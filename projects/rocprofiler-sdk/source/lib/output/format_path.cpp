@@ -28,6 +28,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/output/output_key.hpp"
@@ -45,7 +46,6 @@
 #include <fstream>
 #include <limits>
 #include <locale>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -59,9 +59,9 @@ namespace tool
 namespace
 {
 const auto env_regexes =
-    new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                  std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                                  std::regex{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+    new std::array<std::string, 3>{std::string{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
+                                   std::string{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
+                                   std::string{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
 // env regex examples:
 //  - %env{USER}%       Consistent with other output key formats (start+end with %)
 //  - $ENV{USER}        Similar to CMake
@@ -115,13 +115,13 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
 
         for(const auto& _re : *env_regexes)
         {
-            while(std::regex_search(_fpath, _re))
+            while(rocprofiler::common::regex::regex_search(_fpath, _re))
             {
-                auto        _var = std::regex_replace(_fpath, _re, "$3");
+                auto        _var = rocprofiler::common::regex::regex_replace(_fpath, _re, "$3");
                 std::string _val = common::get_env<std::string>(_var, "");
                 _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
-                auto _beg        = std::regex_replace(_fpath, _re, "$1");
-                auto _end        = std::regex_replace(_fpath, _re, "$4");
+                auto _beg        = rocprofiler::common::regex::regex_replace(_fpath, _re, "$1");
+                auto _end        = rocprofiler::common::regex::regex_replace(_fpath, _re, "$4");
                 _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
             }
         }
@@ -134,9 +134,9 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
     // remove %arg<N>% where N >= argc
     try
     {
-        auto _re = std::regex{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
-        while(std::regex_search(_fpath, _re))
-            _fpath = std::regex_replace(_fpath, _re, "$1$6");
+        auto _re = std::string{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
+        while(rocprofiler::common::regex::regex_search(_fpath, _re))
+            _fpath = rocprofiler::common::regex::regex_replace(_fpath, _re, "$1$6");
     } catch(std::exception& _e)
     {
         ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()

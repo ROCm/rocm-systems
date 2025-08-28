@@ -53,44 +53,31 @@ def test_stream_trace(json_data):
     data = json_data["rocprofiler-sdk-tool"]
     buffer_records = data["buffer_records"]
 
-    kernel_dispatch_data = buffer_records["kernel_dispatch"]
     memory_copies_data = buffer_records["memory_copy"]
-    assert len(kernel_dispatch_data) > 0
     assert len(memory_copies_data) > 0
 
-    # Expect stream ids to be set between 1 and 8 inclusive for transpose executable
-    expected_stream_ids = set([i for i in range(1, 9)])
-    kernel_stream_id_set = set()
+    # Expect non-null stream ids to be set between 1 and 6 inclusive
+    expected_stream_ids = set([i for i in range(1, 7)])
     memory_copy_streams = defaultdict(int)
     # check buffering data
-    for titr in (
-        (kernel_dispatch_data, "KERNEL_DISPATCH"),
-        (memory_copies_data, "MEMORY_COPY"),
-    ):
-        for node in titr[0]:
-            assert "size" in node
-            assert "kind" in node
-            assert "operation" in node
-            assert "correlation_id" in node
-            assert "end_timestamp" in node
-            assert "start_timestamp" in node
-            assert "thread_id" in node
-            assert "stream_id" in node
+    for node in memory_copies_data:
+        assert "size" in node
+        assert "kind" in node
+        assert "operation" in node
+        assert "correlation_id" in node
+        assert "end_timestamp" in node
+        assert "start_timestamp" in node
+        assert "thread_id" in node
+        assert "stream_id" in node
 
-            assert node.size > 0
-            assert node.thread_id > 0
-            assert node.start_timestamp < node.end_timestamp
+        assert node.size > 0
+        assert node.thread_id > 0
+        assert node.start_timestamp < node.end_timestamp
 
-            stream_id = node.stream_id.handle
-            if titr[1] == "KERNEL_DISPATCH":
-                assert stream_id not in kernel_stream_id_set
-                kernel_stream_id_set.add(stream_id)
-            elif titr[1] == "MEMORY_COPY":
-                memory_copy_streams[stream_id] += 1
-    # Exactly 1 kernel executed on streams 1 through 8
-    assert kernel_stream_id_set == expected_stream_ids
-    # One extra memory copy with the null stream
-    assert memory_copy_streams[0] == 1
+        stream_id = node.stream_id.handle
+        memory_copy_streams[stream_id] += 1
+    # 2 memory copies with null stream and 4 with hipStreamPerThread
+    assert memory_copy_streams[0] == 6
     # Exactly 1 memory copy to device and 1 memory copy to host
     for i in expected_stream_ids:
         assert memory_copy_streams[i] == 2
@@ -107,21 +94,10 @@ def test_perfetto_data(pftrace_data, json_data):
     )
 
 
-def test_csv_data(kernel_csv_data, memory_copy_csv_data):
-    assert len(kernel_csv_data) > 0, "Expected non-empty kernel csv data"
+def test_csv_data(memory_copy_csv_data):
     assert len(memory_copy_csv_data) > 0, "Expected non-empty memory copy csv data"
 
-    expected_stream_ids = set([i for i in range(1, 9)])
-    kernel_stream_id_set = set()
-    for row in kernel_csv_data:
-        assert "Stream_Id" in row
-
-        stream_id = int(row["Stream_Id"])
-        assert stream_id not in kernel_stream_id_set
-        kernel_stream_id_set.add(stream_id)
-    # Exactly 1 kernel executed on streams 1 through 8
-    assert kernel_stream_id_set == expected_stream_ids
-
+    expected_stream_ids = set([i for i in range(1, 7)])
     memory_copy_streams = defaultdict(int)
     for row in memory_copy_csv_data:
         assert "Stream_Id" in row
@@ -129,8 +105,8 @@ def test_csv_data(kernel_csv_data, memory_copy_csv_data):
         stream_id = int(row["Stream_Id"])
         memory_copy_streams[stream_id] += 1
 
-    # One extra memory copy with the null stream due to hipStreamLegacy
-    assert memory_copy_streams[0] == 1
+    # 2 memory copies with null stream and 4 with hipStreamPerThread
+    assert memory_copy_streams[0] == 6
     # Exactly 1 memory copy to device and 1 memory copy to host
     for i in expected_stream_ids:
         assert memory_copy_streams[i] == 2

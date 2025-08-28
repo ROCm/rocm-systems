@@ -24,7 +24,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-sdk-tests-rocprofv3-hip-stream-display
+    rocprofiler-sdk-tests-rocprofv3-hip-streams-per-thread
     LANGUAGES CXX
     VERSION 0.0.0)
 
@@ -35,48 +35,49 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(hip-stream-display-env "${PRELOAD_ENV}")
+set(hip-stream-env "${PRELOAD_ENV}")
+set(NUM_THREADS 9)
 
 add_test(
-    NAME rocprofv3-test-hip-stream-display-execute
+    NAME rocprofv3-test-hip-streams-per-thread-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-rename -s -d
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -s -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv
-        --log-level env -- $<TARGET_FILE:hip-streams>)
+        --log-level env -- $<TARGET_FILE:hip-streams-per-thread> ${NUM_THREADS})
 
 set_tests_properties(
-    rocprofv3-test-hip-stream-display-execute
+    rocprofv3-test-hip-streams-per-thread-execute
     PROPERTIES TIMEOUT
                60
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${hip-stream-display-env}"
+               "${hip-stream-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:hip-streams>>)
+               $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
 
 add_test(
-    NAME rocprofv3-test-hip-stream-display-validate
+    NAME rocprofv3-test-hip-streams-per-thread-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.json --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace
-        --kernel-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_kernel_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.json
+        --pftrace-input
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.pftrace
         --memory-copy-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_memory_copy_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_memory_copy_trace.csv
+    )
 
 set_tests_properties(
-    rocprofv3-test-hip-stream-display-validate
+    rocprofv3-test-hip-streams-per-thread-validate
     PROPERTIES TIMEOUT
                60
                LABELS
                "integration-tests"
                DEPENDS
-               rocprofv3-test-hip-stream-display-execute
+               rocprofv3-test-hip-streams-per-thread-execute
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:hip-streams>>)
+               $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
