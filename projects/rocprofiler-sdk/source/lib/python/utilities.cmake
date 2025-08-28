@@ -148,6 +148,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY})
     set(rocpd_PYTHON_SOURCES
         csv.py
+        filter.py
         importer.py
         __init__.py
         __main__.py

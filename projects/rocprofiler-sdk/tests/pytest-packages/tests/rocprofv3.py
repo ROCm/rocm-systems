@@ -308,7 +308,7 @@ def test_csv_data(
         "kernel",
         "memory_allocation",
         "memory_copy",
-        "region",
+        "regions",
     ),
 ):
 
@@ -347,13 +347,21 @@ def test_csv_data(
             "Start_Timestamp": ("start_timestamp", None),
             "End_Timestamp": ("end_timestamp", None),
         },
-        "region": {
+        "regions": {
             "Thread_Id": ("thread_id", None),
             "Correlation_Id": ("correlation_id", "internal"),
             "Start_Timestamp": ("start_timestamp", None),
             "End_Timestamp": ("end_timestamp", None),
         },
     }
+
+    region_views = [
+        "hip_api",
+        "hsa_api",
+        "rccl_api",
+        "rocdecode_api",
+        "rocjpeg_api",
+    ]
 
     for data in csv_data:
         filename, _csv_data = data
@@ -367,11 +375,11 @@ def test_csv_data(
             _js_data = json_data["rocprofiler-sdk-tool"]["callback_records"][category]
         elif category == "agent":
             _js_data = json_data["rocprofiler-sdk-tool"]["agents"]
-        elif category == "region":
+        elif category == "regions":
             buffer_records = json_data["rocprofiler-sdk-tool"]["buffer_records"]
             _js_data = []
             for key, value in buffer_records.items():
-                if key.endswith("_api"):
+                if key in region_views:
                     _js_data.extend(value)
         else:
             json_records_key = mapping[category]

@@ -59,15 +59,9 @@ def write_sql_query_to_csv(
     export_path = os.path.join(
         config.output_path, f"{file_prefix}{filename}{file_postfix}.csv"
     )
-    export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
-
-
-def get_header_with_alias(column_name) -> Tuple[str, str]:
-    match = re.match(r"(.+?)\s+AS\s+(.+)", column_name, re.IGNORECASE)
-    if match:
-        return match.group(1), match.group(2)
-
-    return column_name, column_name.title()
+    
+    kwargs = {"title_columns": True}
+    export_sqlite_query(connection, query, export_format="csv", export_path=export_path, **kwargs)
 
 
 def write_agent_info_csv(importData, config) -> None:
@@ -128,47 +122,42 @@ def write_agent_info_csv(importData, config) -> None:
     # Build SELECT clause for json_extract columns
     select_json = []
     for column in json_keys:
-        column_name, column_alias = get_header_with_alias(column)
+        match = re.match(r"(.+?)\s+AS\s+(.+)", column, re.IGNORECASE)
+        column_name, column_alias = (match.group(1), match.group(2)) if match else (column, column)
         select_json.append(f"json_extract(extdata, '$.{column_name}') AS {column_alias}")
 
-    # Build Capability value for SELECT clause
-    def cap_expr(key, shift, mask=None):
-        base = f"COALESCE(json_extract(extdata, '$.capability.{key}'), 0)"
-        if mask is not None:
-            base = f"({base} & {mask})"
-        return f"({base} << {hex(shift)})"
-
-    capability_bits = [
-        ("HotPluggable", 0x0),
-        ("HSAMMUPresent", 0x1),
-        ("SharedWithGraphics", 0x2),
-        ("QueueSizePowerOfTwo", 0x3),
-        ("QueueSize32bit", 0x4),
-        ("QueueIdleEvent", 0x5),
-        ("VALimit", 0x6),
-        ("WatchPointsSupported", 0x7),
-        ("WatchPointsTotalBits", 0x8, 0xF),
-        ("DoorbellType", 0xC, 0x3),
-        ("AQLQueueDoubleMap", 0xE),
-        ("DebugTrapSupported", 0xF),
-        ("WaveLaunchTrapOverrideSupported", 0x10),
-        ("WaveLaunchModeSupported", 0x11),
-        ("PreciseMemoryOperationsSupported", 0x12),
-        ("DEPRECATED_SRAM_EDCSupport", 0x13),
-        ("Mem_EDCSupport", 0x14),
-        ("RASEventNotify", 0x15),
-        ("ASICRevision", 0x16, 0xF),
-        ("SRAM_EDCSupport", 0x1A),
-        ("SVMAPISupported", 0x1B),
-        ("CoherentHostAccess", 0x1C),
-        ("DebugSupportedFirmware", 0x1D),
-        ("PreciseALUOperationsSupported", 0x1E),
-        ("PerQueueResetSupported", 0x1F),
+    capabilities = [
+        "HotPluggable",
+        "HSAMMUPresent",
+        "SharedWithGraphics",
+        "QueueSizePowerOfTwo",
+        "QueueSize32bit",
+        "QueueIdleEvent",
+        "VALimit",
+        "WatchPointsSupported",
+        "WatchPointsTotalBits",
+        "DoorbellType",
+        "AQLQueueDoubleMap",
+        "DebugTrapSupported",
+        "WaveLaunchTrapOverrideSupported",
+        "WaveLaunchModeSupported",
+        "PreciseMemoryOperationsSupported",
+        "DEPRECATED_SRAM_EDCSupport",
+        "Mem_EDCSupport",
+        "RASEventNotify",
+        "ASICRevision",
+        "SRAM_EDCSupport",
+        "SVMAPISupported",
+        "CoherentHostAccess",
+        "DebugSupportedFirmware",
+        "PreciseALUOperationsSupported",
+        "PerQueueResetSupported",
     ]
 
-    capability_exprs = [cap_expr(*args) for args in capability_bits]
-
-    select_capability = [" | ".join(capability_exprs) + " AS Capability"]
+    # Build SELECT clause for Capability columns
+    select_capability = []
+    for capability in capabilities:
+        select_capability.append(f"json_extract(extdata, '$.capability.{capability}')")
 
     # Add non-JSON columns
     fixed_keys = [
@@ -178,22 +167,17 @@ def write_agent_info_csv(importData, config) -> None:
         "model_name",
     ]
 
-    fixed_select = []
-    for column in fixed_keys:
-        column_name, column_alias = get_header_with_alias(column)
-        fixed_select.append(f"{column_name} AS {column_alias}")
-
-    # to mimic the previous order
+    # to keep the right order
     select_clause = (
-        fixed_select[:1]
+        fixed_keys[:1]
         + select_json[:2]
-        + fixed_select[1:2]
+        + fixed_keys[1:2]
         + select_json[2:33]
         + select_capability
         + select_json[33:47]
-        + fixed_select[2:3]
+        + fixed_keys[2:3]
         + select_json[47:]
-        + fixed_select[3:4]
+        + fixed_keys[3:4]
     )
 
     select_clause = ",\n    ".join(select_clause)
@@ -262,8 +246,7 @@ def write_kernel_csv(importData, config) -> None:
 
     aliased_headers = []
     for column in select_columns:
-        column_name, column_alias = get_header_with_alias(column)
-        aliased_headers.append(f"{column_name} AS {column_alias}")
+        aliased_headers.append(column)
 
     select_clause = ",\n".join(aliased_headers)
 
@@ -359,8 +342,7 @@ def write_counters_csv(importData, config) -> None:
 
     aliased_headers = []
     for column in select_columns:
-        column_name, column_alias = get_header_with_alias(column)
-        aliased_headers.append(f"{column_name} AS {column_alias}")
+        aliased_headers.append(column)
 
     select_clause = ",\n".join(aliased_headers)
 
@@ -402,21 +384,17 @@ def write_region_csv(importData, config) -> None:
         SELECT
             guid AS Guid,
             category AS Domain,
-            CASE
-                WHEN json_extract(extdata, '$.message') IS NOT NULL
-                THEN json_extract(extdata, '$.message')
-                ELSE name
-            END AS Function,
+            name AS Function,
             pid AS Process_Id,
             tid AS Thread_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
             end AS End_Timestamp
-        FROM "regions_and_samples"
+        FROM "regions"
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "region")
+    write_sql_query_to_csv(importData, config, query, "regions")
 
 
 def write_csv(importData, config):

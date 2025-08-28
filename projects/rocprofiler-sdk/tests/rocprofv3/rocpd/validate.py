@@ -58,7 +58,7 @@ def test_csv_data(csv_data, json_data):
             "kernel",
             "memory_allocation",
             "memory_copy",
-            "region",
+            "regions",
         ),
     )
 

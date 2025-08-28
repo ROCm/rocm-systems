@@ -295,7 +295,7 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_region_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-rocpd-validation
