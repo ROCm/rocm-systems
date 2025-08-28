@@ -301,9 +301,10 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
       // TODO: In order to get different event for different instance with WGP counter blocks, we
       //       need to loop through WGP instead of blindly broadcast instance. Fortunately, this
       //       is not a common practice
-      const uint32_t grbm_value = (block_info->instance_count > 1 && !(block_info->attr & CounterBlockWgpAttr))
-                                      ? Primitives::grbm_inst_index_value(block_des.index)
-                                      : Primitives::grbm_broadcast_value();
+      const uint32_t grbm_value =
+          (block_info->instance_count > 1 && !(block_info->attr & CounterBlockWgpAttr))
+              ? Primitives::grbm_inst_index_value(block_des.index)
+              : Primitives::grbm_broadcast_value();
       SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
       // Reset counters
       if (block_info->attr & CounterBlockMcAttr) {
@@ -592,41 +593,44 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
               grbm_value = Primitives::grbm_se_index_value(se_index);
             }
 
-          bool bIsWGPcounter11 = Primitives::GFXIP_LEVEL == 11 && (block_info->attr & CounterBlockSqAttr);
-          bool bIsWGPcounter12 = Primitives::GFXIP_LEVEL >= 12 && (block_info->attr & CounterBlockWgpAttr);
+            bool bIsWGPcounter11 =
+                Primitives::GFXIP_LEVEL == 11 && (block_info->attr & CounterBlockSqAttr);
+            bool bIsWGPcounter12 =
+                Primitives::GFXIP_LEVEL >= 12 && (block_info->attr & CounterBlockWgpAttr);
 
-          if (bIsWGPcounter11) {
-            for (int wgp=0; wgp<wgp_per_sa; wgp++) {
-              grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
-              SetGrbmGfxIndex(cmd_buffer, grbm_value);
-              builder.BuildCopyCounterDataPacket(
-                  cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                  reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 1);
-              read_counter += 2;
-            }
-          } else if (bIsWGPcounter12) {
-            for (int wgp=0; wgp<wgp_per_sa; wgp++) {
-              if (block_info->instance_count > 1)
-                grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(block_des.index, se_index, sarray, wgp);
-              else
+            if (bIsWGPcounter11) {
+              for (int wgp = 0; wgp < wgp_per_sa; wgp++) {
                 grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
-              SetGrbmGfxIndex(cmd_buffer, grbm_value);
-              uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
+                SetGrbmGfxIndex(cmd_buffer, grbm_value);
+                builder.BuildCopyCounterDataPacket(
+                    cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
+                    reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 1);
+                read_counter += 2;
+              }
+            } else if (bIsWGPcounter12) {
+              for (int wgp = 0; wgp < wgp_per_sa; wgp++) {
+                if (block_info->instance_count > 1)
+                  grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(block_des.index,
+                                                                           se_index, sarray, wgp);
+                else
+                  grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
+                SetGrbmGfxIndex(cmd_buffer, grbm_value);
+                uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
+                builder.BuildCopyCounterDataPacket(
+                    cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
+                    reinterpret_cast<uint32_t*>(data_buffer) + read_counter, dw_mask);
+                if (data_buffer && (dw_mask == 1))
+                  *(reinterpret_cast<uint32_t*>(data_buffer) + read_counter + 1) = 0;
+                read_counter += 2;
+              }
+            } else {
+              SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
               builder.BuildCopyCounterDataPacket(
                   cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                  reinterpret_cast<uint32_t*>(data_buffer) + read_counter, dw_mask);
-              if (data_buffer && (dw_mask == 1))
-                  *(reinterpret_cast<uint32_t*>(data_buffer) + read_counter + 1) = 0;
+                  reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 3);
               read_counter += 2;
             }
-          } else {
-            SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
-            builder.BuildCopyCounterDataPacket(
-                cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 3);
-            read_counter += 2;
           }
-        }
       }
     }
     // Reset Grbm to its default state - broadcast
@@ -641,7 +645,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
 
     uint32_t sdma_mask = 0;
-    if (counters_vec.get_attr() & CounterBlockAidAttr)
+    if (counters_vec.get_attr() & CounterBlockAidAttr) {
       for (const auto& counter_des : counters_vec) {
         const auto* block_info = counter_des.block_info;
         const auto& block_des = counter_des.block_des;
@@ -687,6 +691,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
           }
         }
       }
+    }
 
     // Issue barrier command to wait commands to complete
     SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_stop_value(), counters_vec.get_attr());
@@ -708,7 +713,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_read_value(), counters_vec.get_attr());
 
     // counters have UMC events: MI300 Loop over MI300 XCCs for each counter_des
-    if (counters_attr & CounterBlockAidAttr)
+    if (counters_attr & CounterBlockAidAttr) {
       for (const auto& counter_des : counters_vec) {
         const auto* block_info = counter_des.block_info;
         const auto& block_des = counter_des.block_des;
@@ -757,11 +762,16 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
           uint32_t* smn_data_buffer = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
           auto smn_register_addr_lo = get_smn_addr(reg_info.register_addr_lo, target_aid_index);
           auto smn_register_addr_hi = get_smn_addr(reg_info.register_addr_hi, target_aid_index);
-          builder.BuildCopyCounterDataPacket(cmd_buffer, smn_register_addr_lo, smn_register_addr_hi,
+          uint64_t register_addr_lo =
+              (xcc_number_ > 1) ? smn_register_addr_lo : reg_info.register_addr_lo.offset;
+          uint64_t register_addr_hi =
+              (xcc_number_ > 1) ? smn_register_addr_hi : reg_info.register_addr_hi.offset;
+          builder.BuildCopyCounterDataPacket(cmd_buffer, register_addr_lo, register_addr_hi,
                                              smn_data_buffer, 3);
           read_counter += 2;
         }
       }
+    }
     for (size_t xcc_selected = 0; xcc_selected < xcc_number_; ++xcc_selected) {
       PrecExecBuilder<Builder> prec_exec_builder(builder, cmd_buffer, xcc_selected,
                                                  xcc_number_ > 1);
