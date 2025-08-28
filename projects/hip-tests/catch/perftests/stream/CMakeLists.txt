@@ -24,6 +24,7 @@ set(TEST_SRC
     hipPerfStreamConcurrency.cc
     hipPerfStreamCreateCopyDestroy.cc
     hipPerfIncreasingNumberOfStreams.cc
+    hipPerfMultiStreamKernelLaunch.cc
 )
 
 hip_add_exe_to_target(NAME perfStreamTest
