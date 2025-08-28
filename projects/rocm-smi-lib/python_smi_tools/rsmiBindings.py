@@ -108,7 +108,19 @@ class rsmi_dev_perf_level_t(c_int):
     RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100
 
 
-notification_type_names = ['VM_FAULT', 'THERMAL_THROTTLE', 'GPU_PRE_RESET', 'GPU_POST_RESET', 'RING_HANG']
+notification_type_names = [
+    'VM_FAULT',
+    'THERMAL_THROTTLE',
+    'GPU_PRE_RESET',
+    'GPU_POST_RESET',
+    'MIGRATE_START',
+    'MIGRATE_END',
+    'PAGE_FAULT_START',
+    'PAGE_FAULT_END',
+    'QUEUE_EVICTION',
+    'QUEUE_RESTORE',
+    'UNMAP_FROM_GPU'
+]
 
 
 class rsmi_evt_notification_type_t(c_int):
@@ -118,8 +130,14 @@ class rsmi_evt_notification_type_t(c_int):
     RSMI_EVT_NOTIF_THERMAL_THROTTLE = 2
     RSMI_EVT_NOTIF_GPU_PRE_RESET = 3
     RSMI_EVT_NOTIF_GPU_POST_RESET = 4
-    RSMI_EVT_NOTIF_RING_HANG = 5
-    RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_RING_HANG
+    RSMI_EVT_NOTIF_MIGRATE_START = 5
+    RSMI_EVT_NOTIF_MIGRATE_END = 6
+    RSMI_EVT_NOTIF_PAGE_FAULT_START = 7
+    RSMI_EVT_NOTIF_PAGE_FAULT_END = 8
+    RSMI_EVT_NOTIF_QUEUE_EVICTION = 9
+    RSMI_EVT_NOTIF_QUEUE_RESTORE = 10
+    RSMI_EVT_NOTIF_UNMAP_FROM_GPU = 11
+    RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_UNMAP_FROM_GPU
 
 
 class rsmi_voltage_metric_t(c_int):
@@ -545,11 +563,12 @@ class rsmi_error_count_t(Structure):
     _fields_ = [('correctable_err', c_uint64),
                 ('uncorrectable_err', c_uint64)]
 
+MAX_EVENT_NOTIFICATION_MSG_SIZE = 96
 
 class rsmi_evt_notification_data_t(Structure):
     _fields_ = [('dv_ind', c_uint32),
                 ('event', rsmi_evt_notification_type_t),
-                ('message', c_char*64)]
+                ('message', c_char*MAX_EVENT_NOTIFICATION_MSG_SIZE)]
 
 
 class rsmi_process_info_t(Structure):
