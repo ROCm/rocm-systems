@@ -225,12 +225,7 @@ TEST_CASE("Unit_hipMemsetD2D32Async_NegTsts") {
                     hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipMemsetD2D32Async(A_d, devPitch, memsetval, -10, numH, stream),
                     hipErrorInvalidValue);
-  }  // need to check on CUDA
-  /*SECTION("OutOfbounds Hight, Width") {
-    HIP_CHECK_ERROR(hipMemsetD2D32Async(A_d, devPitch, memsetval, numW, numH+256, stream),
-  hipErrorInvalidValue); HIP_CHECK_ERROR(hipMemsetD2D32Async(A_d, devPitch, memsetval, numW+256,
-  numH, stream), hipErrorInvalidValue);
-  }*/
+  }
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipStreamDestroy(stream));
 }

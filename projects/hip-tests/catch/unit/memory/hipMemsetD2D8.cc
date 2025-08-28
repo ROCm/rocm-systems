@@ -223,11 +223,7 @@ TEST_CASE("Unit_hipMemsetD2D8_NegTsts") {
   SECTION("Negative Values of Hight, Width") {
     HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW, -10), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
-  }  // need to check on CUDA
-  /*SECTION("OutOfbounds Hight, Width") {
-    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW, numH+256), hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW+256, numH), hipErrorInvalidValue);
-  }*/
+  }
   HIP_CHECK(hipFree(A_d));
 }
 /**
