@@ -42,6 +42,7 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
       originStream_(false),
       captureID_(0) {
   device_->AddStream(this);
+  stream_id_ = GenerateStreamId();
 }
 
 // ================================================================================================
@@ -338,6 +339,29 @@ hipError_t hipStreamGetFlags_spt(hipStream_t stream, unsigned int* flags) {
   HIP_INIT_API(hipStreamGetFlags, stream, flags);
   PER_THREAD_DEFAULT_STREAM(stream);
   HIP_RETURN(hipStreamGetFlags_common(stream, flags));
+}
+
+// ================================================================================================
+hipError_t hipStreamGetId_common(hipStream_t stream, unsigned long long* streamId) {
+  if (streamId == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  getStreamPerThread(stream);
+  constexpr bool wait = false;
+  hip::Stream* hip_stream = hip::getStream(stream, wait);
+  *streamId = hip_stream->GetStreamId();
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
+  HIP_INIT_API(hipStreamGetId, stream, streamId);
+  HIP_RETURN(hipStreamGetId_common(stream, streamId));
 }
 
 // ================================================================================================
