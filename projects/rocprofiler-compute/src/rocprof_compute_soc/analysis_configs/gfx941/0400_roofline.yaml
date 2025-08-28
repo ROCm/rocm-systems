@@ -3,9 +3,17 @@ Panel Config:
   id: 400
   title: Roofline
   metrics_description:
-    VALU FLOPs: 'The total floating-point operations executed per second on the VALU.
-      This is also presented as a percent of the peak theoretical FLOPs achievable
-      on the specific accelerator. Note: this does not include any floating-point
+    VALU FLOPs (F16): 'The total 16-bit floating-point operations executed per second
+      on the VALU. This is presented with the value of the peak empirical F16 FLOPs
+      achievable on the specific accelerator. Note: this does not include any F16
+      operations from MFMA instructions.'
+    VALU FLOPs (F32): 'The total 32-bit floating-point operations executed per second
+      on the VALU. This is presented with the value of the peak empirical F32 FLOPs
+      achievable on the specific accelerator. Note: this does not include any F32
+      operations from MFMA instructions.'
+    VALU FLOPs (F64): 'The total 64-bit floating-point operations executed per second
+      on the VALU. This is presented with the value of the peak empirical F64 FLOPs
+      achievable on the specific accelerator. Note: this does not include any F64
       operations from MFMA instructions.'
     MFMA FLOPs (F8): The total number of 8-bit brain floating point MFMA operations
       executed per second. This does not include any 16-bit brain floating point operations
@@ -28,6 +36,11 @@ Panel Config:
       per second. Note: this does not include any 64-bit floating point operations
       from VALU instructions. The peak empirically measured F64 MFMA operations achievable
       on the specific accelerator is displayed alongside for comparison.'
+    MFMA FLOPs (F6F4): 'The total number of 4-bit and 6-bit floating point MFMA operations
+      executed per second. Note: this does not include any floating point operations
+      from VALU instructions. The peak empirically measured F6F4 MFMA operations achievable
+      on the specific accelerator is displayed alongside for comparison. It is supported
+      on AMD Instinct MI350 series (gfx950) and later only.'
     MFMA IOPs (Int8): 'The total number of 8-bit integer MFMA operations executed
       per second. Note: this does not include any 8-bit integer operations from VALU
       instructions. The peak empirically measured INT8 MFMA operations achievable
@@ -80,15 +93,24 @@ Panel Config:
         unit: Unit
         peak: Peak (Empirical)
       metric:
-        VALU FLOPs:
-          value: AVG(($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
-            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
-            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
-            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
-            + SQ_INSTS_VALU_TRANS_F64) ) / ((End_Timestamp - Start_Timestamp) / 1e9))
-            / 1e9)
+        VALU FLOPs (F16):
+          value: AVG((($wave_size * ( SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16 )) / ((End_Timestamp
+            - Start_Timestamp) / 1e9)) / 1e9)
           unit: GFLOP/s
-          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          peak: $FP16Flops_empirical_peak
+        VALU FLOPs (F32):
+          value: AVG((($wave_size * ( SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32
+            + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32 )) / ((End_Timestamp
+            - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: $FP32Flops_empirical_peak
+        VALU FLOPs (F64):
+          value: AVG((($wave_size * ( SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64
+            + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64 )) / ((End_Timestamp
+            - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: $FP64Flops_empirical_peak
         MFMA FLOPs (F64):
           value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp)
             / 1e9)) / 1e9)
