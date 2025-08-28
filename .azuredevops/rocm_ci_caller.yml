@@ -24,16 +24,30 @@ variables:
 
 jobs:  
 - job: Determine_Changes
-  displayName: 'Check Changed Files'
+  displayName: 'Sparse Checkout & Check Changed Files'
   pool: rocm-ci-caller
   steps:
-    - checkout: self
     - script: |
         echo "## Detecting file changes in PR #$(PR_NUM)"
-        git fetch origin $(BASE_REF)
-        git diff --name-only origin/$(BASE_REF)...HEAD > changed_files.txt
+
+        git init repo_name
+        cd repo_name
+        git config core.sparseCheckout true
+
+        echo "projects/" > .git/info/sparse-checkout
+        echo "shared/" >> .git/info/sparse-checkout
+
+        git remote add origin https://github.com/$(REPOSITORY_NAME).git
+        git fetch --depth=50 origin $(BASE_REF)
+
+        git fetch --depth=50 origin $(HEAD_SHA)
+
+        git checkout FETCH_HEAD
+        
+        git diff --name-only origin/$(BASE_REF)...HEAD > ../changed_files.txt
+
         echo "Changed files:"
-        cat changed_files.txt
+        cat ../changed_files.txt
 
         MATCH_FOUND=false
         while read file; do
@@ -41,7 +55,7 @@ jobs:
             MATCH_FOUND=true
             break
           fi
-        done < changed_files.txt
+        done < ../changed_files.txt
 
         echo "Match found: $MATCH_FOUND"
         echo "##vso[task.setvariable variable=match_found;isOutput=true]$MATCH_FOUND"
