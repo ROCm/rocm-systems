@@ -145,52 +145,13 @@ GPU: 0
 - **Setting power cap is now available in Linux Guest**.  
   - Users can now use `amd-smi set --power-cap` as usual but now in Linux Guest systems.
 
-### Removed
-- N/A
-
-### Optimized
-- N/A
-
-### Resolved Issues
-
-- N/A
-
-### Upcoming Changes
-
-- N/A
-
-### Known Issues
-
-- N/A
-
-## amd_smi_lib for ROCm 7.0.2
-
-### Added
-
-- **Add bad_page_threshold_exceeded to `amd-smi static --ras`**.  
-  - This field compares retired pages count against the bad page threshold. It displays True if retired pages exceed the threshold, False if within threshold, or N/A if threshold data is unavailable. Users should note that sudo is required to have the bad_page_threshold_exceeded field populated.
-
-  ```shell
-  $ sudo amd-smi static --ras -g 0
-  GPU: 0
-      RAS:
-          EEPROM_VERSION: 0x30000
-          BAD_PAGE_THRESHOLD: 128
-          BAD_PAGE_THRESHOLD_EXCEEDED: False
-          PARITY_SCHEMA: DISABLED
-          SINGLE_BIT_SCHEMA: DISABLED
-          DOUBLE_BIT_SCHEMA: DISABLED
-          POISON_SCHEMA: ENABLED
-  ...
-  ```
-
-### Changed
-
 - **Changed `amd-smi static --vbios` to `amd-smi static --ifwi`**.  
   - VBIOS naming is replaced with IFWI (Integrated Firmware Image) for improved clarity and consistency.
   - Mi300+ series devices now use a new version format with enhanced build information.
   - Legacy command `amd-smi static --vbios` remains functional for backward compatibility, but displays updated IFWI heading.
-  - The Python, C & Rust API for `amdsmi_get_gpu_vbios_version` will now have a new field called `boot_firmware` which will return the legacy vbios version number which is also known as the Unified BootLoader Version (UBL version)
+  - The Python, C & Rust API for `amdsmi_get_gpu_vbios_version()` will now have a new field called `boot_firmware` which will return the legacy vbios version number which is also known as the Unified BootLoader Version (UBL version)
+
+  **Legacy format (Non IFWI systems):**
 
   ```shell
   $ amd-smi static --ifwi
@@ -218,6 +179,56 @@ GPU: 0
 
 ### Removed
 
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed an issue where using `amd-smi ras --folder <folder_name>` was forcing the created folder's name to be lowercase**.  
+  - This fix also allows all string input options to be case insensitive.
+
+- **Fixed certain output in `amd-smi monitor` when GPUs are partitioned**.  
+  - Fixes amd-smi monitor such as: `amd-smi monitor -Vqt`, `amd-smi monitor -g 0 -Vqt -w 1`, `amd-smi monitor -Vqt --file /tmp/test1`, etc. Those such commands will now be able to display as normal in partitioned GPU scenarios.
+
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.0.2
+
+### Added
+
+- **Add bad_page_threshold_exceeded to `amd-smi static --ras`**.  
+  - Added bad_page_threshold_exceeded field to `amd-smi static --ras`, which compares retired pages count against bad page threshold. This field displays True if retired pages exceed the threshold, False if within threshold, or N/A if threshold data is unavailable. Users should note that sudo is required to have the bad_page_threshold_exceeded field populated.
+
+  ```shell
+  $ sudo amd-smi static --ras -g 0
+  GPU: 0
+      RAS:
+          EEPROM_VERSION: 0x30000
+          BAD_PAGE_THRESHOLD: 128
+          BAD_PAGE_THRESHOLD_EXCEEDED: False
+          PARITY_SCHEMA: DISABLED
+          SINGLE_BIT_SCHEMA: DISABLED
+          DOUBLE_BIT_SCHEMA: DISABLED
+          POISON_SCHEMA: ENABLED
+  ...
+  ```
+
+### Changed
+
+- N/A
+
+### Removed
+
 - **Removed gpuboard and baseboard temperatures enums in amdsmi Python Library**.  
   - AmdSmiTemperatureType had issues with referencing the right attribute, so we removed the following duplicate enums:
     - `AmdSmiTemperatureType.GPUBOARD_NODE_FIRST`
@@ -229,15 +240,9 @@ GPU: 0
 - **Implemented reference counting to manage init and shutdown processes**.  
   - This allows multiple initializations and shutdowns of amdsmi.
 
-### Resolved Issues
+### Resolved issues
 
 - **Fixed `attribute error` in `amd-smi monitor` on Linux Guest systems where violations argument caused CLI to break**.  
-
-- **Fixed certain output in `amd-smi monitor` when GPUs are partitioned**.  
-  - Fixes amd-smi monitor such as: `amd-smi monitor -Vqt`, `amd-smi monitor -g 0 -Vqt -w 1`, `amd-smi monitor -Vqt --file /tmp/test1`, etc. Those such commands will now be able to display as normal in partitioned GPU scenarios.
-
-- **Fixed an issue where using `amd-smi ras --folder <folder_name>` was forcing the created folder's name to be lowercase**.  
-  - This fix also allows all string input options to be case insensitive.
 
 - **Added KFD Fallback for process detection**.  
   - Some processes were not being detected by AMD SMI despite making use of KFD resources. This fix ensures that all KFD processes will be detected.
@@ -251,7 +256,7 @@ GPU: 0
 
 - N/A
 
-### Known Issues
+### Known issues
 
 - N/A
 
@@ -375,13 +380,16 @@ $ amd-smi
       - `acc_low_utilization`, `per_low_utilization`, `active_low_utilization`
   - Python API and CLI now report these expanded fields.
   - Example outputs:
-    ```<span style="font-size:0.8em">console
+
+    ```console
     $ amd-smi monitor -V
     GPU  XCP  PVIOL  TVIOL  TVIOL_ACTIVE  PHOT_TVIOL  VR_TVIOL  HBM_TVIOL  GFX_CLKVIOL                                              GFXCLK_PVIOL                                              GFXCLK_TVIOL                                          GFXCLK_TOTALVIOL                                              LOW_UTILVIOL
       0    0    0 %    0 %         False         0 %       0 %        0 %          N/A                  [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]                  [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]  [100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %]  [100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %]
       1    0    0 %    0 %         False         0 %       0 %        0 %          N/A                  [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]                  [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]  [100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %]  [100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %, 100 %]
       ...
+    ```
 
+    ```console
     $ sudo amd-smi set -C DPX > /dev/null
 
     $ amd-smi monitor -V
@@ -393,8 +401,6 @@ $ amd-smi
       2    1    N/A    N/A           N/A         N/A       N/A        N/A          N/A                  [0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A]                  [0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A]          [100 %, 100 %, 100 %, 100 %, N/A, N/A, N/A, N/A]          [100 %, 100 %, 100 %, 100 %, N/A, N/A, N/A, N/A]
     ...
     ```
-    </span>
-    </br>  
 
     ```console
     $ amd-smi metric -v -g 0
@@ -457,7 +463,6 @@ $ amd-smi
                 XCP_1: [100 %, 100 %, 100 %, 100 %, N/A, N/A, N/A, N/A]
     ```
 
-
 - **The char arrays in the following structures have been changed**.  
   - `amdsmi_vbios_info_t` member `build_date` changed from `AMDSMI_MAX_DATE_LENGTH` to `AMDSMI_MAX_STRING_LENGTH`.
   - `amdsmi_dpm_policy_entry_t` member `policy_description` changed from `AMDSMI_MAX_NAME` to `AMDSMI_MAX_STRING_LENGTH`.
@@ -506,6 +511,7 @@ $ amd-smi
   - Example scenarios:
     - **Navi System:**  
       Attempting to change partitions on a Navi system will result in a "not supported" response, since Navi does not support partitions.
+
       ```console
       $ sudo amd-smi set -M NPS2
 
@@ -538,8 +544,10 @@ $ amd-smi
       GPU: 1
           MEMORY_PARTITION: [AMDSMI_STATUS_NOT_SUPPORTED] Unable to set memory partition to NPS2
       ```
+
     - **MI3x System in DPX Mode:**  
       Restricting the power limit on a MI3x device in DPX mode will show "not supported" for logical devices, as only the primary device can accept the change.
+
       ```console
       $ sudo amd-smi set --power-cap 700
       GPU: 0
@@ -746,10 +754,11 @@ $ amd-smi
 ### Known issues
 
 - `amd-smi monitor` does not work on guest systems
-```shell
-$ amd-smi monitor
-AttributeError: 'Namespace' object has no attribute 'violation'
-```
+
+  ```shell
+  $ amd-smi monitor
+  AttributeError: 'Namespace' object has no attribute 'violation'
+  ```
 
 ## amd_smi_lib for ROCm 6.4.2
 
