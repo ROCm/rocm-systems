@@ -6,5 +6,6 @@ Panel Config:
   data source:
   - raw_csv_table:
       id: 101
+      title: System Info
       source: sysinfo.csv
       columnwise: true

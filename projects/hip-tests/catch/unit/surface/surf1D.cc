@@ -53,9 +53,8 @@ __global__ void surf1DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, in
 #endif
 }
 
-template <typename T>
-__global__ void surf1DKernelRW(hipSurfaceObject_t surfaceObject, hipSurfaceObject_t outputSurfObj,
-                               int width) {
+template <typename T> __global__ void surf1DKernelRW(hipSurfaceObject_t surfaceObject,
+                                                     hipSurfaceObject_t outputSurfObj, int width) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   if (x < width) {
@@ -309,6 +308,6 @@ TEMPLATE_TEST_CASE("Unit_surf1D_Positive_ReadWrite", "", char, uchar, short, ush
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

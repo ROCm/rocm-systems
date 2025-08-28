@@ -44,16 +44,12 @@ class OCLGLCommon : public OCLTestImp {
   ///////////////////////
   // virtual interface //
   ///////////////////////
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int &deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int& deviceId);
   virtual unsigned int close(void);
-  static void gluPerspective(double fovy, double aspect, double zNear,
-                             double zFar);
-  static void dumpBuffer(float* pBuffer, const char fileName[],
-                         unsigned int dimSize);
+  static void gluPerspective(double fovy, double aspect, double zNear, double zFar);
+  static void dumpBuffer(float* pBuffer, const char fileName[], unsigned int dimSize);
   static int printOglError(char* file, int line);
-  static bool createGLFragmentProgramFromSource(const char* source,
-                                                GLuint& shader,
+  static bool createGLFragmentProgramFromSource(const char* source, GLuint& shader,
                                                 GLuint& program);
   static void printShaderInfoLog(GLuint shader);
   static void printProgramInfoLog(GLuint program);
@@ -65,8 +61,7 @@ class OCLGLCommon : public OCLTestImp {
                                            cl_context_properties properties[7]);
   bool createGLContext(OCLGLHandle& hGL);
   void destroyGLContext(OCLGLHandle& hGL);
-  bool IsGLEnabled(unsigned int test, char* units, double& conversion,
-                   unsigned int deviceId);
+  bool IsGLEnabled(unsigned int test, char* units, double& conversion, unsigned int deviceId);
 
  private:
   bool initializeGLContext(OCLGLHandle& hGL);

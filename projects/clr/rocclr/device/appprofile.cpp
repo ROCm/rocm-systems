@@ -71,7 +71,5 @@ bool AppProfile::init() {
   return true;
 }
 
-bool AppProfile::ParseApplicationProfile() {
-  return true;
-}
-}
+bool AppProfile::ParseApplicationProfile() { return true; }
+}  // namespace amd
