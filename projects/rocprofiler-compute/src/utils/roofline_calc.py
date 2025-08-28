@@ -104,6 +104,7 @@ SUPPORTED_DATATYPES = {
 
 PEAK_OPS_DATATYPES = ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"]
 MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
+CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
 TOP_N = 10
 
@@ -164,7 +165,7 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
     if roofline_parameters["mem_level"] == "ALL":
-        cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
+        cacheHierarchy = CACHE_HIERARCHY
     else:
         cacheHierarchy = roofline_parameters["mem_level"]
 

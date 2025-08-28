@@ -877,6 +877,9 @@ def printEventList(device, delay, eventList):
         if len(data.message) > 0:
             print2DArray([['\rGPU[%d]:\t' % (data.dv_ind), ctime().split()[3], notification_type_names[data.event.value - 1],
                            data.message.decode('utf8') + '\r']])
+    ret = rocmsmi.rsmi_event_notification_stop(device)
+    if not rsmi_ret_ok(ret, device, 'stop_event_notification'):
+        printErrLog(device, 'Unable to end event notifications.')
 
 def printLog(device, metricName, value=None, extraSpace=False, useItalics=False, xcp=None):
     """ Print out to the SMI log
@@ -919,8 +922,8 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False,
 
         # Handle non UTF-8 locale
         try:
-            print(logstr + '\n', end='')
-        except UnicodeEncodeError:
+            print(logstr.encode('utf-8', 'ignore').decode('utf-8'))
+        except UnicodeError:
             print(logstr.encode('ascii', 'ignore').decode('ascii'))
 
         sys.stdout.flush()
@@ -3007,7 +3010,7 @@ def showEvents(deviceList, eventTypes):
     :param eventTypes: List of event type names (can be a single-item list)
     """
     printLogSpacer(' Show Events ')
-    printLog(None, 'press \'q\' or \'ctrl + c\' to quit', None)
+    printLog(None, 'press \'q\' or \'ctrl + c\' and then \'Enter\' to quit', None)
     eventTypeList = []
     thread_list = []
     for event in eventTypes:  # Cleaning list from wrong values
@@ -3022,23 +3025,18 @@ def showEvents(deviceList, eventTypes):
         for device in deviceList:
             try:
                 thread = threading.Thread(target=printEventList, args=(device, 1000, eventTypeList))
-                thread.start()
                 thread_list.append(thread)
+                thread.start()
                 time.sleep(0.25)
             except Exception as e:
                 printErrLog(device, 'Unable to start new thread. %s' % (e))
                 return
-    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
-        getch = _Getch()
-        user_input = getch()
+    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c' and then 'Enter'
+        user_input = input()
         # Catch user input for q or Ctrl + c
-        global stop_threads
-        stop_threads = True
         if user_input == 'q' or user_input == '\x03':
-            for device in deviceList:
-                ret = rocmsmi.rsmi_event_notification_stop(device)
-                if not rsmi_ret_ok(ret, device, 'stop_event_notification'):
-                    printErrLog(device, 'Unable to end event notifications.')
+            global stop_threads
+            stop_threads = True
             print('\r')
             break
     for thread in thread_list:

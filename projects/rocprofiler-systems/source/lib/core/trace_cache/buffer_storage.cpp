@@ -42,7 +42,7 @@ namespace trace_cache
 namespace
 {
 constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
-constexpr auto NUM_OF_THREADS = 1;
+constexpr auto NUM_OF_THREADS           = 1;
 }  // namespace
 
 buffer_storage::buffer_storage(pid_t _pid)
