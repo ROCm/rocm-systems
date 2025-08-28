@@ -18,6 +18,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
   * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
 
+* Added interactive metric descriptions in TUI analyze mode
+  * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
+
+* Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release
@@ -97,6 +102,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
 
+* Analysis output:
+  * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
+    * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
+    * Add ``--output-name`` analysis mode option to override the default file/folder name.
+  * Replace `--save-dfs` analyze mode option with `--output-format csv`
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi
@@ -104,6 +115,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed L2 read/write/atomic bandwidths on MI350
 * Update metric names for better alignment between analysis configuration and documentation
 * Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100
+* Updated Roofline plots to handle and apply kernel filtering.
+
 
 ### Known issues
 
@@ -169,9 +182,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Support for Roofline plot on CLI (single run) analysis.
 
-* Roofline support for RHEL 10 OS.
-
-* FP4 and FP6 data types have been added for roofline profiling on AMD Instinct MI350 series.
+* `FP4` and `FP6` data types have been added for roofline profiling on AMD Instinct MI350 series.
 
 #### rocprofv3 support
 
@@ -203,9 +214,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Updated Roofline binaries:
   * Rebuild using latest ROCm stack
   * Minimum OS distribution support minimum for roofline feature is now Ubuntu 22.04, RHEL 8, and SLES15 SP6.
-* Fixed not detecting memory clock issue when using amd-smi
-* Fixed standalone GUI crashing
-* Fixed L2 read/write/atomic bandwidths on MI350
+
+### Removed
+
+* Roofline support for Ubuntu 20.04 and SLES below 15.6
+* Removed support for AMD Instinct MI50 and MI60.
 
 ### Optimized
 
@@ -215,7 +228,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed kernel name and kernel dispatch filtering when using ``rocprofv3``.
 * Fixed an issue of TCC channel counters collection in ``rocprofv3``.
-* Fixed peak FLOPS of F8, I8, F16, and BF16 on AMD Instinct MI 300.
+* Fixed peak FLOPS of `F8`, `I8`, `F16`, and `BF16` on AMD Instinct MI300.
+* Fixed not detecting memory clock issue when using amd-smi
+* Fixed standalone GUI crashing
+* Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series.
 
 ### Known issues
 
@@ -234,10 +250,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Memory chart on ROCm Compute Profiler CLI might look corrupted if the CLI width is too narrow.
 
-### Removed
-
-* Roofline support for Ubuntu 20.04 and SLES below 15.6
-* Removed support for AMD Instinct MI50 and MI60.
+* Roofline feature is currently not functional on Azure Linux 3.0 and Debian 12.
 
 ### Upcoming changes
 
@@ -246,7 +259,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Hardware IP block based filtering using ``-b`` option in profile mode will be removed in favor of analysis report block based filtering using ``-b`` option in profile mode.
 * MongoDB database support will be removed, and a deprecation warning has been added to the application interface.
 * Usage of ``rocm-smi`` is deprecated in favor of ``amd-smi``, and a deprecation warning has been added to the application interface.
-
 
 ## ROCm Compute Profiler 3.1.1 for ROCm 6.4.2
 
