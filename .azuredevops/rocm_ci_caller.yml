@@ -95,4 +95,9 @@ jobs:
             -f state=success \
             -f context="PSDB" \
             -f description="PSDB skipped"
+          gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+            -H "Authorization: token $(GH_PAT)" \
+            -f state=success \
+            -f context="psdb-test" \
+            -f description="psdb-test skipped"
         displayName: Send Skipped Status
