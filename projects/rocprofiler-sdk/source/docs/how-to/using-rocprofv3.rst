@@ -2379,6 +2379,23 @@ Here are the properties of the JSON output schema:
                   -  **y** *(integer)*: Dimension y.
                   -  **z** *(integer)*: Dimension z.
                -  **wave_in_group** *(integer)*: Wave position within the workgroup (0-31).
+      -  **``streaming_performance_monitor``** *(array)*: Streaming
+            Performance Monitor.
+            -  **Items** *(object)*
+               -  **``dispatch_id``** *(integer)*: ID of the dispatch.
+               -  **``records``** *(array)*: Records.
+                  -  **Items** *(object)*
+                     -  **``counter_id``** *(object, required)*: Counter
+                        ID information.
+                        -  **``handle``** *(integer, required)*: Handle
+                           of the counter.
+                     -  **``value``** *(number, required)*: Value of the
+                        counter.
+                     -  **``timestamp``** *(number, required)*:
+                        timestamp of sample.
+                     -  **``agent_id``** *(object)*: Agent ID information.
+                        -  **``handle``** *(integer, required)*: Handle of the
+                     agent.
       - **buffer_records** *(object, required)*: Buffer record details.
          - **kernel_dispatch** *(array)*: Kernel dispatch records.
             - **Items** *(object)*
