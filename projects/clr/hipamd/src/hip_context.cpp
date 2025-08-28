@@ -45,7 +45,7 @@ void init(bool* status) {
 #if DISABLE_DIRECT_DISPATCH
   constexpr bool kDirectDispatch = false;
 #else
-#ifndef WITHOUT_HSA_BACKEND
+#if !defined(WITHOUT_HSA_BACKEND) && !IS_WINDOWS
   constexpr bool kDirectDispatch = true;
 #else
   constexpr bool kDirectDispatch = false;
