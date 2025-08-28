@@ -132,7 +132,7 @@ endif()
 
 # Required Defines first:
 find_package(hsa-runtime64 REQUIRED)
-find_package(amd_smi REQUIRED)
+find_package(amd_smi 26.0.0 NAMES amd_smi HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
 
 set (ONLY64STR "64")
 
