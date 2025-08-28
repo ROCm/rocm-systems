@@ -110,6 +110,9 @@ main()
     const int gridSizePerStream = 104;  //(int)ceil((float)elements_per_stream/blockSize);
 
     HIP_ASSERT(hipEventRecord(start));
+    // Extra copy with null stream
+    HIP_ASSERT(hipMemcpyAsync(
+        &d_input1[0], &h_input1[0], bytes_per_stream, hipMemcpyHostToDevice, nullptr));
     // split H2D copies and kernel calls into separate loops
     for(int i = 0; i < num_streams; i++)
     {
