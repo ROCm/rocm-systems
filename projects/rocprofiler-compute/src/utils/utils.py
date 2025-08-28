@@ -1099,16 +1099,17 @@ def process_kokkos_trace_output(workload_dir, fbase):
     marker_api_trace_csvs = glob.glob(
         workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
     )
+
     # counter collection csv files are generated for each process
+    counter_collection_csvs = glob.glob(
+        workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
+    )
+
     existing_marker_files_csv = [d for d in marker_api_trace_csvs if path(d).is_file()]
     existing_counter_files_csv = [
-        d
-        for d in [
-            d.replace("marker_api_trace", "counter_collection")
-            for d in existing_marker_files_csv
-        ]
-        if path(d).is_file()
+        d for d in counter_collection_csvs if path(d).is_file()
     ]
+
     if len(existing_counter_files_csv) != len(existing_marker_files_csv):
         console_warning(
             "Mismatch in number of marker_api_trace and counter_collection files."

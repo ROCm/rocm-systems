@@ -41,6 +41,56 @@ set(EXECUTABLE_NAME "rocprof-compute")
 include(ExternalProject)
 include(GNUInstallDirs)
 
+# Detect AMD GPU architecture using rocminfo
+execute_process(
+    COMMAND bash -c "rocminfo | grep -E 'Name: gfx[0-9]+' | head -n 1 | awk '{print \$2}'"
+    OUTPUT_VARIABLE DETECTED_ARCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(DETECTED_ARCH)
+    set(KOKKOS_ARCH "${DETECTED_ARCH}")
+    message(STATUS "Detected AMD GPU architecture: ${KOKKOS_ARCH}")
+else()
+    set(KOKKOS_ARCH "GFX942") # fallback/default
+    message(WARNING "Could not detect AMD GPU architecture, using default: ${KOKKOS_ARCH}")
+endif()
+
+ExternalProject_Add(
+    kokkos_src
+    GIT_REPOSITORY https://github.com/kokkos/kokkos.git
+    SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+)
+
+# Clone kokkos-miniapps
+ExternalProject_Add(
+    kokkos_miniapps
+    GIT_REPOSITORY https://github.com/kokkos/kokkos-miniapps.git
+    SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos-miniapps
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+    DEPENDS kokkos_src
+)
+
+ExternalProject_Add_Step(
+    kokkos_miniapps patch_and_build_lulesh
+    COMMAND sed -i "s|^KOKKOS_PATH.*|KOKKOS_PATH = ${CMAKE_BINARY_DIR}/kokkos|" ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile
+    COMMAND sed -i "s|^KOKKOS_DEVICES.*|KOKKOS_DEVICES = HIP|" ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile
+    COMMAND sed -i "s|^KOKKOS_ARCH.*|KOKKOS_ARCH = AMD_${KOKKOS_ARCH}|" ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile
+    COMMAND sed -i "s|^KOKKOS_CUDA_OPTIONS.*|KOKKOS_CUDA_OPTIONS = enable_lambda|" ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile
+    COMMAND sed -i "s|^CXX.*|CXX = hipcc|" ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile
+    COMMAND sed -i "/^CXX = hipcc/a CXXFLAGS = -DUSE_MPI=0" ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile
+    COMMAND ${CMAKE_COMMAND} -E env KOKKOS_USE_DEPRECATED_MAKEFILES=1 make
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm
+    DEPENDEES download
+)
+
 # version control info
 execute_process(
     COMMAND git log --pretty=format:%h -n 1
@@ -259,6 +309,12 @@ add_test(
         --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_kokkos
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m kokkos --junitxml=tests/test_profile_kokkos.xml ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 set_tests_properties(
     test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join

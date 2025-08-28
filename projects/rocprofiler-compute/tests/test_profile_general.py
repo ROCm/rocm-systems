@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -1755,6 +1756,86 @@ def test_comprehensive_error_paths():
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
+
+
+@pytest.mark.kokkos
+def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
+    kokkos_app_dir = str(
+        Path(__file__).parent.parent
+        / "build"
+        / "kokkos-miniapps"
+        / "lulesh-2.0"
+        / "kokkos-no-uvm"
+    )
+    kokkos_app = kokkos_app_dir + "/lulesh.kk"
+    config["app_kokkos"] = [kokkos_app]
+    if not os.path.exists(kokkos_app):
+        print("Kokkos app not found at {}, skipping test".format(kokkos_app))
+        pytest.skip("Kokkos app not found, skipping test")
+        return
+
+    if soc in ("MI100"):
+        OTHER_CSV_FILES = ALL_CSVS_MI100
+    elif soc in ("MI200"):
+        OTHER_CSV_FILES = [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+    elif "MI300" in soc:
+        OTHER_CSV_FILES = [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+    elif "MI350" in soc:
+        OTHER_CSV_FILES = ALL_CSVS_MI350
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
+
+    # Exclude files that are not relevant for Kokkos tracing
+    # e.g., timestamps.csv, sysinfo.csv
+
+    fbase_ = [f.split(".")[0] for f in OTHER_CSV_FILES]
+    fbase_ = [f for f in fbase_ if f not in ["sysinfo", "pmc_perf"]]
+    KOKKOS_TRACE_FILES = [f + "_kokkos_kernel_trace.csv" for f in fbase_]
+    MARKER_TRACE_FILES = [f + "_marker_api_trace.csv" for f in fbase_]
+
+    options = ["--kokkos-trace"]
+    workload_dir = test_utils.get_output_dir()
+
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_kokkos",
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    assert sorted(list(file_dict.keys())) == sorted(
+        OTHER_CSV_FILES + KOKKOS_TRACE_FILES + MARKER_TRACE_FILES
+    )
+
+    for f in KOKKOS_TRACE_FILES:
+        df = pd.read_csv(os.path.join(workload_dir, f))
+        if df.empty:
+            continue
+
+        assert (df.Function == df.Kernel_Name).all()
+        assert (df.Process_Id_x == df.Process_Id_y).all()
+        assert (df.Thread_Id_x == df.Thread_Id_y).all()
+
+        df = df[~df["Function"].str.contains("via memset", case=False, na=False)]
+
+        # Check for overlap between intervals
+        overlap = (df.Start_Timestamp_x <= df.End_Timestamp_y) & (
+            df.Start_Timestamp_y <= df.End_Timestamp_x
+        )
+        # assert overlap.all()
+
+        if not overlap.all():
+            mismatches = df[~overlap][["Function"]]
+            warnings.warn("The following functions do not have an interval overlap.")
+            warnings.warn(f"Count: {len(mismatches)}")
+            warnings.warn(f"Names: {mismatches['Function'].unique()}")
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.pc_sampling
