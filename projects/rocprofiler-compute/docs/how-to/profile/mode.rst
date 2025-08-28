@@ -477,7 +477,9 @@ Standalone roofline
 Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
-This option limits the profiling to just the roofline performance counters.
+This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
+	a) If found, uses the data files with the provided arguments to create another roofline PDF output; otherwise,
+	b) Profile mode runs but is limited to collecting only roofline performance counters.
 
 Roofline options
 ----------------
@@ -493,6 +495,10 @@ Roofline options
 ``--device <gpu_id>``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
+
+``-k``, ``--kernel <kernel-substr>``
+   Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
+   utility. See :ref:`profiling-kernel-filtering`.
 
 ``--roofline-data-type <datatype>``
    Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
@@ -544,7 +550,6 @@ successfully.
 .. note::
 
    * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the PDF outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same PDF. To generate results in separate PDFs for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
-   * Roofline feature is currently not enabled on AMD Instinct MI350.
 
 The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
 plot.

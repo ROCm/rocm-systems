@@ -2802,14 +2802,24 @@ panels:
         peak: Peak (Empirical)
       metric:
         gfx90a:
-          VALU FLOPs:
+          VALU FLOPs (F16):
             value: AVG((($wave_size * (
-              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
-              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
-              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16
               )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
-            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+            peak: $FP16Flops_empirical_peak
+          VALU FLOPs (F32):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP32Flops_empirical_peak
+          VALU FLOPs (F64):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP64Flops_empirical_peak
           MFMA FLOPs (F64):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
@@ -2855,14 +2865,24 @@ panels:
             unit: GB/s
             peak: $LDSBw_empirical_peak
         gfx908:
-          VALU FLOPs:
+          VALU FLOPs (F16):
             value: AVG((($wave_size * (
-              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
-              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
-              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16
               )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
-            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+            peak: $FP16Flops_empirical_peak
+          VALU FLOPs (F32):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP32Flops_empirical_peak
+          VALU FLOPs (F64):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP64Flops_empirical_peak
           MFMA FLOPs (F64):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
@@ -2908,14 +2928,24 @@ panels:
             unit: GB/s
             peak: $LDSBw_empirical_peak
         gfx940:
-          VALU FLOPs:
-            value: AVG(($wave_size * (
-              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
-              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
-              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
-              ) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          VALU FLOPs (F16):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
-            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+            peak: $FP16Flops_empirical_peak
+          VALU FLOPs (F32):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP32Flops_empirical_peak
+          VALU FLOPs (F64):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP64Flops_empirical_peak
           MFMA FLOPs (F64):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
@@ -2965,14 +2995,24 @@ panels:
             unit: GB/s
             peak: $LDSBw_empirical_peak
         gfx941:
-          VALU FLOPs:
-            value: AVG(($wave_size * (
-              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
-              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
-              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
-              ) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          VALU FLOPs (F16):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
-            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+            peak: $FP16Flops_empirical_peak
+          VALU FLOPs (F32):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP32Flops_empirical_peak
+          VALU FLOPs (F64):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP64Flops_empirical_peak
           MFMA FLOPs (F64):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
@@ -3022,14 +3062,24 @@ panels:
             unit: GB/s
             peak: $LDSBw_empirical_peak
         gfx942:
-          VALU FLOPs:
+          VALU FLOPs (F16):
             value: AVG((($wave_size * (
-              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
-              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
-              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16
               )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
-            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+            peak: $FP16Flops_empirical_peak
+          VALU FLOPs (F32):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP32Flops_empirical_peak
+          VALU FLOPs (F64):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP64Flops_empirical_peak
           MFMA FLOPs (F64):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
@@ -3079,14 +3129,24 @@ panels:
             unit: GB/s
             peak: $LDSBw_empirical_peak
         gfx950:
-          VALU FLOPs:
+          VALU FLOPs (F16):
             value: AVG((($wave_size * (
-              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
-              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
-              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16
               )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
-            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+            peak: $FP16Flops_empirical_peak
+          VALU FLOPs (F32):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP32Flops_empirical_peak
+          VALU FLOPs (F64):
+            value: AVG((($wave_size * (
+              SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $FP64Flops_empirical_peak
           MFMA FLOPs (F64):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
@@ -3578,15 +3638,35 @@ panels:
               ) / 1e9
             unit: GFLOP/s
   metrics_description:
-      VALU FLOPs:
-        plain: 'The total floating-point operations executed per second on the VALU.
-          This is also presented as a percent of the peak theoretical FLOPs achievable
-          on the specific accelerator. Note: this does not include any floating-point
-          operations from MFMA instructions.'
-        rst: 'The total floating-point operations executed per second on the :ref:`VALU
-          <desc-valu>`. This is also presented as a percent of the peak theoretical
-          FLOPs achievable on the specific accelerator. Note: this does not include
-          any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
+      VALU FLOPs (F16):
+        plain: 'The total 16-bit floating-point operations executed per second on the VALU.
+          This is presented with the value of the peak empirical F16 FLOPs achievable
+          on the specific accelerator. Note: this does not include any F16 operations
+          from MFMA instructions.'
+        rst: 'The total 16-bit floating-point operations executed per second on the :ref:`VALU
+          <desc-valu>`. This is presented with the value of the peak empirical F16 FLOPs achievable
+          on the specific accelerator. Note: this does not include any F16 operations
+          from :ref:`MFMA <desc-mfma>` instructions.'
+        unit: GFLOPs
+      VALU FLOPs (F32):
+        plain: 'The total 32-bit floating-point operations executed per second on the VALU.
+          This is presented with the value of the peak empirical F32 FLOPs achievable
+          on the specific accelerator. Note: this does not include any F32 operations
+          from MFMA instructions.'
+        rst: 'The total 32-bit floating-point operations executed per second on the :ref:`VALU
+          <desc-valu>`. This is presented with the value of the peak empirical F32 FLOPs achievable
+          on the specific accelerator. Note: this does not include any F32 operations
+          from :ref:`MFMA <desc-mfma>` instructions.'
+        unit: GFLOPs
+      VALU FLOPs (F64):
+        plain: 'The total 64-bit floating-point operations executed per second on the VALU.
+          This is presented with the value of the peak empirical F64 FLOPs achievable
+          on the specific accelerator. Note: this does not include any F64 operations
+          from MFMA instructions.'
+        rst: 'The total 64-bit floating-point operations executed per second on the :ref:`VALU
+          <desc-valu>`. This is presented with the value of the peak empirical F64 FLOPs achievable
+          on the specific accelerator. Note: this does not include any F64 operations
+          from :ref:`MFMA <desc-mfma>` instructions.'
         unit: GFLOPs
       MFMA FLOPs (F8):
         plain: The total number of 8-bit brain floating point MFMA operations executed
@@ -3645,6 +3725,19 @@ panels:
           operations from :ref:`VALU <desc-valu>` instructions. The peak empirically
           measured F64 MFMA operations achievable on the specific accelerator is
           displayed alongside for comparison.'
+        unit: GFLOPs
+      MFMA FLOPs (F6F4):
+        plain: 'The total number of 4-bit and 6-bit floating point MFMA operations executed
+          per second. Note: this does not include any floating point operations from
+          VALU instructions. The peak empirically measured F6F4 MFMA operations
+          achievable on the specific accelerator is displayed alongside for comparison.
+          It is supported on AMD Instinct MI350 series (gfx950) and later only.'
+        rst: 'The total number of 4-bit and 6-bit floating point :ref:`MFMA <desc-mfma>`
+          operations executed per second. Note: this does not include any floating point
+          operations from :ref:`VALU <desc-valu>` instructions. The peak empirically
+          measured F6F4 MFMA operations achievable on the specific accelerator is
+          displayed alongside for comparison. It is supported on AMD Instinct MI350
+          series (gfx950) and later only.'
         unit: GFLOPs
       MFMA IOPs (Int8):
         plain: 'The total number of 8-bit integer MFMA operations executed per second.
