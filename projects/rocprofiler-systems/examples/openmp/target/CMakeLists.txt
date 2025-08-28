@@ -57,7 +57,7 @@ function(add_offload_flags tgt)
     endforeach()
 endfunction()
 
-# Derive the ROCm root 
+# Derive the ROCm root
 get_filename_component(_omp_bin_dir "${OMP_TARGET_COMPILER}" DIRECTORY)
 get_filename_component(ROCM_ROOT_DIR "${_omp_bin_dir}" DIRECTORY)
 
