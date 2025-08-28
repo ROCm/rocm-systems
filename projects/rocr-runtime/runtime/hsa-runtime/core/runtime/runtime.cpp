@@ -110,6 +110,7 @@ Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
   ScopedAcquire<KernelMutex> boot(&bootstrap_lock());
+  srand(time(NULL));
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
@@ -354,6 +355,18 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     }
 
     notifiers = std::move(it->second.notifiers);
+
+    //track the exporter BO to clear meta data via set_metadata
+    //clear the set metadata here if possible if theres an existing ldrm_bo
+    if(it->second.ldrm_bo) {
+      struct amdgpu_bo_info info = {0};
+      auto err = amdgpu_bo_query_info(it->second.ldrm_bo, &info);
+
+      //clear metadata
+      amdgpu_bo_metadata zero_metadata = {0};
+      memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
+      amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata);
+    }
 
     allocation_map_.erase(it);
   }
@@ -1269,6 +1282,10 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      SendDmaBufFd(connection_fd, dmabuf_fd);
      err = read(connection_fd, buf, sizeof(buf));
      close(dmabuf_fd);
+
+    //close the extra fd ref opened in ExportDMABufHandle
+    amdgpu_bo_free(runtime_singleton_->allocation_map_[ptr].ldrm_bo);
+
      if (err == -1) break; // Client failed to confirm import so end server
    }
 
@@ -1337,6 +1354,45 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (handle->handle[3] && useFrag) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   handle->handle[4] = agent->node_id();
   if (useFrag) handle->handle[6] |= 0x80000000 | fragOffset;
+
+  handle->handle[7] = static_cast<uint32_t>(rand());
+
+  if(agent->device_type() == Agent::kAmdGpuDevice) {
+    int import_fd = -1;
+    uint64_t dmabufOffset;
+    agent->driver().ExportDMABuf(ptr, len, &import_fd, &dmabufOffset);
+
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
+    amdgpu_bo_import_result res;
+
+    //libdrm import for buffer object handle
+    auto err = DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd,
+                          import_fd, &res));
+    
+    if(err != 0) {
+      std::cout << "Error in amdgpu_bo_import" << std::endl;
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    //query buffer object for pre existing metadata
+    struct amdgpu_bo_info info = {0};
+    err = amdgpu_bo_query_info(res.buf_handle, &info);
+    bool has_metadata = (info.metadata.size_metadata >= sizeof(uint32_t));
+
+    if (has_metadata) {
+      handle->handle[7] = info.metadata.umd_metadata[0];
+    }
+    else {
+      amdgpu_bo_metadata buf_info = {0};
+      buf_info.size_metadata = sizeof(uint32_t);
+      buf_info.umd_metadata[0] = handle->handle[7];
+
+      amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
+      allocation_map_[ptr].ldrm_bo = res.buf_handle;
+    }
+
+    close(import_fd);
+  }
 
   // Work around to defer export on import call to minimize FD creation.
   // Without this, a deferred export may fail due to the kernel mode driver not
@@ -1577,6 +1633,32 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
   for (uint32_t i = 0; i < num_agents; i++)
     agents[i]->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, &nodes[i]);
+
+  if (ipc_dmabuf_supported_ && !importHandle.handle[3]) { // GPU memory
+    amdgpu_bo_import_result res = {0};
+    int ret = IPCClientImport(importHandle.handle[2], dmaBufFDHandle, &res, num_agents, nodes,
+                              &importAddress, &importSize);
+    if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Query buffer metadata for uniqueness check
+    struct amdgpu_bo_info info = {0};
+    ret = amdgpu_bo_query_info(res.buf_handle, &info);
+    if (ret != 0 || info.metadata.size_metadata < sizeof(uint32_t)) {
+        DRM_CALL(amdgpu_bo_free(res.buf_handle));
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    uint32_t meta_word = info.metadata.umd_metadata[0];
+    if (meta_word != importHandle.handle[7]) {
+        DRM_CALL(amdgpu_bo_free(res.buf_handle));
+        std::cout << "IPC Attach: Invalid IPC handle! " << importHandle.handle[7] << " and " << meta_word << std::endl;
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT; // Handle mismatch
+    }
+
+    // Map memory to nodes
+    fixFragment(res.buf_handle);
+    *mapped_ptr = importAddress;
+    return HSA_STATUS_SUCCESS;
+}
 
   hsa_status_t err = importMemory(num_agents, nodes, NULL);
   if (err != HSA_STATUS_SUCCESS) return err;
