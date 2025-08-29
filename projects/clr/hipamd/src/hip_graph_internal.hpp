@@ -2231,6 +2231,7 @@ class GraphHostNode : public GraphNode {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed during block command creation");
       }
       block_command->enqueue();
+      block_command->notifyCmdQueue();
       block_command->release();
       commands_[0]->release();
     }

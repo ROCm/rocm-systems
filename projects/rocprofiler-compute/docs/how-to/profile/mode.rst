@@ -477,7 +477,9 @@ Standalone roofline
 Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
-This option limits the profiling to just the roofline performance counters.
+This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
+	a) If found, uses the data files with the provided arguments to create another roofline PDF output; otherwise,
+	b) Profile mode runs but is limited to collecting only roofline performance counters.
 
 Roofline options
 ----------------
@@ -493,6 +495,10 @@ Roofline options
 ``--device <gpu_id>``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
+
+``-k``, ``--kernel <kernel-substr>``
+   Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
+   utility. See :ref:`profiling-kernel-filtering`.
 
 ``--roofline-data-type <datatype>``
    Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
