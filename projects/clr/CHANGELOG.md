@@ -53,11 +53,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - HIP APIs for `FP4`/`FP6`/`FP8`, which are compatible with corresponding CUDA APIs.
     - HIP Extensions APIs for microscaling formats, which are supported on AMD GPUs.
 * New `wptr` and `rptr` values in `ClPrint`, for better logging in dispatch barrier methods.
-* New debug mask, to print precise code object information for logging.
 * The `_sync()` version of crosslane builtins such as `shfl_sync()` are enabled by default. These can be disabled by setting the preprocessor macro `HIP_DISABLE_WARP_SYNC_BUILTINS`.
 * Added `constexpr` operators for `fp16`/`bf16`.
 * Added warp level primitives: `__syncwarp` and reduce intrinsics (e.g. `__reduce_add_sync()`)
-* Extended fine grained system memory pool.
+* Support for the flags in APIs as following, now allows uncached memory allocation.
+    - `hipExtHostRegisterUncached`, used in `hipHostRegister`.
+    - `hipHostMallocUncached` and `hipHostAllocUncached`, used in `hipHostMalloc` and `hipHostAlloc`.
 * `num_threads`  total number of threads in the group. The legacy API size is alias.
 * Added PCI CHIP ID information as the device attribute.
 * Added new tests applications for OCP data types `FP4`/`FP6`/`FP8`.

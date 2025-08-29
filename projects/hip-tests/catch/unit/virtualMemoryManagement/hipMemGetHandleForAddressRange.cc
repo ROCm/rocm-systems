@@ -222,10 +222,11 @@ hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, i
  * Helper function to validate the handle from hipMemGetHandleForAddressRange
  * by extracting the data from the handle
  */
-bool validateHandle(int* handle, int size, int device = 0) {
+bool validateHandle(int handle, int size, int device = 0) {
   hipMemGenericAllocationHandle_t imported_handle;
-  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, reinterpret_cast<void*>(handle),
-                                            hipMemHandleTypePosixFileDescriptor));
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(handle)),
+            hipMemHandleTypePosixFileDescriptor));
 
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
@@ -303,7 +304,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory") {
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
   checkVMMSupported(device);
-  REQUIRE(validateHandle(&handle, size) == true);
+  REQUIRE(validateHandle(handle, size) == true);
 
   HIP_CHECK(hipFree(srcDevMem));
 }
@@ -341,7 +342,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM") {
       hipMemGetHandleForAddressRange(&handle, ptrA, sizeBytes, hipMemRangeHandleTypeDmaBufFd, 0));
   REQUIRE(handle > 0);
 
-  REQUIRE(validateHandle(&handle, size) == true);
+  REQUIRE(validateHandle(handle, size) == true);
 
   HIP_CHECK(hipMemUnmap(ptrA, reservedAddrSize));
   HIP_CHECK(hipMemAddressFree(ptrA, reservedAddrSize));
@@ -393,7 +394,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice") {
 
   HIP_CHECK(hipDeviceGet(&device, dstDeviceId));
   checkVMMSupported(device);
-  REQUIRE(validateHandle(&handle, size, dstDeviceId) == true);
+  REQUIRE(validateHandle(handle, size, dstDeviceId) == true);
 
   HIP_CHECK(hipFree(srcDevMem));
   HIP_CHECK(hipDeviceReset())
@@ -448,7 +449,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice") {
   HIP_CHECK(hipDeviceGet(&device, dstDeviceId));
   checkVMMSupported(device);
 
-  REQUIRE(validateHandle(&handle, size, dstDeviceId) == true);
+  REQUIRE(validateHandle(handle, size, dstDeviceId) == true);
 
   HIP_CHECK(hipMemUnmap(ptrA, reservedAddrSize));
   HIP_CHECK(hipMemAddressFree(ptrA, reservedAddrSize));
@@ -498,15 +499,16 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
     hipMemGenericAllocationHandle_t imported_handle;
     // import the sareable handle
-    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shHandle,
-                                              hipMemHandleTypePosixFileDescriptor));
+    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+              hipMemHandleTypePosixFileDescriptor));
 
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
 
     // Validate the handle
-    REQUIRE(validateHandle(&shHandle, size_mem / sizeof(int)));
+    REQUIRE(validateHandle(shHandle, size_mem / sizeof(int)));
 
     checkSysCallErrors(sockObj.closeThisSock());
     REQUIRE(close(fd[0]) == 0);
@@ -591,14 +593,15 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
     checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
     hipMemGenericAllocationHandle_t imported_handle;
     // import the sareable handle
-    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shHandle,
-                                              hipMemHandleTypePosixFileDescriptor));
+    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+              hipMemHandleTypePosixFileDescriptor));
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
 
     // Validate handle
-    REQUIRE(validateHandle(&shHandle, size_mem / sizeof(int)));
+    REQUIRE(validateHandle(shHandle, size_mem / sizeof(int)));
 
     checkSysCallErrors(sockObj.closeThisSock());
     REQUIRE(close(fd[0]) == 0);
