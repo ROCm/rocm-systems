@@ -57,19 +57,39 @@ function(add_offload_flags tgt)
     endforeach()
 endfunction()
 
-get_filename_component(OMP_TARGET_COMPILER_DIR ${OMP_TARGET_COMPILER} PATH)
-get_filename_component(OMP_TARGET_COMPILER_DIR ${OMP_TARGET_COMPILER_DIR} PATH)
+# Derive the ROCm root
+get_filename_component(_omp_bin_dir "${OMP_TARGET_COMPILER}" DIRECTORY)
+get_filename_component(ROCM_ROOT_DIR "${_omp_bin_dir}" DIRECTORY)
 
 message(STATUS "Using OpenMP target compiler: ${OMP_TARGET_COMPILER}")
-message(STATUS "Using OpenMP target compiler directory: ${OMP_TARGET_COMPILER_DIR}")
+message(STATUS "ROCm root inferred from compiler: ${ROCM_ROOT_DIR}")
 
-set(_rocm_llvm_lib "${OMP_TARGET_COMPILER_DIR}/llvm/lib")
-set(_rocm_clang_lib "${OMP_TARGET_COMPILER_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib}")
+# Candidate lib directories for libomptarget across ROCm layouts
+set(_LLVM_LIB_HINTS
+    "${ROCM_ROOT_DIR}/lib"
+    "${ROCM_ROOT_DIR}/llvm/lib"
+    "$ENV{ROCM_PATH}/llvm/lib"
+    "$ENV{ROCM_PATH}/lib/llvm/lib"
+    "/opt/rocm/llvm/lib"
+    "/opt/rocm/lib/llvm/lib"
+)
 
-if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so")
-    message(FATAL_ERROR "Could not find libomptarget.so in ${_rocm_llvm_lib}")
+# Find libomptarget
+find_library(LIBOMPTARGET_SO NAMES omptarget HINTS ${_LLVM_LIB_HINTS})
+
+if(NOT LIBOMPTARGET_SO)
+    message(FATAL_ERROR "Could not find libomptarget in any of:\n  ${_LLVM_LIB_HINTS}")
 endif()
+
+# Use the directory that actually contains the library we found
+get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
+set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib}")
+list(REMOVE_DUPLICATES _COMMON_RPATH)
+
+message(STATUS "libomptarget found at: ${LIBOMPTARGET_SO}")
+message(STATUS "LLVM libdir: ${_rocm_llvm_lib}")
+message(STATUS "Clang libdir: ${_rocm_clang_lib}")
 
 # Shared library
 
