@@ -132,12 +132,19 @@ Please refer to [this documentation](/docs/continuous-integration.md) for furthe
 
 ## Large File Storage
 
-[Data Version Control](https://dvc.org) is the system for large file storage in this super-repo. It provides staging capabilities on top of what Git LFS typically provides that ROCm CI/CD workflows can make use of. Files are stored in an S3 bucket that has public-read access.
+[Data Version Control](https://dvc.org) is the system for large file storage in this super-repo. It provides staging capabilities on top of what Git LFS typically provides that ROCm CI/CD workflows can make use of. Files are stored in an AWS S3 bucket that has public-read access.
 
-Currently, `DVC` utilization is limited to the `pal` libraries in the `shared/amdgpu-windows-interop` directory.
-If your development does not involve these files, you do not need to install `DVC`.
+Currently, `dvc` utilization is limited to the `pal` libraries in the `shared/amdgpu-windows-interop` directory.
+If your development does not involve these files, you do not need to install `dvc`.
 
-### [Installing DVC](https://dvc.org/doc/install)
+### Installing DVC
+
+`dvc` can be installed as a python module via pip and is cross-platform. Visit the [dvc installation page](https://dvc.org/doc/install) if you want to use another method of installation. Due to our use of an AWS S3 bucket with `dvc`, the `dvc-s3` module also needs to be installed. The configuration to download the large files from the AWS S3 bucket is already set in this repository.
+
+```bash
+pip install dvc
+pip install dvc-s3
+```
 
 ### Retrieving large files:
 
