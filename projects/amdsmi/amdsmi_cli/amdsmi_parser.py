@@ -1278,7 +1278,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                                                        required=False, help=set_compute_partition_help, metavar=('TYPE/INDEX'))
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
             # Power cap is enabled on guest, maintain order
-            set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._not_negative_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
+            set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._positive_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
             if self.helpers.is_baremetal():
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=lambda value: self._not_negative_int(value, '--xgmi-plpd'), help=set_xgmi_plpd_help, metavar='POLICY_ID')
