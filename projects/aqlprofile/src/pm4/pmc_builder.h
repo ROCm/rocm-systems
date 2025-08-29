@@ -762,11 +762,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
           uint32_t* smn_data_buffer = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
           auto smn_register_addr_lo = get_smn_addr(reg_info.register_addr_lo, target_aid_index);
           auto smn_register_addr_hi = get_smn_addr(reg_info.register_addr_hi, target_aid_index);
-          uint64_t register_addr_lo =
-              (xcc_number_ > 1) ? smn_register_addr_lo : reg_info.register_addr_lo.offset;
-          uint64_t register_addr_hi =
-              (xcc_number_ > 1) ? smn_register_addr_hi : reg_info.register_addr_hi.offset;
-          builder.BuildCopyCounterDataPacket(cmd_buffer, register_addr_lo, register_addr_hi,
+          builder.BuildCopyCounterDataPacket(cmd_buffer, smn_register_addr_lo, smn_register_addr_hi,
                                              smn_data_buffer, 3);
           read_counter += 2;
         }
