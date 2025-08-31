@@ -344,27 +344,29 @@ class PerfettoReader:
             )
 
         scratch_df = self.query_tp(
-            """SELECT
-                begin.id as slice_id,
-                begin.track_id,
-                'scratch_memory' as category,
-                0 as depth,
-                0 as stack_id,
-                0 as parent_stack_id,
-                begin.ts as ts,
-                end.ts - begin.ts as dur,
-                counter_track.name as name
-            FROM counter AS begin
-            JOIN counter AS end ON begin.id + 1 == end.id AND
-                end.track_id == begin.track_id AND begin.value == end.value
-            JOIN counter_track ON begin.track_id = counter_track.id
-            WHERE counter_track.name LIKE '%SCRATCH MEMORY%' 
-            AND NOT EXISTS (
-                SELECT * FROM counter prev
-                WHERE prev.id = begin.id - 1 
-                AND prev.track_id = begin.track_id 
-                AND prev.value = begin.value
-            )"""
+            """WITH Pairs AS(
+                  SELECT
+                     counter.id as slice_id,
+                     track_id,
+                     ts,
+                     (LEAD(counter.ts) OVER window) - counter.ts AS dur,
+                     counter_track.name as track_name,
+                     ROW_NUMBER() OVER window AS rn
+                  FROM counter JOIN counter_track ON counter.track_id = counter_track.id
+                  WHERE counter_track.name LIKE '%SCRATCH MEMORY%' 
+                  WINDOW window AS (PARTITION BY counter.value, track_id ORDER BY counter.ts)
+            )
+            SELECT 
+               slice_id,
+               track_id,
+               'scratch_memory' as category,
+               0 as depth,
+               0 as stack_id,
+               0 as parent_stack_id,
+               ts,
+               dur,
+               Pairs.track_name as name
+            FROM Pairs WHERE (rn % 2 == 1) ORDER BY slice_id"""
         )
 
         # Transform scratch memory data to match the main dataframe schema
