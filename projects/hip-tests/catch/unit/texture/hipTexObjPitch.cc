@@ -35,12 +35,10 @@ THE SOFTWARE.
 
 // texture object is a kernel argument
 template <typename TYPE_t>
-static __global__ void texture2dCopyKernel(hipTextureObject_t texObj,
-                                                   TYPE_t* dst) {
+static __global__ void texture2dCopyKernel(hipTextureObject_t texObj, TYPE_t* dst) {
 #if !__HIP_NO_IMAGE_SUPPORT
   for (int i = 0; i < SIZE_H; i++)
-      for (int j = 0; j < SIZE_W; j++)
-          dst[SIZE_W*i+j] = tex2D<TYPE_t>(texObj, j, i);
+    for (int j = 0; j < SIZE_W; j++) dst[SIZE_W * i + j] = tex2D<TYPE_t>(texObj, j, i);
   __syncthreads();
 #endif
 }
@@ -57,11 +55,12 @@ static __global__ void texture2dCopyKernel(hipTextureObject_t texObj,
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, short,
-                   unsigned short, int, unsigned int, float) {
+TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, short, unsigned short,
+                   int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
 #if HT_NVIDIA
-  (void)hipGetLastError(); // Prevent negative tests affecting this
+      (void)
+  hipGetLastError();  // Prevent negative tests affecting this
 #endif
 #if __HIP_NO_IMAGE_SUPPORT
   HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
@@ -72,17 +71,17 @@ TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, sho
   TestType* devPtrB;
   TestType* devPtrA;
 
-  B = new TestType[SIZE_H*SIZE_W];
-  A = new TestType[SIZE_H*SIZE_W];
-  for (size_t i=1; i <= (SIZE_H*SIZE_W); i++) {
-      A[i-1] = i;
+  B = new TestType[SIZE_H * SIZE_W];
+  A = new TestType[SIZE_H * SIZE_W];
+  for (size_t i = 1; i <= (SIZE_H * SIZE_W); i++) {
+    A[i - 1] = i;
   }
 
   size_t devPitchA;
   HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA,
-                                       SIZE_W*sizeof(TestType), SIZE_H));
-  HIP_CHECK(hipMemcpy2D(devPtrA, devPitchA, A, SIZE_W*sizeof(TestType),
-          SIZE_W*sizeof(TestType), SIZE_H, hipMemcpyHostToDevice));
+                           SIZE_W * sizeof(TestType), SIZE_H));
+  HIP_CHECK(hipMemcpy2D(devPtrA, devPitchA, A, SIZE_W * sizeof(TestType), SIZE_W * sizeof(TestType),
+                        SIZE_H, hipMemcpyHostToDevice));
 
   // Use the texture object
   hipResourceDesc texRes;
@@ -107,25 +106,22 @@ TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, sho
   hipTextureObject_t texObj;
   HIP_CHECK(hipCreateTextureObject(&texObj, &texRes, &texDescr, NULL));
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtrB),
-                                     SIZE_W*sizeof(TestType)*SIZE_H));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtrB), SIZE_W * sizeof(TestType) * SIZE_H));
 
-  hipLaunchKernelGGL(texture2dCopyKernel, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0,
-          texObj, devPtrB);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(texture2dCopyKernel, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, texObj, devPtrB);
+  HIP_CHECK(hipGetLastError());
 
-  HIP_CHECK(hipMemcpy2D(B, SIZE_W*sizeof(TestType), devPtrB,
-                        SIZE_W*sizeof(TestType), SIZE_W*sizeof(TestType),
-                                         SIZE_H, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(B, SIZE_W * sizeof(TestType), devPtrB, SIZE_W * sizeof(TestType),
+                        SIZE_W * sizeof(TestType), SIZE_H, hipMemcpyDeviceToHost));
 
   HipTest::checkArray(A, B, SIZE_H, SIZE_W);
-  delete []A;
-  delete []B;
+  delete[] A;
+  delete[] B;
   HIP_CHECK(hipFree(devPtrA));
   HIP_CHECK(hipFree(devPtrB));
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

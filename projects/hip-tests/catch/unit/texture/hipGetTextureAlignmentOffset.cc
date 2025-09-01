@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipGetTextureAlignmentOffset_Positive") {
   CHECK_IMAGE_SUPPORT
 
   size_t offset = 0;
-  size_t *tex_buf;
+  size_t* tex_buf;
   hipChannelFormatDesc chanDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
   HIP_CHECK(hipMalloc(&tex_buf, 32));
@@ -69,7 +69,7 @@ TEST_CASE("Unit_hipGetTextureAlignmentOffset_Positive") {
 TEST_CASE("Unit_hipGetTextureAlignmentOffset_Negative") {
   CHECK_IMAGE_SUPPORT
   size_t offset = 0;
-  size_t *tex_buf;
+  size_t* tex_buf;
   hipChannelFormatDesc chanDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
   HIP_CHECK(hipMalloc(&tex_buf, 32));
@@ -80,7 +80,7 @@ TEST_CASE("Unit_hipGetTextureAlignmentOffset_Negative") {
   }
 
   SECTION("texture is nullptr") {
-  HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(&offset, nullptr), hipErrorInvalidTexture);
+    HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(&offset, nullptr), hipErrorInvalidTexture);
   }
 
   HIP_CHECK(hipFree(tex_buf));

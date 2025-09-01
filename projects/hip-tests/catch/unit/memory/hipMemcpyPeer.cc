@@ -298,6 +298,6 @@ TEST_CASE("Unit_hipMemcpyPeer_Negative_Parameters") {
 }
 
 /**
-* End doxygen group PeerToPeerTest.
-* @}
-*/
+ * End doxygen group PeerToPeerTest.
+ * @}
+ */

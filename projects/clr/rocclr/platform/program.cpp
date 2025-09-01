@@ -39,9 +39,8 @@
 namespace amd {
 
 #if defined(WITH_COMPILER_LIB)
-static aclTargetInfo *aclutGetTargetInfo(aclBinary *binary)
-{
-  aclTargetInfo *tgt = NULL;
+static aclTargetInfo* aclutGetTargetInfo(aclBinary* binary) {
+  aclTargetInfo* tgt = NULL;
   if (binary->struct_size == sizeof(aclBinary_0_8)) {
     tgt = &reinterpret_cast<aclBinary_0_8*>(binary)->target;
   } else if (binary->struct_size == sizeof(aclBinary_0_8_1)) {
@@ -54,18 +53,17 @@ static aclTargetInfo *aclutGetTargetInfo(aclBinary *binary)
 }
 #endif
 
-static void remove_g_option(std::string &option)
-{
+static void remove_g_option(std::string& option) {
   // Remove " -g " option from application.
   // People can still add -g in AMD_OCL_BUILD_OPTIONS_APPEND, if it is so desired.
   std::string g_str("-g");
   std::size_t g_pos = 0;
   while ((g_pos = option.find(g_str, g_pos)) != std::string::npos) {
     if ((g_pos == 0 || option[g_pos - 1] == ' ') &&
-       (g_pos + 2 == option.size() || option[g_pos + 2] == ' ')) {
-       option.erase(g_pos, g_str.size());
+        (g_pos + 2 == option.size() || option[g_pos + 2] == ' ')) {
+      option.erase(g_pos, g_str.size());
     } else {
-       g_pos += g_str.size();
+      g_pos += g_str.size();
     }
   }
 
@@ -112,20 +110,20 @@ const Symbol* Program::findSymbol(const char* kernelName) const {
   return (it == symbolTable_->cend()) ? NULL : &it->second;
 }
 
-int32_t Program::addDeviceProgram(Device& device, const void* image, size_t length,
-                                  bool make_copy, amd::option::Options* options,
-                                  const amd::Program* same_prog, amd::Os::FileDesc fdesc,
-                                  size_t foffset, std::string uri) {
-  if (image != NULL &&  !amd::Elf::isElfMagic((const char*)image)) {
+int32_t Program::addDeviceProgram(Device& device, const void* image, size_t length, bool make_copy,
+                                  amd::option::Options* options, const amd::Program* same_prog,
+                                  amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
+  if (image != NULL && !amd::Elf::isElfMagic((const char*)image)) {
     if (device.settings().useLightning_) {
       return CL_INVALID_BINARY;
     }
 #if defined(WITH_COMPILER_LIB)
     else if (!amd::Hsail::ValidateBinaryImage(
-          image, length, language_ == SPIRV ? BINARY_TYPE_SPIRV : BINARY_TYPE_ELF | BINARY_TYPE_LLVM)) {
+                 image, length,
+                 language_ == SPIRV ? BINARY_TYPE_SPIRV : BINARY_TYPE_ELF | BINARY_TYPE_LLVM)) {
       return CL_INVALID_BINARY;
     }
-#endif // !defined(WITH_COMPILER_LIB)
+#endif  // !defined(WITH_COMPILER_LIB)
   }
 
   // Check if the device is already associated with this program
@@ -149,7 +147,8 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
   }
 
 #if defined(WITH_COMPILER_LIB)
-  if (image != NULL && length != 0 && amd::Hsail::ValidateBinaryImage(image, length, BINARY_TYPE_ELF)) {
+  if (image != NULL && length != 0 &&
+      amd::Hsail::ValidateBinaryImage(image, length, BINARY_TYPE_ELF)) {
     acl_error errorCode;
     aclBinary* binary = amd::Hsail::ReadFromMem(image, length, &errorCode);
     if (errorCode != ACL_SUCCESS) {
@@ -170,12 +169,12 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
         return CL_INVALID_COMPILER_OPTIONS;
       }
     }
-    options->oVariables->Legacy = !device.settings().useLightning_ ?
-                                     isAMDILTarget(*amd::aclutGetTargetInfo(binary)) :
-                                     isHSAILTarget(*amd::aclutGetTargetInfo(binary));
+    options->oVariables->Legacy = !device.settings().useLightning_
+                                      ? isAMDILTarget(*amd::aclutGetTargetInfo(binary))
+                                      : isHSAILTarget(*amd::aclutGetTargetInfo(binary));
     amd::Hsail::BinaryFini(binary);
   }
-#endif // defined(WITH_COMPILER_LIB)
+#endif  // defined(WITH_COMPILER_LIB)
   options->oVariables->BinaryIsSpirv = language_ == SPIRV;
   device::Program* program = rootDev.createProgram(*this, options);
   if (program == NULL) {
@@ -187,7 +186,7 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
     // clone 'binary' (it is owned by the host thread).
     if (memory == NULL) {
       if (make_copy) {
-        auto *image_copy = new (std::nothrow) uint8_t[length];
+        auto* image_copy = new (std::nothrow) uint8_t[length];
         if (image_copy == NULL) {
           delete program;
           return CL_OUT_OF_HOST_MEMORY;
@@ -205,13 +204,13 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
 
     const device::Program* same_dev_prog = nullptr;
     if ((amd::IS_HIP) && (same_prog != nullptr)) {
-      const auto &same_dev_prog_map_ = same_prog->devicePrograms();
+      const auto& same_dev_prog_map_ = same_prog->devicePrograms();
       guarantee(same_dev_prog_map_.size() == 1, "For same_prog, devicePrograms size != 1");
       same_dev_prog = same_dev_prog_map_.begin()->second;
     }
 
-    if (!program->setBinary(reinterpret_cast<const char*>(memory), length, same_dev_prog,
-                            fdesc, foffset, uri)) {
+    if (!program->setBinary(reinterpret_cast<const char*>(memory), length, same_dev_prog, fdesc,
+                            foffset, uri)) {
       delete program;
       return CL_INVALID_BINARY;
     }
@@ -231,7 +230,7 @@ device::Program* Program::getDeviceProgram(const Device& device) const {
   return it->second;
 }
 
-static bool adjustOptionsOnIgnoreEnv(std::string &cppstr) {
+static bool adjustOptionsOnIgnoreEnv(std::string& cppstr) {
   // if there is a -ignore-env,  adjust options.
   bool optionChangable = true;
   if (cppstr.size() > 0) {
@@ -248,10 +247,10 @@ static bool adjustOptionsOnIgnoreEnv(std::string &cppstr) {
 }
 
 int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
-                        const std::vector<const Program*>& headerPrograms,
-                        const char** headerIncludeNames, const char* options,
-                        void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
-                        bool optionChangable) {
+                         const std::vector<const Program*>& headerPrograms,
+                         const char** headerIncludeNames, const char* options,
+                         void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
+                         bool optionChangable) {
   ScopedLock sl(&programLock_);
 
   int32_t retval = CL_SUCCESS;
@@ -321,9 +320,9 @@ int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
 }
 
 int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
-                     const std::vector<Program*>& inputPrograms, const char* options,
-                     void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
-                     bool optionChangable) {
+                      const std::vector<Program*>& inputPrograms, const char* options,
+                      void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
+                      bool optionChangable) {
   ScopedLock sl(&programLock_);
 
   int32_t retval = CL_SUCCESS;
@@ -360,7 +359,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
       if (inputProgram.language_ == SPIRV) {
         parsedOptions.oVariables->BinaryIsSpirv = true;
       }
-      const deviceprograms_t &inputDevProgs = inputProgram.devicePrograms();
+      const deviceprograms_t& inputDevProgs = inputProgram.devicePrograms();
       const auto findIt = inputDevProgs.find(it);
       if (findIt == inputDevProgs.cend()) {
         if (found) break;
@@ -389,7 +388,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
         }
         amd::Hsail::BinaryFini(aclBin);
       }
-#endif // defined(WITH_COMPILER_LIB)
+#endif  // defined(WITH_COMPILER_LIB)
       found = true;
     }
     if (inputDevPrograms.size() == 0) {
@@ -492,8 +491,8 @@ void Program::StubProgramSource(const std::string& app_name) {
 }
 
 int32_t Program::build(const std::vector<Device*>& devices, const char* options,
-                      void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
-                      bool optionChangable, bool newDevProg) {
+                       void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
+                       bool optionChangable, bool newDevProg) {
   ScopedLock sl(&programLock_);
 
   int32_t retval = CL_SUCCESS;
@@ -524,7 +523,7 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
     option::Options parsedOptions;
     constexpr bool LinkOptsOnly = false;
     if ((language_ != HIP) && !ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly,
-                         it->settings().useLightning_)) {
+                                               it->settings().useLightning_)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing compile options failed.");
       return CL_INVALID_COMPILER_OPTIONS;
@@ -621,7 +620,7 @@ bool Program::load(const std::vector<Device*>& devices) {
     if (!devProgram.load()) {
       if (!devProgram.buildLog().empty()) {
         LogPrintfError("devProgram.load() failed with buildLog=%s\n",
-            devProgram.buildLog().c_str());
+                       devProgram.buildLog().c_str());
       }
       return false;
     }

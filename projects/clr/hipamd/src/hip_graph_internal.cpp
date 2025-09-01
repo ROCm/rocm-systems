@@ -48,7 +48,7 @@ const char* GetGraphNodeTypeString(uint32_t op) {
   };
   return case_string;
 };
-}
+}  // namespace
 
 namespace hip {
 
@@ -71,7 +71,7 @@ amd::Monitor UserObject::UserObjectLock_{};
 amd::Monitor GraphNode::WorkerThreadLock_{};
 
 hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t count,
-                                                hipMemcpyKind kind) {
+                                             hipMemcpyKind kind) {
   hipError_t status = ihipMemcpy_validate(dst, src, count, kind);
   if (status != hipSuccess) {
     return status;
@@ -196,7 +196,7 @@ void Graph::ScheduleOneNode(Node node, int stream_id) {
         reinterpret_cast<hip::ChildGraphNode*>(node)->GraphExec::TopologicalOrder();
       }
     }
-    for (auto edge: node->GetEdges()) {
+    for (auto edge : node->GetEdges()) {
       ScheduleOneNode(edge, stream_id);
       // 1. Each extra edge will get a new stream from the pool
       // 2. Streams will be reused if the number of edges > streams
@@ -238,7 +238,7 @@ bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
   std::unordered_map<Node, int> inDegree;
   for (auto entry : vertices_) {
     // Update the dependencies if a signal is required
-    for (auto dep: entry->GetDependencies()) {
+    for (auto dep : entry->GetDependencies()) {
       // Check if the stream ID doesn't match and enable signal
       if (dep->stream_id_ != entry->stream_id_) {
         dep->signal_is_required_ = true;
@@ -250,8 +250,7 @@ bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
     }
     inDegree[entry] = entry->GetInDegree();
   }
-  while (!q.empty())
-  {
+  while (!q.empty()) {
     Node node = q.front();
     TopoOrder.push_back(node);
     q.pop();
@@ -308,7 +307,7 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
     memcpy(&newGraph->roots_[0], &roots_[0], sizeof(Node) * roots_.size());
   }
   newGraph->memAllocNodePtrs_ = memAllocNodePtrs_;
-  if(!cloneNodes) {
+  if (!cloneNodes) {
     newGraph->clonedNodes_.clear();
   }
 }
@@ -333,8 +332,8 @@ bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
 hipError_t GraphExec::CreateStreams(uint32_t num_streams) {
   parallel_streams_.reserve(num_streams);
   for (uint32_t i = 0; i < num_streams; ++i) {
-    auto stream = new hip::Stream(hip::getCurrentDevice(),
-                                  hip::Stream::Priority::Normal, hipStreamNonBlocking);
+    auto stream = new hip::Stream(hip::getCurrentDevice(), hip::Stream::Priority::Normal,
+                                  hipStreamNonBlocking);
     if (stream == nullptr || !stream->Create()) {
       if (stream != nullptr) {
         hip::Stream::Destroy(stream);
@@ -364,7 +363,7 @@ hipError_t GraphExec::Init() {
     }
   }
   instantiateDeviceId_ = hip::getCurrentDevice()->deviceId();
-  static_cast<ReferenceCountedObject*>( hip::getCurrentDevice())->retain();
+  static_cast<ReferenceCountedObject*>(hip::getCurrentDevice())->retain();
   return status;
 }
 
@@ -523,8 +522,8 @@ bool Graph::RunOneNode(Node node, bool wait) {
         if (depNode->stream_id_ != node->stream_id_) {
           // If there is no wait node on the stream, then assign one
           if ((wait_order_[depNode->stream_id_] == nullptr) ||
-          // If another node executed on the same stream, then use the latest launch only,
-          // since the same stream has in-order run
+              // If another node executed on the same stream, then use the latest launch only,
+              // since the same stream has in-order run
               (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
             wait_order_[depNode->stream_id_] = depNode;
           }
@@ -579,10 +578,11 @@ bool Graph::RunOneNode(Node node, bool wait) {
     node->launch_id_ = current_id_++;
     uint32_t i = 0;
     // Execute the nodes in the edges list
-    for (auto edge: node->GetEdges()) {
+    for (auto edge : node->GetEdges()) {
       // Don't wait in the nodes, executed on the same streams and if it has just one dependency
-      bool wait = ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) ||
-                   (edge->GetDependencies().size() > 1)) ? true : false;
+      bool wait = ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1))
+                      ? true
+                      : false;
       // Execute the edge node
       if (!RunOneNode(edge, wait)) {
         return false;
@@ -599,11 +599,8 @@ bool Graph::RunOneNode(Node node, bool wait) {
 }
 
 // ================================================================================================
-bool Graph::RunNodes(
-    int32_t base_stream,
-    const std::vector<hip::Stream*>* parallel_streams,
-    const amd::Command::EventWaitList* parent_waitlist) {
-
+bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* parallel_streams,
+                     const amd::Command::EventWaitList* parent_waitlist) {
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
   }
@@ -700,9 +697,9 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   // If this is a repeat launch, make sure corresponding MemFreeNode exists for a MemAlloc node
   if (repeatLaunch_ == true) {
     if (!topoOrder_.empty() && topoOrder_[0]->GetParentGraph()->GetMemAllocNodeCount() > 0) {
-       return hipErrorInvalidValue;
+      return hipErrorInvalidValue;
     }
-  }  else {
+  } else {
     repeatLaunch_ = true;
   }
 

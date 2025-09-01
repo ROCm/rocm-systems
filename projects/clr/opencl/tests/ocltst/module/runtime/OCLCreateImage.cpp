@@ -35,7 +35,7 @@
 const static size_t ImageSize = 4;
 const static size_t MaxSubTests = 5;
 
-const static char *strKernel =
+const static char* strKernel =
     "const sampler_t g_Sampler =    CLK_FILTER_LINEAR |                 \n"
     "                               CLK_ADDRESS_CLAMP_TO_EDGE |         \n"
     "                               CLK_NORMALIZED_COORDS_FALSE;        \n"
@@ -91,7 +91,7 @@ OCLCreateImage::OCLCreateImage() {
 
 OCLCreateImage::~OCLCreateImage() {}
 
-void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
+void OCLCreateImage::open(unsigned int test, char* units, double& conversion,
                           unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
@@ -100,8 +100,8 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
   cl_bool imageSupport;
   size_t size;
   for (size_t i = 0; i < deviceCount_; ++i) {
-    _wrapper->clGetDeviceInfo(devices_[i], CL_DEVICE_IMAGE_SUPPORT,
-                              sizeof(imageSupport), &imageSupport, &size);
+    _wrapper->clGetDeviceInfo(devices_[i], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupport),
+                              &imageSupport, &size);
     if (!imageSupport) {
       testDescString = "Image not supported, skipping this test! ";
       done_ = true;
@@ -116,41 +116,39 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
   cl_ulong max3DHeight;
   cl_ulong max3DDepth;
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_MAX_MEM_ALLOC_SIZE,
-                            sizeof(cl_ulong), &maxSize_, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong),
+                            &maxSize_, &size);
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE2D_MAX_WIDTH,
-                            sizeof(cl_ulong), &max2DWidth, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE2D_MAX_WIDTH, sizeof(cl_ulong),
+                            &max2DWidth, &size);
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE2D_MAX_HEIGHT,
-                            sizeof(cl_ulong), &max2DHeight, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE2D_MAX_HEIGHT, sizeof(cl_ulong),
+                            &max2DHeight, &size);
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE3D_MAX_WIDTH,
-                            sizeof(cl_ulong), &max3DWidth, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE3D_MAX_WIDTH, sizeof(cl_ulong),
+                            &max3DWidth, &size);
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE3D_MAX_HEIGHT,
-                            sizeof(cl_ulong), &max3DHeight, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE3D_MAX_HEIGHT, sizeof(cl_ulong),
+                            &max3DHeight, &size);
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE3D_MAX_DEPTH,
-                            sizeof(cl_ulong), &max3DDepth, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE3D_MAX_DEPTH, sizeof(cl_ulong),
+                            &max3DDepth, &size);
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
   CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram() failed");
 
-  const char *kernels[] = {"linear3D", "linear2D", "linear2DArray",
-                           "linear1DArray", "point1DBuffer"};
+  const char* kernels[] = {"linear3D", "linear2D", "linear2DArray", "linear1DArray",
+                           "point1DBuffer"};
   unsigned int dimensions[] = {3, 2, 3, 2, 1};
   kernel_ = _wrapper->clCreateKernel(program_, kernels[test], &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed");
@@ -180,7 +178,7 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
       ImageSizeZ = maxSize_ / (ImageSizeX * ImageSizeY * 16);
 #if EMU_ENV
       ImageSizeX = ImageSizeY = ImageSizeZ = 4;
-#endif // EMU_ENV
+#endif  // EMU_ENV
     } else {
       ImageSizeX = 4;
       ImageSizeY = 4;
@@ -243,9 +241,8 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
   } else if (test == 4) {
     ImageSizeX = ImageSize;
     desc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
-    buf = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                   ImageSizeX * 4 * sizeof(cl_float), NULL,
-                                   &error_);
+    buf = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, ImageSizeX * 4 * sizeof(cl_float),
+                                   NULL, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     ImageSizeY = 0;
     ImageSizeZ = 0;
@@ -255,8 +252,7 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
     desc.buffer = buf;
   }
 
-  memory = _wrapper->clCreateImage(context_, CL_MEM_READ_ONLY, &imageFormat,
-                                   &desc, NULL, &error_);
+  memory = _wrapper->clCreateImage(context_, CL_MEM_READ_ONLY, &imageFormat, &desc, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateImage() failed");
 
   float fillColor[4] = {1.f, 1.f, 1.f, 1.f};
@@ -265,13 +261,11 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
     float data[4][ImageSize];
     size_t region[3] = {ImageSize, 1, 1};
 
-    error_ =
-        _wrapper->clEnqueueFillImage(cmdQueues_[_deviceId], memory, fillColor,
-                                     offset, region, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueFillImage(cmdQueues_[_deviceId], memory, fillColor, offset, region,
+                                          0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueFillImage() failed");
-    error_ =
-        _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], memory, true,
-                                     offset, region, 0, 0, data, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], memory, true, offset, region, 0, 0,
+                                          data, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadImage() failed");
 
     for (size_t x = 0; x < ImageSize; ++x) {
@@ -281,19 +275,17 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
       data[x][0] = (float)x;
       data[x][1] = data[x][2] = data[x][3] = 1.0f;
     }
-    error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true,
-                                           offset, region, 0, 0, data, 0, NULL,
-                                           NULL);
+    error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true, offset, region, 0,
+                                           0, data, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteImage() failed");
   } else if (dimensions[test] == 2) {
     size_t region[3] = {ImageSizeX, ImageSizeY, 1};
 
-    error_ =
-        _wrapper->clEnqueueFillImage(cmdQueues_[_deviceId], memory, fillColor,
-                                     offset, region, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueFillImage(cmdQueues_[_deviceId], memory, fillColor, offset, region,
+                                          0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueFillImage() failed");
 
-    float *data;
+    float* data;
     size_t ActualImageSizeY = ImageSizeY;
     size_t maxImageSize = maxSize_;
 #ifdef __linux__
@@ -303,17 +295,15 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
       maxImageSize = ((size_t)pages * page_size);
     }
 #endif
-    while ((((ImageSizeX * ActualImageSizeY * sizeof(float) * 4) /
-             (1024 * 1024)) >= (size_t)4 * 1024) ||
-           ((ImageSizeX * ActualImageSizeY * sizeof(float) * 4) >=
-            (maxImageSize / 2))) {
+    while ((((ImageSizeX * ActualImageSizeY * sizeof(float) * 4) / (1024 * 1024)) >=
+            (size_t)4 * 1024) ||
+           ((ImageSizeX * ActualImageSizeY * sizeof(float) * 4) >= (maxImageSize / 2))) {
       if (ActualImageSizeY == 1) {
         break;
       }
       ActualImageSizeY /= 2;
     }
-    while ((data = (float *)malloc(ImageSizeX * ActualImageSizeY *
-                                   sizeof(float) * 4)) == NULL) {
+    while ((data = (float*)malloc(ImageSizeX * ActualImageSizeY * sizeof(float) * 4)) == NULL) {
       if (ActualImageSizeY == 1) {
         break;
       }
@@ -325,12 +315,10 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
 
     size_t remainSizeY = ImageSizeY;
     while (remainSizeY > 0) {
-      ActualImageSizeY =
-          (remainSizeY > ActualImageSizeY) ? ActualImageSizeY : remainSizeY;
+      ActualImageSizeY = (remainSizeY > ActualImageSizeY) ? ActualImageSizeY : remainSizeY;
       size_t tmpRange[3] = {ImageSizeX, ActualImageSizeY, 1};
-      error_ = _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], memory, true,
-                                            offset, tmpRange, 0, 0, data, 0,
-                                            NULL, NULL);
+      error_ = _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], memory, true, offset, tmpRange,
+                                            0, 0, data, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadImage() failed");
 
       for (size_t y = 0; y < ActualImageSizeY; ++y) {
@@ -344,22 +332,20 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
           data[offsetData + 2] = data[offsetData + 3] = 1.0f;
         }
       }
-      error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory,
-                                             true, offset, tmpRange, 0, 0, data,
-                                             0, NULL, NULL);
+      error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true, offset, tmpRange,
+                                             0, 0, data, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteImage() failed");
       remainSizeY -= ActualImageSizeY;
       offset[1] += ActualImageSizeY;
     }
     free(data);
   } else if (dimensions[test] == 3) {
-    float *data;
+    float* data;
 
     float index = 0.f;
     size_t region[3] = {ImageSizeX, ImageSizeY, ImageSizeZ};
-    error_ =
-        _wrapper->clEnqueueFillImage(cmdQueues_[_deviceId], memory, fillColor,
-                                     offset, region, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueFillImage(cmdQueues_[_deviceId], memory, fillColor, offset, region,
+                                          0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueFillImage() failed");
 
     size_t ActualImageSizeZ = ImageSizeZ;
@@ -371,17 +357,17 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
       maxImageSize = ((size_t)pages * page_size);
     }
 #endif
-    while ((((ImageSizeX * ImageSizeY * ActualImageSizeZ * sizeof(float) * 4) /
-             (1024 * 1024)) >= (size_t)4 * 1024) ||
-           ((ImageSizeX * ImageSizeY * ActualImageSizeZ * sizeof(float) * 4) >=
-            (maxImageSize / 2))) {
+    while (
+        (((ImageSizeX * ImageSizeY * ActualImageSizeZ * sizeof(float) * 4) / (1024 * 1024)) >=
+         (size_t)4 * 1024) ||
+        ((ImageSizeX * ImageSizeY * ActualImageSizeZ * sizeof(float) * 4) >= (maxImageSize / 2))) {
       if (ActualImageSizeZ == 1) {
         break;
       }
       ActualImageSizeZ /= 2;
     }
-    while ((data = (float *)malloc(ImageSizeX * ImageSizeY * ActualImageSizeZ *
-                                   sizeof(float) * 4)) == NULL) {
+    while ((data = (float*)malloc(ImageSizeX * ImageSizeY * ActualImageSizeZ * sizeof(float) *
+                                  4)) == NULL) {
       if (ActualImageSizeZ == 1) {
         break;
       }
@@ -393,12 +379,10 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
 
     size_t remainSizeZ = ImageSizeZ;
     while (remainSizeZ > 0) {
-      ActualImageSizeZ =
-          (remainSizeZ > ActualImageSizeZ) ? ActualImageSizeZ : remainSizeZ;
+      ActualImageSizeZ = (remainSizeZ > ActualImageSizeZ) ? ActualImageSizeZ : remainSizeZ;
       size_t tmpRange[3] = {ImageSizeX, ImageSizeY, ActualImageSizeZ};
-      error_ = _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], memory, true,
-                                            offset, tmpRange, 0, 0, data, 0,
-                                            NULL, NULL);
+      error_ = _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], memory, true, offset, tmpRange,
+                                            0, 0, data, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadImage() failed");
 
       for (size_t z = 0; z < ActualImageSizeZ; ++z) {
@@ -415,9 +399,8 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
           }
         }
       }
-      error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory,
-                                             true, offset, tmpRange, 0, 0, data,
-                                             0, NULL, NULL);
+      error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true, offset, tmpRange,
+                                             0, 0, data, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteImage() failed");
       remainSizeZ -= ActualImageSizeZ;
       offset[2] += ActualImageSizeZ;
@@ -427,15 +410,14 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
 
   buffers_.push_back(memory);
 
-  memory = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                    4 * sizeof(cl_float), NULL, &error_);
+  memory =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, 4 * sizeof(cl_float), NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(memory);
   if (buf != NULL) {
     buffers_.push_back(buf);
   }
-  size_t imageSizebyte =
-      (ImageSizeY != 0) ? ImageSizeY * ImageSizeX : ImageSizeX;
+  size_t imageSizebyte = (ImageSizeY != 0) ? ImageSizeY * ImageSizeX : ImageSizeX;
   imageSizebyte *= (ImageSizeZ != 0) ? ImageSizeZ : 1;
   imageSizebyte *= 16;  //  16 bytes per pixel, imageFormat = {CL_RGBA,CL_FLOAT}
   char strImgSize[200];
@@ -457,9 +439,8 @@ void OCLCreateImage::open(unsigned int test, char *units, double &conversion,
   testDescString = str.str();
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLCreateImage::run(void) {
   if (done_) {
@@ -478,13 +459,12 @@ void OCLCreateImage::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
   size_t gws[1] = {0x1};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffer, true, 0,
-                                         4 * sizeof(cl_float), values, 0, NULL,
-                                         NULL);
+                                         4 * sizeof(cl_float), values, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer() failed");
   if (testID_ == 4) {
     ref[0] = 2.0f;

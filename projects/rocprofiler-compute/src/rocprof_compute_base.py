@@ -137,6 +137,8 @@ class RocProfCompute:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
             self.__analyze_mode = "tui"
+        elif self.__args.output_format == "db":
+            self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
         return
@@ -229,9 +231,9 @@ class RocProfCompute:
             arch = self.__args.list_metrics
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs(
+            ac.panel_configs = file_io.load_panel_configs([
                 self.__args.config_dir.joinpath(arch)
-            )
+            ])
             sys_info = self.__mspec.get_class_members().iloc[0]
             parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
@@ -259,7 +261,8 @@ class RocProfCompute:
 
         # Print header
         print(
-            f"{'Set Option':<35} {'Set Title':<35} {'Metric Name':<30} {'Metric ID':<10}"
+            f"{'Set Option':<35} {'Set Title':<35}"
+            f" {'Metric Name':<30} {'Metric ID':<10}"
         )
         print("-" * 115)
 
@@ -279,7 +282,8 @@ class RocProfCompute:
                     title_display = title if first_row else ""
 
                     print(
-                        f"{set_display:<35} {title_display:<35} {metric_name:<30} {metric_id:<10}"
+                        f"{set_display:<35} {title_display:<35}"
+                        f" {metric_name:<30} {metric_id:<10}"
                     )
                     first_row = False
             # Empty line between sets
@@ -289,7 +293,7 @@ class RocProfCompute:
         if sets_info:
             first_set = next(iter(sets_info.keys()))
             print(f"  rocprof-compute profile --set {first_set}  # Profile this set")
-        print(f"  rocprof-compute profile --list-sets        # Show this help")
+        print("  rocprof-compute profile --list-sets        # Show this help")
         print()
 
         sys.exit(0)
@@ -445,6 +449,10 @@ class RocProfCompute:
 
             run_tui(self.__args, self.__supported_archs)
             return
+        elif self.__analyze_mode == "db":
+            from rocprof_compute_analyze.analysis_db import db_analysis
+
+            analyzer = db_analysis(self.__args, self.__supported_archs)
         else:
             console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
 

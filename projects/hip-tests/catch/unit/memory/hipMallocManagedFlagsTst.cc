@@ -32,13 +32,12 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 
 // The following section tests working of hipMallocManaged with flag parameters
 TEST_CASE("Unit_hipMallocManaged_FlgParam") {
-  
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
     return;
   }
-  
+
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
@@ -121,13 +120,12 @@ TEST_CASE("Unit_hipMallocManaged_FlgParam") {
 // The following function tests Memory access allocated using hipMallocManaged
 // in multiple streams
 TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
-  
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
     return;
   }
-  
+
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;

@@ -102,8 +102,8 @@ TEST_CASE("Unit_hipEventRecord") {
 
   // Warmup
   HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
-                                 static_cast<const float*>(A_d), static_cast<const float*>(B_d),
-                                 C_d, N);
+                               static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
+                               N);
   HIP_CHECK(hipDeviceSynchronize());
   for (int i = 0; i < iterations; i++) {
     //--- START TIMED REGION
@@ -175,13 +175,13 @@ TEST_CASE("Unit_hipEventRecord_Negative") {
       // start on device 0 but null stream on device 1
       HIP_CHECK(hipSetDevice(1));
       HIP_CHECK_ERROR(hipEventRecord(start, nullptr), hipErrorInvalidHandle)
-	  
+
       HIP_CHECK(hipEventDestroy(start));
     }
   }
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

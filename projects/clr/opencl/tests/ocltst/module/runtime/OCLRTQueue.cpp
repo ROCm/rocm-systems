@@ -48,7 +48,7 @@ const static char* strKernel =
     "    out[id] = factorial;                                           \n"
     "}                                                                  \n";
 
-OCLRTQueue::OCLRTQueue(): rtQueue_(NULL), rtQueue1_(NULL), kernel2_(NULL) {
+OCLRTQueue::OCLRTQueue() : rtQueue_(NULL), rtQueue1_(NULL), kernel2_(NULL) {
 #ifndef CL_VERSION_2_0
   _numSubTests = 0;
   testID_ = 0;
@@ -69,12 +69,11 @@ void OCLRTQueue::open(unsigned int test, char* units, double& conversion, unsign
   testID_ = test;
   size_t param_size = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0,
-                                     0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size,
-                                     strVersion, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size, strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[7] < '2') {
     failed_ = true;
@@ -84,22 +83,20 @@ void OCLRTQueue::open(unsigned int test, char* units, double& conversion, unsign
 #define CL_DEVICE_MAX_REAL_TIME_COMPUTE_QUEUES_AMD 0x404D
 #define CL_DEVICE_MAX_REAL_TIME_COMPUTE_UNITS_AMD 0x404E
 #define CL_DEVICE_MAX_REAL_TIME_COMPUTE_UNITS_GRANULARITY_AMD 0x403A
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId],
-                                     CL_DEVICE_MAX_REAL_TIME_COMPUTE_QUEUES_AMD,
-                                     sizeof(rtQueues), &rtQueues, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_MAX_REAL_TIME_COMPUTE_QUEUES_AMD,
+                                sizeof(rtQueues), &rtQueues, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (rtQueues < 2) {
     failed_ = true;
     return;
   }
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId],
-                                     CL_DEVICE_MAX_REAL_TIME_COMPUTE_UNITS_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_MAX_REAL_TIME_COMPUTE_UNITS_AMD,
                                      sizeof(rtCUs_), &rtCUs_, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId],
-                                     CL_DEVICE_MAX_COMPUTE_UNITS,
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_MAX_COMPUTE_UNITS,
                                      sizeof(maxCUs_), &maxCUs_, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
@@ -108,16 +105,14 @@ void OCLRTQueue::open(unsigned int test, char* units, double& conversion, unsign
                                      sizeof(rtCUsGranularity_), &rtCUsGranularity_, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -128,20 +123,19 @@ void OCLRTQueue::open(unsigned int test, char* units, double& conversion, unsign
 
   cl_mem buffer;
   for (size_t i = 0; i < MaxBuffers; ++i) {
-    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                      BufSize * sizeof(cl_uint), NULL, &error_);
+    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, BufSize * sizeof(cl_uint), NULL,
+                                      &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     buffers_.push_back(buffer);
   }
-  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_ALLOC_HOST_PTR,
-                                    BufSize * sizeof(cl_uint), NULL, &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_ALLOC_HOST_PTR, BufSize * sizeof(cl_uint),
+                                    NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLRTQueue::run(void) {
@@ -155,7 +149,8 @@ void OCLRTQueue::run(void) {
   cl_mem mapBuffer = buffers()[MaxBuffers];
 
   values = _wrapper->clEnqueueMapBuffer(cmdQueues_[_deviceId], mapBuffer, true,
-      (CL_MAP_READ | CL_MAP_WRITE), 0, BufSize * sizeof(cl_uint), 0, NULL, NULL, &error_);
+                                        (CL_MAP_READ | CL_MAP_WRITE), 0, BufSize * sizeof(cl_uint),
+                                        0, NULL, NULL, &error_);
 
   cl_mem buffer = buffers()[0];
   error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
@@ -168,8 +163,8 @@ void OCLRTQueue::run(void) {
   error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
 
@@ -179,8 +174,8 @@ void OCLRTQueue::run(void) {
     error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -213,15 +208,13 @@ void OCLRTQueue::run(void) {
 
   // Create a real time queue
 #define CL_QUEUE_REAL_TIME_COMPUTE_UNITS_AMD 0x404f
-  const cl_queue_properties cprops[] = {
-      CL_QUEUE_PROPERTIES, static_cast<cl_queue_properties>(0),
-      CL_QUEUE_REAL_TIME_COMPUTE_UNITS_AMD, cu_, 0};
-  rtQueue_ = _wrapper->clCreateCommandQueueWithProperties(
-      context_, devices_[_deviceId], cprops, &error_);
+  const cl_queue_properties cprops[] = {CL_QUEUE_PROPERTIES, static_cast<cl_queue_properties>(0),
+                                        CL_QUEUE_REAL_TIME_COMPUTE_UNITS_AMD, cu_, 0};
+  rtQueue_ =
+      _wrapper->clCreateCommandQueueWithProperties(context_, devices_[_deviceId], cprops, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueueWithProperties() failed");
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws,
-                                            NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   _wrapper->clFinish(rtQueue_);
 
@@ -231,8 +224,7 @@ void OCLRTQueue::run(void) {
     error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws,
-                                              NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
   _wrapper->clFinish(rtQueue_);
@@ -248,16 +240,15 @@ void OCLRTQueue::run(void) {
   rtQueue1_ = nullptr;
   if (test_rtq1) {
 #define CL_QUEUE_MEDIUM_PRIORITY_AMD 0x4050
-    const cl_queue_properties cprops2[] = {CL_QUEUE_PROPERTIES,
-                                           static_cast<cl_queue_properties>(0),
+    const cl_queue_properties cprops2[] = {CL_QUEUE_PROPERTIES, static_cast<cl_queue_properties>(0),
                                            CL_QUEUE_MEDIUM_PRIORITY_AMD, cu_, 0};
-    rtQueue1_ = _wrapper->clCreateCommandQueueWithProperties(
-        context_, devices_[_deviceId], cprops2, &error_);
+    rtQueue1_ = _wrapper->clCreateCommandQueueWithProperties(context_, devices_[_deviceId], cprops2,
+                                                             &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueueWithProperties() failed");
   }
   if (rtQueue1_) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws,
-                                              NULL, 0, NULL, NULL);
+    error_ =
+        _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     _wrapper->clFinish(rtQueue1_);
 
@@ -267,8 +258,8 @@ void OCLRTQueue::run(void) {
       error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
       CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-      error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws,
-                                                NULL, 0, NULL, NULL);
+      error_ =
+          _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
 
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
@@ -294,8 +285,8 @@ void OCLRTQueue::run(void) {
     error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -313,8 +304,8 @@ void OCLRTQueue::run(void) {
     error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
   _wrapper->clFlush(cmdQueues_[_deviceId]);
@@ -324,8 +315,7 @@ void OCLRTQueue::run(void) {
     error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws,
-                                              NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
   _wrapper->clFinish(rtQueue_);
@@ -345,8 +335,8 @@ void OCLRTQueue::run(void) {
       error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
       CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-      error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                                NULL, gws, NULL, 0, NULL, NULL);
+      error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL,
+                                                0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
     _wrapper->clFlush(cmdQueues_[_deviceId]);
@@ -356,8 +346,8 @@ void OCLRTQueue::run(void) {
       error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
       CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-      error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws,
-                                                NULL, 0, NULL, NULL);
+      error_ =
+          _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
 
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
@@ -382,22 +372,22 @@ void OCLRTQueue::run(void) {
       error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &buffer);
       CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-      error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                                NULL, gws, NULL, 0, NULL, NULL);
+      error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL,
+                                                0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
     _wrapper->clFlush(cmdQueues_[_deviceId]);
     timer.Reset();
     timer.Start();
     for (x = 0; x < 1; x++) {
-      error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws,
-                                                NULL, 0, NULL, NULL);
+      error_ =
+          _wrapper->clEnqueueNDRangeKernel(rtQueue_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
     _wrapper->clFlush(rtQueue_);
     for (x = 0; x < 1; x++) {
-      error_ = _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws,
-                                                NULL, 0, NULL, NULL);
+      error_ =
+          _wrapper->clEnqueueNDRangeKernel(rtQueue1_, kernel_, 1, NULL, gws, NULL, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
 
@@ -411,10 +401,10 @@ void OCLRTQueue::run(void) {
     // Buffer read bandwidth in GB/s
     perf = ((double)BufSize * sizeof(cl_uint) * x * (double)(1e-09)) / sec;
 
-    printf(" Async RT0(CUs: %d) + RT1(CUs: %d) + Generic(CUs: %d) Time: %.3fs\n",
-           cu_, cu_, maxCUs_ - rtCUs_, sec);
-    error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], mapBuffer,
-                                               values, 0, NULL, NULL);
+    printf(" Async RT0(CUs: %d) + RT1(CUs: %d) + Generic(CUs: %d) Time: %.3fs\n", cu_, cu_,
+           maxCUs_ - rtCUs_, sec);
+    error_ =
+        _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], mapBuffer, values, 0, NULL, NULL);
     _wrapper->clFinish(cmdQueues_[_deviceId]);
   } else {
     if (testID_ == 0) {

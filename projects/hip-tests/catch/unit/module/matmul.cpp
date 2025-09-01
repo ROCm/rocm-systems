@@ -16,11 +16,10 @@ LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include"hip/hip_runtime.h"
+#include "hip/hip_runtime.h"
 __device__ int deviceGlobal = 1;
 
-extern "C" __global__ void matmulK(int clockrate, int* A, int* B, int* C,
-                                   int N) {
+extern "C" __global__ void matmulK(int clockrate, int* A, int* B, int* C, int N) {
   int ROW = blockIdx.y * blockDim.y + threadIdx.y;
   int COL = blockIdx.x * blockDim.x + threadIdx.x;
   int tmpSum = 0;
@@ -33,8 +32,7 @@ extern "C" __global__ void matmulK(int clockrate, int* A, int* B, int* C,
   }
 }
 
-extern "C" __global__ void KernelandExtraParams(int* A, int* B, int* C,
-  int *D, int N) {
+extern "C" __global__ void KernelandExtraParams(int* A, int* B, int* C, int* D, int N) {
   int ROW = blockIdx.y * blockDim.y + threadIdx.y;
   int COL = blockIdx.x * blockDim.x + threadIdx.x;
   int tmpSum = 0;
@@ -50,31 +48,24 @@ extern "C" __global__ void KernelandExtraParams(int* A, int* B, int* C,
 
 __device__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   while (interval--) {
-    #if HT_AMD
+#if HT_AMD
     uint64_t start = wall_clock64();
     while (wall_clock64() - start < ticks_per_ms) {
       __builtin_amdgcn_s_sleep(10);
     }
-    #endif
-    #if HT_NVIDIA
+#endif
+#if HT_NVIDIA
     uint64_t start = clock64();
     while (clock64() - start < ticks_per_ms) {
     }
-    #endif
+#endif
   }
 }
 
-extern "C" __global__ void SixteenSecKernel(int clockrate) {
-  Delay(16000, clockrate);
-}
+extern "C" __global__ void SixteenSecKernel(int clockrate) { Delay(16000, clockrate); }
 
-extern "C" __global__ void TwoSecKernel(int clockrate) {
-  Delay(2000, clockrate);
-}
+extern "C" __global__ void TwoSecKernel(int clockrate) { Delay(2000, clockrate); }
 
-extern "C" __global__ void FourSecKernel(int clockrate) {
-  Delay(4000, clockrate);
-}
+extern "C" __global__ void FourSecKernel(int clockrate) { Delay(4000, clockrate); }
 
-extern "C" __global__ void dummyKernel() {
-}
+extern "C" __global__ void dummyKernel() {}

@@ -32,6 +32,6 @@ class AppProfile : public amd::AppProfile {
   //! parse application profile based on application file name
   virtual bool ParseApplicationProfile();
 };
-}
+}  // namespace amd::roc
 
 #endif

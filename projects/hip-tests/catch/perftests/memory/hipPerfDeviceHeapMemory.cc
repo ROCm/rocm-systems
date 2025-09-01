@@ -25,12 +25,11 @@ __global__ void mallocTest() {
   memset(ptr, 0, size);
   free(ptr);
 }
-__global__ void mallocTest_1()
-{
-    size_t size = 1024;
-    int* ptr = (int*)malloc(size);
-    memset(ptr, 0, size);
-    free(ptr);
+__global__ void mallocTest_1() {
+  size_t size = 1024;
+  int* ptr = (int*)malloc(size);
+  memset(ptr, 0, size);
+  free(ptr);
 }
 /**
  * The tests in this file are added to see the performance improvement with the
@@ -64,7 +63,7 @@ __global__ void mallocTest_1()
  * - HIP_VERSION >= 6.5
  */
 TEST_CASE("Unit_Perf_Device_Heap_Memory_Allocation") {
-  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128*1024*1024));
+  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128 * 1024 * 1024));
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
@@ -87,8 +86,8 @@ TEST_CASE("Unit_Perf_Device_Heap_Memory_Allocation") {
   REQUIRE(time > time_1);
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipStreamDestroy(stream));
-  std::cout<<"First Kernel Latency: "<<time<<" micro seconds"<<std::endl;
-  std::cout<<"Second Kernel Latency: "<<time_1<<" micro seconds"<<std::endl;
+  std::cout << "First Kernel Latency: " << time << " micro seconds" << std::endl;
+  std::cout << "Second Kernel Latency: " << time_1 << " micro seconds" << std::endl;
 }
 /**
  * End doxygen group PerformanceTest.

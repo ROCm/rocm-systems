@@ -47,66 +47,61 @@ static constexpr int numElements{1024 * 16};
 static constexpr size_t sizeBytes{numElements * sizeof(int)};
 
 #if HT_AMD
-static __global__ void kerTestMemAccess(char *buf) {
+static __global__ void kerTestMemAccess(char* buf) {
   size_t myId = threadIdx.x + blockDim.x * blockIdx.x;
   buf[myId] = VALUE;
 }
 #endif
 
-void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags,
-                      int syncMethod, std::string msg) {
-    std::cerr << "test: CheckHostPointer "
-              << msg
-              << " eventFlags = " << std::hex << eventFlags
-              << ((eventFlags & hipEventReleaseToDevice) ?
-                 " hipEventReleaseToDevice" : "")
-              << ((eventFlags & hipEventReleaseToSystem) ?
-                 " hipEventReleaseToSystem" : "")
-              << " ptr=" << ptr << " syncMethod="
-              << syncMsg[syncMethod] << "\n";
+void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMethod,
+                      std::string msg) {
+  std::cerr << "test: CheckHostPointer " << msg << " eventFlags = " << std::hex << eventFlags
+            << ((eventFlags & hipEventReleaseToDevice) ? " hipEventReleaseToDevice" : "")
+            << ((eventFlags & hipEventReleaseToSystem) ? " hipEventReleaseToSystem" : "")
+            << " ptr=" << ptr << " syncMethod=" << syncMsg[syncMethod] << "\n";
 
-    hipStream_t s;
-    hipEvent_t e;
+  hipStream_t s;
+  hipEvent_t e;
 
-    // Init:
-    HIP_CHECK(hipStreamCreate(&s));
-    HIP_CHECK(hipEventCreateWithFlags(&e, eventFlags))
-    dim3 dimBlock(64, 1, 1);
-    dim3 dimGrid(numElements / dimBlock.x, 1, 1);
+  // Init:
+  HIP_CHECK(hipStreamCreate(&s));
+  HIP_CHECK(hipEventCreateWithFlags(&e, eventFlags))
+  dim3 dimBlock(64, 1, 1);
+  dim3 dimGrid(numElements / dimBlock.x, 1, 1);
 
-    const int expected = 13;
+  const int expected = 13;
 
-    // Init array to know state:
-    HipTest::launchKernel(Set, dimGrid, dimBlock, 0, 0x0, ptr, -42);
-    HIP_CHECK(hipDeviceSynchronize());
+  // Init array to know state:
+  HipTest::launchKernel(Set, dimGrid, dimBlock, 0, 0x0, ptr, -42);
+  HIP_CHECK(hipDeviceSynchronize());
 
-    HipTest::launchKernel(Set, dimGrid, dimBlock, 0, s, ptr, expected);
-    HIP_CHECK(hipEventRecord(e, s));
+  HipTest::launchKernel(Set, dimGrid, dimBlock, 0, s, ptr, expected);
+  HIP_CHECK(hipEventRecord(e, s));
 
-    // Host waits for event :
-    switch (syncMethod) {
-        case SYNC_EVENT:
-            HIP_CHECK(hipEventSynchronize(e));
-            break;
-        case SYNC_STREAM:
-            HIP_CHECK(hipStreamSynchronize(s));
-            break;
-        case SYNC_DEVICE:
-            HIP_CHECK(hipDeviceSynchronize());
-            break;
-        default:
-            assert(0);
+  // Host waits for event :
+  switch (syncMethod) {
+    case SYNC_EVENT:
+      HIP_CHECK(hipEventSynchronize(e));
+      break;
+    case SYNC_STREAM:
+      HIP_CHECK(hipStreamSynchronize(s));
+      break;
+    case SYNC_DEVICE:
+      HIP_CHECK(hipDeviceSynchronize());
+      break;
+    default:
+      assert(0);
+  }
+
+  for (int i = 0; i < numElements; i++) {
+    if (ptr[i] != expected) {
+      printf("mismatch at %d: %d != %d\n", i, ptr[i], expected);
+      REQUIRE(ptr[i] == expected);
     }
+  }
 
-    for (int i = 0; i < numElements; i++) {
-        if (ptr[i] != expected) {
-            printf("mismatch at %d: %d != %d\n", i, ptr[i], expected);
-            REQUIRE(ptr[i] == expected);
-        }
-    }
-
-    HIP_CHECK(hipStreamDestroy(s));
-    HIP_CHECK(hipEventDestroy(e));
+  HIP_CHECK(hipStreamDestroy(s));
+  HIP_CHECK(hipEventDestroy(e));
 }
 /*
 This testcase performs the basic scenario of hipHostMalloc API
@@ -129,7 +124,7 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
     float *A_d, *B_d, *C_d;
     unsigned int flag = 0;
     HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE,
-                           hipHostMallocWriteCombined | hipHostMallocMapped));
+                            hipHostMallocWriteCombined | hipHostMallocMapped));
     SECTION("hipHostMallocDefault") { flag = hipHostMallocDefault; }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
     SECTION("hipHostMallocUncached") { flag = hipHostMallocUncached; }
@@ -137,8 +132,7 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
     SECTION("hipHostMallocNonCoherent") { flag = hipHostMallocNonCoherent; }
 #endif
     HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE, flag));
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C_h), SIZE,
-                           hipHostMallocMapped));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C_h), SIZE, hipHostMallocMapped));
 
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0));
@@ -150,11 +144,10 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
 
     dim3 dimGrid(LEN / 512, 1, 1);
     dim3 dimBlock(512, 1, 1);
-    HipTest::launchKernel<float>(HipTest::vectorADD<float>, dimGrid, dimBlock,
-            0, 0, static_cast<const float*>(A_d),
-            static_cast<const float*>(B_d), C_d, static_cast<size_t>(LEN));
-    HIP_CHECK(hipMemcpy(C_h, C_d, LEN*sizeof(float),
-                        hipMemcpyDeviceToHost));
+    HipTest::launchKernel<float>(HipTest::vectorADD<float>, dimGrid, dimBlock, 0, 0,
+                                 static_cast<const float*>(A_d), static_cast<const float*>(B_d),
+                                 C_d, static_cast<size_t>(LEN));
+    HIP_CHECK(hipMemcpy(C_h, C_d, LEN * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HipTest::checkVectorADD<float>(A_h, B_h, C_h, numElements);
 
@@ -173,8 +166,7 @@ TEST_CASE("Unit_hipHostMalloc_Negative") {
     // Stimulate error condition:
     int* A = nullptr;
     REQUIRE(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes,
-            hipHostMallocCoherent | hipHostMallocNonCoherent)
-            != hipSuccess);
+                          hipHostMallocCoherent | hipHostMallocNonCoherent) != hipSuccess);
     REQUIRE(A == nullptr);
   }
 #endif
@@ -189,15 +181,11 @@ This testcase verifies the hipHostMalloc API by
 */
 TEST_CASE("Unit_hipHostMalloc_NonCoherent") {
   int* A = nullptr;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A),
-                          sizeBytes, hipHostMallocNonCoherent));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
   const char* ptrType = "non-coherent";
-  CheckHostPointer(numElements, A, hipEventReleaseToSystem,
-                   SYNC_DEVICE, ptrType);
-  CheckHostPointer(numElements, A, hipEventReleaseToSystem,
-                   SYNC_STREAM, ptrType);
-  CheckHostPointer(numElements, A, hipEventReleaseToSystem,
-                   SYNC_EVENT, ptrType);
+  CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_DEVICE, ptrType);
+  CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_STREAM, ptrType);
+  CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_EVENT, ptrType);
 }
 
 /*
@@ -210,22 +198,15 @@ This testcase verifies the hipHostMalloc API by
 */
 TEST_CASE("Unit_hipHostMalloc_Coherent") {
   int* A = nullptr;
-  if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes,
-                    hipHostMallocCoherent) == hipSuccess) {
+  if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocCoherent) == hipSuccess) {
     const char* ptrType = "coherent";
-    CheckHostPointer(numElements, A, hipEventReleaseToDevice,
-                     SYNC_DEVICE, ptrType);
-    CheckHostPointer(numElements, A, hipEventReleaseToDevice,
-                     SYNC_STREAM, ptrType);
-    CheckHostPointer(numElements, A, hipEventReleaseToDevice,
-                     SYNC_EVENT, ptrType);
+    CheckHostPointer(numElements, A, hipEventReleaseToDevice, SYNC_DEVICE, ptrType);
+    CheckHostPointer(numElements, A, hipEventReleaseToDevice, SYNC_STREAM, ptrType);
+    CheckHostPointer(numElements, A, hipEventReleaseToDevice, SYNC_EVENT, ptrType);
 
-    CheckHostPointer(numElements, A, hipEventReleaseToSystem,
-                     SYNC_DEVICE, ptrType);
-    CheckHostPointer(numElements, A, hipEventReleaseToSystem,
-                     SYNC_STREAM, ptrType);
-    CheckHostPointer(numElements, A, hipEventReleaseToSystem,
-                     SYNC_EVENT, ptrType);
+    CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_DEVICE, ptrType);
+    CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_STREAM, ptrType);
+    CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_EVENT, ptrType);
   } else {
     SUCCEED("Coherence memory allocation failed. Is SVM atomic supported?");
   }
@@ -269,12 +250,12 @@ TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory") {
   size_t maxGpuMem = 0, availableMem = 0;
   // Get available GPU memory and total GPU memory
   HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-  #if defined(_WIN32)
+#if defined(_WIN32)
   size_t allocsize = availableMem - (256 * 1024 * 1024);
   allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-  #else
+#else
   size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-  #endif
+#endif
   // Get free host In bytes
   size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
   // Ensure that allocsize < hostMemFree
@@ -292,12 +273,12 @@ TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
   size_t maxGpuMem = 0, availableMem = 0;
   // Get available GPU memory and total GPU memory
   HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-  #if defined(_WIN32)
+#if defined(_WIN32)
   size_t allocsize = availableMem - (256 * 1024 * 1024);
   allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-  #else
+#else
   size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-  #endif
+#endif
   // Get free host In bytes
   size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
   // Ensure that allocsize < hostMemFree
@@ -306,7 +287,7 @@ TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
     constexpr int sample_size = 1024;
     // memset a sample size to 0
     HIP_CHECK(hipMemset(A, 0, sample_size));
-    unsigned int grid_size = allocsize/BLOCK_SIZE;
+    unsigned int grid_size = allocsize / BLOCK_SIZE;
     // Check if the allocated memory can be accessed in kernels
     kerTestMemAccess<<<grid_size, BLOCK_SIZE>>>(A);
     HIP_CHECK(hipDeviceSynchronize());

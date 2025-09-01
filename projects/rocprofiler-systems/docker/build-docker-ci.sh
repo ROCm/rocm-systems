@@ -4,9 +4,9 @@ set -e
 
 : ${USER:=$(whoami)}
 : ${DISTRO:=ubuntu}
-: ${VERSIONS:=20.04}
+: ${VERSIONS:=24.04}
 : ${NJOBS=$(nproc)}
-: ${ELFUTILS_VERSION:=0.186}
+: ${ELFUTILS_VERSION:=0.188}
 : ${BOOST_VERSION:=1.79.0}
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${PUSH:=0}
@@ -38,7 +38,7 @@ usage()
 
     echo ""
     print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
-    print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
+    print_default_option distro "[ubuntu|opensuse|rhel|debian]" "OS distribution" "${DISTRO}"
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
@@ -124,7 +124,11 @@ do
     shift
 done
 
-DOCKER_FILE=Dockerfile.${DISTRO}.ci
+if [ "${DISTRO}" = "debian" ]; then
+    DOCKER_FILE=Dockerfile.ubuntu.ci
+else
+    DOCKER_FILE=Dockerfile.${DISTRO}.ci
+fi
 
 if [ ! -f ${DOCKER_FILE} ]; then cd docker; fi
 

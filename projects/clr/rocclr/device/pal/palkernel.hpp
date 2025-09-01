@@ -114,7 +114,7 @@ class HSAILKernel : public device::Kernel {
       uint64_t vmDefQueue,                 //!< GPU VM default queue pointer
       uint64_t* vmParentWrap,              //!< GPU VM parent aql wrap object
       uint32_t* aql_index                  //!< AQL packet index in the packets array for debugger
-      ) const;
+  ) const;
 
   //! Returns the kernel index in the program
   uint index() const { return index_; }
@@ -138,11 +138,11 @@ class HSAILKernel : public device::Kernel {
     amd_kernel_code_t akc_;                  //!< AQL kernel code on CPU, used by HSAIL
     llvm::amdhsa::kernel_descriptor_t akd_;  //!< AQL kernel descriptor on CPU, used by LC
   };
-  uint index_;                             //!< Kernel index in the program
+  uint index_;  //!< Kernel index in the program
 
   uint64_t code_;    //!< GPU memory pointer to the kernel
   size_t codeSize_;  //!< Size of ISA code
- };
+};
 
 class LightningKernel : public HSAILKernel {
  public:
