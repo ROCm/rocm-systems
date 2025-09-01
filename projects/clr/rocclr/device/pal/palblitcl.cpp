@@ -17,7 +17,7 @@
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
-
+// clang-format off
 namespace amd::pal {
 
 #define RUNTIME_KERNEL(...) #__VA_ARGS__
@@ -498,3 +498,4 @@ const char* TrapHandlerCode = RUNTIME_KERNEL(
 \n.endif
 \n);
 }  // namespace amd::pal
+// clang-format on
