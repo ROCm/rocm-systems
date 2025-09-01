@@ -25,7 +25,8 @@ THE SOFTWARE.
  * @ingroup PerformanceTest
  */
 
-class MemPoolExportToShareableHandleBenchmark : public Benchmark<MemPoolExportToShareableHandleBenchmark> {
+class MemPoolExportToShareableHandleBenchmark
+    : public Benchmark<MemPoolExportToShareableHandleBenchmark> {
  public:
   void operator()() {
     hipMemPool_t mem_pool{nullptr};
@@ -66,14 +67,15 @@ static void RunBenchmark() {
  */
 TEST_CASE("Performance_hipMemPoolExportToShareableHandle") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   RunBenchmark();
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

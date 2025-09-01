@@ -18,22 +18,22 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hiprtc_VectorTypes_HeaderTst hiprtc_VectorTypes_HeaderTst
-* @{
-* @ingroup hiprtcHeaders
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
-*                                  int numOptions,
-*                                  const char** options);` -
-* These test cases are target including various header file in kernel
-* string and compile using the api mentioned above.
-*/
+ * @addtogroup hiprtc_VectorTypes_HeaderTst hiprtc_VectorTypes_HeaderTst
+ * @{
+ * @ingroup hiprtcHeaders
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
+ *                                  int numOptions,
+ *                                  const char** options);` -
+ * These test cases are target including various header file in kernel
+ * string and compile using the api mentioned above.
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
 
-static constexpr auto vectorTypes_string {
-R"(
+static constexpr auto vectorTypes_string{
+    R"(
 extern "C"
 
 #define EPSILON 0.000001
@@ -1349,22 +1349,22 @@ __global__ void vectorTypes(int *res) {
 )"};
 
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hiprtcCompileProgram
-*    1) To test working of "hip/hip_vector_types" header inside kernel string
-* Test source
-* ------------------------
-*  - unit/rtc/hiprtc_VectorTypes_HeaderTst.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hiprtcCompileProgram
+ *    1) To test working of "hip/hip_vector_types" header inside kernel string
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hiprtc_VectorTypes_HeaderTst.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.1
+ */
 TEST_CASE("Unit_Rtc_VectorTypes_header") {
   std::string kernel_name = "vectorTypes";
   const char* kername = kernel_name.c_str();
-  int *result_h;
-  int *result_d;
+  int* result_h;
+  int* result_d;
   int n = 1240;
   int Nbytes = n * sizeof(int);
   result_h = new int[n];
@@ -1386,10 +1386,8 @@ TEST_CASE("Unit_Rtc_VectorTypes_header") {
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, vectorTypes_string,
-                                   kername, 0, NULL, NULL));
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1,
-                             &compiler_option)};
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, vectorTypes_string, kername, 0, NULL, NULL));
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
     size_t logSize;
@@ -1407,14 +1405,12 @@ TEST_CASE("Unit_Rtc_VectorTypes_header") {
   void* kernelParam[] = {result_d};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < n; i++) {
@@ -1427,11 +1423,11 @@ TEST_CASE("Unit_Rtc_VectorTypes_header") {
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   HIP_CHECK(hipFree(result_d));
-  delete [] result_h;
+  delete[] result_h;
   REQUIRE(true);
 }
 
 /**
-* End doxygen group hiprtcHeaders.
-* @}
-*/
+ * End doxygen group hiprtcHeaders.
+ * @}
+ */

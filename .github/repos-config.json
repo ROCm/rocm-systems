@@ -11,34 +11,34 @@
     {
       "name": "clr",
       "url": "ROCm/clr",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hip",
       "url": "ROCm/hip",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hipother",
       "url": "ROCm/hipother",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hip-tests",
       "url": "ROCm/hip-tests",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rdc",
@@ -115,7 +115,7 @@
     {
       "name": "rocr-runtime",
       "url": "ROCm/ROCR-Runtime",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true

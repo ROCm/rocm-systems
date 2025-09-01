@@ -34,13 +34,12 @@ namespace cg = cooperative_groups;
 
 template <typename BaseType = cg::coalesced_group>
 static __global__ void coalesced_group_size_getter(unsigned int* sizes, uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     BaseType active = cg::coalesced_threads();
     sizes[thread_rank_in_grid()] = active.size();
@@ -50,13 +49,12 @@ static __global__ void coalesced_group_size_getter(unsigned int* sizes, uint64_t
 template <typename BaseType = cg::coalesced_group>
 static __global__ void coalesced_group_thread_rank_getter(unsigned int* thread_ranks,
                                                           uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     BaseType active = cg::coalesced_threads();
     thread_ranks[thread_rank_in_grid()] = active.thread_rank();
@@ -65,13 +63,12 @@ static __global__ void coalesced_group_thread_rank_getter(unsigned int* thread_r
 
 static __global__ void coalesced_group_non_member_size_getter(unsigned int* sizes,
                                                               uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     cg::coalesced_group active = cg::coalesced_threads();
     sizes[thread_rank_in_grid()] = cg::group_size(active);
@@ -80,13 +77,12 @@ static __global__ void coalesced_group_non_member_size_getter(unsigned int* size
 
 static __global__ void coalesced_group_non_member_thread_rank_getter(unsigned int* thread_ranks,
                                                                      uint64_t active_mask) {
-  #if (__GFX8__ || _GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+#if (__GFX8__ || _GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     cg::coalesced_group active = cg::coalesced_threads();
     thread_ranks[thread_rank_in_grid()] = cg::thread_rank(active);
@@ -139,7 +135,6 @@ static uint64_t get_active_mask(unsigned int test_case, size_t warp_size) {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic") {
-
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -269,7 +264,7 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic") {
     const int rank_in_partition = rank_in_block % warp_size;
     // If the number of threads in a block is not a multiple of warp size, the
     // last warp will have inactive threads and coalesced group size must be recalculated
-    if (rank_in_block == (partitions_in_block - 1) * warp_size ) {
+    if (rank_in_block == (partitions_in_block - 1) * warp_size) {
       unsigned int partition_size =
           grid.threads_in_block_count_ - (partitions_in_block - 1) * warp_size;
       coalesced_size = get_active_thread_count(active_mask, partition_size);
@@ -348,7 +343,8 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic"
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
   HIP_CHECK(hipDeviceSynchronize());
-  coalesced_group_non_member_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr(), active_mask);
+  coalesced_group_non_member_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr(),
+                                                                     active_mask);
 
   // Verify coalesced_group.size() values
   unsigned int coalesced_size = 0;
@@ -392,16 +388,15 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic"
   }
 }
 
-template <typename T>
-__global__ void coalesced_group_shfl_up(T* const out, const unsigned int delta,
-                                        const uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+template <typename T> __global__ void coalesced_group_shfl_up(T* const out,
+                                                              const unsigned int delta,
+                                                              const uint64_t active_mask) {
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     cg::coalesced_group active = cg::coalesced_threads();
     T var = static_cast<T>(active.thread_rank());
@@ -410,7 +405,6 @@ __global__ void coalesced_group_shfl_up(T* const out, const unsigned int delta,
 }
 
 template <typename T> void CoalescedGroupShflUpTestImpl() {
-
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -474,16 +468,15 @@ TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Up_Positive_Basic", "", int, unsig
   CoalescedGroupShflUpTestImpl<TestType>();
 }
 
-template <typename T>
-__global__ void coalesced_group_shfl_down(T* const out, const unsigned int delta,
-                                          const uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+template <typename T> __global__ void coalesced_group_shfl_down(T* const out,
+                                                                const unsigned int delta,
+                                                                const uint64_t active_mask) {
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     cg::coalesced_group active = cg::coalesced_threads();
     T var = static_cast<T>(active.thread_rank());
@@ -492,7 +485,6 @@ __global__ void coalesced_group_shfl_down(T* const out, const unsigned int delta
 }
 
 template <typename T> void CoalescedGroupShflDownTest() {
-
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -566,16 +558,14 @@ TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Down_Positive_Basic", "", int, uns
   CoalescedGroupShflDownTest<TestType>();
 }
 
-template <typename T>
-__global__ void coalesced_group_shfl(T* const out, uint8_t* target_lanes,
-                                     const uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
-  const cg::thread_block_tile<ksize> tile =
-      cg::tiled_partition<ksize>(cg::this_thread_block());
+template <typename T> __global__ void coalesced_group_shfl(T* const out, uint8_t* target_lanes,
+                                                           const uint64_t active_mask) {
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
+  const cg::thread_block_tile<ksize> tile = cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     cg::coalesced_group active = cg::coalesced_threads();
     T var = static_cast<T>(active.thread_rank());
@@ -585,7 +575,6 @@ __global__ void coalesced_group_shfl(T* const out, uint8_t* target_lanes,
 }
 
 template <typename T> void CoalescedGroupShflTest() {
-
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -642,11 +631,11 @@ template <typename T> void CoalescedGroupShflTest() {
     if (active_mask & (static_cast<uint64_t>(1) << rank_in_partition)) {
       auto target = target_lanes.ptr()[coalesced_rank];
       if (target >= coalesced_size) {
-        #if HT_NVIDIA
-         target = 0;
-        #else
-         target %= coalesced_size;
-        #endif
+#if HT_NVIDIA
+        target = 0;
+#else
+        target %= coalesced_size;
+#endif
       }
       if (arr.ptr()[i] != target) {
         REQUIRE(arr.ptr()[i] == target);
@@ -686,12 +675,11 @@ template <typename T> static inline T GenerateRandomInteger(const T min, const T
 template <bool use_global, typename T>
 __global__ void coalesced_group_sync_check(T* global_data, unsigned int* wait_modifiers,
                                            const uint64_t active_mask) {
-
-  #if (__GFX8__ || __GFX9__)
-    constexpr unsigned int ksize = 64;
-  #else
-    constexpr unsigned int ksize = 32;
-  #endif
+#if (__GFX8__ || __GFX9__)
+  constexpr unsigned int ksize = 64;
+#else
+  constexpr unsigned int ksize = 32;
+#endif
 
   extern __shared__ uint8_t shared_data[];
   T* const data = use_global ? global_data : reinterpret_cast<T*>(shared_data);
@@ -736,7 +724,6 @@ __global__ void coalesced_group_sync_check(T* global_data, unsigned int* wait_mo
 }
 
 template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
-
   int device;
   hipDeviceProp_t device_properties;
 
@@ -827,6 +814,6 @@ TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Sync_Positive_Basic", "", uint8_t, uint
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

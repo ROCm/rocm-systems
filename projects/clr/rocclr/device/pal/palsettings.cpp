@@ -63,9 +63,9 @@ Settings::Settings() {
   // By default use host blit
   blitEngine_ = BlitEngineHost;
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
-  size_t defaultMinXferSize = amd::IS_HIP ? 128: 4;
-  pinnedMinXferSize_ = flagIsDefault(GPU_PINNED_MIN_XFER_SIZE)
-    ? defaultMinXferSize * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+  size_t defaultMinXferSize = amd::IS_HIP ? 128 : 4;
+  pinnedMinXferSize_ = flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? defaultMinXferSize * Mi
+                                                               : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   // GPU device by default
   apuSystem_ = false;
@@ -131,12 +131,11 @@ Settings::Settings() {
   alwaysResident_ = amd::IS_HIP ? true : false;
   prepinnedMinSize_ = 0;
   cpDmaCopySizeMax_ = GPU_CP_DMA_COPY_SIZE * Ki;
-  kernel_arg_impl_ = flagIsDefault(HIP_FORCE_DEV_KERNARG)
-                         ? KernelArgImpl::DeviceKernelArgs
-                         : HIP_FORCE_DEV_KERNARG;
+  kernel_arg_impl_ = flagIsDefault(HIP_FORCE_DEV_KERNARG) ? KernelArgImpl::DeviceKernelArgs
+                                                          : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_CLR_GRAPH_PACKET_CAPTURE = false; // disable graph performance optimizations for PAL
+  DEBUG_CLR_GRAPH_PACKET_CAPTURE = false;  // disable graph performance optimizations for PAL
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
@@ -183,8 +182,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::Navi21:
       // set wavefront 64 for Geekbench 5
       {
-        if (appName == "Geekbench 5.exe" ||
-            appName == "geekbench_x86_64.exe" ||
+        if (appName == "Geekbench 5.exe" || appName == "geekbench_x86_64.exe" ||
             appName == "geekbench5.exe") {
           useWavefront64 = true;
         }
@@ -224,9 +222,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 
       libSelector_ = amd::GPU_Library_CI;
       if (LP64_SWITCH(false, true)) {
-        oclVersion_ = !reportAsOCL12Device
-            ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR))
-            : OpenCL12;
+        oclVersion_ =
+            !reportAsOCL12Device ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR)) : OpenCL12;
       }
       if (OPENCL_VERSION < 200) {
         oclVersion_ = OpenCL12;
@@ -291,7 +288,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 
   if (hwLDSSize_ == 0) {
     // Use hardcoded values for now, since PAL properties aren't available with offline devices
-    hwLDSSize_ = (IS_LINUX || amd::IS_HIP) ? 64 * Ki: 32 * Ki;
+    hwLDSSize_ = (IS_LINUX || amd::IS_HIP) ? 64 * Ki : 32 * Ki;
   }
 
   imageSupport_ = true;
@@ -344,9 +341,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #endif
   }
 
-  if (apuSystem_ &&
-      ((heaps[Pal::GpuHeapLocal].logicalSize +
-        heaps[Pal::GpuHeapInvisible].logicalSize) < (150 * Mi))) {
+  if (apuSystem_ && ((heaps[Pal::GpuHeapLocal].logicalSize +
+                      heaps[Pal::GpuHeapInvisible].logicalSize) < (150 * Mi))) {
     remoteAlloc_ = true;
   }
 
@@ -356,14 +352,15 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
                                   (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
   } else {
     if (apuSystem_) {
-      resourceCacheSize_ = std::max((
-        (heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize
-        + heaps[Pal::GpuHeapGartUswc].logicalSize) / 8),
-        (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
+      resourceCacheSize_ = std::max(
+          ((heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize +
+            heaps[Pal::GpuHeapGartUswc].logicalSize) /
+           8),
+          (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
     } else {
-      resourceCacheSize_ = std::max(((
-        heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize) / 8),
-        (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
+      resourceCacheSize_ = std::max(
+          ((heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize) / 8),
+          (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
     }
 #if !defined(_LP64)
     resourceCacheSize_ = std::min(resourceCacheSize_, 1 * Gi);
@@ -376,9 +373,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     prepinnedMinSize_ = PAL_PREPINNED_MEMORY_SIZE * Ki;
   }
 
-  limit_blit_wg_ = enableWgpMode_
-      ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
-      : palProp.gfxipProperties.shaderCore.numAvailableCus;
+  limit_blit_wg_ = enableWgpMode_ ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
+                                  : palProp.gfxipProperties.shaderCore.numAvailableCus;
 
   // Override current device settings
   override();

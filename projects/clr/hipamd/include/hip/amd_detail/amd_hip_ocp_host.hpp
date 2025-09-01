@@ -1,6 +1,6 @@
 /*
 Copyright © Advanced Micro Devices, Inc., or its affiliates.
- 
+
 SPDX-License-Identifier: MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -592,7 +592,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
   }();
   const auto& srcEnc = encodings[(size_t)srcE];
 
-  auto srcU32 = u.u32;// (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
+  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
   auto signBit = signbit<srcE, false>(srcU32);
   auto sign = signBit << (enc.ExpBits + enc.ManBits);
 
@@ -706,7 +706,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
   }();
   const auto& srcEnc = encodings[(size_t)srcE];
 
-  auto srcU32 = u.u32; // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
+  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
   auto signBit = signbit<srcE, false>(srcU32);
   auto sign = signBit << (enc.ExpBits + enc.ManBits);
 
@@ -793,11 +793,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale 
                                                         uint32_t seed = 0) {
   // This is tightly coupled with the definitions of the amd_ocp_types
   constexpr bool in_float = std::is_same<InType, __amd_floatx32_storage_t>::value ||
-      std::is_same<InType, __amd_fp16x32_storage_t>::value ||
-      std::is_same<InType, __amd_bf16x32_storage_t>::value;
+                            std::is_same<InType, __amd_fp16x32_storage_t>::value ||
+                            std::is_same<InType, __amd_bf16x32_storage_t>::value;
   constexpr bool out_float = std::is_same<OutType, __amd_floatx32_storage_t>::value ||
-      std::is_same<OutType, __amd_fp16x32_storage_t>::value ||
-      std::is_same<OutType, __amd_bf16x32_storage_t>::value;
+                             std::is_same<OutType, __amd_fp16x32_storage_t>::value ||
+                             std::is_same<OutType, __amd_bf16x32_storage_t>::value;
   using other_type = std::conditional<in_float, OutType, InType>::type;
 
   struct fp6x32_packed {

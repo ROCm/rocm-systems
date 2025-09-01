@@ -164,9 +164,10 @@ RUNTIME_ENTRY(cl_int, clGetEventInfo,
     }
     case CL_EVENT_COMMAND_QUEUE: {
       amd::Command& command = as_amd(event)->command();
-      cl_command_queue queue = command.queue() == NULL
-          ? NULL
-          : const_cast<cl_command_queue>(as_cl(command.queue()->asCommandQueue()));
+      cl_command_queue queue =
+          command.queue() == NULL
+              ? NULL
+              : const_cast<cl_command_queue>(as_cl(command.queue()->asCommandQueue()));
       return amd::clGetInfo(queue, param_value_size, param_value, param_value_size_ret);
     }
     case CL_EVENT_COMMAND_TYPE: {

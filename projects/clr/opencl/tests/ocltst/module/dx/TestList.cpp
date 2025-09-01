@@ -30,13 +30,9 @@
 //
 //  Helper macro for adding tests
 //
-template <typename T>
-static void* dictionary_CreateTestFunc(void) {
-  return new T();
-}
+template <typename T> static void* dictionary_CreateTestFunc(void) { return new T(); }
 
-#define TEST(name) \
-  { #name, &dictionary_CreateTestFunc < name> }
+#define TEST(name) {#name, &dictionary_CreateTestFunc<name>}
 
 #ifdef _WIN32
 

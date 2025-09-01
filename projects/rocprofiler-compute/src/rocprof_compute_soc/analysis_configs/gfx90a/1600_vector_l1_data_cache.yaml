@@ -400,7 +400,7 @@ Panel Config:
         avg: Avg
         min: Min
         max: Max
-        units: Units
+        units: Unit
       metric:
         Req:
           avg: AVG((TCP_UTCL1_REQUEST_sum / $denom))
@@ -438,5 +438,5 @@ Panel Config:
         avg: Avg
         min: Min
         max: Max
-        units: Units
+        units: Unit
       metric: {}

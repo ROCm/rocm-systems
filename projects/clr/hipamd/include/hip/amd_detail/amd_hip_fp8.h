@@ -51,16 +51,16 @@
 #endif
 
 #if defined(__HIPCC_RTC__)
-  #if HIP_FP8_TYPE_FNUZ
-    #define ENABLE_FNUZ_HIPRTC 1
-  #else
-    #define ENABLE_FNUZ_HIPRTC 0
-  #endif
-  #if HIP_FP8_TYPE_OCP
-    #define ENABLE_OCP_HIPRTC 1
-  #else
-    #define ENABLE_OCP_HIPRTC 0
-  #endif
+#if HIP_FP8_TYPE_FNUZ
+#define ENABLE_FNUZ_HIPRTC 1
+#else
+#define ENABLE_FNUZ_HIPRTC 0
+#endif
+#if HIP_FP8_TYPE_OCP
+#define ENABLE_OCP_HIPRTC 1
+#else
+#define ENABLE_OCP_HIPRTC 0
+#endif
 #endif
 
 // Include it explicitly for HIPRTC
@@ -327,8 +327,8 @@ where exponent==0 (actual exponent -14) and highest bit of mantissa is 1 are bf8
 this case, the fp16 mantissa should be shift left by 1  */
     act_exponent = exponent - bias + 1;
     exponent_diff = f8_denormal_act_exponent -
-        act_exponent;  // actual exponent is exponent-bias+1 as it is denormal
-  } else {             // fp32/fp16 is normal with implicit 1
+                    act_exponent;  // actual exponent is exponent-bias+1 as it is denormal
+  } else {                         // fp32/fp16 is normal with implicit 1
     act_exponent = exponent - bias;
     if (act_exponent <= f8_denormal_act_exponent) {
       /* This is the case where fp32/fp16 is normal but it is in f8 denormal range.
@@ -345,7 +345,7 @@ So for fp32/fp16, exponent -8 is the cut point to convert to fp8 nanoo */
   }
 
   bool midpoint = (mantissa & ((1ull << (mfmt - wm + exponent_diff)) - 1)) ==
-      (1ull << (mfmt - wm + exponent_diff - 1));
+                  (1ull << (mfmt - wm + exponent_diff - 1));
   /* This part is a bit tricky. The judgment of whether it is a tie needs to be done before we shift
 right as shift right could rip off some residual part and make something not midpoint look like
 midpoint. For example, the fp16 number 0x1002 (0 00100 0000000010), it is larger than midpoint, but
@@ -400,9 +400,9 @@ after shift right by 4 bits, it would look like midpoint.
 // The conversion function is from rocblas
 // https://github.com/ROCm/rocBLAS/blob/9b7f692abe3c54b88d1e77e045a7db7f1f188b69/library/include/internal/rocblas_hip_f8_impl.h#L220
 // This has been modified to handle double types as well
-template <typename T, bool is_fnuz>
-__FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x, int wm, int we,
-                                          bool clip = false) {
+template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x,
+                                                                              int wm, int we,
+                                                                              bool clip = false) {
 #if defined(__clang__) and defined(__HIP__)
   constexpr bool is_half = __hip_internal::is_same<T, _Float16>::value;
   constexpr bool is_float = __hip_internal::is_same<T, float>::value;
@@ -411,7 +411,7 @@ __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x, int wm, int we,
   constexpr bool is_half = std::is_same<T, _Float16>::value;
   constexpr bool is_float = std::is_same<T, float>::value;
   constexpr bool is_double = std::is_same<T, double>::value;
-#endif // defined(__clang__) and defined(__HIP__)
+#endif  // defined(__clang__) and defined(__HIP__)
   static_assert(is_half || is_float || is_double, "only half, float and double are supported");
 
   constexpr int weo = is_half ? 5 : (is_float ? 8 : 11);
@@ -482,7 +482,7 @@ __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x, int wm, int we,
         return fNaN;
       }
     } else if ((x & 0x7C) == 0x7C) {  // e5m2 NaN/Inf
-      if ((x & 0x3) == 0) { // Inf
+      if ((x & 0x3) == 0) {           // Inf
         if (clip) {
           return sign ? fmin : fmax;
         }
@@ -576,14 +576,15 @@ static __device__ __hip_fp8_storage_t cast_to_f8_from_f32(float v, bool saturate
 
   if (stochastic_rounding) {
     ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-        ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
-        : __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0);  // 0 pos
+               ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
+               : __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0);  // 0 pos
     val.i32val = ival;
     i8data = val.i8val[0];  // little endian
   } else {                  // RNE CVT
-    ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-        ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
-        : __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false);  // false -> WORD0
+    ival =
+        (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
+            ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
+            : __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false);  // false -> WORD0
     val.i32val = ival;
     i8data = val.i8val[0];
   }
@@ -628,8 +629,8 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
   }
 
   f2val.i32val[0] = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-      ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
-      : __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false);
+                        ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
+                        : __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false);
 
   return static_cast<__hip_fp8x2_storage_t>(f2val.i16val[0]);
 }
@@ -643,8 +644,8 @@ static __device__ float cast_to_f32_from_f8(__hip_fp8_storage_t v,
   val.i8val[0] = v;
 
   float fval = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-      ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
-      : __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0);
+                   ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
+                   : __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0);
   return fval;
 }
 
@@ -657,8 +658,8 @@ static __device__ float2 cast_to_f32x2_from_f8x2(__hip_fp8x2_storage_t v,
   val.i16val[0] = v;
 
   auto f2 = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-      ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
-      : __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false);
+                ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
+                : __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false);
   return float2{f2[0], f2[1]};
 }
 #endif  // HIP_FP8_CVT_FAST_PATH
@@ -672,9 +673,9 @@ __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_fnuz_is_nan(__hip_fp8_storage_t a) {
 
 __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_ocp_is_nan(__hip_fp8_storage_t a,
                                                    const __hip_fp8_interpretation_t type) {
-  return (type == __HIP_E4M3) ? ((a & 0x7f) == 0x7f)
-      : (type == __HIP_E5M2)  ? ((a & 0x7f) > 0x7c)
-                              : false;
+  return (type == __HIP_E4M3)   ? ((a & 0x7f) == 0x7f)
+         : (type == __HIP_E5M2) ? ((a & 0x7f) > 0x7c)
+                                : false;
 }
 
 __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_ocp_is_inf(__hip_fp8_storage_t a,
@@ -1305,16 +1306,17 @@ struct __hip_fp8_e4m3_fnuz {
 #endif
       if (internal::hip_fp8_fnuz_is_nan(__x)) {
         return 0;
-      }
+}
 
-      float fval = *this;
-      auto llval = static_cast<long long>(fval);
-      if (llval <= 0) {
-        return 0;
-      }
-      return static_cast<unsigned short>(fval);
-      }
-};
+float fval = *this;
+auto llval = static_cast<long long>(fval);
+if (llval <= 0) {
+  return 0;
+}
+return static_cast<unsigned short>(fval);
+}
+}
+;
 
 /**
  * \brief struct representing two fp8 numbers with e4m3 interpretation
@@ -1393,8 +1395,9 @@ struct __hip_fp8x2_e4m3_fnuz {
                   internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x >> 8),
                                                       __wm, __we));
 #endif
-  }
-};
+}
+}
+;
 
 /**
  * \brief struct representing four fp8 numbers with e4m3 interpretation
@@ -1488,12 +1491,12 @@ struct __hip_fp8x4_e4m3_fnuz {
 #else
   __FP8_HOST__ operator float4() const {
 #endif
-    auto x = __x;                                                // bypass const
-    auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
-    auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
+      auto x = __x;                                                // bypass const
+  auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
+  auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
 #if HIP_FP8_CVT_FAST_PATH
-    float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
-    float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
+  float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
+  float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
     float2 high = float2(internal::cast_from_f8<float, true>(
                              static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we),
@@ -1504,9 +1507,10 @@ struct __hip_fp8x4_e4m3_fnuz {
                         internal::cast_from_f8<float, true>(
                             static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we));
 #endif
-    return float4(low.x, low.y, high.x, high.y);
-  }
-};
+  return float4(low.x, low.y, high.x, high.y);
+}
+}
+;
 
 /**
  * \brief struct representing one fp8 number with e5m2 interpretation
@@ -1861,18 +1865,19 @@ struct __hip_fp8_e5m2_fnuz {
 #else
   __FP8_HOST__ operator unsigned short int() const {
 #endif
-    if (internal::hip_fp8_fnuz_is_nan(__x)) {
-       return 0;
-    }
+      if (internal::hip_fp8_fnuz_is_nan(__x)) {
+        return 0;
+}
 
-    float fval = *this;
-    auto llval = static_cast<long long>(fval);
-    if (llval <= 0) {
-      return 0;
-    }
-    return static_cast<unsigned short>(fval);
-  }
-};
+float fval = *this;
+auto llval = static_cast<long long>(fval);
+if (llval <= 0) {
+  return 0;
+}
+return static_cast<unsigned short>(fval);
+}
+}
+;
 
 /**
  * \brief struct representing two fp8 numbers with e5m2 interpretation
@@ -1944,15 +1949,16 @@ struct __hip_fp8x2_e5m2_fnuz {
   __FP8_HOST__ operator float2() const {
 #endif
 #if HIP_FP8_CVT_FAST_PATH
-    return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
+      return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
     return float2(internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                       __wm, __we),
                   internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x >> 8),
                                                       __wm, __we));
 #endif
-  }
-};
+}
+}
+;
 
 /**
  * \brief struct representing four fp8 numbers with e5m2 interpretation
@@ -2046,12 +2052,12 @@ struct __hip_fp8x4_e5m2_fnuz {
 #else
   __FP8_HOST__ operator float4() const {
 #endif
-    auto x = __x;                                                // bypass const
-    auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
-    auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
+      auto x = __x;                                                // bypass const
+  auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
+  auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
 #if HIP_FP8_CVT_FAST_PATH
-    float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
-    float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
+  float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
+  float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
     float2 high = float2(internal::cast_from_f8<float, true>(
                              static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we),
@@ -2062,11 +2068,12 @@ struct __hip_fp8x4_e5m2_fnuz {
                         internal::cast_from_f8<float, true>(
                             static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we));
 #endif
-    return float4(low.x, low.y, high.x, high.y);
-  }
-};
+  return float4(low.x, low.y, high.x, high.y);
+}
+}
+;
 
-#endif // ENABLE_FNUZ_HIPRTC
+#endif  // ENABLE_FNUZ_HIPRTC
 
 /**
  * \brief struct representing ocp fp8 numbers with e4m3 interpretation
@@ -2419,18 +2426,19 @@ struct __hip_fp8_e4m3 {
 #else
   __FP8_HOST__ operator unsigned short int() const {
 #endif
-    if (internal::hip_fp8_ocp_is_nan(__x, __default_interpret)) {
-      return 0;
-    }
+      if (internal::hip_fp8_ocp_is_nan(__x, __default_interpret)) {
+        return 0;
+}
 
-    float fval = *this;
-    auto llval = static_cast<long long>(fval);
-    if (llval <= 0) {
-      return 0;
-    }
-    return static_cast<unsigned short>(fval);
-  }
-};
+float fval = *this;
+auto llval = static_cast<long long>(fval);
+if (llval <= 0) {
+  return 0;
+}
+return static_cast<unsigned short>(fval);
+}
+}
+;
 
 /**
  * \brief struct representing two ocp fp8 numbers with e4m3 interpretation
@@ -2503,15 +2511,16 @@ struct __hip_fp8x2_e4m3 {
   __FP8_HOST__ operator float2() const {
 #endif
 #if HIP_FP8_CVT_FAST_PATH
-  return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
+      return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
-  return float2(internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
+    return float2(internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                        __wm, __we),
                   internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x >> 8),
                                                        __wm, __we));
 #endif
-  }
-};
+}
+}
+;
 
 /**
  * \brief struct representing four ocp fp8 numbers with e4m3 interpretation
@@ -2531,7 +2540,7 @@ struct __hip_fp8x4_e4m3 {
 #else
   __FP8_HOST__ __hip_fp8x4_e4m3(const double4 val)
 #endif
-    : __x{reinterpret_cast<__hip_fp8x4_storage_t>(
+      : __x{reinterpret_cast<__hip_fp8x4_storage_t>(
             static_cast<unsigned int>(reinterpret_cast<unsigned char>(__hip_cvt_double_to_fp8(
                                           val.x, __default_saturation, __default_interpret)) |
                                       reinterpret_cast<unsigned char>(__hip_cvt_double_to_fp8(
@@ -2606,12 +2615,12 @@ struct __hip_fp8x4_e4m3 {
 #else
   __FP8_HOST__ operator float4() const {
 #endif
-    auto x = __x;                                                // bypass const
-    auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
-    auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
+      auto x = __x;                                                // bypass const
+  auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
+  auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
 #if HIP_FP8_CVT_FAST_PATH
-    float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
-    float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
+  float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
+  float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
     float2 high = float2(internal::cast_from_f8<float, false>(
                              static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we),
@@ -2622,9 +2631,10 @@ struct __hip_fp8x4_e4m3 {
                         internal::cast_from_f8<float, false>(
                             static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we));
 #endif
-    return float4(low.x, low.y, high.x, high.y);
-  }
-};
+  return float4(low.x, low.y, high.x, high.y);
+}
+}
+;
 
 /**
  * \brief struct representing  ocp fp8 numbers with e5m2 interpretation
@@ -2981,18 +2991,19 @@ struct __hip_fp8_e5m2 {
 #else
   __FP8_HOST__ operator unsigned short int() const {
 #endif
-    if (internal::hip_fp8_ocp_is_nan(__x, __default_interpret)) {
-      return 0;
+      if (internal::hip_fp8_ocp_is_nan(__x, __default_interpret)) {
+        return 0;
 }
 
-    float fval = *this;
-    auto  llval = static_cast<long long>(fval);
-    if (llval <= 0) {
-      return 0;
-    }
-    return static_cast<unsigned short>(fval);
-  }
-};
+float fval = *this;
+auto llval = static_cast<long long>(fval);
+if (llval <= 0) {
+  return 0;
+}
+return static_cast<unsigned short>(fval);
+}
+}
+;
 
 /**
  * \brief struct representing two ocp fp8 numbers with e5m2 interpretation
@@ -3065,16 +3076,17 @@ struct __hip_fp8x2_e5m2 {
   __FP8_HOST__ operator float2() const {
 #endif
 #if HIP_FP8_CVT_FAST_PATH
-    return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
+      return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
     return float2(
-      internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF), __wm,
+        internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF), __wm,
                                              __we, __default_saturation == __HIP_SATFINITE),
-      internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x >> 8), __wm, __we,
+        internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x >> 8), __wm, __we,
                                              __default_saturation == __HIP_SATFINITE));
 #endif
-  }
-};
+}
+}
+;
 
 /**
  * \brief struct representing four ocp fp8 numbers with e5m2 interpretation
@@ -3168,12 +3180,12 @@ struct __hip_fp8x4_e5m2 {
 #else
   __FP8_HOST__ operator float4() const {
 #endif
-    auto x = __x;                                                // bypass const
-    auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
-    auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
+      auto x = __x;                                                // bypass const
+  auto fp8x2_low = *reinterpret_cast<__hip_fp8x2_storage_t*>(&x);  // Little E
+  auto fp8x2_high = *(reinterpret_cast<__hip_fp8x2_storage_t*>(&x) + 1);
 #if HIP_FP8_CVT_FAST_PATH
-    float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
-    float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
+  float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
+  float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
     float2 high = float2(
         internal::cast_from_f8<float, false>(
@@ -3188,8 +3200,9 @@ struct __hip_fp8x4_e5m2 {
         internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm,
                                              __we, __default_saturation == __HIP_SATFINITE));
 #endif
-    return float4(low.x, low.y, high.x, high.y);
-  }
-};
-#endif // ENABLE_OCP_HIPRTC
-#endif // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
+  return float4(low.x, low.y, high.x, high.y);
+}
+}
+;
+#endif  // ENABLE_OCP_HIPRTC
+#endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_

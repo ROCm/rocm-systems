@@ -18,21 +18,21 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hiprtc_fp16_HeaderTst hiprtc_fp16_HeaderTst
-* @{
-* @ingroup hiprtcHeaders
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions,
-*                                    const char** options);` -
-* These test cases are target including various header file in kernel
-* string and compile using the api mentioned above.
-*/
+ * @addtogroup hiprtc_fp16_HeaderTst hiprtc_fp16_HeaderTst
+ * @{
+ * @ingroup hiprtcHeaders
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions,
+ *                                    const char** options);` -
+ * These test cases are target including various header file in kernel
+ * string and compile using the api mentioned above.
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
 
-static constexpr auto fp16_string {
-R"(
+static constexpr auto fp16_string{
+    R"(
 extern "C"
 __global__ void fp16(float *res) {
 
@@ -278,23 +278,23 @@ __global__ void fp16(float *res) {
 )"};
 
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hiprtcCompileProgram
-*    1) To test list of apis in "hip/hip_fp16.h" header using kernel string
-* Test source
-* ------------------------
-*  - unit/rtc/hiprtc_fp16_HeaderTst.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.7
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hiprtcCompileProgram
+ *    1) To test list of apis in "hip/hip_fp16.h" header using kernel string
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hiprtc_fp16_HeaderTst.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.7
+ */
 
 TEST_CASE("Unit_Rtc_fp16_header") {
   std::string kernel_name = "fp16";
   const char* kername = kernel_name.c_str();
-  float *result_h;
-  float *result_d;
+  float* result_h;
+  float* result_d;
   int n = 222;
   float Nbytes = n * sizeof(float);
   result_h = new float[n];
@@ -310,10 +310,8 @@ TEST_CASE("Unit_Rtc_fp16_header") {
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, fp16_string,
-                                   kername, 0, NULL, NULL));
-  hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                             1, &compiler_option)};
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, fp16_string, kername, 0, NULL, NULL));
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
     size_t logSize;
@@ -330,14 +328,12 @@ TEST_CASE("Unit_Rtc_fp16_header") {
   void* kernelParam[] = {result_d};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < n; i++) {
@@ -350,11 +346,11 @@ TEST_CASE("Unit_Rtc_fp16_header") {
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   HIP_CHECK(hipFree(result_d));
-  delete [] result_h;
+  delete[] result_h;
   REQUIRE(true);
 }
 
 /**
-* End doxygen group hiprtcHeaders.
-* @}
-*/
+ * End doxygen group hiprtcHeaders.
+ * @}
+ */

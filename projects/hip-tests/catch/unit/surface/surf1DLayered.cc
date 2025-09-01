@@ -53,9 +53,9 @@ __global__ void surf1DLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputD
 #endif
 }
 
-template <typename T>
-__global__ void surf1DLayeredKernelRW(hipSurfaceObject_t surfaceObject,
-                                      hipSurfaceObject_t outputSurfObj, int width) {
+template <typename T> __global__ void surf1DLayeredKernelRW(hipSurfaceObject_t surfaceObject,
+                                                            hipSurfaceObject_t outputSurfObj,
+                                                            int width) {
 #if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   if (x < width) {
@@ -294,6 +294,6 @@ TEMPLATE_TEST_CASE("Unit_surf1DLayered_Positive_ReadWrite", "", char, uchar, sho
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

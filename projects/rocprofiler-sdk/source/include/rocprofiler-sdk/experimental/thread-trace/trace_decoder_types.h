@@ -205,7 +205,7 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
 {
     int64_t  time;
     uint64_t value;    ///< Value written from M0/IMM
-    uint8_t  cu;       ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
+    uint8_t  cu;       ///< CU id (gfx9) or wgp id (gfx10+).
     uint8_t  simd;     ///< SIMD ID [0,3].
     uint8_t  wave_id;  ///< Wave slot ID within SIMD.
     uint8_t  flags;    ///< bitmask of rocprofiler_thread_trace_decoder_shaderdata_flags_t

@@ -1,6 +1,6 @@
 /*
 Copyright © Advanced Micro Devices, Inc., or its affiliates.
- 
+
 SPDX-License-Identifier: MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -44,13 +44,13 @@ static_assert(sizeof(_Float16) == 2);
 // header which will act as a base abstraction, and will be maintained in the future, it makes sense
 // to keep these vector types separate from existing implementations. We can add conversion
 // functions in a different header using these functions.
-typedef uint8_t  __amd_fp8_storage_t;
+typedef uint8_t __amd_fp8_storage_t;
 typedef uint16_t __amd_fp8x2_storage_t;
-typedef uint8_t  __amd_fp4x2_storage_t;
+typedef uint8_t __amd_fp4x2_storage_t;
 typedef uint32_t __amd_fp4x8_storage_t;
-typedef __bf16   __amd_bf16_storage_t;
+typedef __bf16 __amd_bf16_storage_t;
 typedef _Float16 __amd_fp16_storage_t;
-typedef int8_t  __amd_scale_t;
+typedef int8_t __amd_scale_t;
 
 #if defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)
 typedef unsigned int __attribute__((ext_vector_type(2))) __amd_uintx2_storage_t;

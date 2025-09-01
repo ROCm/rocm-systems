@@ -78,13 +78,13 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative") {
   hipStream_t streamForGraph;
   hipError_t ret;
 
-  int *hData = reinterpret_cast<int*>(malloc(size));
-  int *hOutputData = reinterpret_cast<int *>(malloc(size));
+  int* hData = reinterpret_cast<int*>(malloc(size));
+  int* hOutputData = reinterpret_cast<int*>(malloc(size));
 
   REQUIRE(hData != nullptr);
   REQUIRE(hOutputData != nullptr);
   memset(hData, 0, size);
-  memset(hOutputData, 0,  size);
+  memset(hOutputData, 0, size);
 
   HIP_CHECK(hipStreamCreate(&streamForGraph));
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -93,23 +93,21 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative") {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width + k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                                          0, 0, 0, formatKind);
-  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc,
-                       make_hipExtent(width, height, depth), hipArrayDefault));
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
+  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc, make_hipExtent(width, height, depth),
+                             hipArrayDefault));
 
   // Host to Device
   memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
-  myparams.extent = make_hipExtent(width , height, depth);
-  myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+  myparams.extent = make_hipExtent(width, height, depth);
+  myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
   myparams.dstArray = devArray1;
   myparams.kind = hipMemcpyHostToDevice;
 
@@ -118,7 +116,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative") {
     REQUIRE(hipErrorInvalidValue == ret);
   }
   SECTION("When graph is nullptr") {
-    ret = hipGraphAddMemcpyNode(&memcpyNode, nullptr,  nullptr, 0, &myparams);
+    ret = hipGraphAddMemcpyNode(&memcpyNode, nullptr, nullptr, 0, &myparams);
     REQUIRE(hipErrorInvalidValue == ret);
   }
   SECTION("Passing pDependencies as nullptr") {
@@ -126,8 +124,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative") {
     REQUIRE(hipSuccess == ret);
   }
   SECTION("When numDependencies is max and pDependencies is not valid ptr") {
-    ret = hipGraphAddMemcpyNode(&memcpyNode, graph,
-                                nullptr, INT_MAX, &myparams);
+    ret = hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, INT_MAX, &myparams);
     REQUIRE(hipErrorInvalidValue == ret);
   }
   SECTION("When pDependencies is nullptr, but numDependencies is non-zero") {
@@ -142,7 +139,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative") {
     memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
     myparams.srcPos = make_hipPos(0, 0, 0);
     myparams.dstPos = make_hipPos(0, 0, 0);
-    myparams.extent = make_hipExtent(width , height, depth);
+    myparams.extent = make_hipExtent(width, height, depth);
     myparams.dstArray = devArray1;
     myparams.kind = hipMemcpyHostToDevice;
     ret = hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparams);
@@ -152,19 +149,19 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative") {
     memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
     myparams.srcPos = make_hipPos(0, 0, 0);
     myparams.dstPos = make_hipPos(0, 0, 0);
-    myparams.extent = make_hipExtent(width , height, depth);
-    myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+    myparams.extent = make_hipExtent(width, height, depth);
+    myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
     myparams.kind = hipMemcpyHostToDevice;
     ret = hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparams);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  SECTION("Passing different element size for hipMemcpy3DParms::srcArray"
-                   "and hipMemcpy3DParms::dstArray") {
+  SECTION(
+      "Passing different element size for hipMemcpy3DParms::srcArray"
+      "and hipMemcpy3DParms::dstArray") {
     myparams.srcArray = devArray1;
     hipArray_t devArray2;
     HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc,
-              make_hipExtent(width+1, height+1, depth+1), hipArrayDefault));
+                               make_hipExtent(width + 1, height + 1, depth + 1), hipArrayDefault));
     myparams.dstArray = devArray2;
     ret = hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparams);
     REQUIRE(hipErrorInvalidValue == ret);
@@ -191,13 +188,13 @@ static void validateMemcpyNode3DArray(bool peerAccess = false) {
   hipGraphExec_t graphExec;
 
   HIP_CHECK(hipSetDevice(0));
-  int *hData = reinterpret_cast<int*>(malloc(size));
-  int *hOutputData = reinterpret_cast<int *>(malloc(size));
+  int* hData = reinterpret_cast<int*>(malloc(size));
+  int* hOutputData = reinterpret_cast<int*>(malloc(size));
 
   REQUIRE(hData != nullptr);
   REQUIRE(hOutputData != nullptr);
   memset(hData, 0, size);
-  memset(hOutputData, 0,  size);
+  memset(hOutputData, 0, size);
 
   HIP_CHECK(hipStreamCreate(&streamForGraph));
 
@@ -205,17 +202,16 @@ static void validateMemcpyNode3DArray(bool peerAccess = false) {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width + k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                                          0, 0, 0, formatKind);
-  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc,
-                       make_hipExtent(width, height, depth), hipArrayDefault));
-  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc,
-                       make_hipExtent(width, height, depth), hipArrayDefault));
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
+  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc, make_hipExtent(width, height, depth),
+                             hipArrayDefault));
+  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc, make_hipExtent(width, height, depth),
+                             hipArrayDefault));
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // For peer access test, Memory is allocated on device(0)
@@ -228,9 +224,8 @@ static void validateMemcpyNode3DArray(bool peerAccess = false) {
   memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
-  myparams.extent = make_hipExtent(width , height, depth);
-  myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+  myparams.extent = make_hipExtent(width, height, depth);
+  myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
   myparams.dstArray = devArray1;
   myparams.kind = hipMemcpyHostToDevice;
 
@@ -246,8 +241,8 @@ static void validateMemcpyNode3DArray(bool peerAccess = false) {
   myparams.extent = make_hipExtent(width, height, depth);
   myparams.kind = hipMemcpyDeviceToDevice;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                             dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
   dependencies.clear();
   dependencies.push_back(memcpyNode);
 
@@ -255,14 +250,13 @@ static void validateMemcpyNode3DArray(bool peerAccess = false) {
   memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
-  myparams.dstPtr = make_hipPitchedPtr(hOutputData, width * sizeof(int),
-                                      width, height);
+  myparams.dstPtr = make_hipPitchedPtr(hOutputData, width * sizeof(int), width, height);
   myparams.srcArray = devArray2;
   myparams.extent = make_hipExtent(width, height, depth);
   myparams.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                             dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -303,13 +297,12 @@ static void validateMemcpyNode2DArray(bool peerAccess = false) {
     }
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                                          0, 0, 0, formatKind);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
   // Allocate 2D device array by passing depth(0)
-  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc,
-                       make_hipExtent(width, height, 0), hipArrayDefault));
-  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc,
-                       make_hipExtent(width, height, 0), hipArrayDefault));
+  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc, make_hipExtent(width, height, 0),
+                             hipArrayDefault));
+  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc, make_hipExtent(width, height, 0),
+                             hipArrayDefault));
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // For peer access test, Memory is allocated on device(0)
@@ -323,8 +316,7 @@ static void validateMemcpyNode2DArray(bool peerAccess = false) {
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, height, 1);
-  myparams.srcPtr = make_hipPitchedPtr(harray2D, width * sizeof(int),
-                                      width, height);
+  myparams.srcPtr = make_hipPitchedPtr(harray2D, width * sizeof(int), width, height);
   myparams.dstArray = devArray1;
   myparams.kind = hipMemcpyHostToDevice;
 
@@ -340,8 +332,8 @@ static void validateMemcpyNode2DArray(bool peerAccess = false) {
   myparams.extent = make_hipExtent(width, height, 1);
   myparams.kind = hipMemcpyDeviceToDevice;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                             dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
   dependencies.clear();
   dependencies.push_back(memcpyNode);
 
@@ -350,13 +342,12 @@ static void validateMemcpyNode2DArray(bool peerAccess = false) {
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, height, 1);
-  myparams.dstPtr = make_hipPitchedPtr(harray2Dres, width * sizeof(int),
-                                      width, height);
+  myparams.dstPtr = make_hipPitchedPtr(harray2Dres, width * sizeof(int), width, height);
   myparams.srcArray = devArray2;
   myparams.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                             dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -367,8 +358,8 @@ static void validateMemcpyNode2DArray(bool peerAccess = false) {
   for (int i = 0; i < YSIZE; i++) {
     for (int j = 0; j < XSIZE; j++) {
       if (harray2D[i][j] != harray2Dres[i][j]) {
-        INFO("harray2D: " << harray2D[i][j] << "harray2Dres: "
-              << harray2Dres[i][j] << " mismatch at (i,j) : " << i << j);
+        INFO("harray2D: " << harray2D[i][j] << "harray2Dres: " << harray2Dres[i][j]
+                          << " mismatch at (i,j) : " << i << j);
         REQUIRE(false);
       }
     }
@@ -400,13 +391,12 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
     harray1D[i] = i + 1;
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                                          0, 0, 0, formatKind);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
   // Allocate 1D device array by passing depth(0), height(0)
-  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc,
-                       make_hipExtent(width, 0, 0), hipArrayDefault));
-  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc,
-                       make_hipExtent(width, 0, 0), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&devArray1, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&devArray2, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // For peer access test, Memory is allocated on device(0)
@@ -420,8 +410,7 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, 1, 1);
-  myparams.srcPtr = make_hipPitchedPtr(harray1D, width * sizeof(int),
-                                      width, 1);
+  myparams.srcPtr = make_hipPitchedPtr(harray1D, width * sizeof(int), width, 1);
   myparams.dstArray = devArray1;
   myparams.kind = hipMemcpyHostToDevice;
 
@@ -437,8 +426,8 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
   myparams.extent = make_hipExtent(width, 1, 1);
   myparams.kind = hipMemcpyDeviceToDevice;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                             dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
   dependencies.clear();
   dependencies.push_back(memcpyNode);
 
@@ -447,13 +436,12 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, 1, 1);
-  myparams.dstPtr = make_hipPitchedPtr(harray1Dres, width * sizeof(int),
-                                      width, 1);
+  myparams.dstPtr = make_hipPitchedPtr(harray1Dres, width * sizeof(int), width, 1);
   myparams.srcArray = devArray2;
   myparams.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                              dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -464,7 +452,7 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
   for (int i = 0; i < XSIZE; i++) {
     if (harray1D[i] != harray1Dres[i]) {
       INFO("harray1D: " << harray1D[i] << " harray1Dres: " << harray1Dres[i]
-            << " mismatch at : " << i);
+                        << " mismatch at : " << i);
       REQUIRE(false);
     }
   }
@@ -483,17 +471,11 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
 TEST_CASE("Unit_hipGraphAddMemcpyNode_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
 
-  SECTION("Memcpy with 3D array on default device") {
-    validateMemcpyNode3DArray();
-  }
+  SECTION("Memcpy with 3D array on default device") { validateMemcpyNode3DArray(); }
 
-  SECTION("Memcpy with 2D array on default device") {
-    validateMemcpyNode2DArray();
-  }
+  SECTION("Memcpy with 2D array on default device") { validateMemcpyNode2DArray(); }
 
-  SECTION("Memcpy with 1D array on default device") {
-    validateMemcpyNode1DArray();
-  }
+  SECTION("Memcpy with 1D array on default device") { validateMemcpyNode1DArray(); }
 }
 
 /**
@@ -516,23 +498,17 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_PeerAccessFunctional") {
     return;
   }
 
-  SECTION("Memcpy with 3D array on peer device") {
-    validateMemcpyNode3DArray(true);
-  }
+  SECTION("Memcpy with 3D array on peer device") { validateMemcpyNode3DArray(true); }
 
-  SECTION("Memcpy with 2D array on peer device") {
-    validateMemcpyNode2DArray(true);
-  }
+  SECTION("Memcpy with 2D array on peer device") { validateMemcpyNode2DArray(true); }
 
-  SECTION("Memcpy with 1D array on peer device") {
-    validateMemcpyNode1DArray(true);
-  }
+  SECTION("Memcpy with 1D array on peer device") { validateMemcpyNode1DArray(true); }
 }
 /*
-* Create two host pointers, copy the data between them by the api
-* hipGraphAddMemcpyNode with data transfer kind hipMemcpyHostToHost.
-* Validate the output.
-*/
+ * Create two host pointers, copy the data between them by the api
+ * hipGraphAddMemcpyNode with data transfer kind hipMemcpyHostToHost.
+ * Validate the output.
+ */
 TEST_CASE("Unit_hipGraphAddMemcpyNode_HostToHost") {
   constexpr size_t size = 1024;
   size_t numW = size * sizeof(int);
@@ -559,8 +535,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_HostToHost") {
   myparms.kind = hipMemcpyHostToHost;
 
   // Host to Host
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyH2H, graph, nullptr,
-                                            0, &myparms));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyH2H, graph, nullptr, 0, &myparms));
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));

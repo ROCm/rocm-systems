@@ -72,19 +72,14 @@ TEST_CASE("Unit_hipPeekAtLastError_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipPeekAtLastError_Positive_Threaded") {
-  class HipPeekAtLastErrorTest
-      : public ThreadedZigZagTest<HipPeekAtLastErrorTest> {
+  class HipPeekAtLastErrorTest : public ThreadedZigZagTest<HipPeekAtLastErrorTest> {
    public:
-    void TestPart2() {
-      REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue);
-    }
+    void TestPart2() { REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue); }
     void TestPart3() {
       HIP_CHECK(hipPeekAtLastError());
       HIP_CHECK(hipGetLastError());
     }
-    void TestPart4() {
-      REQUIRE_THREAD(hipPeekAtLastError() == hipErrorInvalidValue);
-    }
+    void TestPart4() { REQUIRE_THREAD(hipPeekAtLastError() == hipErrorInvalidValue); }
   };
 
   HipPeekAtLastErrorTest test;
@@ -112,7 +107,7 @@ TEST_CASE("Unit_hipPeekAtLastError_Positive_Threaded") {
 TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Positive_Basic") {
   if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
     HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
-    int *A_d;
+    int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
     HIP_CHECK(hipFree(A_d));
@@ -142,10 +137,9 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Chk_Updated_Status") {
     int value = 0;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
-    int *C_d;
+    int* C_d;
     HIP_CHECK(hipMalloc(&C_d, 1024));
-    HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(
-                        -1, hipGraphMemAttrUsedMemCurrent, &value),
+    HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                     hipErrorInvalidDevice);
     HIP_CHECK(hipFree(C_d));
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
@@ -172,7 +166,7 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Chk_Along_hipGetLastError") {
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-    int *C_d;
+    int* C_d;
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipSuccess);
     HIP_CHECK(hipMalloc(&C_d, 1024));
     HIP_CHECK(hipFree(C_d));
@@ -203,11 +197,10 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Error_Combinations") {
     if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
       HIP_CHECK(hipPeekAtLastError());
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
-      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(
-                          -1, hipGraphMemAttrUsedMemCurrent, &value),
+      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
-      int *A_d;
+      int* A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
       HIP_CHECK(hipFree(A_d));
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
@@ -219,10 +212,9 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Error_Combinations") {
   SECTION("A case with Error-Success-Error-Success") {
     if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
-      int *A_d;
+      int* A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
-      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(
-                          -1, hipGraphMemAttrUsedMemCurrent, &value),
+      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK(hipFree(A_d));
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
@@ -233,11 +225,10 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Error_Combinations") {
   }
   SECTION("A case with Success-Error-Error-Success") {
     if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-      int *A_d;
+      int* A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
-      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(
-                          -1, hipGraphMemAttrUsedMemCurrent, &value),
+      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK(hipFree(A_d));
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
@@ -248,12 +239,11 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Error_Combinations") {
   }
   SECTION("A Case with Success-Error-Success-Error") {
     if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-      int *A_d;
+      int* A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       HIP_CHECK(hipFree(A_d));
-      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(
-                          -1, hipGraphMemAttrUsedMemCurrent, &value),
+      HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
       unsetenv("DEBUG_HIP_7_PREVIEW");
@@ -267,7 +257,7 @@ static void thread_func() {
   HIP_CHECK_ERROR(hipPeekAtLastError(), hipSuccess);
   HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
-  int *A_d;
+  int* A_d;
   HIP_CHECK(hipMalloc(&A_d, 1024));
   HIP_CHECK(hipFree(A_d));
 }
@@ -287,7 +277,7 @@ static void thread_func() {
 TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_With_Thread") {
   hipGraph_t graph;
   if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-    int *A_d;
+    int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     std::thread t(thread_func);
@@ -352,7 +342,7 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Kernel_Invalid_Config") {
   hipError_t ret;
   if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
-    int *A_d;
+    int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     ret = hipPeekAtLastError();
     REQUIRE(ret == hipErrorInvalidConfiguration);
@@ -365,4 +355,3 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Kernel_Invalid_Config") {
  * End doxygen group ErrorTest.
  * @}
  */
-

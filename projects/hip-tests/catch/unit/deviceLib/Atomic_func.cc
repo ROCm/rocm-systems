@@ -51,9 +51,9 @@ static int verifyResultDec(int value) {
 }
 
 // common fuction to launch atomic functions kernel.
-static void launchAtomicFunction(int *Hptr, int val, int TestToRun) {
+static void launchAtomicFunction(int* Hptr, int val, int TestToRun) {
   unsigned int memSize = sizeof(int) * 1;
-  int *dptr{nullptr};
+  int* dptr{nullptr};
   // allocate device memory
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dptr), memSize));
   // copy host memory to device
@@ -79,7 +79,7 @@ static void launchAtomicFunction(int *Hptr, int val, int TestToRun) {
 }
 
 TEST_CASE("Unit_AtomicFunctions_Inc") {
-  int *Hptr{nullptr};
+  int* Hptr{nullptr};
   int val;
   // Allocate Host memory
   Hptr = reinterpret_cast<int*>(malloc(sizeof(int)));
@@ -99,7 +99,7 @@ TEST_CASE("Unit_AtomicFunctions_Inc") {
 }
 
 TEST_CASE("Unit_AtomicFunctions_Dec") {
-  int *Hptr{nullptr};
+  int* Hptr{nullptr};
   int val;
   // Allocate Host memory
   Hptr = reinterpret_cast<int*>(malloc(sizeof(int)));

@@ -27,7 +27,8 @@ THE SOFTWARE.
 
 class MemcpyDtoDAsyncBenchmark : public Benchmark<MemcpyDtoDAsyncBenchmark> {
  public:
-  void operator()(hipDeviceptr_t& dst, const hipDeviceptr_t& src, size_t size, const hipStream_t& stream) {
+  void operator()(hipDeviceptr_t& dst, const hipDeviceptr_t& src, size_t size,
+                  const hipStream_t& stream) {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
       HIP_CHECK(hipMemcpyDtoDAsync(dst, src, size, stream));
     }
@@ -35,7 +36,7 @@ class MemcpyDtoDAsyncBenchmark : public Benchmark<MemcpyDtoDAsyncBenchmark> {
   }
 };
 
-static void RunBenchmark(size_t size, bool enable_peer_access=false) {
+static void RunBenchmark(size_t size, bool enable_peer_access = false) {
   MemcpyDtoDAsyncBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
 
@@ -43,15 +44,16 @@ static void RunBenchmark(size_t size, bool enable_peer_access=false) {
   const hipStream_t stream = stream_guard.stream();
   int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
   int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-  if (src_device == -1 && dst_device == -1) { return; }
+  if (src_device == -1 && dst_device == -1) {
+    return;
+  }
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, size);
   HIP_CHECK(hipSetDevice(dst_device));
   LinearAllocGuard<int> dst_allocation(LinearAllocs::hipMalloc, size);
   HIP_CHECK(hipSetDevice(src_device));
   benchmark.Run(reinterpret_cast<hipDeviceptr_t>(dst_allocation.ptr()),
-                reinterpret_cast<hipDeviceptr_t>(src_allocation.ptr()),
-                size, stream);
+                reinterpret_cast<hipDeviceptr_t>(src_allocation.ptr()), size, stream);
 }
 
 /**
