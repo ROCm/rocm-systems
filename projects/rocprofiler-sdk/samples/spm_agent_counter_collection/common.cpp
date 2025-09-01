@@ -96,67 +96,69 @@ finalize()
         // mi200 values
         constexpr float se_to_cu   = 100.0f / 13;
         constexpr float se_per_xcd = 800.0f;
+        auto info = std::stringstream{};
 
-        std::cout << "\n\n";
-        std::cout << "SALU Insts:    "
+        info << "\n\n";
+        info << "SALU Insts:    "
                   << 1.0f * value_by_name["SQ_INSTS_SALU"] / value_by_name["SQ_WAVES"] << std::endl;
-        std::cout << "VALU Insts:    "
+        info << "VALU Insts:    "
                   << 1.0f * value_by_name["SQ_INSTS_VALU"] / value_by_name["SQ_WAVES"] << std::endl;
-        std::cout << "Block Dim:     "
+        info << "Block Dim:     "
                   << 1.0f * value_by_name["SQ_WAVES"] / value_by_name["SPI_CSN_NUM_THREADGROUPS"]
                   << std::endl;
-        std::cout << "L2 HIT+MISS:   "
+        info << "L2 HIT+MISS:   "
                   << 100.0f * (value_by_name["TCC_HIT"] + value_by_name["TCC_MISS"]) /
                          value_by_name["TCC_REQ"]
                   << " %" << std::endl;
-        std::cout << "SQC HIT+MISS:  "
+        info << "SQC HIT+MISS:  "
                   << 100.0f *
                          (value_by_name["SQC_ICACHE_HITS"] + value_by_name["SQC_ICACHE_MISSES"]) /
                          value_by_name["SQC_ICACHE_REQ"]
                   << " %" << std::endl;
-        std::cout << "CPC BUSY+IDLE: "
+        info << "CPC BUSY+IDLE: "
                   << se_per_xcd *
                          (value_by_name["CPC_CPC_STAT_BUSY"] + value_by_name["CPC_CPC_STAT_IDLE"]) /
                          value_by_name["SQ_CYCLES"]
                   << " %" << std::endl;
-        std::cout << "\n";
-        std::cout << "Active SPI:    "
+        info << "\n";
+        info << "Active SPI:    "
                   << 100.0f * value_by_name["SPI_CSN_WINDOW_VALID"] / value_by_name["SQ_CYCLES"]
                   << " %" << std::endl;
-        std::cout << "SPI Busy:      "
+        info << "SPI Busy:      "
                   << 100.0f * value_by_name["SPI_CSN_BUSY"] / value_by_name["SQ_CYCLES"] << " %"
                   << std::endl;
-        std::cout << "SQ CU Busy:    "
+        info << "SQ CU Busy:    "
                   << se_to_cu * value_by_name["SQ_BUSY_CU_CYCLES"] / value_by_name["SQ_CYCLES"]
                   << " %" << std::endl;
-        std::cout << "CPC Busy:      "
+        info << "CPC Busy:      "
                   << se_per_xcd * value_by_name["CPC_CPC_STAT_BUSY"] / value_by_name["SQ_CYCLES"]
                   << " %" << std::endl;
-        std::cout << "CPC Idle:      "
+        info << "CPC Idle:      "
                   << se_per_xcd * value_by_name["CPC_CPC_STAT_IDLE"] / value_by_name["SQ_CYCLES"]
                   << " %" << std::endl;
-        std::cout << "SQC HIT:       "
+        info << "SQC HIT:       "
                   << 100.0f * value_by_name["SQC_ICACHE_HITS"] / value_by_name["SQC_ICACHE_REQ"]
                   << " %" << std::endl;
-        std::cout << "SQC MISS:      "
+        info << "SQC MISS:      "
                   << 100.0f * value_by_name["SQC_ICACHE_MISSES"] / value_by_name["SQC_ICACHE_REQ"]
                   << " %" << std::endl;
-        std::cout << "L2 Hit:        "
+        info << "L2 Hit:        "
                   << 100.0f * value_by_name["TCC_HIT"] / value_by_name["TCC_REQ"] << " %"
                   << std::endl;
-        std::cout << "L2 Miss:       "
+        info << "L2 Miss:       "
                   << 100.0f * value_by_name["TCC_MISS"] / value_by_name["TCC_REQ"] << " %"
                   << std::endl;
-        std::cout << "L1 Read/wave:  "
+        info << "L1 Read/wave:  "
                   << 1.0f * value_by_name["TCP_TOTAL_READ"] / value_by_name["SQ_WAVES"]
                   << std::endl;
-        std::cout << "L1 Write/wave: "
+        info << "L1 Write/wave: "
                   << 1.0f * value_by_name["TCP_TOTAL_WRITE"] / value_by_name["SQ_WAVES"]
                   << std::endl;
-        std::cout << "L1->L2 Forward:" << 100.0f * tcp_miss / tcp_access << " %" << std::endl;
-        std::cout << "TA BUSY/WAVE:  "
+        info << "L1->L2 Forward:" << 100.0f * tcp_miss / tcp_access << " %" << std::endl;
+        info << "TA BUSY/WAVE:  "
                   << 1.0f * value_by_name["TA_TA_BUSY"] / value_by_name["TA_TOTAL_WAVEFRONTS"]
                   << std::endl;
+        std::clog << info.str() << std::endl;
     }
 }
 

@@ -77,8 +77,6 @@ main(int argc, char** argv)
         hipLaunchKernelGGL(
             branching_kernel, dim3(DATA_SIZE / 256), dim3(256), 0, 0, dst.ptr, src1.ptr, src2.ptr);
         HIP_API_CALL(hipGetLastError());
-        // HIP_API_CALL(hipDeviceSynchronize());
-
         hipLaunchKernelGGL(looping_lds_kernel,
                            dim3(DATA_SIZE / 256),
                            dim3(256),

@@ -57,7 +57,7 @@ public:
     , filemgr(_mgr)
     {}
 
-    const int            shader_engine;
+    const int      shader_engine;
     WavestateArray wstates;
 
     std::array<SIMD, SIMD_NUM>   id_count{};

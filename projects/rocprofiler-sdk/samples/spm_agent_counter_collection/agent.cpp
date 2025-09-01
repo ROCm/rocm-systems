@@ -103,9 +103,6 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
     static std::set<int>          captured_ids;
     static rocprofiler_agent_id_t capture_agent{};
 
-    // auto& kernel_name = kernel_id_to_kernel_name.at(rdata->dispatch_info.kernel_id);
-    // std::cout << dispatch_id << " Saw " << kernel_name << " phase " << record.phase << std::endl;
-
     std::unique_lock<std::mutex> _lk(capture_mut);
 
     if(capture_agent.handle && rdata->dispatch_info.agent_id.handle != capture_agent.handle) return;
@@ -171,7 +168,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
                                                     params.size(),
                                                     common::spm_data_callback,
                                                     rocprofiler_user_data_t{.ptr = nullptr}),
-            "thread trace service configure");
+            "spm service configure");
 
         int valid_ctx = 0;
         ROCPROFILER_CALL(rocprofiler_context_is_valid(ctx, &valid_ctx), "validity check");

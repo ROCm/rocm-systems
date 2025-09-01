@@ -68,7 +68,6 @@ public:
                const std::vector<std::string>&     counters_names,
                const std::string&                  output_formats);
     bool valid() const;
-
 protected:
     rocprofiler_thread_trace_decoder_id_t decoder{};
 };

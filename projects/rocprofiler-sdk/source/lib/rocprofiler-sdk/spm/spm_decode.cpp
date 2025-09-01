@@ -20,15 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -71,7 +72,7 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 }
 
 void
-aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* userdata)
+aql_data_callback(size_t /**/, void* data, size_t data_size, int /*flags*/, void* userdata)
 {
     SPM::counter_vec counters{};
     auto             spm_packet = static_cast<hsa::SPMPacket*>(userdata);
@@ -93,7 +94,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
         v.shaders.resize(4);
 
     auto status =
-        spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, size, &counters);
+        spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, data_size, &counters);
     if(status != HSA_STATUS_SUCCESS) return;
     auto records = std::vector<rocprofiler_spm_counter_record_t>{};
     for(size_t i = 0; i < counters.size(); i++)
@@ -104,8 +105,8 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
             const auto& times  = counters.at(i).shaders.at(se).timestamps;
             const auto& values = counters.at(i).shaders.at(se).values;
 
-            size_t size_1 = std::min(times.size(), values.size());
-            if(!size_1) continue;
+            size_t size = std::min(times.size(), values.size());
+            if(!size) continue;
 
             if(counters.at(i).is_global)
             {
@@ -114,7 +115,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
                                          rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
                                          spm_packet->spm_desc.buffer_num);
                 counters::set_counter_in_rec(instance_id, event.id);
-                for(size_t it = 0; it < size_1; it++)
+                for(size_t it = 0; it < size; it++)
                 {
                     records.emplace_back(
                         rocprofiler_spm_counter_record_t{.agent_id  = spm_packet->agent_id,
@@ -135,7 +136,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
                                          rocprofiler::counters::ROCPROFILER_DIMENSION_INSTANCE,
                                          event.instance);
                 counters::set_counter_in_rec(instance_id, event.id);
-                for(size_t it = 0; it < size_1; it++)
+                for(size_t it = 0; it < size; it++)
                 {
                     records.emplace_back(
                         rocprofiler_spm_counter_record_t{.agent_id  = spm_packet->agent_id,
