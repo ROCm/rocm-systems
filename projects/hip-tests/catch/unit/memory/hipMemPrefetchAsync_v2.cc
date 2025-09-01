@@ -21,8 +21,10 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <utils.hh>
+#if __linux__
 #include <numaif.h>
 #include <numa.h>
+#endif
 
 /**
  * Kernel to fill value for each element in the given array
@@ -141,6 +143,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
  *  - HIP_VERSION >= 7.1
  */
 #if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
+#if __linux__
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
@@ -233,6 +236,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   HIP_CHECK(hipFree(memPtr));
 }
 #endif
+#endif
 
 /**
  * Test Description
@@ -322,6 +326,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
   }
 #endif
 
+#if __linux__
 #if 0
   /**
    * Commenting below section due to,
@@ -338,6 +343,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
                       hipErrorInvalidValue);
     }
   }
+#endif
 #endif
 
   HIP_CHECK(hipStreamDestroy(stream));

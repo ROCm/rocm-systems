@@ -21,8 +21,10 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <utils.hh>
+#if __linux__
 #include <numaif.h>
 #include <numa.h>
+#endif
 
 /**
  * Kernel to fill value for each element in the given array
@@ -137,6 +139,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
  *  - HIP_VERSION >= 7.1
  */
 #if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
+#if __linux__
 TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
@@ -196,6 +199,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
+#endif
 #endif
 
 /**
@@ -263,6 +267,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
                     hipErrorInvalidDevice);
   }
 
+#if __linux__
   SECTION("With invalid numa node") {
     if (numa_available() >= 0) {
       hipMemLocation dstLocation;
@@ -273,6 +278,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
                       hipErrorInvalidDevice);
     }
   }
+#endif
 #endif
 
 #if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
