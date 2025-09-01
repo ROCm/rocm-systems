@@ -48,13 +48,7 @@ extern "C"
 {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
-#pragma weak rocprofiler_load_prestore_queues
-#pragma weak rocprofiler_load_prestore_code_objects
-#pragma weak rocprofiler_prestore_get_version
-#pragma weak rocprofiler_prestore_set_api_table
-#pragma weak rocprofiler_prestore_export_all_queues
-#pragma weak rocprofiler_prestore_set_write_interceptor
-#pragma weak rocprofiler_prestore_export_all_code_objects
+#pragma weak rocprofiler_attach_set_api_table
 #pragma weak rocprofiler_register_import_hip
 #pragma weak rocprofiler_register_import_hip_static
 #pragma weak rocprofiler_register_import_hip_compiler
@@ -91,26 +85,8 @@ rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
-extern void
-rocprofiler_load_prestore_queues(void*);
-
-extern void
-rocprofiler_load_prestore_code_objects(void*);
-
 extern int
-rocprofiler_prestore_get_version();
-
-extern int
-rocprofiler_prestore_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
-
-extern int
-rocprofiler_prestore_export_all_queues(void*, uint64_t*);
-
-extern int
-rocprofiler_prestore_set_write_interceptor(void*, void*, void*);
-
-extern int
-rocprofiler_prestore_export_all_code_objects(void*, uint64_t*);
+rocprofiler_attach_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t, void*);
 
 extern void
 rocprofv3_attach(void);
@@ -148,33 +124,10 @@ namespace
 using namespace rocprofiler_register;
 using rocprofiler_set_api_table_t        = decltype(::rocprofiler_set_api_table)*;
 using rocp_set_api_table_data_t          = std::tuple<void*, rocprofiler_set_api_table_t>;
-using rocprofiler_load_prestore_queues_t = decltype(::rocprofiler_load_prestore_queues)*;
-using rocprofiler_load_prestore_code_objects_t =
-    decltype(::rocprofiler_load_prestore_code_objects)*;
 using rocprofv3_attach_t                 = decltype(::rocprofv3_attach)*;
 using rocprofv3_detach_t                 = decltype(::rocprofv3_detach)*;
-using rocprofiler_set_api_table_t        = decltype(::rocprofiler_set_api_table)*;
-using rocprofiler_prestore_get_version_t = decltype(::rocprofiler_prestore_get_version)*;
-using rocprofiler_prestore_set_api_table_t =
-    decltype(::rocprofiler_prestore_set_api_table)*;
-using rocprofiler_prestore_export_all_queues_t =
-    decltype(::rocprofiler_prestore_export_all_queues)*;
-using rocprofiler_prestore_set_write_interceptor_t =
-    decltype(::rocprofiler_prestore_set_write_interceptor)*;
-using rocprofiler_prestore_export_all_code_objects_t =
-    decltype(::rocprofiler_prestore_export_all_code_objects)*;
-
-struct rocprofiler_prestore_dispatch_table_t
-{
-    uint32_t                                 version;
-    rocprofiler_prestore_get_version_t       rocprofiler_prestore_get_version;
-    rocprofiler_prestore_set_api_table_t     rocprofiler_prestore_set_api_table;
-    rocprofiler_prestore_export_all_queues_t rocprofiler_prestore_export_all_queues;
-    rocprofiler_prestore_set_write_interceptor_t
-        rocprofiler_prestore_set_write_interceptor;
-    rocprofiler_prestore_export_all_code_objects_t
-        rocprofiler_prestore_export_all_code_objects;
-};
+using rocprofiler_attach_set_api_table_t =
+    decltype(::rocprofiler_attach_set_api_table)*;
 
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
@@ -184,24 +137,10 @@ static_assert(sizeof(bitset_t) ==
 
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
-constexpr auto rocprofiler_load_prestore_queues_entry_point =
-    "rocprofiler_load_prestore_queues";
-constexpr auto rocprofiler_load_prestore_code_objects_entry_point =
-    "rocprofiler_load_prestore_code_objects";
 
-constexpr auto rocprofiler_prestore_lib_name = "librocprofiler-sdk-prestore.so";
-constexpr auto rocprofiler_prestore_get_version_entrypoint =
-    "rocprofiler_prestore_get_version";
-constexpr auto rocprofiler_prestore_lib_register_entrypoint =
-    "rocprofiler_prestore_set_api_table";
-constexpr auto rocprofiler_prestore_set_api_table_entrypoint =
-    "rocprofiler_prestore_set_api_table";
-constexpr auto rocprofiler_prestore_export_all_queues_entrypoint =
-    "rocprofiler_prestore_export_all_queues";
-constexpr auto rocprofiler_prestore_set_write_interceptor_entrypoint =
-    "rocprofiler_prestore_set_write_interceptor";
-constexpr auto rocprofiler_prestore_export_all_code_objects_entrypoint =
-    "rocprofiler_prestore_export_all_code_objects";
+constexpr auto rocprofiler_attach_lib_name = "librocprofiler-sdk-attach.so";
+constexpr auto rocprofiler_attach_lib_register_entrypoint =
+    "rocprofiler_attach_set_api_table";
 
 constexpr auto rocprofiler_tool_lib_name = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 constexpr auto rocprofiler_tool_attach_entrypoint = "rocprofv3_attach";
@@ -219,6 +158,7 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_RCCL,
     ROCP_REG_ROCDECODE,
     ROCP_REG_ROCJPEG,
+    ROCP_REG_ATTACH,
     ROCP_REG_LAST,
 };
 
@@ -287,6 +227,11 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCJPEG,
                                "rocjpeg",
                                "rocprofiler_register_import_rocjpeg",
                                "librocjpeg.so.[0-9]($|\\.[0-9\\.]+)")
+
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ATTACH,
+                               "attach",
+                               "rocprofiler_register_import_attach",
+                               "librocprofiler-sdk-attach.so.[0-9]($|\\.[0-9\\.]+)")
 
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_SUCCESS, "Success")
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_NO_TOOLS, "rocprofiler-register found no tools")
@@ -614,45 +559,6 @@ load_environment_buffer(const char* environment_buffer)
     }
 }
 
-rocprofiler_prestore_dispatch_table_t
-create_prestore_dispatch_table(void* prestore_lib)
-{
-    constexpr uint32_t                    PRESTORE_CURRENT_SUPPORTED_VERSION = 1;
-    constexpr uint32_t                    PRESTORE_OLDEST_SUPPORTED_VERSION  = 1;
-    rocprofiler_prestore_dispatch_table_t table{};
-
-    if(!prestore_lib)
-    {
-        return table;
-    }
-
-    auto get_version = reinterpret_cast<rocprofiler_prestore_get_version_t>(
-        dlsym(prestore_lib, rocprofiler_prestore_get_version_entrypoint));
-    uint32_t version = get_version();
-
-    if(version > PRESTORE_CURRENT_SUPPORTED_VERSION ||
-       version < PRESTORE_OLDEST_SUPPORTED_VERSION)
-    {
-        return table;
-    }
-
-    table.version                          = version;
-    table.rocprofiler_prestore_get_version = get_version;
-    table.rocprofiler_prestore_set_api_table =
-        reinterpret_cast<rocprofiler_prestore_set_api_table_t>(
-            dlsym(prestore_lib, rocprofiler_prestore_set_api_table_entrypoint));
-    table.rocprofiler_prestore_export_all_queues =
-        reinterpret_cast<rocprofiler_prestore_export_all_queues_t>(
-            dlsym(prestore_lib, rocprofiler_prestore_export_all_queues_entrypoint));
-    table.rocprofiler_prestore_set_write_interceptor =
-        reinterpret_cast<rocprofiler_prestore_set_write_interceptor_t>(
-            dlsym(prestore_lib, rocprofiler_prestore_set_write_interceptor_entrypoint));
-    table.rocprofiler_prestore_export_all_code_objects =
-        reinterpret_cast<rocprofiler_prestore_export_all_code_objects_t>(
-            dlsym(prestore_lib, rocprofiler_prestore_export_all_code_objects_entrypoint));
-    return table;
-}
-
 extern "C"
 {
 rocprofiler_register_error_code_t
@@ -679,6 +585,12 @@ rocprofiler_register_library_api_table(
     if(_count.value > 1) return ROCP_REG_DEADLOCK;
 
     auto _scan_result = rocp_reg_scan_for_tools();
+    
+    // rocprofiler library is dlopened and we have the functor to pass the API data
+    auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
+
+    // TODO: upgrade this to use cmake define
+    auto _attachment_enabled = common::get_env<bool>("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", false);
 
     rocp_import* _import_match = nullptr;
     for(auto& itr : import_info)
@@ -741,6 +653,53 @@ rocprofiler_register_library_api_table(
     auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
     _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
 
+    // if attachment is enabled the HSA API table should be forwarded to the attachment library
+    if(!_activate_rocprofiler && _attachment_enabled && _import_match->library_idx == ROCP_REG_HSA)
+    {
+        void* attachlibrary = rocp_load_lib(rocprofiler_attach_lib_name);
+        if(!attachlibrary)
+        {
+            LOG(ERROR)
+                << "Proxy queues for attachment are enabled, but the attach library "
+                   "was not found or able to be loaded. The attaching profiler will not "
+                   "be able to profile anything that requires proxy queues.";
+            return ROCP_REG_NO_TOOLS;
+        }
+        rocprofiler_attach_set_api_table_t rocprofiler_attach_set_api_table_fn;
+        *(void**) (&rocprofiler_attach_set_api_table_fn) =
+            dlsym(attachlibrary, rocprofiler_attach_lib_register_entrypoint);
+
+        if(!rocprofiler_attach_set_api_table_fn)
+        {
+            LOG(ERROR)
+                << "Proxy queues for attachment are enabled, but the attach library's "
+                   "entry point was not found. The attaching profiler will not be able "
+                   "to profile anything that requires proxy queues.";
+            return ROCP_REG_NO_TOOLS;
+        }
+
+        // Pass a functor to the attach library that it can use to pass back its own API table to us.
+        // This approach simplifies the interface and avoids having to modify the deadlock protection of this function.
+        auto register_functor = [](uint64_t lib_version, void** api_tables, uint64_t api_table_length){
+            rocp_add_registered_library_api_table("attach", nullptr, lib_version, api_tables, api_table_length, 0);
+        };
+
+        auto _ret = rocprofiler_attach_set_api_table_fn(
+            common_name, lib_version, _instance_val, api_tables, api_table_length, (void*)(&register_functor));
+        if(_ret != 0)
+        {
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but attach library "
+                          "registration returned an error: "
+                       << _ret
+                       << ". The attaching profiler may not be able to profile anything "
+                          "that requires proxy queues.";
+            return ROCP_REG_ROCPROFILER_ERROR;
+        }
+
+        LOG(INFO) << "Successfully registered for proxy queue creation";
+
+    }
+
     auto* reginfo = rocp_add_registered_library_api_table(common_name,
                                                           import_func,
                                                           lib_version,
@@ -758,9 +717,6 @@ rocprofiler_register_library_api_table(
     if(_bits.to_ulong() != register_id->handle)
         throw std::runtime_error("error encoding register_id");
 
-    // rocprofiler library is dlopened and we have the functor to pass the API data
-    auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
-
     if(_activate_rocprofiler)
     {
         auto _ret = _scan_result.set_api_table_fn(
@@ -768,47 +724,6 @@ rocprofiler_register_library_api_table(
         if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
 
         if(reginfo) (*reginfo)->propagated = true;
-    }
-    else if(_import_match->library_idx == ROCP_REG_HSA &&
-            common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", false))
-    {
-        void* prestorelibrary = rocp_load_lib(rocprofiler_prestore_lib_name);
-        if(!prestorelibrary)
-        {
-            LOG(ERROR)
-                << "Proxy queues for attachment are enabled, but the prestore library "
-                   "was not found or able to be loaded. The attaching profiler will not "
-                   "be able to profile anything that requires proxy queues.";
-            return ROCP_REG_NO_TOOLS;
-        }
-        rocprofiler_prestore_set_api_table_t rocprofiler_prestore_set_api_table_fn;
-        *(void**) (&rocprofiler_prestore_set_api_table_fn) =
-            dlsym(prestorelibrary, rocprofiler_prestore_lib_register_entrypoint);
-
-        if(!rocprofiler_prestore_set_api_table_fn)
-        {
-            LOG(ERROR)
-                << "Proxy queues for attachment are enabled, but the prestore library's "
-                   "entry point was not found. The attaching profiler will not be able "
-                   "to profile anything that requires proxy queues.";
-            return ROCP_REG_NO_TOOLS;
-        }
-
-        auto _ret = rocprofiler_prestore_set_api_table_fn(
-            common_name, lib_version, _instance_val, api_tables, api_table_length);
-        if(_ret != 0)
-        {
-            LOG(ERROR) << "Proxy queues for attachment are enabled, but prestore library "
-                          "registration returned an error: "
-                       << _ret
-                       << ". The attaching profiler may not be able to profile anything "
-                          "that requires proxy queues.";
-            return ROCP_REG_ROCPROFILER_ERROR;
-        }
-
-        LOG(INFO) << "Successfully registered for proxy queue creation";
-
-        return ROCP_REG_NO_TOOLS;
     }
     else
     {
@@ -878,53 +793,6 @@ rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer)
     ROCPROFILER_REGISTER_PUBLIC_API;
 
-rocprofiler_register_error_code_t
-rocprofiler_register_invoke_prestore_loads()
-{
-    void* rocplibrary = rocp_load_lib(rocprofiler_lib_name);
-    if(!rocplibrary)
-    {
-        LOG(ERROR) << "couldn't dlopen rocprofiler library. reason: " << dlerror();
-        return ROCP_REG_NO_TOOLS;
-    }
-
-    void* prestorelibrary = rocp_load_lib(rocprofiler_prestore_lib_name);
-    if(!prestorelibrary)
-    {
-        LOG(ERROR) << "Proxy queues for attachment are enabled, but the prestore library "
-                      "was not found or able to be loaded. The attaching profiler will "
-                      "not be able to profile anything that requires proxy queues.";
-    }
-
-    auto table = create_prestore_dispatch_table(prestorelibrary);
-    rocprofiler_load_prestore_queues_t rocprofiler_load_prestore_queues_fn;
-    *(void**) (&rocprofiler_load_prestore_queues_fn) =
-        dlsym(rocplibrary, rocprofiler_load_prestore_queues_entry_point);
-    rocprofiler_load_prestore_code_objects_t rocprofiler_load_prestore_code_objects_fn;
-    *(void**) (&rocprofiler_load_prestore_code_objects_fn) =
-        dlsym(rocplibrary, rocprofiler_load_prestore_code_objects_entry_point);
-
-    if(!rocprofiler_load_prestore_queues_fn)
-    {
-        LOG(ERROR) << "Could not find " << rocprofiler_load_prestore_queues_entry_point
-                   << " symbol in " << rocprofiler_prestore_lib_name
-                   << ". Error: " << dlerror();
-        return ROCP_REG_NO_TOOLS;
-    }
-
-    if(!rocprofiler_load_prestore_code_objects_fn)
-    {
-        LOG(ERROR) << "Could not find "
-                   << rocprofiler_load_prestore_code_objects_entry_point << " symbol in "
-                   << rocprofiler_prestore_lib_name << ". Error: " << dlerror();
-        return ROCP_REG_NO_TOOLS;
-    }
-
-    rocprofiler_load_prestore_queues_fn(&table);
-    rocprofiler_load_prestore_code_objects_fn(&table);
-    return ROCP_REG_SUCCESS;
-}
-
 //
 //  This function can be invoked by ptrace
 rocprofiler_register_error_code_t
@@ -962,13 +830,6 @@ rocprofiler_register_attach(const char* environment_buffer)
         return status;
     }
 
-    status = rocprofiler_register_invoke_prestore_loads();
-    if(status)
-    {
-        LOG(ERROR) << "error during invoke_prestore_loads: " << status;
-        return status;
-    }
-
     return ROCP_REG_SUCCESS;
 }
 
@@ -1002,7 +863,6 @@ rocprofiler_register_detach()
         LOG(ERROR) << "detach entry point is NULL";
     }
 
-    dlclose(toollibrary);
     return ROCP_REG_SUCCESS;
 }
 }

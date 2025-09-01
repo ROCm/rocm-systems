@@ -20,23 +20,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#pragma once
+#include "table.hpp"
 
-#include <rocprofiler-sdk/defines.h>
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rocprofiler_attach_dispatch_table_t, ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH);
 
-#include <stdint.h>
+namespace rocprofiler {
+namespace attach {
 
-ROCPROFILER_EXTERN_C_INIT
+rocprofiler_attach_dispatch_table_t* get_dispatch_table()
+{
+    static auto*& dispatch_table = rocprofiler::common::static_object<rocprofiler_attach_dispatch_table_t>::construct();
+    return dispatch_table;
+}
 
-int
-rocprofiler_attach_set_api_table(const char* name,
-                                 uint64_t    lib_version,
-                                 uint64_t    lib_instance,
-                                 void**      tables,
-                                 uint64_t    num_tables,
-                                 void*       register_functor) ROCPROFILER_PUBLIC_API;
+void dispatch_table_init()
+{
+    auto table = get_dispatch_table();
 
-int
-rocprofiler_attach_get_version() ROCPROFILER_API;
+    table->size = sizeof(rocprofiler_attach_dispatch_table_t);
+    table->rocprofiler_attach_get_version = &rocprofiler_attach_get_version;
+    table->rocprofiler_attach_iterate_all_queues = &rocprofiler_attach_iterate_all_queues;
+    table->rocprofiler_attach_set_write_interceptor = &rocprofiler_attach_set_write_interceptor;
+    table->rocprofiler_attach_iterate_all_code_objects = &rocprofiler_attach_iterate_all_code_objects;
+    table->rocprofiler_attach_notify_new_queue = nullptr;
+    table->rocprofiler_attach_notify_code_object = nullptr;
+};
 
-ROCPROFILER_EXTERN_C_FINI
+}
+}
