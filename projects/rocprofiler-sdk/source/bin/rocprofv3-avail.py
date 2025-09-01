@@ -458,8 +458,10 @@ def process_pmc_check(args):
 
 
 def main(argv=None):
-    if argv is None or len(argv) == 0:
-        avail.fatal_error("No arguments provided")
+    # If no arguments provided, show help and exit
+    if (argv is None and len(sys.argv) == 1) or (argv is not None and len(argv) == 0):
+        parse_arguments(["--help"])
+        return 0
 
     ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
