@@ -26,20 +26,26 @@
 #include "queue_registration.h"
 #include "code_object_registration.h"
 
-constexpr uint32_t ROCPROFILER_ATTACH_TABLE_CURRENT_VERSION = 1;
+#define ROCTX_API_TABLE_VERSION_MAJOR 0
 
-typedef int (*rocprofiler_attach_get_version_t)();
-typedef int (*rocprofiler_attach_set_api_table_t)(const char*, uint64_t, uint64_t, void**, uint64_t);
-typedef int (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_iterator_t, void*);
-typedef int (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
-typedef int (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t, void*);
+ROCPROFILER_EXTERN_C_INIT
+
+typedef int  (*rocprofiler_attach_get_version_t)();
+typedef int  (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_iterator_t, void*);
+typedef int  (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
+typedef int  (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t, void*);
+typedef void (*rocprofiler_attach_notify_new_queue_t)(hsa_queue_t*, hsa_agent_t, void*);
+typedef void (*rocprofiler_attach_notify_new_code_object_t)(hsa_executable_t);
 
 struct rocprofiler_attach_dispatch_table_t
 {
-    uint32_t                                      version;
+    uint64_t                                      size;
     rocprofiler_attach_get_version_t              rocprofiler_attach_get_version;
-    rocprofiler_attach_set_api_table_t            rocprofiler_attach_set_api_table;
     rocprofiler_attach_iterate_all_queues_t       rocprofiler_attach_iterate_all_queues;
     rocprofiler_attach_set_write_interceptor_t    rocprofiler_attach_set_write_interceptor;
     rocprofiler_attach_iterate_all_code_objects_t rocprofiler_attach_iterate_all_code_objects;
+    rocprofiler_attach_notify_new_queue_t         rocprofiler_attach_notify_new_queue;
+    rocprofiler_attach_notify_new_code_object_t   rocprofiler_attach_notify_code_object;
 };
+
+ROCPROFILER_EXTERN_C_FINI

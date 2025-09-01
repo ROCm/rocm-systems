@@ -20,23 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#pragma once
+#include "include/table.h"
 
-#include <rocprofiler-sdk/defines.h>
+namespace rocprofiler {
+namespace attach{
 
-#include <stdint.h>
+constexpr size_t ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH = 6;
 
-ROCPROFILER_EXTERN_C_INIT
+rocprofiler_attach_dispatch_table_t* get_dispatch_table();
 
-int
-rocprofiler_attach_set_api_table(const char* name,
-                                 uint64_t    lib_version,
-                                 uint64_t    lib_instance,
-                                 void**      tables,
-                                 uint64_t    num_tables,
-                                 void*       register_functor) ROCPROFILER_PUBLIC_API;
+void dispatch_table_init();
 
-int
-rocprofiler_attach_get_version() ROCPROFILER_API;
-
-ROCPROFILER_EXTERN_C_FINI
+}
+}

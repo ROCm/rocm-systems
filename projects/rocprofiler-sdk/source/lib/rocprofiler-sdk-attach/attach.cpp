@@ -23,6 +23,7 @@
 #include "include/attach.h"
 #include "code_object_registration.hpp"
 #include "queue_registration.hpp"
+#include "table.hpp"
 
 #include "lib/common/logging.hpp"
 
@@ -35,14 +36,17 @@ init_logging()
 // ensure that logging is always initialized when library is loaded
 bool init_logging_at_load = (init_logging(), true);
 
+using rocprofiler_register_functor_t = void(*)(uint64_t, void*, uint64_t);
+
 ROCPROFILER_EXTERN_C_INIT
 
 int
 rocprofiler_attach_set_api_table(const char* name,
-                                   uint64_t    lib_version,
-                                   uint64_t    lib_instance,
-                                   void**      tables,
-                                   uint64_t    num_tables)
+                                 uint64_t    lib_version,
+                                 uint64_t    lib_instance,
+                                 void**      tables,
+                                 uint64_t    num_tables,
+                                 void*       register_functor)
 {
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
     (void) lib_version;   // unused
@@ -59,6 +63,14 @@ rocprofiler_attach_set_api_table(const char* name,
 
     auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
 
+    rocprofiler::attach::dispatch_table_init();
+
+    if (register_functor)
+    {
+        auto callable = reinterpret_cast<rocprofiler_register_functor_t>(register_functor);
+        callable(rocprofiler_attach_get_version(), (void*)(rocprofiler::attach::get_dispatch_table()), rocprofiler::attach::ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH);
+    }    
+
     // Initialize all registration services in attach
     rocprofiler::attach::queue_registration_init(hsa_api_table);
     rocprofiler::attach::code_object_registration_init(hsa_api_table);
@@ -69,8 +81,8 @@ rocprofiler_attach_set_api_table(const char* name,
 int
 rocprofiler_attach_get_version()
 {
-    constexpr int ROCPROFILER_attach_VERSION = 1;
-    return ROCPROFILER_attach_VERSION;
+    constexpr int ROCPROFILER_ATTACH_VERSION = 1;
+    return ROCPROFILER_ATTACH_VERSION;
 }
 
 ROCPROFILER_EXTERN_C_FINI
