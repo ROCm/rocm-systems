@@ -30,6 +30,7 @@
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <vector>
 
@@ -94,8 +95,14 @@ cache_manager::post_process_bulk()
 {
     struct cache_files
     {
-        std::string buff_storage;
-        std::string metadata;
+        std::string buffered_storage_filepath;
+        std::string metadata_registry_filepath;
+    };
+
+    enum class file_type : uint8_t
+    {
+        buffered_storage,
+        metadata_registry
     };
 
     if(is_root_process())
@@ -105,15 +112,21 @@ cache_manager::post_process_bulk()
 
         std::map<int, cache_files> cache_map{};
 
-        // TODO: Rewrite, reuse same lambda..
-        auto parse_and_fill_cache = [&](const std::string& filename) {
-            if(filename.find("buffered_storage_") != std::string::npos)
+        const std::map<file_type, std::string> filetype_filename_map = {
+            { file_type::buffered_storage, "buffered_storage_" },
+            { file_type::metadata_registry, "metadata_" }
+        };
+
+        auto parse_path = [&](file_type type, const std::string& filename) {
+            const auto& name_to_search = filetype_filename_map.at(type);
+
+            if(filename.find(name_to_search) != std::string::npos)
             {
-                auto first_underscore = filename.find("buffered_storage_");
+                auto first_underscore = filename.find(name_to_search);
                 if(first_underscore != std::string::npos)
                 {
                     auto start_pos =
-                        first_underscore + std::string("buffered_storage_").length();
+                        first_underscore + std::string(name_to_search).length();
                     auto second_underscore = filename.find('_', start_pos);
                     if(second_underscore != std::string::npos)
                     {
@@ -127,38 +140,35 @@ cache_manager::post_process_bulk()
 
                             if(parent_pid == root_pid)
                             {
-                                cache_map[pid].buff_storage =
-                                    std::string("/tmp/" + filename);
+                                auto result = std::string("/tmp/" + filename);
+                                switch(type)
+                                {
+                                    case file_type::buffered_storage:
+                                    {
+                                        cache_map[pid].buffered_storage_filepath = result;
+                                        break;
+                                    }
+                                    case file_type::metadata_registry:
+                                    {
+                                        cache_map[pid].metadata_registry_filepath =
+                                            result;
+                                        break;
+                                    }
+                                    default: return false;
+                                }
+                                return true;
                             }
                         }
                     }
                 }
             }
-            else if(filename.find("metadata_") != std::string::npos)
-            {
-                auto first_underscore = filename.find("metadata_");
-                if(first_underscore != std::string::npos)
-                {
-                    auto start_pos = first_underscore + std::string("metadata_").length();
-                    auto second_underscore = filename.find('_', start_pos);
-                    if(second_underscore != std::string::npos)
-                    {
-                        auto dot_pos = filename.find('.', second_underscore);
-                        if(dot_pos != std::string::npos)
-                        {
-                            int parent_pid = std::stoi(filename.substr(
-                                start_pos, second_underscore - start_pos));
-                            int pid        = std::stoi(filename.substr(
-                                second_underscore + 1, dot_pos - second_underscore - 1));
+            return false;
+        };
 
-                            if(parent_pid == root_pid)
-                            {
-                                cache_map[pid].metadata = std::string("/tmp/" + filename);
-                            }
-                        }
-                    }
-                }
-            }
+        auto parse_and_fill_cache = [&](const std::string& filename) {
+            // short circut
+            return parse_path(file_type::buffered_storage, filename) ||
+                   parse_path(file_type::metadata_registry, filename);
         };
 
         std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
@@ -178,30 +188,32 @@ cache_manager::post_process_bulk()
 
         for(const auto& [pid, files] : cache_map)
         {
-            if(!files.buff_storage.empty() && !files.metadata.empty())
+            if(!files.buffered_storage_filepath.empty() &&
+               !files.metadata_registry_filepath.empty())
             {
                 rocpd_threads.emplace_back([pid = pid, files = files]() {
                     ROCPROFSYS_DEBUG("Creating database for [%d] from buffered storage "
                                      "file: %s and from metadata file: %s",
-                                     pid, files.buff_storage.c_str(),
-                                     files.metadata.c_str());
+                                     pid, files.buffered_storage_filepath.c_str(),
+                                     files.metadata_registry_filepath.c_str());
                     metadata_registry metadata;
-                    auto              res = metadata.load_from_file(files.metadata);
+                    auto res = metadata.load_from_file(files.metadata_registry_filepath);
                     if(!res)
                     {
                         ROCPROFSYS_WARNING(0, "Load from file for metadata failed: %s\n",
-                                           files.metadata.c_str());
+                                           files.metadata_registry_filepath.c_str());
                         return;
                     }
                     agent_manager         agent_mngr(metadata.get_agents());
                     rocpd_post_processing _post_processing(metadata, agent_mngr,
                                                            std::to_string(pid));
-                    storage_parser        _parser(getpid(), files.buff_storage);
+                    storage_parser _parser(getpid(), files.buffered_storage_filepath);
                     _post_processing.register_parser_callback(_parser);
                     _post_processing.post_process_metadata();
                     _parser.consume_storage();
                     _post_processing.get_data_processor()->flush();
-                    std::remove(files.metadata.c_str());  // Remove metadata file
+                    std::remove(files.metadata_registry_filepath
+                                    .c_str());  // Remove metadata file
                 });
             }
         }
