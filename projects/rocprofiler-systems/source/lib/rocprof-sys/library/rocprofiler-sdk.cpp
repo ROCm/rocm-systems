@@ -550,11 +550,6 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
         record->dispatch_info.grid_size.y,
         record->dispatch_info.grid_size.z,
         stream_handle);
-    static auto count = 0;
-    count++;
-    if((count % 1000) == 0) {
-        std::cout << "[PID:" << getpid() << "] :: Current kernel dispatch count:" << count << "\n";
-    }
 }
 
 void
@@ -2119,10 +2114,7 @@ tool_fini(void* callback_data)
 
 void
 setup()
-{
-    std::cout << "[PID:" << getpid() << " LINE: " << __LINE__ << "] :: SETUP CALLED"
-              << "\n";
-}
+{}
 
 void
 shutdown()

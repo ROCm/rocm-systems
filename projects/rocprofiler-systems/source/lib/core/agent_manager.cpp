@@ -160,7 +160,6 @@ agent_manager::get_cpu_agents_count() const
 void
 agent_manager::set_agents(std::vector<std::shared_ptr<agent>> agents)
 {
-    std::cout << "Chaning agents in agent manager" << std::endl;
     _agents = std::move(agents);
 }
 }  // namespace rocprofsys

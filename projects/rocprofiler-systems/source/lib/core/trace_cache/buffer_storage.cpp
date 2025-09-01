@@ -113,8 +113,6 @@ buffer_storage::buffer_storage(pid_t _pid)
         _ofs.close();
         m_exit_finished = true;
         m_exit_condition.notify_one();
-        std::cout << "[PID:" << getpid() << "] :: Buffered storage flush finished"
-                  << "\n";
     });
 }
 

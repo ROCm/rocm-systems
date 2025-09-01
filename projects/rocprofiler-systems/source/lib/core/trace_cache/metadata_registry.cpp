@@ -23,6 +23,7 @@
 #include "metadata_registry.hpp"
 #include "agent.hpp"
 #include "agent_manager.hpp"
+#include "debug.hpp"
 #include <algorithm>
 #include <cstdint>
 
@@ -739,7 +740,7 @@ metadata_registry::save_to_file(const std::string& filepath) const
         auto json        = to_json(*this);
         auto json_string = json.dump();
 
-        std::cout << "Saving metadata to file:" << filepath << std::endl;
+        ROCPROFSYS_DEBUG("Saving metadata to file: %s\n", filepath.c_str());
 
         std::ofstream file(filepath, std::ios::out);
 
@@ -748,7 +749,7 @@ metadata_registry::save_to_file(const std::string& filepath) const
         return true;
     } catch(const std::exception& e)
     {
-        std::cout << "Failed writing to file: " << filepath << std::endl;
+        ROCPROFSYS_WARNING(0, "Failed writing to file: %s\n", filepath.c_str());
         return false;
     }
 }
