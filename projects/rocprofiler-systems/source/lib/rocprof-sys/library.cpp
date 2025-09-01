@@ -399,6 +399,18 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
     rocprofsys_preinit_hidden();
 }
 
+bool
+is_selinux_enforcing()
+{
+    std::ifstream ifs("/sys/fs/selinux/enforce");
+    if(!ifs.is_open()) return false;  // SELinux disabled or sysfs not mounted
+
+    int mode = 0;
+    if(!(ifs >> mode)) return false;  // Could not read the file
+
+    return mode == 1;
+}
+
 //======================================================================================//
 
 extern "C" void
@@ -409,6 +421,13 @@ rocprofsys_init_library_hidden()
 
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
+
+    if(is_selinux_enforcing())
+    {
+        std::cerr << "SELinux enforcing mode detected. Consider to disable SELinux "
+                  << "or configure a more permissive setting. Aborting.\n";
+        std::exit(EXIT_FAILURE);
+    }
 
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
