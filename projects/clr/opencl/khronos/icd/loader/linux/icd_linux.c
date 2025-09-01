@@ -40,128 +40,107 @@ static pthread_once_t initialized = PTHREAD_ONCE_INIT;
  */
 
 // go through the list of vendors in the two configuration files
-void khrIcdOsVendorsEnumerate(void)
-{
-    DIR *dir = NULL;
-    struct dirent *dirEntry = NULL;
-    char* vendorPath = ICD_VENDOR_PATH;
-    char* envPath = NULL;
+void khrIcdOsVendorsEnumerate(void) {
+  DIR* dir = NULL;
+  struct dirent* dirEntry = NULL;
+  char* vendorPath = ICD_VENDOR_PATH;
+  char* envPath = NULL;
 
-    khrIcdVendorsEnumerateEnv();
+  khrIcdVendorsEnumerateEnv();
 
-    envPath = khrIcd_secure_getenv("OCL_ICD_VENDORS");
-    if (NULL != envPath)
-    {
-        vendorPath = envPath;
+  envPath = khrIcd_secure_getenv("OCL_ICD_VENDORS");
+  if (NULL != envPath) {
+    vendorPath = envPath;
+  }
+
+  dir = opendir(vendorPath);
+  if (NULL == dir) {
+    KHR_ICD_TRACE("Failed to open path %s, continuing\n", vendorPath);
+  } else {
+    // attempt to load all files in the directory
+    for (dirEntry = readdir(dir); dirEntry; dirEntry = readdir(dir)) {
+      switch (dirEntry->d_type) {
+        case DT_UNKNOWN:
+        case DT_REG:
+        case DT_LNK: {
+          const char* extension = ".icd";
+          FILE* fin = NULL;
+          char* fileName = NULL;
+          char* buffer = NULL;
+          long bufferSize = 0;
+
+          // make sure the file name ends in .icd
+          if (strlen(extension) > strlen(dirEntry->d_name)) {
+            break;
+          }
+          if (strcmp(dirEntry->d_name + strlen(dirEntry->d_name) - strlen(extension), extension)) {
+            break;
+          }
+
+          // allocate space for the full path of the vendor library name
+          fileName = malloc(strlen(dirEntry->d_name) + strlen(vendorPath) + 1);
+          if (!fileName) {
+            KHR_ICD_TRACE("Failed allocate space for ICD file path\n");
+            break;
+          }
+          sprintf(fileName, "%s%s", vendorPath, dirEntry->d_name);
+
+          // open the file and read its contents
+          fin = fopen(fileName, "r");
+          if (!fin) {
+            free(fileName);
+            break;
+          }
+          fseek(fin, 0, SEEK_END);
+          bufferSize = ftell(fin);
+
+          buffer = malloc(bufferSize + 1);
+          if (!buffer) {
+            free(fileName);
+            fclose(fin);
+            break;
+          }
+          memset(buffer, 0, bufferSize + 1);
+          fseek(fin, 0, SEEK_SET);
+          if (bufferSize != (long)fread(buffer, 1, bufferSize, fin)) {
+            free(fileName);
+            free(buffer);
+            fclose(fin);
+            break;
+          }
+          // ignore a newline at the end of the file
+          if (buffer[bufferSize - 1] == '\n') buffer[bufferSize - 1] = '\0';
+
+          // load the string read from the file
+          khrIcdVendorAdd(buffer);
+
+          free(fileName);
+          free(buffer);
+          fclose(fin);
+        } break;
+        default:
+          break;
+      }
     }
 
-    dir = opendir(vendorPath);
-    if (NULL == dir)
-    {
-        KHR_ICD_TRACE("Failed to open path %s, continuing\n", vendorPath);
+    closedir(dir);
+
+    KHRicdVendor* vendorIterator;
+    for (vendorIterator = khrIcdVendors; vendorIterator; vendorIterator = vendorIterator->next) {
+      if (vendorIterator->libName != NULL) {
+        free(vendorIterator->libName);
+        vendorIterator->libName = NULL;
+      }
     }
-    else
-    {
-        // attempt to load all files in the directory
-        for (dirEntry = readdir(dir); dirEntry; dirEntry = readdir(dir) )
-        {
-            switch(dirEntry->d_type)
-            {
-            case DT_UNKNOWN:
-            case DT_REG:
-            case DT_LNK:
-                {
-                    const char* extension = ".icd";
-                    FILE *fin = NULL;
-                    char* fileName = NULL;
-                    char* buffer = NULL;
-                    long bufferSize = 0;
+  }
 
-                    // make sure the file name ends in .icd
-                    if (strlen(extension) > strlen(dirEntry->d_name) )
-                    {
-                        break;
-                    }
-                    if (strcmp(dirEntry->d_name + strlen(dirEntry->d_name) - strlen(extension), extension) )
-                    {
-                        break;
-                    }
-
-                    // allocate space for the full path of the vendor library name
-                    fileName = malloc(strlen(dirEntry->d_name) + strlen(vendorPath) + 1);
-                    if (!fileName)
-                    {
-                        KHR_ICD_TRACE("Failed allocate space for ICD file path\n");
-                        break;
-                    }
-                    sprintf(fileName, "%s%s", vendorPath, dirEntry->d_name);
-
-                    // open the file and read its contents
-                    fin = fopen(fileName, "r");
-                    if (!fin)
-                    {
-                        free(fileName);
-                        break;
-                    }
-                    fseek(fin, 0, SEEK_END);
-                    bufferSize = ftell(fin);
-
-                    buffer = malloc(bufferSize+1);
-                    if (!buffer)
-                    {
-                        free(fileName);
-                        fclose(fin);
-                        break;
-                    }
-                    memset(buffer, 0, bufferSize+1);
-                    fseek(fin, 0, SEEK_SET);
-                    if (bufferSize != (long)fread(buffer, 1, bufferSize, fin) )
-                    {
-                        free(fileName);
-                        free(buffer);
-                        fclose(fin);
-                        break;
-                    }
-                    // ignore a newline at the end of the file
-                    if (buffer[bufferSize-1] == '\n') buffer[bufferSize-1] = '\0';
-
-                    // load the string read from the file
-                    khrIcdVendorAdd(buffer);
-
-                    free(fileName);
-                    free(buffer);
-                    fclose(fin);
-                }
-                break;
-            default:
-                break;
-            }
-        }
-
-        closedir(dir);
-
-        KHRicdVendor *vendorIterator;
-        for (vendorIterator = khrIcdVendors; vendorIterator; vendorIterator = vendorIterator->next)
-        {
-            if (vendorIterator->libName != NULL)
-            {
-                free(vendorIterator->libName);
-                vendorIterator->libName = NULL;
-            }
-        }
-    }
-
-    if (NULL != envPath)
-    {
-        khrIcd_free_getenv(envPath);
-    }
+  if (NULL != envPath) {
+    khrIcd_free_getenv(envPath);
+  }
 }
 
 // go through the list of vendors only once
-void khrIcdOsVendorsEnumerateOnce(void)
-{
-    pthread_once(&initialized, khrIcdOsVendorsEnumerate);
-}
+void khrIcdOsVendorsEnumerateOnce(void) { pthread_once(&initialized, khrIcdOsVendorsEnumerate); }
 
 /*
  *
@@ -170,25 +149,20 @@ void khrIcdOsVendorsEnumerateOnce(void)
  */
 
 // dynamically load a library.  returns NULL on failure
-void *khrIcdOsLibraryLoad(const char *libraryName)
-{
-    void *retVal = dlopen (libraryName, RTLD_NOW);
+void* khrIcdOsLibraryLoad(const char* libraryName) {
+  void* retVal = dlopen(libraryName, RTLD_NOW);
 
-    if (NULL == retVal) {
-        printf("dlerror: %s\n", dlerror());
-    }
+  if (NULL == retVal) {
+    printf("dlerror: %s\n", dlerror());
+  }
 
-    return retVal;
+  return retVal;
 }
 
 // get a function pointer from a loaded library.  returns NULL on failure.
-void *khrIcdOsLibraryGetFunctionAddress(void *library, const char *functionName)
-{
-    return dlsym(library, functionName);
+void* khrIcdOsLibraryGetFunctionAddress(void* library, const char* functionName) {
+  return dlsym(library, functionName);
 }
 
 // unload a library
-void khrIcdOsLibraryUnload(void *library)
-{
-    dlclose(library);
-}
+void khrIcdOsLibraryUnload(void* library) { dlclose(library); }

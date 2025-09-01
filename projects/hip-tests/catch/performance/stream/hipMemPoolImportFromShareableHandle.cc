@@ -25,7 +25,8 @@ THE SOFTWARE.
  * @ingroup PerformanceTest
  */
 
-class MemPoolImportFromShareableHandleBenchmark : public Benchmark<MemPoolImportFromShareableHandleBenchmark> {
+class MemPoolImportFromShareableHandleBenchmark
+    : public Benchmark<MemPoolImportFromShareableHandleBenchmark> {
  public:
   void operator()() {
     hipMemPool_t mem_pool{nullptr};
@@ -41,8 +42,8 @@ class MemPoolImportFromShareableHandleBenchmark : public Benchmark<MemPoolImport
     HIP_CHECK(hipMemPoolExportToShareableHandle(&share_handle, mem_pool, kHandleType, 0));
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolImportFromShareableHandle(
-        &mem_pool_shareable, (void*)share_handle, kHandleType, 0));
+      HIP_CHECK(hipMemPoolImportFromShareableHandle(&mem_pool_shareable, (void*)share_handle,
+                                                    kHandleType, 0));
     }
 
     HIP_CHECK(hipMemPoolDestroy(mem_pool_shareable));
@@ -74,14 +75,15 @@ static void RunBenchmark() {
  */
 TEST_CASE("Performance_hipMemPoolImportFromShareableHandle") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   RunBenchmark();
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

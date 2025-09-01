@@ -49,8 +49,8 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
   hipGraphNodeParams node_params = {};
-  char *A_d;
-  char *A_h;
+  char* A_d;
+  char* A_h;
   size_t N = 10;
   size_t Nbytes = N * sizeof(char);
 
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &node_params));
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  A_h = reinterpret_cast<char *>(malloc(Nbytes));
+  A_h = reinterpret_cast<char*>(malloc(Nbytes));
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
   hipGraphNodeParams node_params2 = {};
   node_params2.type = hipGraphNodeTypeMemset;
@@ -79,13 +79,11 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
   node_params2.memset.value = 110;
 
   SECTION("node == nullptr") {
-    HIP_CHECK_ERROR(hipGraphNodeSetParams(nullptr, &node_params2),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphNodeSetParams(nullptr, &node_params2), hipErrorInvalidValue);
   }
 
   SECTION("nodeParams == nullptr") {
-    HIP_CHECK_ERROR(hipGraphNodeSetParams(node, nullptr),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphNodeSetParams(node, nullptr), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
@@ -158,6 +156,6 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Positive") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

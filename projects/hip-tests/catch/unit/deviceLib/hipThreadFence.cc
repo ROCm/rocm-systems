@@ -21,8 +21,7 @@ THE SOFTWARE.
 #define NUM 1024
 #define SIZE (NUM * sizeof(float))
 
-__global__ static void vAdd(float* In1, float* In2, float* In3,
-                     float* In4, float* Out) {
+__global__ static void vAdd(float* In1, float* In2, float* In3, float* In4, float* Out) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   In4[tid] = In1[tid] + In2[tid];
   __threadfence();
@@ -57,8 +56,7 @@ TEST_CASE("Unit_hipThreadFence") {
   HIP_CHECK(hipMemcpy(In3d, In3, SIZE, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(In4d, In4, SIZE, hipMemcpyHostToDevice));
 
-  hipLaunchKernelGGL(vAdd, dim3(32, 1, 1), dim3(32, 1, 1), 0, 0,
-                     In1d, In2d, In3d, In4d, Outd);
+  hipLaunchKernelGGL(vAdd, dim3(32, 1, 1), dim3(32, 1, 1), 0, 0, In1d, In2d, In3d, In4d, Outd);
   HIP_CHECK(hipMemcpy(Out, Outd, SIZE, hipMemcpyDeviceToHost));
   for (uint32_t i = 0; i < NUM; i++) {
     REQUIRE(Out[i] == 2 * In1[i] + 2 * In2[i] + In3[i]);

@@ -80,6 +80,6 @@ TEST_CASE("Performance_hipStreamWaitEvent") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

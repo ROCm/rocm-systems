@@ -33,11 +33,10 @@
 
 // Functions defined in devhcprintf.cpp
 namespace amd {
-void handlePrintfDelayed(const uint64_t *input, uint64_t len, uint64_t control);
-bool populateFormatStringHashMap(
-    const std::vector<device::PrintfInfo> &printfInfo,
-    std::map<uint64_t, std::string> &strMap);
-} // namespace amd
+void handlePrintfDelayed(const uint64_t* input, uint64_t len, uint64_t control);
+bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfInfo,
+                                 std::map<uint64_t, std::string>& strMap);
+}  // namespace amd
 
 namespace amd::roc {
 
@@ -152,8 +151,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
       amd::Os::printf(fmt.data(), argumentStr);
       // copiedBytes = strlen(argumentStr)
-      while (argumentStr[copiedBytes++] != 0)
-        ;
+      while (argumentStr[copiedBytes++] != 0);
     }
   }
 
@@ -170,8 +168,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
         const char* str = reinterpret_cast<const char*>(argument);
         amd::Os::printf(fmt.data(), str);
         // Find the string length
-        while (str[copiedBytes++] != 0)
-          ;
+        while (str[copiedBytes++] != 0);
       } break;
       case 1:
         amd::Os::printf(fmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
@@ -179,9 +176,9 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       case 2:
       case 4:
         if (printFloat) {
-          const float fArg = size == 2 ?
-                          amd::half2float(*(reinterpret_cast<const uint16_t *>(argument))) :
-                          *(reinterpret_cast<const float *>(argument));
+          const float fArg = size == 2
+                                 ? amd::half2float(*(reinterpret_cast<const uint16_t*>(argument)))
+                                 : *(reinterpret_cast<const float*>(argument));
           static const char* fSpecifiers = "eEfgGa";
           std::string fmtF = fmt;
           size_t posS = fmtF.find_first_of("%");
@@ -219,13 +216,12 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
             hhFmt.erase(hhFmt.find_first_of("h"), 2);
             amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
           } else if (hlModifier) {
-            amd::Os::printf(hlFmt.data(), size == 2 ?
-                *(reinterpret_cast<const uint16_t *>(argument)):
-                *(reinterpret_cast<const uint32_t *>(argument)));
+            amd::Os::printf(hlFmt.data(), size == 2
+                                              ? *(reinterpret_cast<const uint16_t*>(argument))
+                                              : *(reinterpret_cast<const uint32_t*>(argument)));
           } else {
-            amd::Os::printf(fmt.data(), size == 2 ?
-                *(reinterpret_cast<const uint16_t *>(argument)):
-                *(reinterpret_cast<const uint32_t *>(argument)));
+            amd::Os::printf(fmt.data(), size == 2 ? *(reinterpret_cast<const uint16_t*>(argument))
+                                                  : *(reinterpret_cast<const uint32_t*>(argument)));
           }
         }
         break;
@@ -300,8 +296,7 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
         }
         break;
       } else if (pos < str.length()) {
-        outputArgument(sepStr, false, ConstStr,
-                       str.substr(pos).data());
+        outputArgument(sepStr, false, ConstStr, str.substr(pos).data());
       }
     } while (posStart != std::string::npos);
 
@@ -412,8 +407,10 @@ bool PrintfDbg::init(bool printfEnabled) {
     // into the corresponding location in the debug buffer
     hsa_status_t err = hsa_memory_copy(dbgBuffer_, sysMem, 2 * sizeof(uint32_t));
     if (err != HSA_STATUS_SUCCESS) {
-      LogPrintfError("\n Can't copy offset and bytes available data to dgbBuffer_,"
-                     "failed with status: %d \n!", err);
+      LogPrintfError(
+          "\n Can't copy offset and bytes available data to dgbBuffer_,"
+          "failed with status: %d \n!",
+          err);
       return false;
     }
   }
@@ -460,15 +457,13 @@ bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled,
 
       // Populate string map with hashes and actual
       // format strings.
-      if(!amd::populateFormatStringHashMap(printfInfo, StrMap))
-        return false;
+      if (!amd::populateFormatStringHashMap(printfInfo, StrMap)) return false;
 
-      while (sbt < offsetSize)
-      {
+      while (sbt < offsetSize) {
         auto controlDword = *BufferForHIP++;
         auto PB = (uint64_t*)BufferForHIP;
 
-        uint64_t nextOffset  = controlDword >> 2;
+        uint64_t nextOffset = controlDword >> 2;
 
         std::vector<uint8_t> PBuffer;
         uint64_t BufferLen = 0;
@@ -485,25 +480,22 @@ bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled,
           BufferLen = ArgsLen + amd::alignUp(StrLenWithNull, sizeof(uint64_t));
           PBuffer.resize(BufferLen);
           memcpy(PBuffer.data(), Str.c_str(), StrLenWithNull);
-          memset(PBuffer.data() + Str.size(), 0, 8 - (StrLenWithNull % 8 ));
-          memcpy(PBuffer.data() + amd::alignUp(StrLenWithNull, sizeof(uint64_t)),
-          PB, ArgsLen);
-        }
-        else {
-            // Process Non constant format string case.
-            // Here, The buffer itself contains the actual
-            // format string and hence just copy the contents
-            // of format string and arguments into a temporary
-            // buffer
-            BufferLen = nextOffset - /*ControlDWord*/4;
-            PBuffer.resize(BufferLen);
-            memcpy(PBuffer.data(), BufferForHIP, nextOffset);
+          memset(PBuffer.data() + Str.size(), 0, 8 - (StrLenWithNull % 8));
+          memcpy(PBuffer.data() + amd::alignUp(StrLenWithNull, sizeof(uint64_t)), PB, ArgsLen);
+        } else {
+          // Process Non constant format string case.
+          // Here, The buffer itself contains the actual
+          // format string and hence just copy the contents
+          // of format string and arguments into a temporary
+          // buffer
+          BufferLen = nextOffset - /*ControlDWord*/ 4;
+          PBuffer.resize(BufferLen);
+          memcpy(PBuffer.data(), BufferForHIP, nextOffset);
         }
 
         // Handle printing
-        amd::handlePrintfDelayed((uint64_t*)PBuffer.data(), BufferLen / 8,
-                            controlDword);
-        BufferForHIP += (nextOffset / 4) - /*ControlDWord*/1;
+        amd::handlePrintfDelayed((uint64_t*)PBuffer.data(), BufferLen / 8, controlDword);
+        BufferForHIP += (nextOffset / 4) - /*ControlDWord*/ 1;
         sbt += nextOffset;
       }
 
@@ -535,4 +527,4 @@ bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled,
   return true;
 }
 
-}  // namespace gpu
+}  // namespace amd::roc

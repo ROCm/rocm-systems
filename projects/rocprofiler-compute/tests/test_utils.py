@@ -30,18 +30,17 @@ import json
 import locale
 import logging
 import os
-import tempfile
 import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
 import pytest
-import yaml
 
 import utils.utils as utils
 
@@ -163,6 +162,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
                 assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
+        elif file.endswith(".json"):
+            file_dict[file] = "json"
     return file_dict
 
 
@@ -173,7 +174,9 @@ def get_num_pmc_file(output_dir):
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
-    return len([f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"])
+    return len([
+        f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
+    ])
 
 
 # =============================================================================
@@ -1770,8 +1773,18 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 1, "wave_front_size": 32},
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    },
+                    {
+                        "id": {"handle": 2},
+                        "type": 2,
+                        "node_id": 1,
+                        "wave_front_size": 32,
+                    },
                 ],
                 "counters": [
                     {
@@ -1924,8 +1937,10 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
 
 def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     """
-    Test v3_json_to_csv handles cases where different dispatches have different sets of counters.
-    This addresses the DataFrame creation issue where arrays have different lengths.
+    Test v3_json_to_csv handles cases where different
+    dispatches have different sets of counters.
+    This addresses the DataFrame creation issue
+    where arrays have different lengths.
 
     Args:
         tmp_path (pathlib.Path): Temporary directory for test files
@@ -1937,7 +1952,12 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [
                     {
@@ -2073,7 +2093,8 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     except ValueError as e:
         if "All arrays must be of the same length" in str(e):
             pytest.skip(
-                "v3_json_to_csv does not currently handle missing counters gracefully - arrays have different lengths"
+                "v3_json_to_csv does not currently "
+                "handle missing counters gracefully - arrays have different lengths"
             )
         else:
             raise

@@ -26,13 +26,14 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-//#define TEST_TEXTURE  // Only for float2
-static constexpr bool printLog = false; // Print log for debugging
+// #define TEST_TEXTURE  // Only for float2
+static constexpr bool printLog = false;  // Print log for debugging
 
 // Populate mipmap next level array
 template <typename T, hipTextureReadMode readMode>
 static __global__ void populateMipmapNextLevelArray(hipSurfaceObject_t surfOut,
-               hipTextureObject_t texIn, unsigned int width, T* data = nullptr) {
+                                                    hipTextureObject_t texIn, unsigned int width,
+                                                    T* data = nullptr) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   float px = 1.0 / float(width);
@@ -58,9 +59,8 @@ static __global__ void populateMipmapNextLevelArray(hipSurfaceObject_t surfOut,
 #endif
 }
 
-template <typename T>
-__global__ void getMipmap(hipTextureObject_t texMipmap, unsigned int width,
-                                float offsetX, float lod, T* data = nullptr) {
+template <typename T> __global__ void getMipmap(hipTextureObject_t texMipmap, unsigned int width,
+                                                float offsetX, float lod, T* data = nullptr) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   float px = 1.0 / float(width);
@@ -85,22 +85,22 @@ static void populateMipmaps(hipMipmappedArray_t mipmapArray, hipExtent size,
     HIP_CHECK(hipGetMipmappedArrayLevel(&levelArray, mipmapArray, level));
     HIP_CHECK(hipGetMipmappedArrayLevel(&nextLevelArray, mipmapArray, level + 1));
 
-    hipExtent levelArraySize {0, 0, 0};
+    hipExtent levelArraySize{0, 0, 0};
     HIP_CHECK(hipArrayGetInfo(nullptr, &levelArraySize, nullptr, levelArray));
-    if(levelArraySize.width != width) {
+    if (levelArraySize.width != width) {
       fprintf(stderr, "Level %u: size (%zu, %zu, %zu) != Expected size (%zu, 0, 0)\n", level,
-               levelArraySize.width, levelArraySize.height, levelArraySize.depth, width);
+              levelArraySize.width, levelArraySize.height, levelArraySize.depth, width);
       REQUIRE(false);
     }
 
-    width = width >> 1 ? width >> 1: 1;
+    width = width >> 1 ? width >> 1 : 1;
 
-    hipExtent nextLevelArraySize {0, 0, 0};
+    hipExtent nextLevelArraySize{0, 0, 0};
     HIP_CHECK(hipArrayGetInfo(nullptr, &nextLevelArraySize, nullptr, nextLevelArray));
-    if(nextLevelArraySize.width != width) {
+    if (nextLevelArraySize.width != width) {
       fprintf(stderr, "Next level %u: size (%zu, %zu, %zu) != Expected size (%zu, 0, 0)\n",
-          level + 1, nextLevelArraySize.width, nextLevelArraySize.height,
-          nextLevelArraySize.depth, width);
+              level + 1, nextLevelArraySize.width, nextLevelArraySize.height,
+              nextLevelArraySize.depth, width);
       REQUIRE(false);
     }
 
@@ -112,7 +112,7 @@ static void populateMipmaps(hipMipmappedArray_t mipmapArray, hipExtent size,
 
     hipTextureDesc texDescr;
     memset(&texDescr, 0, sizeof(hipTextureDesc));
-    texDescr.normalizedCoords = 1; // To populate next level array smoothly
+    texDescr.normalizedCoords = 1;  // To populate next level array smoothly
     texDescr.filterMode = filterMode;
     texDescr.addressMode[0] = addressMode;
     texDescr.addressMode[1] = addressMode;
@@ -145,16 +145,15 @@ static void populateMipmaps(hipMipmappedArray_t mipmapArray, hipExtent size,
     HIP_CHECK(hipDestroyTextureObject(texIn));
     HIP_CHECK(hipFreeArray(levelArray));
     HIP_CHECK(hipFreeArray(nextLevelArray));
-    mipmapData.push_back(data); // For later verification
+    mipmapData.push_back(data);  // For later verification
     level++;
   }
 }
 
-template <typename T,
-          hipTextureFilterMode filterMode = hipFilterModePoint,
+template <typename T, hipTextureFilterMode filterMode = hipFilterModePoint,
           hipTextureAddressMode addressMode = hipAddressModeClamp>
-static void verifyMipmapLevel(hipTextureObject_t texMipmap, T* data, size_t width,
-                                                       float level, float offsetX) {
+static void verifyMipmapLevel(hipTextureObject_t texMipmap, T* data, size_t width, float level,
+                              float offsetX) {
   T* hOutput = nullptr;
   size_t size = width * sizeof(T);
   HIP_CHECK(hipHostMalloc((void**)&hOutput, size));
@@ -172,18 +171,16 @@ static void verifyMipmapLevel(hipTextureObject_t texMipmap, T* data, size_t widt
     T gpuOutput = hOutput[i];
     bool match = hipTextureSamplingVerify<T, filterMode, false>(gpuOutput, cpuExpected);
     if (!match) {
-      WARN("Mismatch at (level "
-            << level << ": " << i << " -> " << (i + offsetX)
-            << ") GPU output : " << getString(gpuOutput)
-            << " CPU expected: " << getString(cpuExpected) << ", data[" << i
-            << "]:" << getString(data[i]) << "\n");
+      WARN("Mismatch at (level " << level << ": " << i << " -> " << (i + offsetX)
+                                 << ") GPU output : " << getString(gpuOutput)
+                                 << " CPU expected: " << getString(cpuExpected) << ", data[" << i
+                                 << "]:" << getString(data[i]) << "\n");
       REQUIRE(false);
     } else if (printLog) {
-      WARN("Matching at (level "
-            << level << ": " << i << " -> " << (i + offsetX)
-            << ") GPU output : " << getString(gpuOutput)
-            << " CPU expected: " << getString(cpuExpected) << ", data[" << i
-            << "]:" << getString(data[i]) << "\n");
+      WARN("Matching at (level " << level << ": " << i << " -> " << (i + offsetX)
+                                 << ") GPU output : " << getString(gpuOutput)
+                                 << " CPU expected: " << getString(cpuExpected) << ", data[" << i
+                                 << "]:" << getString(data[i]) << "\n");
     }
   }
   HIP_CHECK(hipHostFree(hOutput));
@@ -208,12 +205,12 @@ static void testMipmapTextureObj(size_t width, float offsetX = 0.) {
        * is mistaken. To workaround this issue, we can initialize float pixels on a retively
        * smoothy surface.
        */
-      data.data[i] = T( float(i) * (float(i) - width + 1));
+      data.data[i] = T(float(i) * (float(i) - width + 1));
     } else {
       initVal(data.data[i]);  // Randomize initial values
     }
   }
-  mipmapData.push_back(data); // record level 0 data for later verification
+  mipmapData.push_back(data);  // record level 0 data for later verification
 
   // Get the max mipmap levels in terms of image size
   const unsigned int maxLevels = 1 + std::log2(width);
@@ -221,15 +218,14 @@ static void testMipmapTextureObj(size_t width, float offsetX = 0.) {
   // create mipmap array
   hipChannelFormatDesc desc = hipCreateChannelDesc<T>();
   hipMipmappedArray_t mipmapArray = nullptr;
-  hipExtent extent { width, 0, 0 };
+  hipExtent extent{width, 0, 0};
   HIP_CHECK(hipMallocMipmappedArray(&mipmapArray, &desc, extent, maxLevels));
 
   // Initialize level 0
   hipArray_t levelArray;
   HIP_CHECK(hipGetMipmappedArrayLevel(&levelArray, mipmapArray, 0));
   hipMemcpy3DParms copyParams{};
-  copyParams.srcPtr = make_hipPitchedPtr(data.data, width * sizeof(T),
-                                            width, 1);
+  copyParams.srcPtr = make_hipPitchedPtr(data.data, width * sizeof(T), width, 1);
   copyParams.dstArray = levelArray;
   copyParams.extent.width = width;
   copyParams.extent.height = 1;
@@ -240,20 +236,20 @@ static void testMipmapTextureObj(size_t width, float offsetX = 0.) {
   // Populate other mipmap levels based on level 0
   populateMipmaps<T, readMode, filterMode, addressMode>(mipmapArray, extent, mipmapData);
 
-  if(maxLevels != mipmapData.size()) {
+  if (maxLevels != mipmapData.size()) {
     fprintf(stderr, "maxLevels %u != mipmapData.size() %zu\n", maxLevels, mipmapData.size());
     REQUIRE(false);
   }
 
   hipResourceDesc resDescr;
   memset(&resDescr, 0, sizeof(hipResourceDesc));
-  resDescr.resType = hipResourceTypeMipmappedArray; // For mipmap texture
+  resDescr.resType = hipResourceTypeMipmappedArray;  // For mipmap texture
   resDescr.res.mipmap.mipmap = mipmapArray;
 
   hipTextureDesc texDescr;
   memset(&texDescr, 0, sizeof(hipTextureDesc));
 
-  texDescr.normalizedCoords = 1; // normalizedCoords must be 1 for mipmap array
+  texDescr.normalizedCoords = 1;  // normalizedCoords must be 1 for mipmap array
   texDescr.filterMode = filterMode;
   texDescr.mipmapFilterMode = filterMode;
   texDescr.addressMode[0] = addressMode;
@@ -266,8 +262,8 @@ static void testMipmapTextureObj(size_t width, float offsetX = 0.) {
   hipTextureObject_t texMipmap = nullptr;
   HIP_CHECK(hipCreateTextureObject(&texMipmap, &resDescr, &texDescr, NULL));
 
-  for(unsigned int level = 0; level < mipmapData.size(); level++){
-    mipmapLevelArray<T> &data = mipmapData.at(level);
+  for (unsigned int level = 0; level < mipmapData.size(); level++) {
+    mipmapLevelArray<T>& data = mipmapData.at(level);
 
     if constexpr (hipReadModeNormalizedFloat == readMode) {
       typedef decltype(getNormalizedFloatType(*data.data)) TargetType;
@@ -276,11 +272,11 @@ static void testMipmapTextureObj(size_t width, float offsetX = 0.) {
       for (unsigned int i = 0; i < data.e.width; i++) {
         fData[i] = getNormalizedFloatType<T>(data.data[i]);
       }
-      verifyMipmapLevel<TargetType, filterMode, addressMode>(
-          texMipmap, fData.data(), data.e.width, level, offsetX);
+      verifyMipmapLevel<TargetType, filterMode, addressMode>(texMipmap, fData.data(), data.e.width,
+                                                             level, offsetX);
     } else {  // hipReadModeElementType == readMode
-      verifyMipmapLevel<T, filterMode, addressMode>(
-          texMipmap, data.data, data.e.width, level, offsetX);
+      verifyMipmapLevel<T, filterMode, addressMode>(texMipmap, data.data, data.e.width, level,
+                                                    offsetX);
     }
     HIP_CHECK(hipHostFree(data.data));
     memset(&data, 0, sizeof(data));
@@ -309,11 +305,10 @@ static void testMipmapTextureObj(size_t width, float offsetX = 0.) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType", "",
-                   char, uchar, short, ushort, int, uint, float,
-                   char1, uchar1, short1, ushort1, int1, uint1, float1,
-                   char2, uchar2, short2, ushort2, int2, uint2, float2,
-                   char4, uchar4, short4, ushort4, int4, uint4, float4) {
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType", "", char, uchar,
+                   short, ushort, int, uint, float, char1, uchar1, short1, ushort1, int1, uint1,
+                   float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4, uchar4,
+                   short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
 #if __HIP_NO_IMAGE_SUPPORT
@@ -324,14 +319,14 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType", 
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 23") {
-    testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint,
-                         hipAddressModeClamp>(23, 0.49);
+    testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint, hipAddressModeClamp>(
+        23, 0.49);
   }
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 67") {
-    testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint,
-                         hipAddressModeClamp>(67, -0.3);
+    testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint, hipAddressModeClamp>(
+        67, -0.3);
   }
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModePoint, "
@@ -365,10 +360,8 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType", 
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloat", "",
-                   char,  uchar,  short,  ushort,
-                   char1, uchar1, short1, ushort1,
-                   char2, uchar2, short2, ushort2,
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloat", "", char, uchar,
+                   short, ushort, char1, uchar1, short1, ushort1, char2, uchar2, short2, ushort2,
                    char4, uchar4, short4, ushort4) {
   CHECK_IMAGE_SUPPORT
 

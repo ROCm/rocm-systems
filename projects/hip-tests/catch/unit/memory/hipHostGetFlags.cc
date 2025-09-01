@@ -86,7 +86,6 @@ inline void checkFlags(unsigned int expected, unsigned int obtained) {
 }
 
 TEST_CASE("Unit_hipHostGetFlags_flagCombos") {
-
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 

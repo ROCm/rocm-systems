@@ -166,10 +166,9 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = 0;
 
-  auto waitForStream = [&submitMarker,
-                         &eventWaitList](hip::Stream* stream) {
-    if (amd::Command *command = stream->getLastQueuedCommand(true)) {
-      amd::Event &event = command->event();
+  auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
+    if (amd::Command* command = stream->getLastQueuedCommand(true)) {
+      amd::Event& event = command->event();
       // Check HW status of the ROCcrl event.
       // Note: not all ROCclr modes support HW status
       bool ready = stream->device().IsHwEventReady(event);
@@ -196,10 +195,10 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
     auto activeQueues = blocking_stream->device().getActiveQueues();
     for (const auto& command : activeQueues) {
       hip::Stream* active_stream = static_cast<hip::Stream*>(command);
-      if (// Make sure it's a default stream
-        ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
-        // and it's not the current stream
-        (active_stream != blocking_stream)) {
+      if (  // Make sure it's a default stream
+          ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
+          // and it's not the current stream
+          (active_stream != blocking_stream)) {
         ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         // Get the last valid command
         waitForStream(active_stream);
@@ -230,13 +229,13 @@ void Device::AddStream(Stream* stream) {
 }
 
 // ================================================================================================
-void Device::RemoveStream(Stream* stream){
+void Device::RemoveStream(Stream* stream) {
   std::unique_lock lock(streamSetLock);
   streamSet.erase(stream);
 }
 
 // ================================================================================================
-bool Device::StreamExists(Stream* stream){
+bool Device::StreamExists(Stream* stream) {
   std::shared_lock lock(streamSetLock);
   if (streamSet.find(stream) != streamSet.end()) {
     return true;
@@ -250,7 +249,7 @@ void Device::destroyAllStreams() {
   {
     std::shared_lock lock(streamSetLock);
     for (auto& it : streamSet) {
-      if (it->Null() == false ) {
+      if (it->Null() == false) {
         toBeDeleted.push_back(it);
       }
     }
@@ -300,7 +299,8 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
 bool Device::StreamCaptureBlocking() {
   std::shared_lock lock(streamSetLock);
   for (auto& it : streamSet) {
-    if (it->GetCaptureStatus() == hipStreamCaptureStatusActive && it->Flags() != hipStreamNonBlocking) {
+    if (it->GetCaptureStatus() == hipStreamCaptureStatusActive &&
+        it->Flags() != hipStreamNonBlocking) {
       return true;
     }
   }
@@ -536,8 +536,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.cooperativeMultiDeviceUnmatchedBlockDim = info.cooperativeMultiDeviceGroups_;
   deviceProps.cooperativeMultiDeviceUnmatchedSharedMem = info.cooperativeMultiDeviceGroups_;
 
-  deviceProps.maxTexture1DLinear =
-      std::min(pixel_size_max * info.imageMaxBufferSize_, int32_max);
+  deviceProps.maxTexture1DLinear = std::min(pixel_size_max * info.imageMaxBufferSize_, int32_max);
   deviceProps.maxTexture1DMipmap = std::min(16 * info.imageMaxBufferSize_, int32_max);
   deviceProps.maxTexture1D = deviceProps.maxSurface1D = std::min(info.image1DMaxWidth_, int32_max);
   deviceProps.maxTexture2D[0] = deviceProps.maxSurface2D[0] =
@@ -771,22 +770,22 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
 
   std::string symbolString = symbol;
-  if(symbol == nullptr || symbolString == "" || pfn == nullptr){
+  if (symbol == nullptr || symbolString == "" || pfn == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (symbolString == "hipGetDeviceProperties"){
-    if (hipVersion >= 600){
+  if (symbolString == "hipGetDeviceProperties") {
+    if (hipVersion >= 600) {
       symbolString = "hipGetDevicePropertiesR0600";
     }
   } else if (symbolString == "hipChooseDevice") {
-    if (hipVersion >= 600){
+    if (hipVersion >= 600) {
       symbolString = "hipChooseDeviceR0600";
     }
   }
 
   void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
-  if (handle == nullptr){
+  if (handle == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

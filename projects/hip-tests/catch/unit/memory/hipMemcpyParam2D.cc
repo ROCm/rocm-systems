@@ -63,9 +63,7 @@ TEST_CASE("Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior") {
   }
 #endif
 
-  SECTION("Device to Device") {
-    Memcpy2DDtoDSyncBehavior(MemcpyParam2DAdapter<>(), false);
-  }
+  SECTION("Device to Device") { Memcpy2DDtoDSyncBehavior(MemcpyParam2DAdapter<>(), false); }
 
 #if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232
   SECTION("Host to Host") { Memcpy2DHtoHSyncBehavior(MemcpyParam2DAdapter<>(), true); }
@@ -191,7 +189,7 @@ TEST_CASE("Unit_hipMemcpyParam2D_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyParam2D_Capture") { 
+TEST_CASE("Unit_hipMemcpyParam2D_Capture") {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t cols = 128;

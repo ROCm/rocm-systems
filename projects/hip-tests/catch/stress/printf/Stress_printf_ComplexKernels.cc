@@ -38,8 +38,8 @@ struct printInfo {
   uint32_t printSizeinBytes, lineCount;
 };
 
-__device__ __host__ struct printInfo startPrint(uint32_t tid,
-                    uint32_t iterCount, uint32_t *a, uint32_t *b) {
+__device__ __host__ struct printInfo startPrint(uint32_t tid, uint32_t iterCount, uint32_t* a,
+                                                uint32_t* b) {
   uint32_t printSize = 0;
   uint32_t lineCount = 0;
   // The 2nd modulus operand is arbitrarily chosen as 7 below to
@@ -54,59 +54,47 @@ __device__ __host__ struct printInfo startPrint(uint32_t tid,
     if (0 == mod) {
       // Perform Vector Multiplication a(i)*b(i)
       // Print both tid and result
-      uiresult = a[tid]*b[tid];
-      printSize +=
-      printf("tid %u: Value of result=%u or %x\n",
-              tid, uiresult, uiresult);
+      uiresult = a[tid] * b[tid];
+      printSize += printf("tid %u: Value of result=%u or %x\n", tid, uiresult, uiresult);
       lineCount++;
     } else if (1 == mod) {
       // Perform Array Addition a(i) + b(i)
       // Print both tid and result
       uiresult = a[tid] + b[tid];
-      printSize +=
-      printf("tid %u: Value of result=%u or %x \n",
-              tid, uiresult, uiresult);
+      printSize += printf("tid %u: Value of result=%u or %x \n", tid, uiresult, uiresult);
       lineCount++;
     } else if (2 == mod) {
       // Perform Array Subtraction a(i) - b(i)
       // Print both tid and result (as both int, uint)
       iresult = a[tid] - b[tid];
-      printSize +=
-      printf("tid %u: Value of result=%d or %x\n",
-              tid, iresult, iresult);
+      printSize += printf("tid %u: Value of result=%d or %x\n", tid, iresult, iresult);
       lineCount++;
     } else if (3 == mod) {
       // Perform Sum of Squares a(i)*a(i) + b(i)*b(i)
       // Print both tid and result
-      uiresult = a[tid]*a[tid] + b[tid]*b[tid];
-      printSize +=
-      printf("tid %u: Value of result=%u or %x\n",
-             tid, uiresult, uiresult);
+      uiresult = a[tid] * a[tid] + b[tid] * b[tid];
+      printSize += printf("tid %u: Value of result=%u or %x\n", tid, uiresult, uiresult);
       lineCount++;
     } else if (4 == mod) {
       // Perform (a(i)*a(i) + b(i)*b(i))/a(i)*b(i)
       // Print both tid and result (in float upto 2 decimal precision)
-      fresult = (a[tid]*a[tid] + b[tid]*b[tid])/(a[tid]*b[tid]);
+      fresult = (a[tid] * a[tid] + b[tid] * b[tid]) / (a[tid] * b[tid]);
       printSize +=
-      printf("tid %u: Value of result[%d] = %.2f or %.2e\n",
-             tid, tid, fresult, fresult);
+          printf("tid %u: Value of result[%d] = %.2f or %.2e\n", tid, tid, fresult, fresult);
       lineCount++;
     } else if (5 == mod) {
       // Perform  (a(i)*a(i) - b(i)*b(i))/a(i)*b(i)
       // Print both tid and result (in float upto 4 decimal precision)
-      fresult = (a[tid]*a[tid] - b[tid]*b[tid])/(a[tid]*b[tid]);
+      fresult = (a[tid] * a[tid] - b[tid] * b[tid]) / (a[tid] * b[tid]);
       printSize +=
-      printf("tid %u: Value of result[%d] = %.4f or %.4e \n",
-             tid, tid, fresult, fresult);
+          printf("tid %u: Value of result[%d] = %.4f or %.4e \n", tid, tid, fresult, fresult);
       lineCount++;
     } else if (6 == mod) {
       // Perform  (a(i)*a(i) + b(i)*b(i))/(a(i)*a(i) - b(i)*b(i))
       // Print both tid and result (in float upto 6 decimal precision)
-      fresult = (a[tid]*a[tid] + b[tid]*b[tid])/
-                (a[tid]*a[tid] - b[tid]*b[tid]);
+      fresult = (a[tid] * a[tid] + b[tid] * b[tid]) / (a[tid] * a[tid] - b[tid] * b[tid]);
       printSize +=
-      printf("tid %u: Value of result[%d] = %.6f or %.6e \n",
-             tid, tid, fresult, fresult);
+          printf("tid %u: Value of result[%d] = %.6f or %.6e \n", tid, tid, fresult, fresult);
       lineCount++;
     }
     // Print a random character string of variable size
@@ -123,47 +111,37 @@ __device__ __host__ struct printInfo startPrint(uint32_t tid,
       } else if (3 == imod) {
         msg = "mcropkaA234dmelmfhja44ndalomkfokdMDFK328";
       } else if (4 == imod) {
-        msg =
-        "udnekc8939MDkdnjj3knsdlmnekdlgJNls328419i905409dfm";
+        msg = "udnekc8939MDkdnjj3knsdlmnekdlgJNls328419i905409dfm";
       } else if (5 == imod) {
-        msg =
-        "lfjweknm4349u34sdlk09j3mAADDSDkeffe575675fdvfLKMWMORMFREKLkl";
+        msg = "lfjweknm4349u34sdlk09j3mAADDSDkeffe575675fdvfLKMWMORMFREKLkl";
       }
       printSize += printf("tid %u: %s imod = %d \n", tid, msg, imod);
       lineCount++;
     }
     // Print a long string with data
-    msg =
-    "jheku83290dnmnd##9u9BJKHFJLKsMMMMdkejwejjj232indnfdmsnndnsdn****bsXxZz";
+    msg = "jheku83290dnmnd##9u9BJKHFJLKsMMMMdkejwejjj232indnfdmsnndnsdn****bsXxZz";
     float pi = 3.141592;
     uint32_t unum = 123456789;
     int32_t inum = -123456789;
-    printSize +=
-    printf("%s,%d,%s,%u,%s,%x,%s,%f,%s,%e\n",
-    msg, inum, msg, unum, msg, unum, msg, pi, msg, pi);
+    printSize += printf("%s,%d,%s,%u,%s,%x,%s,%f,%s,%e\n", msg, inum, msg, unum, msg, unum, msg, pi,
+                        msg, pi);
     lineCount++;
     // Print different data types using different specifiers
     float fmaxvalue = std::numeric_limits<float>::max();
     float fminvalue = std::numeric_limits<float>::min();
     double dmaxvalue = std::numeric_limits<double>::max();
     double dminvalue = std::numeric_limits<double>::min();
-    printSize +=
-    printf("%f, %f, %e, %e \n", fmaxvalue, fminvalue, fmaxvalue, fminvalue);
-    printSize +=
-    printf("%f, %f, %e, %e \n", dmaxvalue, dminvalue, dmaxvalue, dminvalue);
-    printSize +=
-    printf("%a, %a, %A, %A \n", fmaxvalue, fminvalue, fmaxvalue, fminvalue);
-    printSize +=
-    printf("%a, %a, %A, %A \n", dmaxvalue, dminvalue, dmaxvalue, dminvalue);
-    lineCount+=4;
+    printSize += printf("%f, %f, %e, %e \n", fmaxvalue, fminvalue, fmaxvalue, fminvalue);
+    printSize += printf("%f, %f, %e, %e \n", dmaxvalue, dminvalue, dmaxvalue, dminvalue);
+    printSize += printf("%a, %a, %A, %A \n", fmaxvalue, fminvalue, fmaxvalue, fminvalue);
+    printSize += printf("%a, %a, %A, %A \n", dmaxvalue, dminvalue, dmaxvalue, dminvalue);
+    lineCount += 4;
     size_t size_tmaxvalue = std::numeric_limits<size_t>::max();
     size_t size_tminvalue = std::numeric_limits<size_t>::min();
     long long llmaxvalue = std::numeric_limits<long long>::max();
     long long llminvalue = std::numeric_limits<long long>::min();
-    unsigned long long ullmaxvalue =
-                     std::numeric_limits<unsigned long long>::max();
-    unsigned long long ullminvalue =
-                     std::numeric_limits<unsigned long long>::min();
+    unsigned long long ullmaxvalue = std::numeric_limits<unsigned long long>::max();
+    unsigned long long ullminvalue = std::numeric_limits<unsigned long long>::min();
     long lmaxvalue = std::numeric_limits<long>::max();
     long lminvalue = std::numeric_limits<long>::min();
     unsigned long ulmaxvalue = std::numeric_limits<unsigned long>::max();
@@ -180,77 +158,55 @@ __device__ __host__ struct printInfo startPrint(uint32_t tid,
     int32_t iminvalue = std::numeric_limits<int32_t>::min();
     uint32_t uimaxvalue = std::numeric_limits<uint32_t>::max();
     uint32_t uiminvalue = std::numeric_limits<uint32_t>::min();
-    printSize +=
-    printf("%zu, %zu, %lli, %lli, %llu, %llu, %li, %li, %lu, %lu\n",
-          size_tmaxvalue, size_tminvalue, llmaxvalue, llminvalue,
-          ullmaxvalue, ullminvalue, lmaxvalue, lminvalue,
-          ulmaxvalue, ulminvalue);
-    printSize +=
-    printf("%zx, %zx, %llx, %llx, %llx, %llx, %lx, %lx, %lx, %lx\n",
-          size_tmaxvalue, size_tminvalue, llmaxvalue, llminvalue,
-          ullmaxvalue, ullminvalue, lmaxvalue, lminvalue,
-          ulmaxvalue, ulminvalue);
-    printSize +=
-    printf("%zX, %zX, %llX, %llX, %llX, %llX, %lX, %lX, %lX, %lX\n",
-          size_tmaxvalue, size_tminvalue, llmaxvalue, llminvalue,
-          ullmaxvalue, ullminvalue, lmaxvalue, lminvalue,
-          ulmaxvalue, ulminvalue);
-    printSize +=
-    printf("%zo, %zo, %llo, %llo, %llo, %llo, %lo, %lo, %lo, %lo\n",
-          size_tmaxvalue, size_tminvalue, llmaxvalue, llminvalue,
-          ullmaxvalue, ullminvalue, lmaxvalue, lminvalue,
-          ulmaxvalue, ulminvalue);
-    printSize +=
-    printf("%hd, %hd, %hu, %hu, %hhd, %hhd, %hhu, %hhu, %d, %d, %u, %u\n",
-         smaxvalue, sminvalue, usmaxvalue, usminvalue,
-         cmaxvalue, cminvalue, ucmaxvalue, ucminvalue,
-         imaxvalue, iminvalue, uimaxvalue, uiminvalue);
-    printSize +=
-    printf("%hx, %hx, %hx, %hx, %hhx, %hhx, %hhx, %hhx, %x, %x, %x, %x\n",
-         smaxvalue, sminvalue, usmaxvalue, usminvalue,
-         cmaxvalue, cminvalue, ucmaxvalue, ucminvalue,
-         imaxvalue, iminvalue, uimaxvalue, uiminvalue);
-    printSize +=
-    printf("%hX, %hX, %hX, %hX, %hhX, %hhX, %hhX, %hhX, %X, %X, %X, %X\n",
-         smaxvalue, sminvalue, usmaxvalue, usminvalue,
-         cmaxvalue, cminvalue, ucmaxvalue, ucminvalue,
-         imaxvalue, iminvalue, uimaxvalue, uiminvalue);
-    printSize +=
-    printf("%ho, %ho, %ho, %ho, %hho, %hho, %hho, %hho, %o, %o, %o, %o\n",
-         smaxvalue, sminvalue, usmaxvalue, usminvalue,
-         cmaxvalue, cminvalue, ucmaxvalue, ucminvalue,
-         imaxvalue, iminvalue, uimaxvalue, uiminvalue);
-    printSize +=
-    printf("%c, %c, %c, %c\n", cmaxvalue, cminvalue, ucmaxvalue, ucminvalue);
-    lineCount+=9;
+    printSize += printf("%zu, %zu, %lli, %lli, %llu, %llu, %li, %li, %lu, %lu\n", size_tmaxvalue,
+                        size_tminvalue, llmaxvalue, llminvalue, ullmaxvalue, ullminvalue, lmaxvalue,
+                        lminvalue, ulmaxvalue, ulminvalue);
+    printSize += printf("%zx, %zx, %llx, %llx, %llx, %llx, %lx, %lx, %lx, %lx\n", size_tmaxvalue,
+                        size_tminvalue, llmaxvalue, llminvalue, ullmaxvalue, ullminvalue, lmaxvalue,
+                        lminvalue, ulmaxvalue, ulminvalue);
+    printSize += printf("%zX, %zX, %llX, %llX, %llX, %llX, %lX, %lX, %lX, %lX\n", size_tmaxvalue,
+                        size_tminvalue, llmaxvalue, llminvalue, ullmaxvalue, ullminvalue, lmaxvalue,
+                        lminvalue, ulmaxvalue, ulminvalue);
+    printSize += printf("%zo, %zo, %llo, %llo, %llo, %llo, %lo, %lo, %lo, %lo\n", size_tmaxvalue,
+                        size_tminvalue, llmaxvalue, llminvalue, ullmaxvalue, ullminvalue, lmaxvalue,
+                        lminvalue, ulmaxvalue, ulminvalue);
+    printSize += printf("%hd, %hd, %hu, %hu, %hhd, %hhd, %hhu, %hhu, %d, %d, %u, %u\n", smaxvalue,
+                        sminvalue, usmaxvalue, usminvalue, cmaxvalue, cminvalue, ucmaxvalue,
+                        ucminvalue, imaxvalue, iminvalue, uimaxvalue, uiminvalue);
+    printSize += printf("%hx, %hx, %hx, %hx, %hhx, %hhx, %hhx, %hhx, %x, %x, %x, %x\n", smaxvalue,
+                        sminvalue, usmaxvalue, usminvalue, cmaxvalue, cminvalue, ucmaxvalue,
+                        ucminvalue, imaxvalue, iminvalue, uimaxvalue, uiminvalue);
+    printSize += printf("%hX, %hX, %hX, %hX, %hhX, %hhX, %hhX, %hhX, %X, %X, %X, %X\n", smaxvalue,
+                        sminvalue, usmaxvalue, usminvalue, cmaxvalue, cminvalue, ucmaxvalue,
+                        ucminvalue, imaxvalue, iminvalue, uimaxvalue, uiminvalue);
+    printSize += printf("%ho, %ho, %ho, %ho, %hho, %hho, %hho, %hho, %o, %o, %o, %o\n", smaxvalue,
+                        sminvalue, usmaxvalue, usminvalue, cmaxvalue, cminvalue, ucmaxvalue,
+                        ucminvalue, imaxvalue, iminvalue, uimaxvalue, uiminvalue);
+    printSize += printf("%c, %c, %c, %c\n", cmaxvalue, cminvalue, ucmaxvalue, ucminvalue);
+    lineCount += 9;
   }
   struct printInfo pInfo = {printSize, lineCount};
   return pInfo;
 }
 // This kernel is launched only in X dimension
-__global__ void kernel_complex_opX(uint32_t *a, uint32_t *b,
-                                  uint32_t iterCount) {
+__global__ void kernel_complex_opX(uint32_t* a, uint32_t* b, uint32_t iterCount) {
   uint32_t tid = threadIdx.x + blockIdx.x * blockDim.x;
   startPrint(tid, iterCount, a, b);
 }
 // This kernel is launched only in Y dimension
-__global__ void kernel_complex_opY(uint32_t *a, uint32_t *b,
-                                  uint32_t iterCount) {
+__global__ void kernel_complex_opY(uint32_t* a, uint32_t* b, uint32_t iterCount) {
   uint32_t tid = threadIdx.y + blockIdx.y * blockDim.y;
   startPrint(tid, iterCount, a, b);
 }
 // This kernel is launched only in Z dimension
-__global__ void kernel_complex_opZ(uint32_t *a, uint32_t *b,
-                                  uint32_t iterCount) {
+__global__ void kernel_complex_opZ(uint32_t* a, uint32_t* b, uint32_t iterCount) {
   uint32_t tid = threadIdx.z + blockIdx.z * blockDim.z;
   startPrint(tid, iterCount, a, b);
 }
 #ifdef __linux__
 // Performs printf stress test on a single GPU using multiple streams.
-bool test_printf_multistream(uint32_t num_blocks,
-                             uint32_t threads_per_block,
-                             uint32_t iterCount) {
-  uint32_t buffsize = num_blocks*threads_per_block;
+bool test_printf_multistream(uint32_t num_blocks, uint32_t threads_per_block, uint32_t iterCount) {
+  uint32_t buffsize = num_blocks * threads_per_block;
   size_t actualFileSize = 0;
   uint32_t totalActualLinecount = 0;
   uint32_t *Ah, *Bh;
@@ -261,28 +217,23 @@ bool test_printf_multistream(uint32_t num_blocks,
     Ah[i] = i + 1;
     Bh[i] = buffsize - i;
   }
-  HIP_CHECK(hipMalloc(&Ad, buffsize*sizeof(uint32_t)));
-  HIP_CHECK(hipMalloc(&Bd, buffsize*sizeof(uint32_t)));
-  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize*sizeof(uint32_t),
-          hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize*sizeof(uint32_t),
-           hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&Bd, buffsize * sizeof(uint32_t)));
+  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
   // DO NOT PUT ANY PRINTF WITHIN THIS BLOCK OF CODE
   {
     CaptureStream captured(stdout);
     hipStream_t stream[NUM_STREAM];
     for (int i = 0; i < NUM_STREAM; i++) {
       HIP_CHECK(hipStreamCreate(&stream[i]));
-      hipLaunchKernelGGL(kernel_complex_opX, dim3(num_blocks, 1, 1),
-                         dim3(threads_per_block, 1, 1),
+      hipLaunchKernelGGL(kernel_complex_opX, dim3(num_blocks, 1, 1), dim3(threads_per_block, 1, 1),
                          0, stream[i], Ad, Bd, iterCount);
       HIP_CHECK(hipGetLastError());
-      hipLaunchKernelGGL(kernel_complex_opY, dim3(1, num_blocks, 1),
-                         dim3(1, threads_per_block, 1),
+      hipLaunchKernelGGL(kernel_complex_opY, dim3(1, num_blocks, 1), dim3(1, threads_per_block, 1),
                          0, stream[i], Ad, Bd, iterCount);
       HIP_CHECK(hipGetLastError());
-      hipLaunchKernelGGL(kernel_complex_opZ, dim3(1, 1, num_blocks),
-                         dim3(1, 1, threads_per_block),
+      hipLaunchKernelGGL(kernel_complex_opZ, dim3(1, 1, num_blocks), dim3(1, 1, threads_per_block),
                          0, stream[i], Ad, Bd, iterCount);
       HIP_CHECK(hipGetLastError());
     }
@@ -291,7 +242,7 @@ bool test_printf_multistream(uint32_t num_blocks,
       HIP_CHECK(hipStreamDestroy(stream[i]));
     }
     std::ifstream CapturedData = captured.getCapturedData();
-    char *buffer = new char[CHUNK_SIZE];
+    char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
       CapturedData.getline(buffer, CHUNK_SIZE);
       totalActualLinecount++;
@@ -328,28 +279,22 @@ bool test_printf_multistream(uint32_t num_blocks,
       }
     }
   }
-  printf("estimatedPrintSize = %zu, actualFileSize = %zu\n",
-         estimatedPrintSize, actualFileSize);
-  printf("estimatedLinesPrinted = %u, actualLinesPrinted = %u\n",
-         lop, totalActualLinecount-1);
+  printf("estimatedPrintSize = %zu, actualFileSize = %zu\n", estimatedPrintSize, actualFileSize);
+  printf("estimatedLinesPrinted = %u, actualLinesPrinted = %u\n", lop, totalActualLinecount - 1);
   HIP_CHECK(hipFree(Bd));
   HIP_CHECK(hipFree(Ad));
   delete[] Bh;
   delete[] Ah;
-  if ((estimatedPrintSize != actualFileSize)||
-     (lop != (totalActualLinecount-1))) {
+  if ((estimatedPrintSize != actualFileSize) || (lop != (totalActualLinecount - 1))) {
     return false;
   }
   return true;
 }
 
-bool test_printf_multigpu(int gpu,
-                          uint32_t num_blocks,
-                          uint32_t threads_per_block,
-                          uint32_t iterCount,
-                          size_t *actualFileSize,
-                          uint32_t *totalActualLinecount) {
-  uint32_t buffsize = num_blocks*threads_per_block;
+bool test_printf_multigpu(int gpu, uint32_t num_blocks, uint32_t threads_per_block,
+                          uint32_t iterCount, size_t* actualFileSize,
+                          uint32_t* totalActualLinecount) {
+  uint32_t buffsize = num_blocks * threads_per_block;
   uint32_t *Ah, *Bh;
   uint32_t *Ad, *Bd;
   HIP_CHECK(hipSetDevice(gpu));
@@ -359,30 +304,25 @@ bool test_printf_multigpu(int gpu,
     Ah[i] = i + 1;
     Bh[i] = buffsize - i;
   }
-  HIP_CHECK(hipMalloc(&Ad, buffsize*sizeof(uint32_t)));
-  HIP_CHECK(hipMalloc(&Bd, buffsize*sizeof(uint32_t)));
-  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize*sizeof(uint32_t),
-           hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize*sizeof(uint32_t),
-           hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&Bd, buffsize * sizeof(uint32_t)));
+  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
   // DO NOT PUT ANY PRINTF WITHIN THIS BLOCK OF CODE
   {
     CaptureStream captured(stdout);
-    hipLaunchKernelGGL(kernel_complex_opX, dim3(num_blocks, 1, 1),
-                       dim3(threads_per_block, 1, 1),
-                       0, 0, Ad, Bd, iterCount);
+    hipLaunchKernelGGL(kernel_complex_opX, dim3(num_blocks, 1, 1), dim3(threads_per_block, 1, 1), 0,
+                       0, Ad, Bd, iterCount);
     HIP_CHECK(hipGetLastError());
-    hipLaunchKernelGGL(kernel_complex_opY, dim3(1, num_blocks, 1),
-                       dim3(1, threads_per_block, 1),
-                       0, 0, Ad, Bd, iterCount);
+    hipLaunchKernelGGL(kernel_complex_opY, dim3(1, num_blocks, 1), dim3(1, threads_per_block, 1), 0,
+                       0, Ad, Bd, iterCount);
     HIP_CHECK(hipGetLastError());
-    hipLaunchKernelGGL(kernel_complex_opZ, dim3(1, 1, num_blocks),
-                       dim3(1, 1, threads_per_block),
-                       0, 0, Ad, Bd, iterCount);
+    hipLaunchKernelGGL(kernel_complex_opZ, dim3(1, 1, num_blocks), dim3(1, 1, threads_per_block), 0,
+                       0, Ad, Bd, iterCount);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     std::ifstream CapturedData = captured.getCapturedData();
-    char *buffer = new char[CHUNK_SIZE];
+    char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
       CapturedData.getline(buffer, CHUNK_SIZE);
       *totalActualLinecount += 1;
@@ -405,16 +345,14 @@ bool test_printf_multigpu(int gpu,
 }
 
 // Performs printf stress test on all GPUs present in the system.
-bool testPrintfMultGPU(int numOfGPUs,
-                       uint32_t num_blocks,
-                       uint32_t threads_per_block,
+bool testPrintfMultGPU(int numOfGPUs, uint32_t num_blocks, uint32_t threads_per_block,
                        uint32_t iterCount) {
-  uint32_t buffsize = num_blocks*threads_per_block;
+  uint32_t buffsize = num_blocks * threads_per_block;
   size_t actualFileSize = 0;
   uint32_t totalActualLinecount = 0;
   for (int gpu = 0; gpu < numOfGPUs; gpu++) {
-    test_printf_multigpu(gpu, num_blocks, threads_per_block,
-            iterCount, &actualFileSize, &totalActualLinecount);
+    test_printf_multigpu(gpu, num_blocks, threads_per_block, iterCount, &actualFileSize,
+                         &totalActualLinecount);
   }
   struct printInfo pInfo;
   size_t estimatedPrintSize = 0;
@@ -449,12 +387,9 @@ bool testPrintfMultGPU(int numOfGPUs,
   }
   delete[] Bh;
   delete[] Ah;
-  printf("estimatedPrintSize = %zu, actualFileSize = %zu\n",
-         estimatedPrintSize, actualFileSize);
-  printf("estimatedLinesPrinted = %u, actualLinesPrinted = %u\n",
-         lop, totalActualLinecount);
-  if ((estimatedPrintSize != actualFileSize)||
-     (lop != totalActualLinecount)) {
+  printf("estimatedPrintSize = %zu, actualFileSize = %zu\n", estimatedPrintSize, actualFileSize);
+  printf("estimatedLinesPrinted = %u, actualLinesPrinted = %u\n", lop, totalActualLinecount);
+  if ((estimatedPrintSize != actualFileSize) || (lop != totalActualLinecount)) {
     return false;
   }
   return true;
@@ -473,11 +408,10 @@ TEST_CASE("Stress_printf_ComplexKernelMultStream") {
   // num_blocks is calculated using an approximate formula to arrive at
   // the required print data quantity. CONST_WEIGHTING_FACT1 and
   // CONST_WEIGHTING_FACT2 are empirically determined.
-  uint32_t num_blocks = (MAX_GRID_SIZE*print_limit)/CONST_WEIGHTING_FACT1
-                         - (CONST_WEIGHTING_FACT2*print_limit);
+  uint32_t num_blocks =
+      (MAX_GRID_SIZE * print_limit) / CONST_WEIGHTING_FACT1 - (CONST_WEIGHTING_FACT2 * print_limit);
   TestPassed =
-  hipPrintfStressTest::test_printf_multistream(num_blocks, threads_per_block,
-                                              iterCount);
+      hipPrintfStressTest::test_printf_multistream(num_blocks, threads_per_block, iterCount);
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStream completed \n");
 #else
@@ -502,13 +436,12 @@ TEST_CASE("Stress_printf_ComplexKernelMultStreamMultGpu") {
   // num_blocks is calculated using an approximate formula to arrive at
   // the required print data quantity. CONST_WEIGHTING_FACT1 and
   // CONST_WEIGHTING_FACT2 are empirically determined.
-  uint32_t num_blocks =
-  (((MAX_GRID_SIZE*print_limit)/CONST_WEIGHTING_FACT1 -
-  (CONST_WEIGHTING_FACT2*print_limit))*4)/numOfGPUs;
+  uint32_t num_blocks = (((MAX_GRID_SIZE * print_limit) / CONST_WEIGHTING_FACT1 -
+                          (CONST_WEIGHTING_FACT2 * print_limit)) *
+                         4) /
+                        numOfGPUs;
   TestPassed =
-  hipPrintfStressTest::testPrintfMultGPU(numOfGPUs, num_blocks,
-                                         threads_per_block,
-                                         iterCount);
+      hipPrintfStressTest::testPrintfMultGPU(numOfGPUs, num_blocks, threads_per_block, iterCount);
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu end \n");
 #else

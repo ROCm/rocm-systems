@@ -29,8 +29,7 @@ class OCLPerfSHA256 : public OCLTestImp {
   virtual ~OCLPerfSHA256();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 

@@ -110,6 +110,6 @@ TEST_CASE("Unit_hipMemMapArrayAsync_Positive_Basic") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

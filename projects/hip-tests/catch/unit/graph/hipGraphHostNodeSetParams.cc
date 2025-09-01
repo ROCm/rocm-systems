@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipGraphHostNodeSetParams_Negative") {
     HIP_CHECK_ERROR(hipGraphHostNodeSetParams(hostNode, &unintParams), hipErrorInvalidValue);
   }
 
-#if HT_NVIDIA // segfaults on AMD
+#if HT_NVIDIA  // segfaults on AMD
   SECTION("node is not a host node") {
     hipGraphNode_t empty_node;
     HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));

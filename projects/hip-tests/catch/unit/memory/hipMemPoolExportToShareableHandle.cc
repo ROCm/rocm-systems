@@ -33,7 +33,7 @@ THE SOFTWARE.
 
 #include "mempool_common.hh"
 
-constexpr int DATA_SIZE = 1024*1024;
+constexpr int DATA_SIZE = 1024 * 1024;
 constexpr size_t byte_size = DATA_SIZE * sizeof(int);
 
 /**
@@ -48,12 +48,11 @@ static __global__ void square_kernel(int* Buff) {
 /**
  Fill with input and expected output data.
  */
-static void fill_data(std::vector<int> &A_h, std::vector<int> &B_h,
-                      std::vector<int> &C_h) {
+static void fill_data(std::vector<int>& A_h, std::vector<int>& B_h, std::vector<int>& C_h) {
   for (int i = 0; i < DATA_SIZE; i++) {
     A_h[i] = i % 1024;
     B_h[i] = 0;
-    C_h[i] = A_h[i]*A_h[i];
+    C_h[i] = A_h[i] * A_h[i];
   }
 }
 
@@ -78,8 +77,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_SameProc") {
   fill_data(A_h, B_h, C_h);
   hipMemPoolProps pool_props{};
   hipMemPool_t mempool, mempoolImp;
-  checkMempoolSupported(0)
-  HIP_CHECK(hipSetDevice(0));
+  checkMempoolSupported(0) HIP_CHECK(hipSetDevice(0));
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   // Create mempool
@@ -89,28 +87,24 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_SameProc") {
   pool_props.handleTypes = hipMemHandleTypePosixFileDescriptor;
   HIP_CHECK(hipMemPoolCreate(&mempool, &pool_props));
   // Allocate device memory from mempool
-  int *A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-                              byte_size, mempool, stream));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size,
-                           hipMemcpyHostToDevice, stream));
+  int* A_d;
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   // Export mempool
-  HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle,
-                         mempool, hipMemHandleTypePosixFileDescriptor, 0));
+  HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle, mempool,
+                                              hipMemHandleTypePosixFileDescriptor, 0));
   // Export A_d
   HIP_CHECK(hipMemPoolExportPointer(&ptrExp, A_d));
   // Import mempool
-  HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp,
-                              (void*)sharedHandle,
-                              hipMemHandleTypePosixFileDescriptor, 0));
+  HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)sharedHandle,
+                                                hipMemHandleTypePosixFileDescriptor, 0));
   // Import and use pointer
-  void *ptrImp;
+  void* ptrImp;
   HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-  square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK),
-                  dim3(THREADS_PER_BLOCK), 0, stream>>>((int*)ptrImp);
-  HIP_CHECK(hipMemcpyAsync(B_h.data(), ptrImp, byte_size,
-                           hipMemcpyDeviceToHost, stream));
+  square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      (int*)ptrImp);
+  HIP_CHECK(hipMemcpyAsync(B_h.data(), ptrImp, byte_size, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
@@ -161,12 +155,12 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl") {
     // Import mempool
     hipMemPool_t mempoolImp;
     HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
-                                hipMemHandleTypePosixFileDescriptor, 0));
+                                                  hipMemHandleTypePosixFileDescriptor, 0));
     // Import and use pointer
-    void *ptrImp;
+    void* ptrImp;
     HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-    square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK),
-                    dim3(THREADS_PER_BLOCK), 0, 0>>>((int*)ptrImp);
+    square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+        (int*)ptrImp);
     HIP_CHECK(hipStreamSynchronize(0));
     // Import and use pointer
     REQUIRE(close(fd[0]) == 0);
@@ -179,8 +173,8 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl") {
 
     hipMemPoolProps pool_props{};
     checkMempoolSupported(0)
-    // Set property
-    hipMemPool_t mempool;
+        // Set property
+        hipMemPool_t mempool;
     pool_props.allocType = hipMemAllocationTypePinned;
     pool_props.location.id = 0;
     pool_props.location.type = hipMemLocationTypeDevice;
@@ -188,16 +182,14 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl") {
     HIP_CHECK(hipMemPoolCreate(&mempool, &pool_props));
     // Export mempool
     hipShareableHdl shdl;
-    HIP_CHECK(hipMemPoolExportToShareableHandle(&shdl, mempool,
-                                hipMemHandleTypePosixFileDescriptor, 0));
+    HIP_CHECK(
+        hipMemPoolExportToShareableHandle(&shdl, mempool, hipMemHandleTypePosixFileDescriptor, 0));
     // Allocate device memory from mempool
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    int *A_d;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-                                byte_size, mempool, stream));
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size,
-                             hipMemcpyHostToDevice, stream));
+    int* A_d;
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     hipMemPoolPtrExportData ptrExp;
     // Export A_d
@@ -214,8 +206,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl") {
     int status;
     REQUIRE(wait(&status) >= 0);
     REQUIRE(status == 0);
-    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size,
-                             hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size, hipMemcpyDeviceToHost, stream));
     // Free all resources
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -268,7 +259,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess") {
     // Import mempool
     hipMemPool_t mempoolImp;
     HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
-                                hipMemHandleTypePosixFileDescriptor, 0));
+                                                  hipMemHandleTypePosixFileDescriptor, 0));
     // Get and validate access for all devices
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -291,8 +282,8 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess") {
 
     hipMemPoolProps pool_props{};
     checkMempoolSupported(0)
-    // Set property
-    hipMemPool_t mempool;
+        // Set property
+        hipMemPool_t mempool;
     pool_props.allocType = hipMemAllocationTypePinned;
     pool_props.location.id = 0;
     pool_props.location.type = hipMemLocationTypeDevice;
@@ -302,8 +293,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess") {
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     for (int dev = 0; dev < numDevices; dev++) {
-      checkMempoolSupported(dev)
-      hipMemAccessDesc accessDesc;
+      checkMempoolSupported(dev) hipMemAccessDesc accessDesc;
       accessDesc.location.type = hipMemLocationTypeDevice;
       accessDesc.location.id = dev;
       accessDesc.flags = hipMemAccessFlagsProtReadWrite;
@@ -311,8 +301,8 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess") {
     }
     // Export mempool
     hipShareableHdl shdl;
-    HIP_CHECK(hipMemPoolExportToShareableHandle(&shdl, mempool,
-                                hipMemHandleTypePosixFileDescriptor, 0));
+    HIP_CHECK(
+        hipMemPoolExportToShareableHandle(&shdl, mempool, hipMemHandleTypePosixFileDescriptor, 0));
     // Create the socket for communication as Server
     ipcSocketCom sockObj(true);
     // Signal child process that socket is ready
@@ -377,12 +367,12 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl") {
       // Import mempool
       hipMemPool_t mempoolImp;
       HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)shdl,
-                                    hipMemHandleTypePosixFileDescriptor, 0));
+                                                    hipMemHandleTypePosixFileDescriptor, 0));
       // Import and use pointer
-      void *ptrImp;
+      void* ptrImp;
       HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-      square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK),
-                      dim3(THREADS_PER_BLOCK), 0, 0>>>((int*)ptrImp);
+      square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+          (int*)ptrImp);
       HIP_CHECK(hipStreamSynchronize(0));
       REQUIRE(close(fd[0]) == 0);
       REQUIRE(close(fdSig[1]) == 0);
@@ -406,8 +396,8 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl") {
 
     hipMemPoolProps pool_props{};
     checkMempoolSupported(0)
-    // Set property
-    hipMemPool_t mempool;
+        // Set property
+        hipMemPool_t mempool;
     pool_props.allocType = hipMemAllocationTypePinned;
     pool_props.location.id = 0;
     pool_props.location.type = hipMemLocationTypeDevice;
@@ -415,16 +405,14 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl") {
     HIP_CHECK(hipMemPoolCreate(&mempool, &pool_props));
     // Export mempool
     hipShareableHdl shdl;
-    HIP_CHECK(hipMemPoolExportToShareableHandle(&shdl, mempool,
-                                hipMemHandleTypePosixFileDescriptor, 0));
+    HIP_CHECK(
+        hipMemPoolExportToShareableHandle(&shdl, mempool, hipMemHandleTypePosixFileDescriptor, 0));
     // Allocate device memory from mempool
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    int *A_d;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-                                byte_size, mempool, stream));
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size,
-                             hipMemcpyHostToDevice, stream));
+    int* A_d;
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     hipMemPoolPtrExportData ptrExp;
     // Export A_d
@@ -442,8 +430,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl") {
     int status;
     REQUIRE(wait(&status) >= 0);
     REQUIRE(status == 0);
-    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size,
-                             hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size, hipMemcpyDeviceToHost, stream));
     // Free all resources
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -474,8 +461,8 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_Negative") {
   hipMemPool_t mempoolPfd, mempoolwoPfd;
   checkMempoolSupported(0)
 
-  // Create mempool with Posix File Descriptor
-  pool_props.allocType = hipMemAllocationTypePinned;
+      // Create mempool with Posix File Descriptor
+      pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
   pool_props.handleTypes = hipMemHandleTypePosixFileDescriptor;
@@ -488,23 +475,23 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_Negative") {
   pool_props.handleTypes = hipMemHandleTypeNone;
   HIP_CHECK(hipMemPoolCreate(&mempoolwoPfd, &pool_props));
   SECTION("Passing nullptr as handle") {
-    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(nullptr,
-                    mempoolPfd, hipMemHandleTypePosixFileDescriptor, 0),
+    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(nullptr, mempoolPfd,
+                                                      hipMemHandleTypePosixFileDescriptor, 0),
                     hipErrorInvalidValue);
   }
   SECTION("Passing nullptr as mempool") {
-    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle,
-                    nullptr, hipMemHandleTypePosixFileDescriptor, 0),
+    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle, nullptr,
+                                                      hipMemHandleTypePosixFileDescriptor, 0),
                     hipErrorInvalidValue);
   }
   SECTION("Passing invalid handle type") {
-    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle,
-                    mempoolPfd, hipMemHandleTypeNone, 0),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemPoolExportToShareableHandle(&sharedHandle, mempoolPfd, hipMemHandleTypeNone, 0),
+        hipErrorInvalidValue);
   }
   SECTION("Passing mempool without file descriptor") {
-    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle,
-                    mempoolwoPfd, hipMemHandleTypePosixFileDescriptor, 0),
+    HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle, mempoolwoPfd,
+                                                      hipMemHandleTypePosixFileDescriptor, 0),
                     hipErrorInvalidValue);
   }
   HIP_CHECK(hipMemPoolDestroy(mempoolPfd));
@@ -512,6 +499,6 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_Negative") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

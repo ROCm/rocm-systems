@@ -22,11 +22,13 @@ THE SOFTWARE.
 Testcase Scenarios
 ------------------
 Functional:
-1) Create a graph and add nodes with dependencies. Query for dependent nodes of the node passed and verify the result with dependencies defined.
-2) When pDependentNodes is passed as nullptr, verify pNumDependentNodes returns the number of dependent nodes.
-3) When pNumDependentNodes is higher than the actual number of dependent nodes, the remaining entries in pDependentNodes will be set to NULL,
+1) Create a graph and add nodes with dependencies. Query for dependent nodes of the node passed and
+verify the result with dependencies defined. 2) When pDependentNodes is passed as nullptr, verify
+pNumDependentNodes returns the number of dependent nodes. 3) When pNumDependentNodes is higher than
+the actual number of dependent nodes, the remaining entries in pDependentNodes will be set to NULL,
  and the number of nodes actually obtained will be returned in pNumDependentNodes.
-4) When pNumDependentNodes is lesser than the actual number of dependent nodes, api should return the requested number of nodes in pDependentNodes.
+4) When pNumDependentNodes is lesser than the actual number of dependent nodes, api should return
+the requested number of nodes in pDependentNodes.
 
 Argument Validation:
 1) Add a single node in graph and pass the node to api. Verify the api returns dependent nodes as 0.
@@ -40,8 +42,7 @@ Argument Validation:
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
-static __global__ void updateResult(int* C_d, int* Res_d, int val,
-                                                  int64_t NELEM) {
+static __global__ void updateResult(int* C_d, int* Res_d, int val, int64_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -50,8 +51,8 @@ static __global__ void updateResult(int* C_d, int* Res_d, int val,
   }
 }
 
-static __global__ void vectorSum(const int* A_d, const int* B_d,
-                                 const int* C_d, int* Res_d, size_t NELEM) {
+static __global__ void vectorSum(const int* A_d, const int* B_d, const int* C_d, int* Res_d,
+                                 size_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -64,11 +65,11 @@ static __global__ void vectorSum(const int* A_d, const int* B_d,
  * Verify api when GetDependent nodes is requested
  * for actual number of nodes.
  */
-static void queryActualNumOfDepNodes(const std::vector<hipGraphNode_t> &Nlist,
-                             hipGraphNode_t kernel_vecSqr, size_t numDeps) {
+static void queryActualNumOfDepNodes(const std::vector<hipGraphNode_t>& Nlist,
+                                     hipGraphNode_t kernel_vecSqr, size_t numDeps) {
   hipGraphNode_t* depnodes;
   int numBytes = sizeof(hipGraphNode_t) * numDeps;
-  depnodes = reinterpret_cast<hipGraphNode_t *>(malloc(numBytes));
+  depnodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(depnodes != nullptr);
   HIP_CHECK(hipGraphNodeGetDependentNodes(kernel_vecSqr, depnodes, &numDeps));
   REQUIRE(numDeps == Nlist.size());
@@ -95,13 +96,13 @@ static void queryActualNumOfDepNodes(const std::vector<hipGraphNode_t> &Nlist,
  * Verify api when GetDependent nodes queried
  * for greater number than actual number of nodes.
  */
-static void queryGreaterNumOfDepNodes(const std::vector<hipGraphNode_t> &Nlist,
-                             hipGraphNode_t kernel_vecSqr, size_t numDeps) {
+static void queryGreaterNumOfDepNodes(const std::vector<hipGraphNode_t>& Nlist,
+                                      hipGraphNode_t kernel_vecSqr, size_t numDeps) {
   constexpr auto addlEntries = 4;
   hipGraphNode_t* depnodes;
   size_t totDeps = numDeps + addlEntries;
   int numBytes = sizeof(hipGraphNode_t) * totDeps;
-  depnodes = reinterpret_cast<hipGraphNode_t *>(malloc(numBytes));
+  depnodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(depnodes != nullptr);
   HIP_CHECK(hipGraphNodeGetDependentNodes(kernel_vecSqr, depnodes, &totDeps));
   REQUIRE(totDeps == Nlist.size());
@@ -132,13 +133,13 @@ static void queryGreaterNumOfDepNodes(const std::vector<hipGraphNode_t> &Nlist,
  * Verify api when GetDependent nodes queried
  * for lesser number than actual number of nodes.
  */
-static void queryLesserNumOfDepNodes(const std::vector<hipGraphNode_t> &Nlist,
-                             hipGraphNode_t kernel_vecSqr, size_t numDeps) {
+static void queryLesserNumOfDepNodes(const std::vector<hipGraphNode_t>& Nlist,
+                                     hipGraphNode_t kernel_vecSqr, size_t numDeps) {
   size_t totDeps = numDeps - 1;
   hipGraphNode_t* depnodes;
   int numBytes = sizeof(hipGraphNode_t) * totDeps;
   size_t count{};
-  depnodes = reinterpret_cast<hipGraphNode_t *>(malloc(numBytes));
+  depnodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(depnodes != nullptr);
   HIP_CHECK(hipGraphNodeGetDependentNodes(kernel_vecSqr, depnodes, &totDeps));
   REQUIRE(totDeps == Nlist.size() - 1);
@@ -182,78 +183,66 @@ TEST_CASE("Unit_hipGraphNodeGetDependentNodes_Functional") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   HipTest::initArrays<int>(&A_d, &C_d, &Sum_d, &A_h, &C_h, &Sum_h, N);
-  HipTest::initArrays<int>(&Res1_d, &Res2_d, &Res3_d,
-                           nullptr, nullptr, nullptr, N);
+  HipTest::initArrays<int>(&Res1_d, &Res2_d, &Res3_d, nullptr, nullptr, nullptr, N);
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
   // Initialize input buffer and vecsqr result
   for (size_t i = 0; i < N; ++i) {
-      A_h[i] = i + 1;
-      C_h[i] = A_h[i] * A_h[i];
+    A_h[i] = i + 1;
+    C_h[i] = A_h[i] * A_h[i];
   }
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  void* kernelArgsVS[] = {&A_d, &C_d, reinterpret_cast<void *>(&NElem)};
+  void* kernelArgsVS[] = {&A_d, &C_d, reinterpret_cast<void*>(&NElem)};
   memset(&kernelNodeParams, 0, sizeof(kernelNodeParams));
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(HipTest::vector_square<int>);
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vector_square<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgsVS);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecSqr, graph, &memcpyH2D_A, 1,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecSqr, graph, &memcpyH2D_A, 1, &kernelNodeParams));
 
   // Create multiple nodes dependent on vecSqr node.
   // Dependent nodes takes vecSqr input and computes output independently.
   std::vector<hipGraphNode_t> nodelist;
   int incValue1{1};
-  void* kernelArgs1[] = {&C_d, &Res1_d, &incValue1,
-                                        reinterpret_cast<void *>(&NElem)};
+  void* kernelArgs1[] = {&C_d, &Res1_d, &incValue1, reinterpret_cast<void*>(&NElem)};
   memset(&kernelNodeParams, 0, sizeof(kernelNodeParams));
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(updateResult);
+  kernelNodeParams.func = reinterpret_cast<void*>(updateResult);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelmod1, graph, &kernel_vecSqr, 1,
-                                                      &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelmod1, graph, &kernel_vecSqr, 1, &kernelNodeParams));
   nodelist.push_back(kernelmod1);
 
   int incValue2{2};
-  void* kernelArgs2[] = {&C_d, &Res2_d, &incValue2,
-                                        reinterpret_cast<void *>(&NElem)};
+  void* kernelArgs2[] = {&C_d, &Res2_d, &incValue2, reinterpret_cast<void*>(&NElem)};
   memset(&kernelNodeParams, 0, sizeof(kernelNodeParams));
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(updateResult);
+  kernelNodeParams.func = reinterpret_cast<void*>(updateResult);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelmod2, graph, &kernel_vecSqr, 1,
-                                                      &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelmod2, graph, &kernel_vecSqr, 1, &kernelNodeParams));
   nodelist.push_back(kernelmod2);
 
   int incValue3{3};
-  void* kernelArgs3[] = {&C_d, &Res3_d, &incValue3,
-                                        reinterpret_cast<void *>(&NElem)};
+  void* kernelArgs3[] = {&C_d, &Res3_d, &incValue3, reinterpret_cast<void*>(&NElem)};
   memset(&kernelNodeParams, 0, sizeof(kernelNodeParams));
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(updateResult);
+  kernelNodeParams.func = reinterpret_cast<void*>(updateResult);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs3);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelmod3, graph, &kernel_vecSqr, 1,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelmod3, graph, &kernel_vecSqr, 1, &kernelNodeParams));
   nodelist.push_back(kernelmod3);
 
   HIP_CHECK(hipGraphNodeGetDependentNodes(kernel_vecSqr, nullptr, &numDeps));
@@ -271,22 +260,18 @@ TEST_CASE("Unit_hipGraphNodeGetDependentNodes_Functional") {
   queryLesserNumOfDepNodes(nodelist, kernel_vecSqr, numDeps);
 
   // Compute sum from all dependent nodes
-  void* kernelArgsAdd[] = {&Res1_d, &Res2_d, &Res3_d, &Sum_d,
-                                             reinterpret_cast<void *>(&NElem)};
+  void* kernelArgsAdd[] = {&Res1_d, &Res2_d, &Res3_d, &Sum_d, reinterpret_cast<void*>(&NElem)};
   memset(&kernelNodeParams, 0, sizeof(kernelNodeParams));
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(vectorSum);
+  kernelNodeParams.func = reinterpret_cast<void*>(vectorSum);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgsAdd);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph,
-                                   nodelist.data(), nodelist.size(),
-                                   &kernelNodeParams));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H, graph, &kernel_vecAdd, 1,
-                                    Sum_h, Sum_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nodelist.data(), nodelist.size(),
+                                  &kernelNodeParams));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H, graph, &kernel_vecAdd, 1, Sum_h, Sum_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -295,18 +280,14 @@ TEST_CASE("Unit_hipGraphNodeGetDependentNodes_Functional") {
 
   // Validate the computation
   for (size_t i = 0; i < N; i++) {
-    if ( Sum_h[i] != ( (C_h[i] + incValue1)
-                     + (C_h[i] + incValue2)
-                     + (C_h[i] + incValue3) ) ) {
-      INFO("Sum not matching at " << i << " Sum_h[i] " << Sum_h[i]
-                                       << " C_h[i] " << C_h[i]);
+    if (Sum_h[i] != ((C_h[i] + incValue1) + (C_h[i] + incValue2) + (C_h[i] + incValue3))) {
+      INFO("Sum not matching at " << i << " Sum_h[i] " << Sum_h[i] << " C_h[i] " << C_h[i]);
       REQUIRE(false);
     }
   }
 
   HipTest::freeArrays<int>(A_d, C_d, Sum_d, A_h, C_h, Sum_h, false);
-  HipTest::freeArrays<int>(Res1_d, Res2_d, Res3_d,
-                             nullptr, nullptr, nullptr, false);
+  HipTest::freeArrays<int>(Res1_d, Res2_d, Res3_d, nullptr, nullptr, nullptr, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
@@ -323,7 +304,7 @@ TEST_CASE("Unit_hipGraphNodeGetDependentNodes_ParamValidation") {
   size_t numDeps{1};
   hipGraphNode_t memsetNode{}, depnodes{};
   hipError_t ret{};
-  char *A_d;
+  char* A_d;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipMalloc(&A_d, numBytes));
@@ -334,8 +315,7 @@ TEST_CASE("Unit_hipGraphNodeGetDependentNodes_ParamValidation") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = numBytes * sizeof(char);
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr,
-                                                    0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
 
   SECTION("single node in graph") {
     ret = hipGraphNodeGetDependentNodes(memsetNode, &depnodes, &numDeps);
