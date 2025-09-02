@@ -79,9 +79,6 @@ extern const char* BlitImageSourceCode;
 
 bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
 
-#if defined(USE_COMGR_LIBRARY)
-extern amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str);
-#endif
 }  // namespace amd::device
 
 static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone) ==
@@ -349,61 +346,6 @@ const Isa* Isa::findIsa(uint32_t versionMajor, uint32_t versionMinor, uint32_t v
 const Isa* Isa::begin() { return supportedIsas().first; }
 
 const Isa* Isa::end() { return supportedIsas().second; }
-
-#if defined(USE_COMGR_LIBRARY)
-void Isa::setAvailableSgprVgprCached() const {
-  std::call_once(setSgprVgprFlag, [this]() {
-    std::string buf;
-    amd_comgr_metadata_node_t isaMeta;
-    amd_comgr_metadata_node_t sgprMeta;
-    amd_comgr_metadata_node_t vgprMeta;
-    bool hasIsaMeta = false;
-    bool hasSgprMeta = false;
-    bool hasVgprMeta = false;
-
-    amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isaName().c_str(), &isaMeta);
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasIsaMeta = true;
-      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumSGPRs", &sgprMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasSgprMeta = true;
-      status = amd::device::getMetaBuf(sgprMeta, &buf);
-    }
-
-    sgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumVGPRs", &vgprMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasVgprMeta = true;
-      status = amd::device::getMetaBuf(vgprMeta, &buf);
-    }
-
-    vgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-    if (hasVgprMeta) {
-      amd::Comgr::destroy_metadata(vgprMeta);
-    }
-
-    if (hasSgprMeta) {
-      amd::Comgr::destroy_metadata(sgprMeta);
-    }
-
-    if (hasIsaMeta) {
-      amd::Comgr::destroy_metadata(isaMeta);
-    }
-
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      DevLogPrintfError("Failed to set SGPR/VGPR for ISA: %s", isaName().c_str());
-    }
-  });
-}
-#endif
 
 std::vector<Device*>* Device::devices_ = nullptr;
 AppProfile Device::appProfile_;
