@@ -140,7 +140,7 @@ Settings::Settings() {
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
                       const Pal::GpuMemoryHeapProperties* heaps, const Pal::WorkStationCaps& wscaps,
-                      bool enableXNACK, bool reportAsOCL12Device) {
+                      const amd::Isa& isa, bool reportAsOCL12Device) {
   uint32_t osVer = 0x0;
 
   // Disable thread trace by default for all devices
@@ -151,8 +151,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     apuSystem_ = true;
   }
 
-  enableXNACK_ = enableXNACK;
-  hsailExplicitXnack_ = enableXNACK;
+  enableXNACK_ = (isa.xnack() == amd::Isa::Feature::Enabled);
+  hsailExplicitXnack_ = enableXNACK_;
   bool useWavefront64 = false;
 
   std::string appName = {};
@@ -292,7 +292,13 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   }
 
   imageSupport_ = true;
-
+  std::string imageSupport;
+  if (amd::device::getValueFromIsaMeta(isa.isaName(), "ImageSupport", imageSupport)) {
+    imageSupport_ = atoi(imageSupport.c_str());
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "imageSupport=%u", imageSupport_);
+  } else {
+    LogInfo("Can not get image support info from ISA meta");
+  }
   // Use kernels for blit if appropriate
   blitEngine_ = BlitEngineKernel;
 
