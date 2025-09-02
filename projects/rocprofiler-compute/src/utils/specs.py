@@ -75,15 +75,25 @@ def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
 
 
 def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
+    chip_id_dict = mi_gpu_specs.get_chip_id_dict()
+    unknown_chips: list[str] = []
+
     for idx, line_text in enumerate(rocminfo_lines):
         chip_id = search(r"^\s*Chip ID\s*:\s* ([0-9]+).*\s*$", line_text)
         if chip_id:
-            chip_id_dict = mi_gpu_specs.get_chip_id_dict()
-            if chip_id not in chip_id_dict and int(chip_id) not in chip_id_dict:
-                console_warning(f"Unknown Chip ID detected: {chip_id }")
-            return chip_id
+            # Check if this chip ID is valid (known)
+            if chip_id in chip_id_dict or int(chip_id) in chip_id_dict:
+                return chip_id  # Return first valid chip ID found
+            else:
+                unknown_chips.append(chip_id)
 
-    console_warning("No Chip ID detected")
+    # Exhausted all lines - handle the cases where no valid chip was found
+    if unknown_chips:
+        for chip_id in unknown_chips:
+            console_warning(f"Unknown Chip ID(s) detected: {chip_id}")
+    else:
+        console_warning("No Chip ID detected")
+
     return None
 
 
@@ -767,31 +777,30 @@ class MachineSpecs:
             return self.total_l2_chan
 
     def get_class_members(self) -> pd.DataFrame:
-        all_populated = True
         data = {}
-        # dataclass uses an OrderedDict for member variables, ensuring order consistency
-        for class_field in fields(self):
-            name = class_field.name
-            if not name.startswith("_"):
-                value = getattr(self, name)
-                if value is None:
-                    # check if we've marked it optional
-                    if (
-                        class_field.metadata
-                        and "optional" in class_field.metadata
-                        and class_field.metadata["optional"]
-                    ):
-                        pass
-                    else:
-                        console_warning(
-                            f"Incomplete class definition for {self.gpu_arch}. "
-                            f"Expecting populated {name} but detected None."
-                        )
-                        all_populated = False
-                data[name] = value
+        missing_required_fields = []
 
-        if not all_populated:
+        for class_field in fields(self):
+            if not class_field.metadata.get("show_in_table", True):
+                continue
+
+            name = class_field.name
+            value = getattr(self, name)
+            data[name] = value
+
+            # Check for missing required fields
+            if value is None and not class_field.metadata.get("optional", False):
+                missing_required_fields.append(name)
+
+        # Handle warnings after processing all fields
+        if missing_required_fields:
+            for field_name in missing_required_fields:
+                console_warning(
+                    f"Incomplete class definition for {self.gpu_arch}. "
+                    f"Expecting populated {field_name} but detected None."
+                )
             console_warning(f"Missing specs fields for {self.gpu_arch}")
+
         return pd.DataFrame(data, index=[0])
 
     def __repr__(self) -> str:
