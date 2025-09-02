@@ -27,8 +27,7 @@ jobs:
       fail-fast: true
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
-      CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
-      CCACHE_MAXSIZE: "700M"
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: "gfx94X-dcgpu"
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
