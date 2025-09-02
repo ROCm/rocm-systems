@@ -26,6 +26,7 @@ import ast
 import json
 import re
 from pathlib import Path
+from typing import Any, Callable, Optional, Union
 
 import astunparse
 import pandas as pd
@@ -65,15 +66,28 @@ class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
     # -----------------------
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._roofline_ceilings_per_workload: dict[str, Any] = {}
+        self._pc_sampling_data_per_workload: dict[str, pd.DataFrame] = {}
+        self._pmc_df_per_workload: dict[str, pd.DataFrame] = {}
+        self._top_kernels_per_workload: dict[str, list[str]] = {}
+        self._dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
+        self._metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
+        self._values_data_per_workload: dict[str, pd.DataFrame] = {}
+        self._roofline_data_per_workload: dict[str, pd.DataFrame] = {}
+
     @demarcate
     def pre_processing(self):
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
+
         if self._profiling_config.get("format_rocprof_output") != "rocpd":
             console_error(
                 "Creation of analysis database is only supported "
                 "for profiling data with rocpd output format."
             )
+
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
         self._pmc_df_per_workload = {
@@ -101,16 +115,17 @@ class db_analysis(OmniAnalyze_Base):
         self._roofline_data_per_workload = self.calc_roofline_data()
 
     @demarcate
-    def run_analysis(self):
+    def run_analysis(self) -> None:
         """Run CLI analysis."""
         super().run_analysis()
 
         # Initialize analysis database
         # Create db uuid
-        if self.get_args().output_name:
-            db_name = f"{self.get_args().output_name}.db"
-        else:
-            db_name = f"rocprof_compute_{get_uuid()}.db"
+        db_name = (
+            f"{self.get_args().output_name}.db"
+            if self.get_args().output_name
+            else f"rocprof_compute_{get_uuid()}.db"
+        )
         Database.init(db_name)
         console_debug(f"Initialized database: {db_name}")
 
@@ -125,6 +140,7 @@ class db_analysis(OmniAnalyze_Base):
                 profiling_config_extdata=self._profiling_config,
             )
             Database.get_session().add(workload_obj)
+
             for pc_sample in self._pc_sampling_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
@@ -141,6 +157,7 @@ class db_analysis(OmniAnalyze_Base):
                         workload=workload_obj,
                     )
                 )
+
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
@@ -153,6 +170,7 @@ class db_analysis(OmniAnalyze_Base):
                         workload=workload_obj,
                     )
                 )
+
             for metric in self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
@@ -210,8 +228,8 @@ class db_analysis(OmniAnalyze_Base):
         console_debug("Completed writing database")
         console_warning(f"Created file: {db_name}")
 
-    def calc_roofline_ceilings(self):
-        roofline_ceilings_per_workload = dict()
+    def calc_roofline_ceilings(self) -> dict[str, dict[str, float]]:
+        roofline_ceilings_per_workload: dict[str, dict[str, float]] = {}
 
         for workload_path in self._runs.keys():
             if not (Path(workload_path) / "roofline.csv").exists():
@@ -221,24 +239,22 @@ class db_analysis(OmniAnalyze_Base):
             roofline_dict = (
                 pd.read_csv(f"{workload_path}/roofline.csv").iloc[0].to_dict()
             )
-            keys = list()
-            for mem_level in CACHE_HIERARCHY:
-                keys.append(f"{mem_level}Bw")
+
+            keys = [f"{mem_level}Bw" for mem_level in CACHE_HIERARCHY]
+
             for dtype in SUPPORTED_DATATYPES[
                 self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
             ]:
                 if dtype in PEAK_OPS_DATATYPES:
-                    if dtype.startswith("F") or dtype.startswith("B"):
-                        keys.append(f"{dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{dtype}Ops")
+                    key_suffix = "Flops" if dtype.startswith(("F", "B")) else "Ops"
+                    keys.append(f"{dtype}{key_suffix}")
+
                 if dtype in MFMA_DATATYPES:
-                    if dtype.startswith("F") or dtype.startswith("B"):
-                        # FP16 -> F16
-                        dtype = dtype.replace("FP", "F")
-                        keys.append(f"MFMA{dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"MFMA{dtype}Ops")
+                    # FP16 -> F16
+                    formatted_dtype = dtype.replace("FP", "F")
+                    key_suffix = "Flops" if dtype.startswith(("F", "B")) else "Ops"
+                    keys.append(f"MFMA{formatted_dtype}{key_suffix}")
+
             roofline_ceilings_per_workload[workload_path] = {
                 key: roofline_dict[key] for key in keys if key in roofline_dict
             }
@@ -248,7 +264,7 @@ class db_analysis(OmniAnalyze_Base):
         return roofline_ceilings_per_workload
 
     def calc_pc_sampling_data(self):
-        pc_sampling_data_per_workload = dict()
+        pc_sampling_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             if not (Path(workload_path) / "ps_file_results.json").exists():
@@ -291,16 +307,18 @@ class db_analysis(OmniAnalyze_Base):
                 ]
             )
 
-            def custom_aggregator(column_name):
+            def custom_aggregator(
+                column_name: str,
+            ) -> Callable[[pd.Series], Optional[Union[int, dict[str, int]]]]:
                 if column_name == "count_issued":
 
-                    def aggregator(series):
+                    def aggregator(series: pd.Series) -> Optional[int]:
                         return None if series.isnull().all() else series.sum()
 
                     return aggregator
                 if column_name == "count_stalled":
 
-                    def aggregator(series):
+                    def aggregator(series: pd.Series) -> Optional[int]:
                         if series.isnull().all():
                             return None
                         return series.count() - series.sum()
@@ -308,7 +326,7 @@ class db_analysis(OmniAnalyze_Base):
                     return aggregator
                 if column_name == "stall_reason":
 
-                    def aggregator(series):
+                    def aggregator(series: pd.Series) -> Optional[dict[str, int]]:
                         if series.isnull().all():
                             return None
                         cleaned_series = series.dropna().str[
@@ -317,6 +335,7 @@ class db_analysis(OmniAnalyze_Base):
                         return cleaned_series.value_counts().to_dict()
 
                     return aggregator
+
                 raise ValueError(f"Unknown column name: {column_name}")
 
             grouped_df = (
@@ -356,7 +375,13 @@ class db_analysis(OmniAnalyze_Base):
         return pc_sampling_data_per_workload
 
     @staticmethod
-    def evaluate(name, value, pmc_df, sys_info, parse=False):
+    def evaluate(
+        name: str,
+        value: str,
+        pmc_df: pd.DataFrame,
+        sys_info: dict[str, Any],
+        parse: bool = False,
+    ) -> Any:
         if parse:
             value = re.sub(
                 r"\$([0-9A-Za-z_]+)",
@@ -376,6 +401,7 @@ class db_analysis(OmniAnalyze_Base):
                 lambda m: f'sys_info["{m.group(1)}"]',
                 value,
             )
+
         try:
             return eval(
                 compile(value, "<string>", "eval"),
@@ -401,12 +427,14 @@ class db_analysis(OmniAnalyze_Base):
             console_warning(f"Failed to evaluate expression for {name}: {value} - {e}")
             return None
 
-    def calc_expressions(self):
+    def calc_expressions(self) -> dict[str, pd.DataFrame]:
         values_data_per_workload = self._values_data_per_workload.copy()
 
         for workload_path in self._runs.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
+
+            # Add roofline empirical peaks
             for key, value in self._roofline_ceilings_per_workload[
                 workload_path
             ].items():
@@ -442,14 +470,17 @@ class db_analysis(OmniAnalyze_Base):
         console_debug("Calculated metric values")
         return values_data_per_workload
 
-    def calc_metrics_data(self):
-        metrics_info_data_per_workload = dict()
-        values_data_per_workload = dict()
+    def calc_metrics_data(
+        self,
+    ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+        metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
+        values_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
+
             # for example 201 -> Wavefront
-            table_names_map = dict()
+            table_names_map: dict[int, str] = {}
             for panel_config in self._arch_configs[gfx_arch].panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
@@ -518,8 +549,8 @@ class db_analysis(OmniAnalyze_Base):
         console_debug("Collected metrics data")
         return metrics_info_data_per_workload, values_data_per_workload
 
-    def calc_dispatch_data(self):
-        dispatch_data_per_workload = dict()
+    def calc_dispatch_data(self) -> dict[str, pd.DataFrame]:
+        dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             dispatch_df = pd.DataFrame(
@@ -538,7 +569,7 @@ class db_analysis(OmniAnalyze_Base):
         console_debug("Calculated dispatch data")
         return dispatch_data_per_workload
 
-    def apply_pmc_filters(self):
+    def apply_pmc_filters(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload = self._pmc_df_per_workload.copy()
 
         for workload_path, pmc_df in pmc_df_per_workload.items():
@@ -549,6 +580,7 @@ class db_analysis(OmniAnalyze_Base):
                     .astype(str)
                     .isin([self._runs[workload_path].filter_gpu_ids])
                 ]
+
             # Filter kernel_ids
             if self._runs[workload_path].filter_kernel_ids:
                 pmc_df = pmc_df.loc[
@@ -559,6 +591,7 @@ class db_analysis(OmniAnalyze_Base):
                         ]
                     )
                 ]
+
             # Filter dispatch_ids
             if self._runs[workload_path].filter_dispatch_ids:
                 if ">" in self._runs[workload_path].filter_dispatch_ids[0]:
@@ -577,8 +610,8 @@ class db_analysis(OmniAnalyze_Base):
         console_debug("Applied analysis mode filters")
         return pmc_df_per_workload
 
-    def calc_roofline_data(self):
-        roofline_data_per_workload = dict()
+    def calc_roofline_data(self) -> dict[str, pd.DataFrame]:
+        roofline_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()

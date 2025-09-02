@@ -101,6 +101,7 @@ PEAK_OPS_DATATYPES: list[str] = [
     "I64",
 ]
 MFMA_DATATYPES: list[str] = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
+CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
 
 ################################################
@@ -175,7 +176,7 @@ def calc_ceilings(
     }
 
     cache_hierarchy: list[str] = (
-        ["HBM", "L2", "L1", "LDS"]
+        CACHE_HIERARCHY
         if roofline_parameters["mem_level"] == "ALL"
         else roofline_parameters["mem_level"]
     )
