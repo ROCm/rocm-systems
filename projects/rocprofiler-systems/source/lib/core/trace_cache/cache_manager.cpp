@@ -46,7 +46,7 @@ list_dir_files(const std::string& path)
     DIR* dir = opendir(path.c_str());
     if(dir == nullptr)
     {
-        std::cerr << "Error opening directory: " << path << std::endl;
+        ROCPROFSYS_WARNING(0, "Error opening directory to list it: %s\n", path.c_str());
         return {};
     }
 
@@ -166,7 +166,7 @@ cache_manager::post_process_bulk()
         };
 
         auto parse_and_fill_cache = [&](const std::string& filename) {
-            // short circut
+            // short circuit
             return parse_path(file_type::buffered_storage, filename) ||
                    parse_path(file_type::metadata_registry, filename);
         };
@@ -179,7 +179,7 @@ cache_manager::post_process_bulk()
         rocpd_threads.emplace_back([this]() {
             rocpd_post_processing _post_processing(
                 m_metadata, agent_manager::get_instance(), std::to_string(getpid()));
-            storage_parser _parser(getpid(), filename);
+            storage_parser _parser(filename);
             _post_processing.register_parser_callback(_parser);
             _post_processing.post_process_metadata();
             _parser.consume_storage();
@@ -192,10 +192,11 @@ cache_manager::post_process_bulk()
                !files.metadata_registry_filepath.empty())
             {
                 rocpd_threads.emplace_back([pid = pid, files = files]() {
-                    ROCPROFSYS_DEBUG("Creating database for [%d] from buffered storage "
-                                     "file: %s and from metadata file: %s",
-                                     pid, files.buffered_storage_filepath.c_str(),
-                                     files.metadata_registry_filepath.c_str());
+                    ROCPROFSYS_DEBUG(
+                        "Creating database for pid: %d - from buffered storage "
+                        "file: %s - and from metadata file: %s\n",
+                        pid, files.buffered_storage_filepath.c_str(),
+                        files.metadata_registry_filepath.c_str());
                     metadata_registry metadata;
                     auto res = metadata.load_from_file(files.metadata_registry_filepath);
                     if(!res)
@@ -207,7 +208,7 @@ cache_manager::post_process_bulk()
                     agent_manager         agent_mngr(metadata.get_agents());
                     rocpd_post_processing _post_processing(metadata, agent_mngr,
                                                            std::to_string(pid));
-                    storage_parser _parser(getpid(), files.buffered_storage_filepath);
+                    storage_parser        _parser(files.buffered_storage_filepath);
                     _post_processing.register_parser_callback(_parser);
                     _post_processing.post_process_metadata();
                     _parser.consume_storage();

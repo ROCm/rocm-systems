@@ -52,7 +52,7 @@ public:
 
 private:
     friend class cache_manager;
-    storage_parser(pid_t _pid, std::string filename);
+    storage_parser(std::string filename);
     template <typename T>
     static void process_arg(const uint8_t*& data_pos, T& arg)
     {

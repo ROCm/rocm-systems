@@ -34,9 +34,8 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-storage_parser::storage_parser(pid_t _pid, std::string filename)
-: m_pid(_pid)
-, m_filename(std::move(filename))
+storage_parser::storage_parser(std::string filename)
+: m_filename(std::move(filename))
 {}
 
 void
@@ -50,14 +49,8 @@ storage_parser::register_type_callback(
 void
 storage_parser::consume_storage()
 {
-    ROCPROFSYS_VERBOSE(0, "Consuming buffered storage with filename: %s",
+    ROCPROFSYS_VERBOSE(0, "Consuming buffered storage with filename: %s\n",
                        m_filename.c_str());
-    // if(m_pid != getpid())
-    // {
-    //     ROCPROFSYS_DEBUG(
-    //         "Storage parser is not created in same process as shutting down..");
-    //     return;
-    // }
 
     std::ifstream ifs(m_filename, std::ios::binary);
     if(!ifs)
@@ -92,10 +85,10 @@ storage_parser::consume_storage()
 
         if(ifs.bad())
         {
-            ROCPROFSYS_WARNING(
-                1,
-                "Bad read while consuming buffered storage. Filename: %s. Bytes read: %d",
-                m_filename.c_str(), static_cast<int>(ifs.tellg()));
+            ROCPROFSYS_WARNING(1,
+                               "Bad read while consuming buffered storage. Filename: %s. "
+                               "Bytes read: %d\n",
+                               m_filename.c_str(), static_cast<int>(ifs.tellg()));
             continue;
         }
 
@@ -247,7 +240,7 @@ storage_parser::consume_storage()
     }
 
     ifs.close();
-    ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system",
+    ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system\n",
                      m_filename.c_str());
     std::remove(m_filename.c_str());
 }
@@ -258,7 +251,7 @@ storage_parser::invoke_callbacks(entry_type type, const storage_parsed_type_base
     auto _callback_list = m_callbacks.find(type);
     if(_callback_list == m_callbacks.end())
     {
-        ROCPROFSYS_VERBOSE(1, "Callback not found for cache postprocessing");
+        ROCPROFSYS_VERBOSE(1, "Callback not found for cache postprocessing\n");
         return;
     }
 

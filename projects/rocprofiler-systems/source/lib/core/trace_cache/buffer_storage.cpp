@@ -96,7 +96,7 @@ buffer_storage::buffer_storage(pid_t _pid)
             }
         };
 
-        ROCPROFSYS_DEBUG("Starting buffered storage flushing thread for pid %d",
+        ROCPROFSYS_DEBUG("Starting buffered storage flushing thread for pid %d\n",
                          static_cast<int>(_pid));
         m_created_process = _pid;
         std::mutex _shutdown_condition_mutex;
@@ -119,7 +119,7 @@ buffer_storage::buffer_storage(pid_t _pid)
 void
 buffer_storage::shutdown()
 {
-    ROCPROFSYS_DEBUG("Buffer storage shutting down..");
+    ROCPROFSYS_DEBUG("Buffer storage shutting down..\n");
     m_running = false;
     m_shutdown_condition.notify_all();
 
