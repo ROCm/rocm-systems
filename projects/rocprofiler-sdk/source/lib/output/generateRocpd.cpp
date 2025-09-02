@@ -647,6 +647,11 @@ write_rocpd(
                          itr.demangled_kernel_name,
                          itr.truncated_kernel_name);
 
+    for(const auto& itr : tool_metadata.kernel_rename_map.get())
+    {
+        add_string_entry(_metadata, itr.first);
+    }
+
     for(const auto& itr : tool_metadata.get_code_objects())
         if(itr.uri != nullptr) add_string_entry(_metadata, itr.uri);
 
