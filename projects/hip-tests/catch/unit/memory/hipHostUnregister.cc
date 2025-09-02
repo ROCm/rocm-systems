@@ -94,4 +94,21 @@ TEST_CASE("Unit_hipHostUnregister_AlreadyUnregisteredPointer") {
   }
 }
 
+TEST_CASE("Unit_hipHostUnregister_Capture") {
+  constexpr size_t kBufferSize = 1024;
+  auto buffer = std::make_unique<int[]>(kBufferSize);
+  hipError_t capture_error = hipSuccess;
+
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostUnregister(buffer.get()), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error != hipSuccess) {
+    HIP_CHECK(hipHostUnregister(buffer.get()));
+  }
+}
+
 }  // namespace hipHostUnregisterTests
