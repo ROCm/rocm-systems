@@ -2040,26 +2040,65 @@ def get_memchart(mem_data, base_data):
 
 
 def format_value_for_display(value, max_length=6):
+    """
+    Format a value (int, float, or str) into a concise string suitable for display.
+
+    The function attempts to convert strings to numeric types if possible.
+    It then decides between normal decimal notation and scientific notation
+    based on length constraints and value magnitude.
+
+    If the formatted string is too long, it truncates it gracefully,
+    preserving scientific notation exponent parts where applicable.
+
+    Parameters:
+    - value: The input value to format. Can be int, float, or string.
+             Strings representing numbers are converted to numeric types if possible.
+    - max_length: Maximum allowed length of the output string.
+                  Longer strings are truncated with an ellipsis ('…').
+
+    Returns:
+    - A string representation of the input value, formatted either
+      in fixed-point or scientific notation, and truncated if too long.
+      Returns "N/A" if the value is invalid (e.g., None or NaN).
+    """
+
+    if value is None:
+        return "N/A"
+
     if isinstance(value, str):
         try:
             if "." in value:
+                # when dot is in the string, we know it's a float number and convert with "float"
                 value = float(value)
             else:
+                # without dot, we assume it's an integer and convert with "int"
                 value = int(value)
         except ValueError:
-            pass
+            # when conversion fails, the string is neither legit float or int, then assume it's invalid and display "N/A"
+            return "N/A"
 
     if isinstance(value, (int, float)):
         is_negative = value < 0
         abs_val = abs(value)
 
-        if isinstance(abs_val, float) and abs_val.is_integer():
-            normal = str(int(abs_val))
+        if isinstance(abs_val, float):
+            if value != value:
+                return "N/A"
+
+            if abs_val.is_integer():
+                normal = str(int(abs_val))
+            else:
+                normal = f"{abs_val:.1f}"
         else:
-            normal = f"{abs_val:.1f}"
+            normal = str(abs_val)
 
         sci = format_scientific_notation_if_needed(
-            abs_val, format_spec=">8.1e", max_length=max_length
+            abs_val,
+            align=">",
+            width_align=8,
+            precision_align=".1",
+            fmt_type_align="e",
+            max_length=max_length,
         ).strip()
 
         # Choose shorter notation or if normal too long
@@ -2077,21 +2116,16 @@ def format_value_for_display(value, max_length=6):
     # Custom truncation logic:
     if len(value) > max_length:
         if "e" in value.lower():
-            # For scientific notation, allow full exponent part
-            # Find 'e' index and truncate mantissa only if needed
             e_index = value.lower().index("e")
             mantissa = value[:e_index]
             exponent = value[e_index:]
-            # Truncate mantissa if too long
             max_mantissa_len = max_length - len(exponent)
             if max_mantissa_len < 1:
-                # Can't truncate mantissa, just keep exponent + ellipsis
                 value = exponent[: max_length - 1] + "…"
             else:
                 truncated_mantissa = mantissa[:max_mantissa_len]
                 value = truncated_mantissa + exponent
         else:
-            # Normal truncation with ellipsis
             value = value[: max_length - 1] + "…"
 
     return value

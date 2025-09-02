@@ -83,76 +83,71 @@ def format_text(
     key_step_prec_leftalign=0,
     key_align="<",
     value_align=">",
-    max_value_length=6,  # max length before forcing scientific notation
 ):
     """
     Format a text string for canvas to display according to
-    input key value pair and make proper alignment.
-    Displays N/A for invalid values.
-    Uses scientific notation for very large/small or long numeric values.
+    input key-value pair and make proper alignment.
+    Uses scientific notation formatting when needed.
+    For invalid value, it displays N/A.
     """
 
-    def is_value_valid(v):
-        try:
-            return v is not None and not (isinstance(v, float) and v != v)  # not NaN
-        except:
-            return False
-
-    def make_format_spec(prec, align):
-        # Ensure prec is int
-        prec_int = int(prec) if prec else 0
-        if prec_int > 0:
-            return f"{align}{prec_int}.2f"
-        else:
-            return f"{align}6"
-
-    # 1. Format specifier for value alignment
+    # Step 1: Build format spec using make_format_spec
     value_format = make_format_spec(value_step_prec_rightalign, value_align)
 
-    # 2. Format the value string
-    if is_value_valid(value):
-        if isinstance(value, (int, float)):
-            value_str = format_scientific_notation_if_needed(
-                value, value_format, max_value_length
-            )
-        else:
-            # For strings or other types, just use str() and align width only
-            width_match = re.search(r"\d+", value_format)
-            width = int(width_match.group()) if width_match else 6
-            align_char = value_format[0] if value_format else "<"
-            value_str = f"{str(value):{align_char}{width}}"
+    # Step 2: Extract width and precision
+    match = re.match(r"([<>=^])(\d+)(?:\.(\d+))?([a-zA-Z])?", value_format)
+    if match:
+        align_char = match.group(1)
+        width_align = int(match.group(2))
+        precision_digits = match.group(3)
+        fmt_type_align = match.group(4) or "f"
+        precision_align = f".{precision_digits}" if precision_digits else ""
     else:
-        match = re.search(r"[<>=^](\d+)", value_format)
-        width = int(match.group(1)) if match else 6
-        align = value_format[0] if value_format else "<"
-        value_str = f"{'N/A':{align}{width}}"
+        # Fallback to default value if parsing fails
+        align_char = value_align
+        width_align = 6
+        precision_align = ".2"
+        fmt_type_align = "f"
 
-    # 3. Format key string if exists
+    # Step 3: Format the key using make_format_spec
     key_format = (
         make_format_spec(key_step_prec_leftalign, key_align)
         if key is not None
         else None
     )
+    key_str = (
+        "{key:{key_format}}".format(key=key, key_format=key_format)
+        if key is not None and isinstance(key, (int, float))
+        else str(key)
+        if key is not None
+        else None
+    )
 
-    if key is not None:
-        if isinstance(key, (int, float)):
-            key_str = f"{key:{key_format}}"
-        else:
-            key_str = str(key)
+    # Step 4: Format the value or fallback to N/A
+    if is_value_valid(value):
+        formatted_value = format_scientific_notation_if_needed(
+            value,
+            align=align_char,
+            width_align=width_align,
+            precision_align=precision_align,
+            fmt_type_align=fmt_type_align,
+            max_length=width_align,
+            sci_lower_bound=1e-3,
+            sci_upper_bound=1e3,
+        )
+        value_str = formatted_value
     else:
-        key_str = None
+        value_str = f"{'N/A':{align_char}{width_align}}"
 
-    # 4. Add unit string only if value is valid
+    # Step 5: Unit and Final Output
     unit_string = post_description_with_space if "N/A" not in value_str else ""
 
-    # 5. Compose final string
     if key_str is not None:
         result_str_no_unit = f"{key_str}{mark_between}{value_str}"
     else:
-        result_str_no_unit = f"{value_str}"
+        result_str_no_unit = value_str
 
     result_str = result_str_no_unit + unit_string
-
     return result_str
 
 
@@ -633,7 +628,7 @@ class ScalarL1DCache(RectFrame):
                 key="Hit",
                 value=self.hit,
                 key_step_prec_leftalign=6,
-                value_step_prec_rightalign=6,
+                value_step_prec_rightalign=6.0,
                 post_description_with_space=" %",
             ),
         )

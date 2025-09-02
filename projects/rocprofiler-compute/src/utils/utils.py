@@ -1649,10 +1649,13 @@ def get_uuid(length=8):
 
 def format_scientific_notation_if_needed(
     value: Union[int, float],
-    format_spec: str = ">6.2f",
+    align: str = ">",
+    width_align: int = 6,
+    precision_align: str = ".2",
+    fmt_type_align: str = "f",
     max_length: int = 6,
-    sci_lower_bound: float = 1e-3,
-    sci_upper_bound: float = 1e9,
+    sci_lower_bound: float = 1e-2,
+    sci_upper_bound: float = 1e6,
 ) -> str:
     """
     Format a numeric value as normal or scientific notation string.
@@ -1664,7 +1667,10 @@ def format_scientific_notation_if_needed(
 
     Parameters:
     - value: numeric value to format
-    - format_spec: format specifier (e.g., '>6.2f')
+    - align: alignment character ('<', '>', '^', '=')
+    - width_align: total width of formatted output
+    - precision_align: precision string including dot, e.g., '.2'
+    - fmt_type_align: format type, e.g., 'f', 'e', 'g'
     - max_length: max allowed length for normal format string
     - sci_lower_bound: lower bound for scientific notation usage
     - sci_upper_bound: upper bound for scientific notation usage
@@ -1673,17 +1679,18 @@ def format_scientific_notation_if_needed(
     - formatted string according to the criteria, respecting alignment
     """
     abs_val = abs(value)
-
-    # Determine if scientific notation is needed
     use_sci = False
+
+    # Build normal format specifier string from parts
+    normal_format_spec = f"{align}{width_align}{precision_align}{fmt_type_align}"
+
     if abs_val != 0:
         if abs_val < sci_lower_bound or abs_val >= sci_upper_bound:
             use_sci = True
         else:
             try:
-                normal_str = f"{value:{format_spec}}"
-                sci_str = f"{value:.1e}"
-                # Use scientific if normal is longer or too long
+                normal_str = format(value, normal_format_spec)
+                sci_str = format(value, ".1e")
                 if (
                     len(normal_str) > len(sci_str)
                     or len(normal_str.strip()) > max_length
@@ -1693,12 +1700,9 @@ def format_scientific_notation_if_needed(
                 use_sci = True
 
     if use_sci:
-        sci_str = f"{value:.1e}"
-        width_match = re.search(r"\d+", format_spec)
-        width = int(width_match.group()) if width_match else 6
-        align_char = format_spec[0] if format_spec else ">"
-        formatted = f"{sci_str:{align_char}{width}}"
+        sci_str = format(value, ".1e")
+        formatted = f"{sci_str:{align}{width_align}}"
     else:
-        formatted = f"{value:{format_spec}}"
+        formatted = format(value, normal_format_spec)
 
     return formatted
