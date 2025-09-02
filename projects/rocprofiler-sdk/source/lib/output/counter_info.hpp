@@ -126,7 +126,7 @@ struct tool_spm_counter_value_t
     {
         ar(cereal::make_nvp("counter_id", id));
         ar(cereal::make_nvp("value", value));
-        ar(cereal::make_nvp("timestamp", value));
+        ar(cereal::make_nvp("timestamp", timestamp));
         ar(cereal::make_nvp("agent_id", agent_id));
     }
 };

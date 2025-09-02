@@ -2602,7 +2602,6 @@ tool_fini(void* /*tool_data*/)
     generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
-    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
     generate_output(spm_counters_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())

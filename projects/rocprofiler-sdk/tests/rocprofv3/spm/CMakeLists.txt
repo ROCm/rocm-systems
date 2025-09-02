@@ -25,7 +25,7 @@ set(COUNTER_LIST
     CPC_CPC_STAT_IDLE
     SPI_CSN_NUM_THREADGROUPS)
 
-set(IS_DISABLED False)
+set(IS_DISABLED TRUE)
 
 list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
 

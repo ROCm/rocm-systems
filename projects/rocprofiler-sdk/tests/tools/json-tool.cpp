@@ -591,7 +591,7 @@ struct spm_counting_record_t
         ar(cereal::make_nvp("counter_id", counter_id));
         ar(cereal::make_nvp("agent_id", agent_id));
         ar(cereal::make_nvp("id", id));
-        ar(cereal::make_nvp("timestamp", id));
+        ar(cereal::make_nvp("timestamp", timestamp));
         ar(cereal::make_nvp("value", value));
     }
 };

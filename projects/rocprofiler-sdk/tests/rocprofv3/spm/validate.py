@@ -32,7 +32,10 @@ def test_validate_spm_json(json_data):
             agent = get_agent(record["agent_id"])
             counter = get_counter(record["counter_id"])
             assert counter is not None, f"record:\n\t{record}"
-            if counter["name"] == "SQ_WAVES" and re.match(pattern, agent["name"]) is not None:
+            if (
+                counter["name"] == "SQ_WAVES"
+                and re.match(pattern, agent["name"]) is not None
+            ):
                 sq_waves_values.append(record["value"])
         if len(sq_waves_values) > 0:
             assert sum(sq_waves_values) > 0, "SQ_WAVES value is not > 0"

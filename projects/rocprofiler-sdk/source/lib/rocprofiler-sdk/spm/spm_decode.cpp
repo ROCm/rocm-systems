@@ -28,8 +28,8 @@
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -89,7 +89,7 @@ aql_data_callback(size_t /**/, void* data, size_t data_size, int /*flags*/, void
         if(count != desc_v0.num_events) return;
         counters.resize(count);
     }
-    // Prealloc SE_NUM for MI300.
+
     for(auto& v : counters)
         v.shaders.resize(4);
 

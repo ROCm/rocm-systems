@@ -131,7 +131,6 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     uint32_t buffer_size_lo     = static_cast<uint32_t>(params.buffer_size);
     uint32_t buffer_size_hi     = static_cast<uint32_t>(params.buffer_size >> 32);
     uint32_t perf_ctrl          = static_cast<uint32_t>(params.perfcounter_ctrl);
-    
 
     aql_params.clear();
 
