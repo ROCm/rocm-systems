@@ -1394,7 +1394,7 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;
     auto                        dispatch_id = 0;
-    const auto handle_consecutive_kernels   = tool::get_config().att_consecutive_kernels > 1;
+    const auto handle_consecutive_kernels   = tool::get_config().att_consecutive_kernels >= 1;
     if(handle_consecutive_kernels)
         dispatch_id = *static_cast<rocprofiler_dispatch_id_t*>(CHECK_NOTNULL(userdata.ptr));
     else
@@ -1431,29 +1431,40 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                                          void* userdata)
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) return;
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE) return;
 
     assert(record.payload != nullptr);
     auto* rdata = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(record.payload);
     auto  dispatch_id = rdata->dispatch_info.dispatch_id;
-    // auto  kernel_id = rdata->dispatch_info.kernel_id;
+    auto  kernel_id   = rdata->dispatch_info.kernel_id;
 
     // Keep track of number of consecutive kernels
     const auto                 consecutive_kernels = tool::get_config().att_consecutive_kernels;
     static std::atomic<size_t> num_consecutive_kernels{0};
-    size_t                     local_count = num_consecutive_kernels.fetch_add(1);
+    size_t                     local_count{0};
 
     static std::atomic<bool> isprofiling{false};
     static std::atomic<bool> stop_profiling{false};
 
-    static std::mutex    mut{};
-    static std::set<int> captured_ids{};
+    static std::mutex                          mut{};
+    static std::set<rocprofiler_dispatch_id_t> captured_ids{};
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        if(local_count == 0)
+        // Reset counter if kernel ID and iteration range matches
+        if(is_targeted_kernel(kernel_id, kernel_iteration))
         {
-            ROCPROFILER_CALL(rocprofiler_start_context(agent_ctx), "context start");
-            isprofiling.store(true);
+            num_consecutive_kernels.store(0);
+            bool _exp = false;
+            if(!isprofiling &&
+               isprofiling.compare_exchange_strong(_exp, true, std::memory_order_relaxed))
+            {
+                ROCPROFILER_CALL(rocprofiler_start_context(agent_ctx), "context start");
+            }
+        }
+        // Increment counter if we are profiling
+        else if(isprofiling)
+        {
+            local_count = num_consecutive_kernels.fetch_add(1);
         }
         if(isprofiling && local_count < consecutive_kernels)
         {
@@ -1469,7 +1480,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
         return;
     }
 
-    assert(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE);
+    assert(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT);
 
     if(!isprofiling) return;
 
@@ -2143,14 +2154,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         const auto selecting_by_gpuid = !gpu_idx_set.empty();
 
         // Use device_thread_trace_service when handling consecutive kernels
-        const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels > 1;
+        const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
         rocprofiler_user_data_t user{};
-        ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
 
         if(handle_consecutive_kernels)
         {
             // Use user data pointer to dispatch id to communicate dispatch ID to shader callback
             // function
+            ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                                  get_client_ctx(),
                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
