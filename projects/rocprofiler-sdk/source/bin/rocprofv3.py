@@ -281,10 +281,10 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
+        help="For adding output format (supported formats: csv, json, jupiter, pftrace, otf2, rocpd)",
         nargs="+",
         default=None,
-        choices=("csv", "json", "pftrace", "otf2", "rocpd"),
+        choices=("csv", "json", "jupiter", "pftrace", "otf2", "rocpd"),
         type=str.lower,
     )
     add_parser_bool_argument(

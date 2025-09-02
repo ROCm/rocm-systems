@@ -39,6 +39,7 @@ def main(argv=None, config=None):
     """
     import argparse
     from . import csv
+    from . import jupiter
     from . import otf2
     from . import output_config
     from . import pftrace
@@ -150,10 +151,10 @@ Example usage:
     converter_required_params.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, pftrace, otf2)",
+        help="For adding output format (supported formats: csv, jupiter, pftrace, otf2)",
         nargs="+",
         default=None,
-        choices=("csv", "pftrace", "otf2"),
+        choices=("csv", "jupiter", "pftrace", "otf2"),
         type=get_output_type,
         required=True,
     )
@@ -183,6 +184,7 @@ Example usage:
     valid_generic_args = output_config.add_generic_args(converter)
     valid_pftrace_args = pftrace.add_args(converter)
     valid_csv_args = csv.add_args(converter)
+    valid_jupiter_args = jupiter.add_args(converter)
     valid_otf2_args = otf2.add_args(converter)
     valid_time_window_args = time_window.add_args(converter)
 
@@ -220,6 +222,7 @@ Example usage:
         )
         pftrace_args = pftrace.process_args(args, valid_pftrace_args)
         csv_args = csv.process_args(args, valid_csv_args)
+        jupiter_args = jupiter.process_args(args, valid_jupiter_args)
         otf2_args = otf2.process_args(args, valid_otf2_args)
         window_args = time_window.process_args(args, valid_time_window_args)
 
@@ -235,6 +238,7 @@ Example usage:
             **generic_out_cfg_args,
             **pftrace_args,
             **csv_args,
+            **jupiter_args,
             **otf2_args,
         }
         # setup the config args
@@ -249,6 +253,7 @@ Example usage:
             "pftrace": pftrace.write_pftrace,
             "csv": csv.write_csv,
             "otf2": otf2.write_otf2,
+            "jupiter": jupiter.write_jupiter,
         }
 
         for out_format in args.output_format:
