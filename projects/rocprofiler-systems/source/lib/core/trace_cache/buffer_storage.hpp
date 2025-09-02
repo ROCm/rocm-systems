@@ -26,6 +26,7 @@
 #include "PTL/ThreadPool.hh"
 #include "cache_utility.hpp"
 #include "sample_type.hpp"
+#include <PTL/PTL.hh>
 #include <cassert>
 #include <condition_variable>
 #include <cstdlib>
@@ -37,7 +38,6 @@
 #include <string.h>
 #include <thread>
 #include <type_traits>
-#include <PTL/PTL.hh>
 #include <unistd.h>
 
 namespace rocprofsys
@@ -63,7 +63,8 @@ public:
 
         constexpr bool is_supported_type = (supported_types::is_supported<T> && ...);
         static_assert(is_supported_type, "Supported types are const char*, char*, "
-                                         "unsigned long, unsigned int, and int.");
+                                         "unsigned long, unsigned int, long, unsigned "
+                                         "char, std::vector<unsigned char> and int.");
 
         auto   arg_size        = get_size(values...);
         auto   total_size      = arg_size + sizeof(type) + sizeof(size_t);
@@ -78,6 +79,13 @@ public:
             {
                 len = strlen(val) + 1;
                 std::memcpy(dest, val, len);
+            }
+            else if constexpr(std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
+            {
+                size_t elem_count = val.size();
+                len               = elem_count + sizeof(size_t);
+                std::memcpy(dest, &elem_count, sizeof(size_t));
+                std::memcpy(dest + sizeof(size_t), val.data(), val.size());
             }
             else
             {
@@ -110,7 +118,8 @@ private:
             (std::is_same_v<std::decay_t<T>, Types> || ...);
     };
 
-    using supported_types = typelist<const char*, char*, uint64_t, int32_t, uint32_t>;
+    using supported_types = typelist<const char*, char*, uint64_t, int32_t, uint32_t,
+                                     std::vector<uint8_t>, uint8_t, int64_t>;
 
     template <typename T>
     static constexpr bool is_string_literal_v =
@@ -129,6 +138,10 @@ private:
             }
             return ++size;
         }
+        else if constexpr(std::is_same_v<std::decay_t<T>, std::vector<uint8_t>>)
+        {
+            return val.size() + sizeof(size_t);
+        }
         else
         {
             return sizeof(T);
@@ -144,18 +157,18 @@ private:
     }
 
 private:
-    std::mutex                      m_mutex;
-    std::condition_variable         m_exit_condition;
-    bool                            m_exit_finished{ false };
-    bool                            m_running{ true };
-    std::condition_variable         m_shutdown_condition;
+    std::mutex              m_mutex;
+    std::condition_variable m_exit_condition;
+    bool                    m_exit_finished{ false };
+    bool                    m_running{ true };
+    std::condition_variable m_shutdown_condition;
 
-    std::unique_ptr<PTL::ThreadPool>m_thread_pool;
+    std::unique_ptr<PTL::ThreadPool>      m_thread_pool;
     std::unique_ptr<PTL::TaskGroup<void>> m_task_group;
-    size_t                          m_head{ 0 };
-    size_t                          m_tail{ 0 };
-    std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
-    pid_t                           m_created_process;
+    size_t                                m_head{ 0 };
+    size_t                                m_tail{ 0 };
+    std::unique_ptr<buffer_array_t>       m_buffer{ std::make_unique<buffer_array_t>() };
+    pid_t                                 m_created_process;
 };
 
 }  // namespace trace_cache
