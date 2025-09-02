@@ -331,7 +331,7 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
         }
         // Sanitize string values before embedding into SQL to escape quotes and remove
         // problematic control/separator characters.
-        auto _sanitized = sanitize_sql_string(std::string_view{_value});
+        auto _sanitized = sanitize_sql_string(std::string{_value});
         return sql_insert_value{_name, fmt::format("'{}'", _sanitized)};
     }
     else
