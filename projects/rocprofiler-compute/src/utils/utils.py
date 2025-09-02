@@ -38,7 +38,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path as path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import pandas as pd
 import yaml
@@ -59,18 +59,18 @@ rocprof_args = ""
 spi_pipe_counter_regexs = [r"SPI_CS\d+_(.*)", r"SPI_CSQ_P\d+_(.*)"]
 
 
-def is_tcc_channel_counter(counter) -> bool:
+def is_tcc_channel_counter(counter: str) -> bool:
     return counter.startswith("TCC") and counter.endswith("]")
 
 
 def add_counter_extra_config_input_yaml(
-    data: dict,
+    data: dict[str, Any],
     counter_name: str,
     description: str,
     expression: str,
-    architectures: list,
-    properties: Optional[list] = None,
-) -> dict:
+    architectures: list[str],
+    properties: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """
     Add a new counter to the rocprofiler-sdk dictionary.
     Initialize missing parts if data is empty or incomplete.
