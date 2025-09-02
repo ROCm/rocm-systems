@@ -245,6 +245,7 @@ Filtering options
 
 ``--set <metric-set>``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
+   Cannot be used with ``--roof-only`` or ``--block``.
    See :ref:`profiling-metric-sets`.
 
 .. tip::
@@ -445,6 +446,7 @@ Metric Sets
 
 A Set contains a subset of metrics that can be collected in a single pass. This filtering option allows minimized profiling overhead by only collecting counters of interest.
 Sets provide a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
+This option cannot be used with ``--roof-only`` and ``--block``.
 
 .. code-block:: shell-session
 
