@@ -70,11 +70,11 @@ struct Instruction
 };
 
 /**
- * @brief Examines a specific DWARF DIE for inlined function information at an address
+ * @brief Extracts inlined function call stack information for a given address
  *
- * This class extracts DWARF information from a given Die, including it's child dies.
- *
- * @param die Pointer to the DWARF DIE to examine
+ * This struct is used to recursively search through DWARF debug information to find all inlined
+ * functions that contain the specified address, building a complete call stack from the outermost
+ * function down to the innermost inlined function.
  */
 struct DIEInfo
 {
@@ -98,7 +98,8 @@ struct DIEInfo
     DIEInfo(Dwarf_Die* die);
 
     /**
-     * @brief Recursively traverses all DWARF DIEs to find inlined functions at a specific address
+     * @brief Recursively traverses all children DIEInfos to find inlined functions at a specific
+     * address
      *
      * This function performs a depth-first traversal of the DWARF debug information tree,
      * checking each DIE for inlined function information that covers the specified address.
@@ -111,8 +112,9 @@ struct DIEInfo
      *
      * @param addr The address to search for inlined function information
      * @param call_stack Reference to vector that accumulates the call stack information
+     * @return True if either this instance or one of the children added an entry to the stack
      */
-    bool buildStack(Dwarf_Addr addr, std::vector<std::string>& call_stack);
+    bool getCallStackRecursive(Dwarf_Addr addr, std::vector<std::string>& call_stack);
 
     std::vector<DRange>                   all_ranges{};
     std::vector<std::unique_ptr<DIEInfo>> children{};
@@ -210,7 +212,7 @@ public:
 
                         auto& die_ptr = diemap[dwarf_dieoffset(&die)];
                         if(die_ptr == nullptr) die_ptr = std::make_unique<DIEInfo>(&die);
-                        die_ptr->buildStack(addr, call_stack_info);
+                        die_ptr->getCallStackRecursive(addr, call_stack_info);
 
                         size_t capacity = dwarf_line.size() +
                                           Instruction::separator.size() * call_stack_info.size();
@@ -579,6 +581,7 @@ inline DIEInfo::DIEInfo(Dwarf_Die* die)
 
     Dwarf_Die child{};
 
+    // Traverse children (recursive part)
     if(dwarf_child(die, &child) == 0)
     {
         do
@@ -591,7 +594,7 @@ inline DIEInfo::DIEInfo(Dwarf_Die* die)
 }
 
 inline bool
-DIEInfo::buildStack(Dwarf_Addr addr, std::vector<std::string>& call_stack)
+DIEInfo::getCallStackRecursive(Dwarf_Addr addr, std::vector<std::string>& call_stack)
 {
     if(!children_range.contains(addr)) return false;
 
@@ -600,7 +603,7 @@ DIEInfo::buildStack(Dwarf_Addr addr, std::vector<std::string>& call_stack)
     for(auto& child : children)
     {
         // Only add from one of the children
-        addedOne = child->buildStack(addr, call_stack);
+        addedOne = child->getCallStackRecursive(addr, call_stack);
         if(addedOne) break;
     }
 
