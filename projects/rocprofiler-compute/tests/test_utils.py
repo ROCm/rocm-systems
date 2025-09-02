@@ -2988,7 +2988,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
-    monkeypatch.setattr("utils.utils.path", path_side_effect)
+    monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
     original_env_var = "original_value"
     monkeypatch.setenv("EXISTING_VAR", original_env_var)
@@ -3094,7 +3094,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
-    monkeypatch.setattr("utils.utils.path", path_side_effect)
+    monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
     dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
@@ -3768,7 +3768,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    original_path = utils.path
+    original_path = utils.Path
 
     def mock_path_exists(path_str):
         if path_str == workload_dir + "/out":
@@ -3778,7 +3778,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
         else:
             return original_path(path_str)
 
-    monkeypatch.setattr("utils.utils.path", mock_path_exists)
+    monkeypatch.setattr("utils.utils.Path", mock_path_exists)
 
     import utils.utils as utils_mod
 
@@ -4324,7 +4324,7 @@ def test_process_hip_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    original_path = utils.path
+    original_path = utils.Path
 
     def mock_path_exists(path_str):
         if path_str == workload_dir + "/out":
@@ -4334,7 +4334,7 @@ def test_process_hip_trace_output_no_out_directory(tmp_path, monkeypatch):
         else:
             return original_path(path_str)
 
-    monkeypatch.setattr("utils.utils.path", mock_path_exists)
+    monkeypatch.setattr("utils.utils.Path", mock_path_exists)
 
     import utils.utils as utils_mod
 
@@ -8725,7 +8725,7 @@ class MockArgs:
 
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
 @mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.path")
+@mock.patch("utils.utils.Path")
 def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_constructor, mock_console_error_func
 ):
@@ -9165,7 +9165,7 @@ def create_dummy_csv(filepath, data_dict):
 
 
 @mock.patch("utils.utils.console_warning")
-@mock.patch("utils.utils.path")
+@mock.patch("utils.utils.Path")
 def test_replace_timestamps_no_timestamps_csv_returns_early(
     mock_path_util, mock_console_warning, tmp_path
 ):
@@ -9192,7 +9192,7 @@ def test_replace_timestamps_no_timestamps_csv_returns_early(
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")  # Mock glob.glob
-@mock.patch("utils.utils.path")
+@mock.patch("utils.utils.Path")
 def test_replace_timestamps_timestamps_csv_missing_columns_warns(
     mock_path_util, mock_glob, mock_console_warning, tmp_path
 ):
@@ -9227,7 +9227,7 @@ def test_replace_timestamps_timestamps_csv_missing_columns_warns(
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")
-@mock.patch("utils.utils.path")
+@mock.patch("utils.utils.Path")
 def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
     mock_path_util, mock_glob, mock_console_warning, tmp_path
 ):
@@ -9303,7 +9303,7 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")
-@mock.patch("utils.utils.path")
+@mock.patch("utils.utils.Path")
 def test_replace_timestamps_no_other_csvs_to_update(
     mock_path_util, mock_glob, mock_console_warning, tmp_path
 ):

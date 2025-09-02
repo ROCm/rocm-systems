@@ -165,7 +165,7 @@ class webui_analysis(OmniAnalyze_Base):
             # All filtering will occur here
             parser.load_table_data(
                 workload=base_data[base_run],
-                dir=self.dest_dir,
+                directory=self.dest_dir,
                 is_gui=True,
                 args=self.get_args(),
                 config=self._profiling_config,

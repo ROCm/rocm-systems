@@ -37,9 +37,9 @@ from utils import rocpd_data
 from utils.analysis_orm import Database, get_views
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.parser import (
+    BUILD_IN_VARS,
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
-    build_in_vars,
     to_avg,
     to_concat,
     to_int,
@@ -274,20 +274,22 @@ class db_analysis(OmniAnalyze_Base):
                 for symbol in pc_sampling_data["kernel_symbols"]
             }
 
-            pc_df = pd.DataFrame([
-                {
-                    "inst_index": pc_sample["inst_index"],
-                    "code_object_id": pc_sample["record"]["pc"]["code_object_id"],
-                    "code_object_offset": pc_sample["record"]["pc"][
-                        "code_object_offset"
-                    ],
-                    "stall_reason": pc_sample["record"]
-                    .get("snapshot", {})
-                    .get("stall_reason"),
-                    "wave_issued": pc_sample["record"].get("wave_issued"),
-                }
-                for pc_sample in pc_sampling_stochastic + pc_sampling_host_trap
-            ])
+            pc_df = pd.DataFrame(
+                [
+                    {
+                        "inst_index": pc_sample["inst_index"],
+                        "code_object_id": pc_sample["record"]["pc"]["code_object_id"],
+                        "code_object_offset": pc_sample["record"]["pc"][
+                            "code_object_offset"
+                        ],
+                        "stall_reason": pc_sample["record"]
+                        .get("snapshot", {})
+                        .get("stall_reason"),
+                        "wave_issued": pc_sample["record"].get("wave_issued"),
+                    }
+                    for pc_sample in pc_sampling_stochastic + pc_sampling_host_trap
+                ]
+            )
 
             def custom_aggregator(column_name):
                 if column_name == "count_issued":
@@ -330,14 +332,16 @@ class db_analysis(OmniAnalyze_Base):
             )
 
             grouped_df["instruction"] = grouped_df["inst_index"].apply(
-                lambda x: pc_sampling_instruction[x]
-                if x < len(pc_sampling_instruction)
-                else None
+                lambda x: (
+                    pc_sampling_instruction[x]
+                    if x < len(pc_sampling_instruction)
+                    else None
+                )
             )
             grouped_df["source_line"] = grouped_df["inst_index"].apply(
-                lambda x: pc_sampling_comments[x]
-                if x < len(pc_sampling_comments)
-                else None
+                lambda x: (
+                    pc_sampling_comments[x] if x < len(pc_sampling_comments) else None
+                )
             )
             grouped_df["kernel_name"] = grouped_df["code_object_id"].apply(
                 lambda x: pc_sampling_kernel_name_dict.get(x)
@@ -409,14 +413,14 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info[f"{key}_empirical_peak"] = value
 
             # Calculate PER_XCD variables first
-            for key, value in build_in_vars.items():
+            for key, value in BUILD_IN_VARS.items():
                 if "PER_XCD" in key:
                     sys_info[key] = db_analysis.evaluate(
                         key, value, pmc_df, sys_info, parse=True
                     )
 
             # variable dependent on PER_XCD variables
-            for key, value in build_in_vars.items():
+            for key, value in BUILD_IN_VARS.items():
                 if "PER_XCD" not in key:
                     sys_info[key] = db_analysis.evaluate(
                         key, value, pmc_df, sys_info, parse=True
@@ -464,39 +468,49 @@ class db_analysis(OmniAnalyze_Base):
                 "Coherency",
                 "Transaction",
             ]
-            metrics_info_df = pd.DataFrame([
-                {
-                    "name": row.get("Metric") or row["Channel"].strip(),
-                    "metric_id": metric_id,
-                    "description": row.get("Description"),
-                    "unit": row.get("Unit"),
-                    "table_name": table_names_map[int(metric_id.split(".")[0]) * 100],
-                    "sub_table_name": table_names_map[
-                        int(metric_id.split(".")[0]) * 100
-                        + int(metric_id.split(".")[1])
-                    ],
-                }
-                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id
-                != 402  # Skip roofline data points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
-            ])
-            values_df = pd.DataFrame([
-                {
-                    "metric_id": metric_id,
-                    "value_name": value_name,
-                    "value": row[value_name].strip(),
-                }
-                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id
-                != 402  # Skip roofline data points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
-                for value_name in metric_df.drop(
-                    columns=non_expression_columns, errors="ignore"
-                ).columns
-            ])
+            metrics_info_df = pd.DataFrame(
+                [
+                    {
+                        "name": row.get("Metric") or row["Channel"].strip(),
+                        "metric_id": metric_id,
+                        "description": row.get("Description"),
+                        "unit": row.get("Unit"),
+                        "table_name": table_names_map[
+                            int(metric_id.split(".")[0]) * 100
+                        ],
+                        "sub_table_name": table_names_map[
+                            int(metric_id.split(".")[0]) * 100
+                            + int(metric_id.split(".")[1])
+                        ],
+                    }
+                    for metric_df_id, metric_df in self._arch_configs[
+                        gfx_arch
+                    ].dfs.items()
+                    if metric_df_id
+                    != 402  # Skip roofline data points handled in calc_roofline_data
+                    if set(metric_df.columns).intersection({"Metric", "Channel"})
+                    for metric_id, row in metric_df.iterrows()
+                ]
+            )
+            values_df = pd.DataFrame(
+                [
+                    {
+                        "metric_id": metric_id,
+                        "value_name": value_name,
+                        "value": row[value_name].strip(),
+                    }
+                    for metric_df_id, metric_df in self._arch_configs[
+                        gfx_arch
+                    ].dfs.items()
+                    if metric_df_id
+                    != 402  # Skip roofline data points handled in calc_roofline_data
+                    if set(metric_df.columns).intersection({"Metric", "Channel"})
+                    for metric_id, row in metric_df.iterrows()
+                    for value_name in metric_df.drop(
+                        columns=non_expression_columns, errors="ignore"
+                    ).columns
+                ]
+            )
 
             metrics_info_data_per_workload[workload_path] = metrics_info_df
             values_data_per_workload[workload_path] = values_df
@@ -508,15 +522,17 @@ class db_analysis(OmniAnalyze_Base):
         dispatch_data_per_workload = dict()
 
         for workload_path in self._runs.keys():
-            dispatch_df = pd.DataFrame([
-                {
-                    "dispatch_id": row.Dispatch_ID,
-                    "kernel_name": row.Kernel_Name,
-                    "gpu_id": row.GPU_ID,
-                    "duration": row.End_Timestamp - row.Start_Timestamp,
-                }
-                for row in self._pmc_df_per_workload[workload_path].itertuples()
-            ])
+            dispatch_df = pd.DataFrame(
+                [
+                    {
+                        "dispatch_id": row.Dispatch_ID,
+                        "kernel_name": row.Kernel_Name,
+                        "gpu_id": row.GPU_ID,
+                        "duration": row.End_Timestamp - row.Start_Timestamp,
+                    }
+                    for row in self._pmc_df_per_workload[workload_path].itertuples()
+                ]
+            )
             dispatch_data_per_workload[workload_path] = dispatch_df
 
         console_debug("Calculated dispatch data")
@@ -536,10 +552,12 @@ class db_analysis(OmniAnalyze_Base):
             # Filter kernel_ids
             if self._runs[workload_path].filter_kernel_ids:
                 pmc_df = pmc_df.loc[
-                    pmc_df["Kernel_Name"].isin([
-                        self._top_kernels_per_workload[workload_path][id]
-                        for id in self._runs[workload_path].filter_kernel_ids
-                    ])
+                    pmc_df["Kernel_Name"].isin(
+                        [
+                            self._top_kernels_per_workload[workload_path][id]
+                            for id in self._runs[workload_path].filter_kernel_ids
+                        ]
+                    )
                 ]
             # Filter dispatch_ids
             if self._runs[workload_path].filter_dispatch_ids:
@@ -577,23 +595,25 @@ class db_analysis(OmniAnalyze_Base):
                 "hbm_cache_data": roofline_data_expressions["AI HBM"],
             }
 
-            roofline_df = pd.DataFrame([
-                {
-                    "kernel_name": kernel_name,
-                    **{
-                        metric_name: db_analysis.evaluate(
-                            metric_name,
-                            roofline_data_expressions[metric_name],
-                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                            sys_info,
-                        )
-                        for metric_name in roofline_data_expressions
-                    },
-                }
-                for kernel_name in self._top_kernels_per_workload[workload_path][
-                    : self.get_args().max_stat_num
+            roofline_df = pd.DataFrame(
+                [
+                    {
+                        "kernel_name": kernel_name,
+                        **{
+                            metric_name: db_analysis.evaluate(
+                                metric_name,
+                                roofline_data_expressions[metric_name],
+                                pmc_df[pmc_df["Kernel_Name"] == kernel_name],
+                                sys_info,
+                            )
+                            for metric_name in roofline_data_expressions
+                        },
+                    }
+                    for kernel_name in self._top_kernels_per_workload[workload_path][
+                        : self.get_args().max_stat_num
+                    ]
                 ]
-            ])
+            )
 
             roofline_data_per_workload[workload_path] = roofline_df
 

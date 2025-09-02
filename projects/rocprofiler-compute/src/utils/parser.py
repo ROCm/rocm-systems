@@ -751,7 +751,7 @@ def build_dfs(
                         #   sys_info at this stage.
                         var = calc_builtin_var(r, sys_info)
                         if var is not None:
-                            for i in range(var):
+                            for i in range(int(var)):
                                 new_key = metric.replace(p, str(i))
                                 new_val = {
                                     k: v.replace(p, str(i))

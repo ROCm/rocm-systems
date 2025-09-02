@@ -72,7 +72,7 @@ class cli_analysis(OmniAnalyze_Base):
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
-                dir=d[0],
+                directory=d[0],
                 is_gui=False,
                 args=self.get_args(),
                 config=self._profiling_config,
