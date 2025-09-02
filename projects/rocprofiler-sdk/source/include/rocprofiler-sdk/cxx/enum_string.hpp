@@ -1106,7 +1106,20 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_mscclRunAlgo);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_mscclUnloadAlgo);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommRegister);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommDeregister);
+#if RCCL_API_TRACE_VERSION_PATCH >= 1
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAllReduceWithBias);
+#endif
+
+#if RCCL_API_TRACE_VERSION_PATCH == 0
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 37);
+#elif RCCL_API_TRACE_VERSION_PATCH == 1
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 38);
+#else
+#    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
+        (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
+static_assert(false, "Support for new RCCL_API_TRACE_VERSION_PATCH enumerations is required");
+#    endif
+#endif
 
 // rocprofiler_rocdecode_api_id_t
 ROCPROFILER_ENUM_INFO(rocprofiler_rocdecode_api_id_t, 0, ROCPROFILER_ROCDECODE_API_ID_LAST, false)
