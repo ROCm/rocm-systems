@@ -407,6 +407,12 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
+# busySpin
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/busy_spin_kernels.cl")
+build_sample_for_devices("busySpin")
+
+
 set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 
 # Build rules
