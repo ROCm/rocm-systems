@@ -15707,12 +15707,12 @@ panels:
             max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
             unit: (Req  + $normUnit)
           Read (64B):
-            avg: AVG(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
-              / $denom))
-            min: MIN(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
-              / $denom))
-            max: MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
-              / $denom))
+            avg: AVG(MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) /
+              $denom), 0))
+            min: MIN(MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) /
+              $denom), 0))
+            max: MAX(MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) /
+              $denom), 0))          
             unit: (Req  + $normUnit)
           Read (128B):
             avg: AVG(((TCC_BUBBLE_sum) / $denom))
