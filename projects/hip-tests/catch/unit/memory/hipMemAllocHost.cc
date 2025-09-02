@@ -130,3 +130,19 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
     HIP_CHECK(hipCtxDestroy(devices_ctxs[device_index]));
   }
 }
+
+TEST_CASE("Unit_hipMemAllocHost_Capture") {
+  int* host_memory = nullptr;
+
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)),
+                  capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    REQUIRE(host_memory != nullptr);
+    HIP_CHECK(hipHostFree(host_memory));
+  }
+}

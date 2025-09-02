@@ -980,6 +980,21 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   }
 }
 
+TEST_CASE("Unit_hipHostRegister_Capture") {
+  constexpr size_t kBufferSize = 1024;
+  auto buffer = std::make_unique<int[]>(kBufferSize);
+  hipError_t capture_error = hipSuccess;
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    HIP_CHECK(hipHostUnregister(buffer.get()));
+  }
+}
+
 /**
  * End doxygen group MemoryTest.
  * @}
