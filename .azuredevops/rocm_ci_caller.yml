@@ -51,7 +51,7 @@ jobs:
 
         MATCH_FOUND=false
         while read file; do
-          if [[ "$file" == projects/* || "$file" == shared/* ]]; then
+          if [[ "$file" == projects/* ]]; then
             MATCH_FOUND=true
             break
           fi
