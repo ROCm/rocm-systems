@@ -51,7 +51,7 @@ from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
     calc_ai_analyze,
     calc_ai_profile,
-    constuct_roof,
+    construct_roof,
 )
 from utils.utils import mibench
 
