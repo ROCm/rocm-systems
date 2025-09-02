@@ -256,7 +256,7 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
 
   // Create setting for the offline target
   if ((palSettings == nullptr) ||
-      !palSettings->create(properties, heaps, wscaps, isa.xnack() == amd::Isa::Feature::Enabled)) {
+      !palSettings->create(properties, heaps, wscaps, isa)) {
     LogPrintfError("Unable to create PAL setting for offline PAL device %s", isa.targetId());
     return false;
   }
@@ -1005,7 +1005,7 @@ bool Device::create(Pal::IDevice* device) {
 
   pal::Settings* gpuSettings = reinterpret_cast<pal::Settings*>(settings_);
   if (!gpuSettings ||
-      !gpuSettings->create(properties(), heaps_, wscaps, isa->xnack() == amd::Isa::Feature::Enabled,
+      !gpuSettings->create(properties(), heaps_, wscaps, *isa,
                            appProfile_.reportAsOCL12Device())) {
     return false;
   }

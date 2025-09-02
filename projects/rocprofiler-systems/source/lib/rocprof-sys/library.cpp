@@ -56,7 +56,6 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
-#include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -85,6 +84,7 @@
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/agent.h>
+#    include <rocprofiler-sdk/registration.h>
 #endif
 
 #include <atomic>
@@ -602,12 +602,6 @@ rocprofsys_init_tooling_hidden(void)
         }
     }
 
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up OMPT...\n");
-        ompt::setup();
-    }
-
     if(get_use_perfetto())
     {
         ROCPROFSYS_VERBOSE_F(1, "Starting Perfetto...\n");
@@ -851,12 +845,6 @@ rocprofsys_finalize_hidden(void)
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down VA-API tracing...\n");
         component::vaapi_gotcha::shutdown();
-    }
-
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down OMPT...\n");
-        ompt::shutdown();
     }
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
