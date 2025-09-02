@@ -4,6 +4,7 @@ This dictionary is used to map specific file directory changes to the correspond
 subtree_to_project_map = {
     "projects/aqlprofile": "profiler",
     "projects/rocprofiler-sdk": "profiler",
+    "projects/rocprofiler-register": "profiler",
     "projects/roctracer": "profiler",
     "projects/rocm_smi_lib": "base",
     "projects/rocm-core": "base",
@@ -17,9 +18,9 @@ subtree_to_project_map = {
 
 project_map = {
     "profiler": {
-        "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "",
-        "subtree_checkout": "projects/aqlprofile\nprojects/rocprofiler-sdk\nprojects/roctracer",
+        "subtree_checkout": "projects/aqlprofile\nprojects/rocprofiler-sdk\nprojects/roctracer\nprojects/rocprofiler-register\nprojects/clr\nprojects/hip\nprojects/hip-tests\nprojects/rocminfo\nprojects/rocr-runtime",
     },
     "base": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=OFF",
