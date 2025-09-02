@@ -20,7 +20,7 @@ project_map = {
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "",
-        "subtree_checkout": "projects/aqlprofile\nprojects/rocprofiler-sdk\nprojects/roctracer\nprojects/rocprofiler-register\nprojects/clr\nprojects/hip\nprojects/hip-tests\nprojects/rocminfo\nprojects/rocr-runtime",
+        "subtree_checkout": "projects/aqlprofile\nprojects/rocprofiler-sdk\nprojects/roctracer\nprojects/rocprofiler-register\nprojects/clr\nprojects/hip\nprojects/hip-tests\nprojects/rocminfo\nprojects/rocr-runtime\nprojects/rocm_smi_lib\nprojects/rocm-core\nprojects/rocprofiler-register",
     },
     "base": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=OFF",
