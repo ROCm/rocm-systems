@@ -19,8 +19,6 @@
  THE SOFTWARE. */
 
 #include "cl.h"
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
@@ -62,7 +60,6 @@
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
 #include <sstream>
 #include <vector>
-#endif  // WITHOUT_HSA_BACKEND
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
 #define OPENCL_C_VERSION_STR XSTR(OPENCL_C_MAJOR) "." XSTR(OPENCL_C_MINOR)
@@ -78,7 +75,6 @@ static_assert(static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite) ==
                   static_cast<uint32_t>(HSA_ACCESS_PERMISSION_RW),
               "Vmm Access Flag Read Write mismatch with ROC-runtime!");
 
-#ifndef WITHOUT_HSA_BACKEND
 
 namespace amd::device {
 extern const char* HipExtraSourceCode;
@@ -3622,4 +3618,3 @@ device::UriLocator* Device::createUriLocator() const { return new roc::UriLocato
 #endif
 #endif
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND

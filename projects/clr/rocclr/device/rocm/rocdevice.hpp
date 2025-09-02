@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "CL/cl.h"
 #include "device/device.hpp"
@@ -691,4 +689,4 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 /**
  * @}
  */
-#endif /*WITHOUT_HSA_BACKEND*/
+

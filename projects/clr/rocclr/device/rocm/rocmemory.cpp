@@ -18,8 +18,6 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
@@ -1610,4 +1608,4 @@ amd::Image* Image::FindView(cl_image_format format) const {
 }
 
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND
+
