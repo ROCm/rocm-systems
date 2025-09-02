@@ -30,7 +30,6 @@ import json
 import locale
 import logging
 import os
-import pathlib
 import re
 import shutil
 import subprocess
@@ -174,9 +173,9 @@ def get_num_pmc_file(output_dir):
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
-    ])
+    return len(
+        [f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"]
+    )
 
 
 # =============================================================================
@@ -189,7 +188,7 @@ def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
     given directory.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path provided by pytest for test isolation.
+        tmp_path (Path): Temporary path provided by pytest for test isolation.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture to modify or simulate behavior
             of modules/functions.
 
@@ -219,7 +218,7 @@ def test_get_version_finds_version_in_parent(tmp_path, monkeypatch):
     in the given directory.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path provided by pytest for test isolation.
+        tmp_path (Path): Temporary path provided by pytest for test isolation.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture to modify or simulate behavior
             of modules/functions.
 
@@ -280,7 +279,7 @@ def test_get_version_git_success(tmp_path, monkeypatch):
     Test get_version returns correct version info when git command succeeds.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -309,7 +308,7 @@ def test_get_version_git_fails_sha_file(tmp_path, monkeypatch):
     Test get_version returns correct version info when git fails but VERSION.sha exists.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -343,7 +342,7 @@ def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
     Test get_version returns unknown sha and mode when both git and VERSION.sha fail.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -426,7 +425,7 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
         "shutil.which", lambda cmd: "/usr/bin/rocprof" if cmd == "rocprof" else None
     )
     # Path.resolve returns the same path for simplicity
-    monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
+    monkeypatch.setattr("Path.resolve", lambda self: self)
     # Track debug logs
     logs = []
     monkeypatch.setattr(
@@ -456,7 +455,7 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     monkeypatch.setattr(
         "shutil.which", lambda cmd: "/usr/bin/rocprofv3" if cmd == "rocprofv3" else None
     )
-    monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
+    monkeypatch.setattr("Path.resolve", lambda self: self)
     logs = []
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
@@ -483,7 +482,7 @@ def test_detect_rocprof_sdk(monkeypatch):
         rocprofiler_sdk_library_path = "/some/sdk/path"
 
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
-    monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
+    monkeypatch.setattr("Path.exists", lambda self: True)
     logs = []
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
@@ -1310,7 +1309,7 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
     Test basic functionality of v3_json_to_csv with a minimal valid JSON input.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1425,7 +1424,7 @@ def test_v3_json_to_csv_no_dispatches(tmp_path, monkeypatch):
     Should create an empty CSV with headers.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1480,7 +1479,7 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     Should rename them to SQ_ACCUM_PREV_HIRES.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1590,7 +1589,7 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
     Should sum the values.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1718,7 +1717,7 @@ def test_v3_json_to_csv_invalid_json(tmp_path):
     Should raise JSONDecodeError.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
     """
     json_path = tmp_path / "invalid.json"
     with open(json_path, "w") as f:
@@ -1736,7 +1735,7 @@ def test_v3_json_to_csv_missing_required_keys(tmp_path):
     Should raise KeyError.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
     """
 
     invalid_json = {
@@ -1764,7 +1763,7 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     multiple dispatches and 3D grid/workgroup sizes.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1943,7 +1942,7 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     where arrays have different lengths.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -2228,7 +2227,7 @@ def test_parse_text_basic(tmp_path):
     """Test parse_text with a simple valid input file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that counters are correctly extracted from a simple file.
@@ -2244,7 +2243,7 @@ def test_parse_text_empty_file(tmp_path):
     """Test parse_text with an empty file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that an empty file returns an empty list.
@@ -2260,7 +2259,7 @@ def test_parse_text_no_pmc_entries(tmp_path):
     """Test parse_text with a file that doesn't contain any 'pmc:' entries.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that a file without 'pmc:' returns an empty list.
@@ -2276,7 +2275,7 @@ def test_parse_text_with_comments(tmp_path):
     """Test parse_text with lines that have comments after the counters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that comments are properly stripped from counter lines.
@@ -2292,7 +2291,7 @@ def test_parse_text_multiple_lines(tmp_path):
     """Test parse_text with multiple 'pmc:' lines.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts counters from multiple lines are correctly combined.
@@ -2308,7 +2307,7 @@ def test_parse_text_mixed_lines(tmp_path):
     """Test parse_text with a mix of 'pmc:' and non-'pmc:' lines.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that only counters from 'pmc:' lines are extracted.
@@ -2326,7 +2325,7 @@ def test_parse_text_whitespace_handling(tmp_path):
     """Test parse_text with various whitespace combinations.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that whitespace is properly handled in counter extraction.
@@ -2352,7 +2351,7 @@ def test_parse_text_edge_cases(tmp_path):
     """Test parse_text with edge cases like empty 'pmc:' lines.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that edge cases are handled correctly.
@@ -2385,7 +2384,7 @@ def test_run_prof_success_v2(tmp_path, monkeypatch):
     Test run_prof with rocprofv2 successful execution.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2433,7 +2432,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     Test run_prof with rocprofv3 using CSV format.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2481,7 +2480,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     Test run_prof with rocprofiler-sdk execution.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2530,7 +2529,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     Test run_prof with additional YAML configuration file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2575,7 +2574,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     Test run_prof when subprocess execution fails.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2622,7 +2621,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     Test run_prof sets proper environment variables for MI300 series GPUs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2672,7 +2671,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     Test run_prof handles timestamps.txt special case correctly.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2712,11 +2711,13 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
-    mock_df = pd.DataFrame({
-        "Dispatch_ID": [0],
-        "Start_Timestamp": [100],
-        "End_Timestamp": [200],
-    })
+    mock_df = pd.DataFrame(
+        {
+            "Dispatch_ID": [0],
+            "Start_Timestamp": [100],
+            "End_Timestamp": [200],
+        }
+    )
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -2730,7 +2731,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     Test run_prof when no results files are generated.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2769,7 +2770,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     Test run_prof properly standardizes CSV headers.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2796,14 +2797,16 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
-    old_headers_df = pd.DataFrame({
-        "KernelName": ["test_kernel"],
-        "Index": [0],
-        "grd": [64],
-        "gpu-id": [0],
-        "BeginNs": [100],
-        "EndNs": [200],
-    })
+    old_headers_df = pd.DataFrame(
+        {
+            "KernelName": ["test_kernel"],
+            "Index": [0],
+            "grd": [64],
+            "gpu-id": [0],
+            "BeginNs": [100],
+            "EndNs": [200],
+        }
+    )
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
     monkeypatch.setattr(
@@ -2850,7 +2853,7 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     Test run_prof applies TCC flattening for MI300 series GPUs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2874,11 +2877,13 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     def mock_flatten_tcc_info_across_xcds(file, xcds, l2_banks):
         nonlocal flatten_called
         flatten_called = True
-        return pd.DataFrame({
-            "Dispatch_ID": [0],
-            "TCC_HIT[0]": [100],
-            "TCC_HIT[16]": [200],
-        })
+        return pd.DataFrame(
+            {
+                "Dispatch_ID": [0],
+                "TCC_HIT[0]": [100],
+                "TCC_HIT[16]": [200],
+            }
+        )
 
     # Mock functions
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
@@ -2931,7 +2936,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             by the mspec.gpu_model check.
     """
     fname_str = str(tmp_path / "counters.txt")
-    pathlib.Path(fname_str).touch()
+    Path(fname_str).touch()
     workload_dir_str = str(tmp_path)
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
@@ -2958,15 +2963,15 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         "utils.utils.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"]
     )
 
-    mock_fname_path_obj = mock.Mock(spec=pathlib.Path)
+    mock_fname_path_obj = mock.Mock(spec=Path)
     mock_fname_path_obj.stem = "counters"
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-    mock_out_path_obj = mock.Mock(spec=pathlib.Path)
+    mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
 
     def path_side_effect(p_arg, *args):
-        if isinstance(p_arg, pathlib.Path):
+        if isinstance(p_arg, Path):
             if p_arg.name == "counters.txt":
                 return mock_fname_path_obj
             return p_arg
@@ -3010,12 +3015,12 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         format_rocprof_output,
     )
 
-    assert capture_subprocess_called_with_env is not None, (
-        "new_env should have been created"
-    )
-    assert "EXISTING_VAR" in capture_subprocess_called_with_env, (
-        "new_env should be a copy of os.environ"
-    )
+    assert (
+        capture_subprocess_called_with_env is not None
+    ), "new_env should have been created"
+    assert (
+        "EXISTING_VAR" in capture_subprocess_called_with_env
+    ), "new_env should be a copy of os.environ"
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
     assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
     assert "APP_CMD" not in capture_subprocess_called_with_env
@@ -3032,7 +3037,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
         process_hip_trace_output(...)
     """
     fname_str = str(tmp_path / "counters.txt")
-    pathlib.Path(fname_str).touch()
+    Path(fname_str).touch()
     fbase_str = "counters"
     workload_dir_str = str(tmp_path)
     (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
@@ -3065,17 +3070,17 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])
 
-    mock_fname_path_obj = mock.MagicMock(spec=pathlib.Path)
+    mock_fname_path_obj = mock.MagicMock(spec=Path)
     mock_fname_path_obj.stem = fbase_str
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=pathlib.Path)
+    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=Path)
 
-    mock_out_path_obj = mock.MagicMock(spec=pathlib.Path)
+    mock_out_path_obj = mock.MagicMock(spec=Path)
     mock_out_path_obj.exists.return_value = True
 
     def path_side_effect(p_arg, *args):
-        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt":
+        if isinstance(p_arg, Path) and p_arg.name == "counters.txt":
             return mock_fname_path_obj
         if isinstance(p_arg, str) and p_arg.endswith("/out"):
             return mock_out_path_obj
@@ -3170,7 +3175,7 @@ def test_process_rocprofv3_output_json_format(tmp_path, monkeypatch):
     Test process_rocprofv3_output with json format converts JSON files to CSV.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3208,7 +3213,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
     Test process_rocprofv3_output with csv format processes counter collection files.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3254,7 +3259,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
     Test process_rocprofv3_output handles conversion errors gracefully.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3301,7 +3306,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
     Test process_rocprofv3_output raises error when agent info file is missing.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3332,7 +3337,7 @@ def test_process_rocprofv3_output_csv_format_timestamps_fallback(tmp_path, monke
     Test process_rocprofv3_output falls back to kernel trace files for timestamps.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3370,7 +3375,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
     no files found for non-timestamps.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3416,7 +3421,7 @@ def test_process_rocprofv3_output_json_format_no_files(tmp_path, monkeypatch):
     Test process_rocprofv3_output with json format when no JSON files exist.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3440,7 +3445,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
     Test process_rocprofv3_output processes multiple counter collection files.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3535,7 +3540,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with a single CSV file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3612,9 +3617,9 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "kokkos_malloc" in df["marker_name"].values
     assert "kokkos_parallel_reduce" in df["marker_name"].values
@@ -3626,7 +3631,7 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     Should handle empty file list gracefully.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3675,7 +3680,7 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with a mix of valid, empty, and corrupted files.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3734,7 +3739,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
     Should not copy file to workload directory.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3797,7 +3802,7 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
     only headers but no data.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3834,7 +3839,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with larger CSV files to ensure memory handling.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3885,7 +3890,7 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with CSV files containing unicode characters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3926,7 +3931,7 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with CSV files having different column schemas.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3982,7 +3987,7 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
     errors during file operations.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -4082,9 +4087,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "hipMalloc" in df["api_name"].values
     assert "hipLaunchKernel" in df["api_name"].values
@@ -4092,9 +4097,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
     assert copied_file.exists(), "The copied output file was not created."
     df_copy = pd.read_csv(copied_file)
-    assert df.equals(df_copy), (
-        "The copied file content does not match the primary output."
-    )
+    assert df.equals(
+        df_copy
+    ), "The copied file content does not match the primary output."
 
 
 def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
@@ -4193,7 +4198,7 @@ def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
     def mock_is_file(self):
         return False
 
-    monkeypatch.setattr("pathlib.Path.is_file", mock_is_file)
+    monkeypatch.setattr("Path.is_file", mock_is_file)
 
     def mock_concat(dataframes, **kwargs):
         if not dataframes:
@@ -4611,7 +4616,7 @@ def test_ubuntu_22_04_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4646,7 +4651,7 @@ def test_ubuntu_24_04_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4680,8 +4685,8 @@ def test_rhel_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
 
     def mock_search(pattern, text):
         if "PLATFORM_ID" in pattern:
@@ -4715,7 +4720,7 @@ def test_sles_15_6_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4748,7 +4753,7 @@ def test_sles_15_7_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4774,7 +4779,7 @@ def test_mibench_override_distro_success(tmp_path, monkeypatch):
     Test mibench with override distro that successfully finds and executes binary.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -4829,7 +4834,7 @@ def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
     Test mibench with standard distro where first potential path exists.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -4892,7 +4897,7 @@ def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -4906,7 +4911,7 @@ def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
     Test mibench with standard distro where second potential path exists.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -4969,14 +4974,20 @@ def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
     utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
 
     assert len(subprocess_calls) == 1
-    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "2"]  # noqa
+    expected_args = [
+        str(binary_path),
+        "-o",
+        str(tmp_path) + "/roofline.csv",
+        "-d",
+        "2",
+    ]  # noqa
 
 
 def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
@@ -4984,7 +4995,7 @@ def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
     Test mibench when no binary paths exist, should call console_error.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5058,7 +5069,7 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
     Test mibench quiet flag handling demonstrates the bug where += splits the string.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5112,7 +5123,7 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -5133,7 +5144,15 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
         "-d",
         "0",
     ]
-    expected_full_args = expected_base_args + ["-", "-", "q", "u", "i", "e", "t"]  # noqa
+    expected_full_args = expected_base_args + [
+        "-",
+        "-",
+        "q",
+        "u",
+        "i",
+        "e",
+        "t",
+    ]  # noqa
 
     subprocess_calls.clear()
 
@@ -5147,7 +5166,13 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
 
     utils_mod.mibench(MockArgsQuiet(), SimpleNamespace(rocm_version="0.x.x"))
 
-    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "0"]  # noqa
+    expected_args = [
+        str(binary_path),
+        "-o",
+        str(tmp_path) + "/roofline.csv",
+        "-d",
+        "0",
+    ]  # noqa
 
 
 def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
@@ -5155,7 +5180,7 @@ def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
     Test mibench with SLES distro mapping.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5218,7 +5243,7 @@ def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -5232,7 +5257,7 @@ def test_mibench_subprocess_run_failure(tmp_path, monkeypatch):
     Test mibench when subprocess.run raises an exception.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5276,7 +5301,7 @@ def test_mibench_device_string_conversion(tmp_path, monkeypatch):
     Test mibench correctly converts device ID to string.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5326,7 +5351,7 @@ def test_mibench_unknown_distro_mapping(tmp_path, monkeypatch):
     Test mibench behavior with unknown distro (should cause KeyError).
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5389,7 +5414,7 @@ def test_mibench_console_log_called(tmp_path, monkeypatch):
     Test mibench calls console_log with correct message.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -5475,7 +5500,7 @@ def test_flatten_tcc_info_across_xcds_zero_xcds(tmp_path):
     Test edge case with zero XCDs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles zero XCDs edge case by raising ValueError.
@@ -5500,7 +5525,7 @@ def test_flatten_tcc_info_across_xcds_insufficient_data(tmp_path):
     Test when there's insufficient data for the specified XCDs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function raises ValueError when trying
@@ -5526,7 +5551,7 @@ def test_flatten_tcc_info_across_xcds_irregular_tcc_column_names(tmp_path):
     Test with irregular TCC column naming patterns.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles various TCC column name
@@ -5575,7 +5600,7 @@ def test_flatten_tcc_info_across_xcds_regex_pattern_validation(tmp_path):
     Test that regex pattern correctly identifies channel indices.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts regex pattern works for various channel
@@ -5623,7 +5648,7 @@ def test_flatten_tcc_info_across_xcds_edge_case_validation(tmp_path):
     flatten_tcc_info_across_xcds.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function behavior with various edge cases.
@@ -5660,7 +5685,7 @@ def test_flatten_tcc_info_across_xcds_pandas_filter_issue(tmp_path):
     Test demonstrating the pandas filter regex issue that causes Series ambiguity error.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Documents the pandas boolean evaluation issue in the function.
@@ -5703,7 +5728,7 @@ def test_flatten_tcc_info_across_xcds_successful_cases_only(tmp_path):
     Test only the cases that are expected to work successfully.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts successful operation for known working scenarios.
@@ -6269,7 +6294,7 @@ Directory access issues
 String Formatting and Dependencies:
 
 Console error message formatting
-Path handling (string vs pathlib.Path)
+Path handling (string vs Path)
 Pandas dependency verification
 Return value consistency
 Special Scenarios:
@@ -6286,7 +6311,7 @@ def test_is_workload_empty_valid_data_file(tmp_path):
     Test is_workload_empty with a valid pmc_perf.csv file containing data.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles valid data files without errors.
@@ -6321,7 +6346,7 @@ def test_is_workload_empty_file_with_nan_values(tmp_path):
     Test is_workload_empty with pmc_perf.csv containing NaN values.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects and reports empty cells after dropping NaN.
@@ -6360,7 +6385,7 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
     Test is_workload_empty with completely empty pmc_perf.csv file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects empty CSV file.
@@ -6392,7 +6417,7 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
     Test is_workload_empty with CSV containing only headers.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects CSV with headers but no data.
@@ -6426,7 +6451,7 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     Test is_workload_empty when pmc_perf.csv file doesn't exist.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects missing profiling data file.
@@ -6482,7 +6507,7 @@ def test_is_workload_empty_malformed_csv(tmp_path):
     Test is_workload_empty with malformed CSV that causes pandas read error.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles pandas CSV reading errors gracefully.
@@ -6518,7 +6543,7 @@ def test_is_workload_empty_mixed_valid_invalid_data(tmp_path):
     Test is_workload_empty with CSV containing mix of valid and invalid (NaN) data.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles mixed data correctly.
@@ -6554,7 +6579,7 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
     Test is_workload_empty with large dataset that becomes empty after dropping NaNs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function correctly processes large datasets.
@@ -6592,7 +6617,7 @@ def test_is_workload_empty_unicode_content(tmp_path):
     Test is_workload_empty with CSV containing Unicode characters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles Unicode content correctly.
@@ -6627,7 +6652,7 @@ def test_is_workload_empty_special_path_characters(tmp_path):
     Test is_workload_empty with directory paths containing special characters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles special characters in paths.
@@ -6660,7 +6685,7 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
     Test is_workload_empty when CSV file exists but cannot be read due to permissions.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles file permission errors.
@@ -6696,7 +6721,7 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
 
 def test_is_workload_empty_string_path_input():
     """
-    Test is_workload_empty with string path input vs pathlib.Path.
+    Test is_workload_empty with string path input vs Path.
 
     Returns:
         None: Asserts function handles different path input types.
@@ -6724,7 +6749,7 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     Test is_workload_empty string formatting in console_error messages.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts console_error messages are properly formatted.
@@ -6760,7 +6785,7 @@ def test_is_workload_empty_function_return_value(tmp_path):
     Test that is_workload_empty function return behavior (implicitly returns None).
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function return value consistency.
@@ -6808,7 +6833,7 @@ def test_is_workload_empty_pandas_import_dependency():
     with patch.dict("sys.modules", {"pandas": mock_pandas}):
         with patch("utils.utils.pd", mock_pandas):
             with patch("utils.utils.console_error"):
-                with patch("pathlib.Path.is_file", return_value=True):
+                with patch("Path.is_file", return_value=True):
                     utils_mod.is_workload_empty("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
@@ -7523,9 +7548,9 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
                     utils_mod.set_locale_encoding()
 
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
+                    assert (
+                        len(console_error_calls) == scenario["expected_errors"]
+                    ), f"Failed scenario: {scenario['name']}"
 
 
 # =============================================================================
@@ -8754,9 +8779,9 @@ def test_store_app_cmd_sets_global_rocprof_args():
     else:
         pass
     utils.store_app_cmd(sample_args_object)
-    assert utils.rocprof_args is sample_args_object, (
-        "Global rocprof_args should be the same object as the passed args"
-    )
+    assert (
+        utils.rocprof_args is sample_args_object
+    ), "Global rocprof_args should be the same object as the passed args"
 
 
 # =============================================================================
@@ -8777,35 +8802,39 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     Tests Line 1: Successful parsing of 'Agent Id' string.
     Tests Line 2: Error during parsing of 'Agent Id' string, triggering console_error.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0, 1],
-        "Agent_Type": ["CPU", "GPU"],
-        "Wave_Front_Size": [0, 64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0, 1],
+            "Agent_Type": ["CPU", "GPU"],
+            "Wave_Front_Size": [0, 64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted.csv"
-    counter_content_success = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": ["Agent 1"],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content_success = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": ["Agent 1"],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath_success = tmp_path / "counter_success.csv"
     counter_filepath_success.write_text(counter_content_success)
 
@@ -8823,27 +8852,29 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
 
     mock_console_error.reset_mock()
 
-    counter_content_error = create_csv_string({
-        "Correlation_Id": [2],
-        "Dispatch_Id": [20],
-        "Agent_Id": ["Malformed Agent X"],
-        "Queue_Id": [200],
-        "Process_Id": [2000],
-        "Thread_Id": [20000],
-        "Grid_Size": [512],
-        "Kernel_Id": [2],
-        "Kernel_Name": ["kernelB"],
-        "Workgroup_Size": [128],
-        "LDS_Block_Size": [64],
-        "Scratch_Size": [0],
-        "VGPR_Count": [32],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [64],
-        "Start_Timestamp": [200000],
-        "End_Timestamp": [200200],
-        "Counter_Name": ["Instructions"],
-        "Counter_Value": [10000],
-    })
+    counter_content_error = create_csv_string(
+        {
+            "Correlation_Id": [2],
+            "Dispatch_Id": [20],
+            "Agent_Id": ["Malformed Agent X"],
+            "Queue_Id": [200],
+            "Process_Id": [2000],
+            "Thread_Id": [20000],
+            "Grid_Size": [512],
+            "Kernel_Id": [2],
+            "Kernel_Name": ["kernelB"],
+            "Workgroup_Size": [128],
+            "LDS_Block_Size": [64],
+            "Scratch_Size": [0],
+            "VGPR_Count": [32],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [64],
+            "Start_Timestamp": [200000],
+            "End_Timestamp": [200200],
+            "Counter_Name": ["Instructions"],
+            "Counter_Value": [10000],
+        }
+    )
     counter_filepath_error = tmp_path / "counter_error.csv"
     counter_filepath_error.write_text(counter_content_error)
 
@@ -8871,11 +8902,13 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
     """
     # --- Setup ---
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_accum.csv"
@@ -8922,35 +8955,39 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_no_accum_vgpr.csv"
 
-    counter_content = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": [0],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": [0],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"
     counter_filepath.write_text(counter_content)
 
@@ -8991,7 +9028,7 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
         sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
         rocprofiler_sdk_library_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        pathlib.Path(rocprofiler_sdk_library_path).touch()
+        Path(rocprofiler_sdk_library_path).touch()
 
         expected_tool_path = str(
             sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
@@ -9047,7 +9084,7 @@ def test_pc_sampling_prof_subprocess_fails(
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
         rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        pathlib.Path(rocprofiler_sdk_library_path_sdk).touch()
+        Path(rocprofiler_sdk_library_path_sdk).touch()
 
         tool_dir = sdk_lib_dir / "rocprofiler-sdk"
         tool_dir.mkdir(parents=True, exist_ok=True)
@@ -9101,7 +9138,7 @@ def test_pc_sampling_prof_empty_appcmd(
         sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
         rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        pathlib.Path(rocprofiler_sdk_library_path_sdk).touch()
+        Path(rocprofiler_sdk_library_path_sdk).touch()
         tool_dir = sdk_lib_dir / "rocprofiler-sdk"
         tool_dir.mkdir(parents=True, exist_ok=True)
         (tool_dir / "librocprofiler-sdk-tool.so").touch()
