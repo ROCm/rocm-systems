@@ -572,7 +572,7 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemGetHandleForAddressRange_fn, 476)
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
-ROCP_SDK_ENFORCE_ABI(HipDispatchTable, hipModuleGetFunctionCount_fn, 477);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipModuleGetFunctionCount_fn, 477);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemsetD2D8_fn, 478);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemsetD2D8Async_fn, 479);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemsetD2D16_fn, 480);
