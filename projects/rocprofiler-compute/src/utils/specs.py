@@ -188,10 +188,10 @@ def generate_machine_specs(
             specs.gpu_arch, specs.gpu_model, specs.compute_partition
         )
     )
-    specs.total_l2_chan = total_l2_banks(
+    specs.total_l2_chan = totall2_banks(
         specs.gpu_arch,
         specs.gpu_model,
-        specs._l2_banks,
+        specs.l2_banks,
         specs.compute_partition,
     )
     specs.num_hbm_channels = str(specs.get_hbm_channels())
@@ -343,6 +343,7 @@ class MachineSpecs:
             "doc": "The name of the workload data was collected for.",
             "name": "Workload Name",
             "optional": True,
+            "show_in_table": True,
         },
     )
     command: Optional[str] = field(
@@ -351,6 +352,7 @@ class MachineSpecs:
             "doc": "The command the workload was executed with.",
             "name": "Command",
             "optional": True,
+            "show_in_table": True,
         },
     )
     ip_blocks: Optional[str] = field(
@@ -366,6 +368,7 @@ class MachineSpecs:
         metadata={
             "doc": "The time (in local system time) when data was collected",
             "name": "Timestamp",
+            "show_in_table": True,
         },
     )
     version: Optional[str] = field(
@@ -374,6 +377,7 @@ class MachineSpecs:
             "doc": "The version of the machine specification file format.",
             "name": "MachineSpecs Version",
             "intable": False,
+            "show_in_table": True,
         },
     )
     timestamp: Optional[str] = field(
@@ -381,25 +385,37 @@ class MachineSpecs:
         metadata={
             "doc": "The time (in local system time) when data was collected",
             "name": "Timestamp",
+            "show_in_table": True,
         },
     )
-    rocminfo_lines: Optional[list] = field(default=None)
+    rocminfo_lines: Optional[list] = field(
+        default=None, metadata={"show_in_table": False}
+    )
     ##########################################
     ## A. Machine Specs
     ##########################################
     hostname: Optional[str] = field(
         default=None,
-        metadata={"doc": "The hostname of the machine.", "name": "Hostname"},
+        metadata={
+            "doc": "The hostname of the machine.",
+            "name": "Hostname",
+            "show_in_table": True,
+        },
     )
     cpu_model: Optional[str] = field(
         default=None,
-        metadata={"doc": "The model name of the CPU used.", "name": "CPU Model"},
+        metadata={
+            "doc": "The model name of the CPU used.",
+            "name": "CPU Model",
+            "show_in_table": True,
+        },
     )
     sbios: Optional[str] = field(
         default=None,
         metadata={
             "doc": "The system management bios version and vendor.",
             "name": "SBIOS",
+            "show_in_table": True,
         },
     )
     linux_distro: Optional[str] = field(
@@ -407,6 +423,7 @@ class MachineSpecs:
         metadata={
             "doc": "The Linux distribution installed on the machine.",
             "name": "Linux Distribution",
+            "show_in_table": True,
         },
     )
     linux_kernel_version: Optional[str] = field(
@@ -414,6 +431,7 @@ class MachineSpecs:
         metadata={
             "doc": "The Linux kernel version running on the machine.",
             "name": "Linux Kernel Version",
+            "show_in_table": True,
         },
     )
     amd_gpu_kernel_version: Optional[str] = field(
@@ -424,6 +442,7 @@ class MachineSpecs:
                 "Unimplemented."
             ),
             "name": "AMD GPU Kernel Version",
+            "show_in_table": True,
         },
     )
     cpu_memory: Optional[str] = field(
@@ -432,6 +451,7 @@ class MachineSpecs:
             "doc": "The total amount of memory available to the CPU.",
             "unit": "KB",
             "name": "CPU Memory",
+            "show_in_table": True,
         },
     )
     gpu_memory: Optional[str] = field(
@@ -443,6 +463,7 @@ class MachineSpecs:
             ),
             "unit": "KB",
             "name": "GPU Memory",
+            "show_in_table": True,
         },
     )
     rocm_version: Optional[str] = field(
@@ -450,6 +471,7 @@ class MachineSpecs:
         metadata={
             "doc": "The ROCm version used during data-collection.",
             "name": "ROCm Version",
+            "show_in_table": True,
         },
     )
     vbios: Optional[str] = field(
@@ -457,6 +479,7 @@ class MachineSpecs:
         metadata={
             "doc": "The version of the accelerators/GPUs video bios in the system.",
             "name": "VBIOS",
+            "show_in_table": True,
         },
     )
     compute_partition: Optional[str] = field(
@@ -467,6 +490,7 @@ class MachineSpecs:
                 "system (MI300 only)."
             ),
             "name": "Compute Partition",
+            "show_in_table": True,
         },
     )
     memory_partition: Optional[str] = field(
@@ -477,6 +501,7 @@ class MachineSpecs:
                 "system (MI300 only)."
             ),
             "name": "Memory Partition",
+            "show_in_table": True,
         },
     )
 
@@ -488,6 +513,7 @@ class MachineSpecs:
         metadata={
             "doc": "The series of the accelerators/GPUs in the system.",
             "name": "GPU Series",
+            "show_in_table": True,
         },
     )
     gpu_model: Optional[str] = field(
@@ -495,6 +521,7 @@ class MachineSpecs:
         metadata={
             "doc": "The product name of the accelerators/GPUs in the system.",
             "name": "GPU Model",
+            "show_in_table": True,
         },
     )
     gpu_arch: Optional[str] = field(
@@ -503,6 +530,7 @@ class MachineSpecs:
             "doc": "The architecture name of the accelerators/GPUs in the system,\n"
             "as used by (e.g.,) the AMDGPU backed of LLVM.",
             "name": "GPU Arch",
+            "show_in_table": True,
         },
     )
     gpu_chip_id: Optional[str] = field(
@@ -511,6 +539,7 @@ class MachineSpecs:
             "doc": "The Chip ID of the accelerators/GPUs in the system.",
             "name": "Chip ID",
             "optional": True,
+            "show_in_table": True,
         },
     )
     gpu_l1: Optional[str] = field(
@@ -522,6 +551,7 @@ class MachineSpecs:
             ),
             "name": "GPU L1",
             "unit": "KiB",
+            "show_in_table": True,
         },
     )
     gpu_l2: Optional[str] = field(
@@ -533,6 +563,7 @@ class MachineSpecs:
             ),
             "name": "GPU L2",
             "unit": "KiB",
+            "show_in_table": True,
         },
     )
     cu_per_gpu: Optional[str] = field(
@@ -544,6 +575,7 @@ class MachineSpecs:
                 "the total number of compute units in a partition."
             ),
             "name": "CU per GPU",
+            "show_in_table": True,
         },
     )
     simd_per_cu: Optional[str] = field(
@@ -554,6 +586,7 @@ class MachineSpecs:
                 "accelerators/GPUs in the system."
             ),
             "name": "SIMD per CU",
+            "show_in_table": True,
         },
     )
     se_per_gpu: Optional[str] = field(
@@ -565,6 +598,7 @@ class MachineSpecs:
                 "the total number of shader engines in a partition."
             ),
             "name": "SE per GPU",
+            "show_in_table": True,
         },
     )
     wave_size: Optional[str] = field(
@@ -575,6 +609,7 @@ class MachineSpecs:
                 "the system."
             ),
             "name": "Wave Size",
+            "show_in_table": True,
         },
     )
     workgroup_max_size: Optional[str] = field(
@@ -585,6 +620,7 @@ class MachineSpecs:
                 "accelerators/GPUs in the system."
             ),
             "name": "Workgroup Max Size",
+            "show_in_table": True,
         },
     )
     max_waves_per_cu: Optional[str] = field(
@@ -595,6 +631,7 @@ class MachineSpecs:
                 "compute unit on the accelerators/GPUs in the system"
             ),
             "name": "Max Waves per CU",
+            "show_in_table": True,
         },
     )
     max_sclk: Optional[str] = field(
@@ -606,6 +643,7 @@ class MachineSpecs:
             ),
             "name": "Max SCLK",
             "unit": "MHz",
+            "show_in_table": True,
         },
     )
     max_mclk: Optional[str] = field(
@@ -616,6 +654,7 @@ class MachineSpecs:
             ),
             "name": "Max MCLK",
             "unit": "MHz",
+            "show_in_table": True,
         },
     )
     cur_sclk: Optional[str] = field(
@@ -627,6 +666,7 @@ class MachineSpecs:
             ),
             "name": "Cur SCLK",
             "unit": "MHz",
+            "show_in_table": True,
         },
     )
     cur_mclk: Optional[str] = field(
@@ -638,9 +678,15 @@ class MachineSpecs:
             ),
             "name": "Cur MCLK",
             "unit": "MHz",
+            "show_in_table": True,
         },
     )
-    _l2_banks: Optional[str] = None
+    l2_banks: Optional[str] = field(
+        default=None,
+        metadata={
+            "show_in_table": True,
+        },
+    )
     total_l2_chan: Optional[str] = field(
         default=None,
         metadata={
@@ -651,6 +697,7 @@ class MachineSpecs:
                 "in a partition."
             ),
             "name": "Total L2 Channels",
+            "show_in_table": True,
         },
     )
     lds_banks_per_cu: Optional[str] = field(
@@ -661,6 +708,7 @@ class MachineSpecs:
                 "accelerators/GPUs in the system."
             ),
             "name": "LDS Banks per CU",
+            "show_in_table": True,
         },
     )
     sqc_per_gpu: Optional[str] = field(
@@ -672,6 +720,7 @@ class MachineSpecs:
                 "this is the total number of L1I/sL1D caches in a partition."
             ),
             "name": "SQC per GPU",
+            "show_in_table": True,
         },
     )
     pipes_per_gpu: Optional[str] = field(
@@ -681,6 +730,7 @@ class MachineSpecs:
                 "The number of scheduler-pipes on the accelerators/GPUs in the system."
             ),
             "name": "Pipes per GPU",
+            "show_in_table": True,
         },
     )
     num_xcd: Optional[str] = field(
@@ -693,6 +743,7 @@ class MachineSpecs:
             ),
             "name": "Num XCDs",
             "unit": "XCDs",
+            "show_in_table": True,
         },
     )
     num_hbm_channels: Optional[str] = field(
@@ -700,6 +751,7 @@ class MachineSpecs:
         metadata={
             "doc": "Number of HBM channels",
             "name": "HBM channels",
+            "show_in_table": True,
         },
     )
 
@@ -750,7 +802,7 @@ class MachineSpecs:
         data = []
         for class_field in fields(self):
             name = class_field.name
-            if not name.startswith("_"):
+            if class_field.metadata.get("show_in_table", True):
                 _data = {}
                 value = getattr(self, name)
                 if class_field.metadata:
@@ -847,7 +899,7 @@ def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) ->
     return int(sq_per_se) * int(num_shader_engines)
 
 
-def total_l2_banks(
+def totall2_banks(
     gpu_arch: Optional[str] = None,
     gpu_model: Optional[str] = None,
     L2banks: Optional[str] = None,

@@ -885,7 +885,7 @@ def run_prof(
         xcds = mi_gpu_specs.get_num_xcds(
             mspec.gpu_arch, mspec.gpu_model, mspec.compute_partition
         )
-        df = flatten_tcc_info_across_xcds(f, xcds, int(mspec._l2_banks))
+        df = flatten_tcc_info_across_xcds(f, xcds, int(mspec.l2_banks))
         df.to_csv(f, index=False)
 
     if Path(workload_dir + "/out").exists():

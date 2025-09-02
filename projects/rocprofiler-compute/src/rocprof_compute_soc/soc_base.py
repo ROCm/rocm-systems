@@ -388,9 +388,7 @@ class OmniSoC_Base:
                 counters = counters.union(
                     {
                         f"{counter_name}[{i}]"
-                        for i in range(
-                            num_xcd_for_pmc_file * int(self._mspec._l2_banks)
-                        )
+                        for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
                     }
                 )
 
@@ -796,8 +794,8 @@ class OmniSoC_Base:
                         if is_tcc_channel_counter(ctr):
                             counter_name = ctr.split("[")[0]
                             idx = int(ctr.split("[")[1].split("]")[0])
-                            xcd_idx = idx // int(self._mspec._l2_banks)
-                            channel_idx = idx % int(self._mspec._l2_banks)
+                            xcd_idx = idx // int(self._mspec.l2_banks)
+                            channel_idx = idx % int(self._mspec.l2_banks)
                             expression = (
                                 f"select({counter_name},"
                                 f"[DIMENSION_XCC=[{xcd_idx}], "

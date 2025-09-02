@@ -48,12 +48,14 @@ class gfx942_soc(OmniSoC_Base):
                     )
                 )
             )
-        self.set_compatible_profilers([
-            "rocprofv1",
-            "rocprofv2",
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ])
+        self.set_compatible_profilers(
+            [
+                "rocprofv1",
+                "rocprofv2",
+                "rocprofv3",
+                "rocprofiler-sdk",
+            ]
+        )
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx942"))
         # Create roofline object if mode is provided; skip for --specs
@@ -61,7 +63,7 @@ class gfx942_soc(OmniSoC_Base):
             self.roofline_obj = Roofline(args, self._mspec)
 
         # Set arch specific specs
-        self._mspec._l2_banks = 16
+        self._mspec.l2_banks = 16
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 4
 

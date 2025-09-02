@@ -56,7 +56,7 @@ class gfx950_soc(OmniSoC_Base):
             self.roofline_obj = Roofline(args, self._mspec)
 
         # Set arch specific specs
-        self._mspec._l2_banks = 16
+        self._mspec.l2_banks = 16
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 4
 

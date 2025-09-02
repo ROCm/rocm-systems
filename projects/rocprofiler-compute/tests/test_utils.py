@@ -2402,7 +2402,7 @@ def test_run_prof_success_v2(tmp_path, monkeypatch):
     class MockSpec:
         def __init__(self):
             self.gpu_model = "mi250x"
-            self._l2_banks = 32
+            self.l2_banks = 32
             self.gpu_arch = "gfx90a"
             self.compute_partition = "CPX"
 
@@ -2448,7 +2448,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2495,7 +2495,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2546,7 +2546,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2589,7 +2589,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2636,7 +2636,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2688,7 +2688,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2746,7 +2746,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2787,7 +2787,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2868,7 +2868,7 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2926,7 +2926,7 @@ class MockMSpec:
         self.gpu_model = gpu_model
         self.gpu_arch = gpu_arch
         self.compute_partition = compute_partition
-        self._l2_banks = l2_banks
+        self.l2_banks = l2_banks
 
 
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):

@@ -37,7 +37,7 @@ class gfx908_soc(OmniSoC_Base):
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx908"))
 
         # Set arch specific specs
-        self._mspec._l2_banks = 32
+        self._mspec.l2_banks = 32
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 4
 
