@@ -76,7 +76,7 @@ struct Instruction
  *
  * @param die Pointer to the DWARF DIE to examine
  */
-class DIEInfo
+struct DIEInfo
 {
     struct DRange
     {
@@ -95,7 +95,6 @@ class DIEInfo
         bool contains(Dwarf_Addr addr) const { return low <= addr && high > addr; }
     };
 
-public:
     DIEInfo(Dwarf_Die* die);
 
     /**
@@ -115,7 +114,6 @@ public:
      */
     bool buildStack(Dwarf_Addr addr, std::vector<std::string>& call_stack);
 
-private:
     std::vector<DRange>                   all_ranges{};
     std::vector<std::unique_ptr<DIEInfo>> children{};
 
@@ -124,35 +122,13 @@ private:
     // Union of all children's children_range + this total range
     DRange children_range{};
 
+    std::string file_and_line{};
+
     void addRange(const DRange& range)
     {
         all_ranges.push_back(range);
         total_range.expand(range);
     }
-
-    /**
-     * @brief Extracts source file and line number information from Die
-     *
-     * @param die Pointer to the DWARF DIE to examine
-     *
-     * @note Only processes DW_TAG_inlined_subroutine DIEs. Regular functions
-     *       (DW_TAG_subprogram) are ignored since this function specifically
-     *       extracts inlined function call information.
-     */
-    void checkDIEForInlinedFunction(Dwarf_Die* die);
-
-    /**
-     * @brief Iterates over all address ranges in a Die, adding them to struct's list of ranges
-     *
-     * @param die Pointer to the DWARF DIE to examine
-     *
-     * @note Only processes DW_TAG_inlined_subroutine DIEs. Regular functions
-     *       (DW_TAG_subprogram) are ignored since this function specifically
-     *       extracts inlined function call information.
-     */
-    void checkRanges(Dwarf_Die* die);
-
-    std::string file_and_line{};
 };
 
 class CodeobjDecoderComponent
@@ -548,8 +524,56 @@ inline DIEInfo::DIEInfo(Dwarf_Die* die)
 {
     if(dwarf_tag(die) == DW_TAG_inlined_subroutine)
     {
-        checkDIEForInlinedFunction(die);
-        checkRanges(die);
+        Dwarf_Addr low_pc{};
+        Dwarf_Addr high_pc{};
+
+        // Check if this inlined subroutine covers the target address
+        // First try simple contiguous range (low_pc to high_pc)
+        if(dwarf_lowpc(die, &low_pc) == 0 && dwarf_highpc(die, &high_pc) == 0)
+        {
+            addRange(DRange{low_pc, high_pc});
+        }
+        else
+        {
+            // Function may have non-contiguous ranges
+            // Check all address ranges associated with this DIE
+            Dwarf_Addr base{};
+            ptrdiff_t  offset{};
+            while((offset = dwarf_ranges(die, offset, &base, &low_pc, &high_pc)) > 0)
+                addRange(DRange{low_pc, high_pc});
+        }
+
+        // Extract call site information - where this function was inlined
+        Dwarf_Attribute call_file_attr{};
+        Dwarf_Attribute call_line_attr{};
+        Dwarf_Word      call_file{};
+        Dwarf_Word      call_line{};
+
+        // Get the file and line number where this function was called/inlined
+
+        if(!dwarf_attr(die, DW_AT_call_file, &call_file_attr) ||
+           !dwarf_attr(die, DW_AT_call_line, &call_line_attr) ||
+           dwarf_formudata(&call_file_attr, &call_file) != 0 ||
+           dwarf_formudata(&call_line_attr, &call_line) != 0)
+            return;  // No call site information available
+
+        // Get the compilation unit to resolve file names
+        Dwarf_Die cu_die{};
+        if(!dwarf_diecu(die, &cu_die, nullptr, nullptr)) return;
+
+        // Get the source files table for this compilation unit
+        Dwarf_Files* files{};
+        size_t       nfiles{};
+        if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
+        {
+            if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
+            {
+                // Add "filename:line" to call stack showing where this function was inlined
+                file_and_line = std::string(filename) + ":" + std::to_string(call_line);
+                return;
+            }
+        }
+
         children_range = total_range;
     }
 
@@ -593,64 +617,6 @@ DIEInfo::buildStack(Dwarf_Addr addr, std::vector<std::string>& call_stack)
 
     // Check if one of the child nodes added to the stack
     return addedOne;
-}
-
-inline void
-DIEInfo::checkRanges(Dwarf_Die* die)
-{
-    Dwarf_Addr low_pc{};
-    Dwarf_Addr high_pc{};
-
-    // Check if this inlined subroutine covers the target address
-    // First try simple contiguous range (low_pc to high_pc)
-    if(dwarf_lowpc(die, &low_pc) == 0 && dwarf_highpc(die, &high_pc) == 0)
-    {
-        addRange(DRange{low_pc, high_pc});
-    }
-    else
-    {
-        // Function may have non-contiguous ranges
-        // Check all address ranges associated with this DIE
-        Dwarf_Addr base{};
-        ptrdiff_t  offset{};
-        while((offset = dwarf_ranges(die, offset, &base, &low_pc, &high_pc)) > 0)
-            addRange(DRange{low_pc, high_pc});
-    }
-}
-
-inline void
-DIEInfo::checkDIEForInlinedFunction(Dwarf_Die* die)
-{
-    // Extract call site information - where this function was inlined
-    Dwarf_Attribute call_file_attr{};
-    Dwarf_Attribute call_line_attr{};
-    Dwarf_Word      call_file{};
-    Dwarf_Word      call_line{};
-
-    // Get the file and line number where this function was called/inlined
-
-    if(!dwarf_attr(die, DW_AT_call_file, &call_file_attr) ||
-       !dwarf_attr(die, DW_AT_call_line, &call_line_attr) ||
-       dwarf_formudata(&call_file_attr, &call_file) != 0 ||
-       dwarf_formudata(&call_line_attr, &call_line) != 0)
-        return;  // No call site information available
-
-    // Get the compilation unit to resolve file names
-    Dwarf_Die cu_die{};
-    if(!dwarf_diecu(die, &cu_die, nullptr, nullptr)) return;
-
-    // Get the source files table for this compilation unit
-    Dwarf_Files* files{};
-    size_t       nfiles{};
-    if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
-    {
-        if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
-        {
-            // Add "filename:line" to call stack showing where this function was inlined
-            file_and_line = std::string(filename) + ":" + std::to_string(call_line);
-            return;
-        }
-    }
 }
 
 }  // namespace disassembly
