@@ -27,16 +27,19 @@ import argparse
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 
-def print_avail_arch(avail_arch: list) -> str:
+def print_avail_arch(avail_arch: list[str]) -> str:
     ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
-        ret_str += "\n\t\t\t   {}".format(arch)
+        ret_str += f"\n\t\t\t   {arch}"
     return ret_str
 
 
-def add_general_group(parser, rocprof_compute_version) -> None:
+def add_general_group(
+    parser: argparse.ArgumentParser, rocprof_compute_version: dict[str, Any]
+) -> None:
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -56,14 +59,17 @@ def add_general_group(parser, rocprof_compute_version) -> None:
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
     # Nowhere to load specs from in db mode
-    if "database" not in parser.usage:
+    if parser.usage and "database" not in parser.usage:
         general_group.add_argument(
             "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
 
 
 def omniarg_parser(
-    parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+    parser: argparse.ArgumentParser,
+    rocprof_compute_home: Path,
+    supported_archs: list[str],
+    rocprof_compute_version: dict[str, Any],
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)

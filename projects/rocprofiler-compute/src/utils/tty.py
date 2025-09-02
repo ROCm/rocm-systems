@@ -71,8 +71,9 @@ def get_table_string(
                 .astype(str)
                 .apply(lambda x: textwrap.fill(x, width=wrap_width))
             )
+    df_with_index = df_to_show.reset_index()
     return tabulate(
-        df_to_show,
+        df_with_index.to_dict("records"),
         headers="keys",
         tablefmt="fancy_grid",
         floatfmt=f".{decimal}f",

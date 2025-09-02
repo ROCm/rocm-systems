@@ -107,13 +107,16 @@ class OmniSoC_Base:
     def populate_mspec(self):
         from utils.specs import run, search, total_sqc
 
-        if not hasattr(self._mspec, "_rocminfo") or self._mspec._rocminfo is None:
+        if (
+            not hasattr(self._mspec, "rocminfo_lines")
+            or self._mspec.rocminfo_lines is None
+        ):
             return
 
         # load stats from rocminfo
         self._mspec.gpu_l1 = ""
         self._mspec.gpu_l2 = ""
-        for idx2, linetext in enumerate(self._mspec._rocminfo):
+        for idx2, linetext in enumerate(self._mspec.rocminfo_lines):
             key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
                 self._mspec.gpu_l1 = key
@@ -225,11 +228,15 @@ class OmniSoC_Base:
         static_data = run(
             ["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True
         )
-        gpu_list = (
-            static_data
-            if isinstance(static_data, list)
-            else static_data.get("gpu_data", [])
-        )
+        try:
+            parsed_data = json.loads(static_data)
+            gpu_list = (
+                parsed_data
+                if isinstance(parsed_data, list)
+                else parsed_data.get("gpu_data", [])
+            )
+        except json.JSONDecodeError:
+            gpu_list = []
         gpu_data = gpu_list[0] if gpu_list else {}
 
         # Try detection methods until we find a match

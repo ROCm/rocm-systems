@@ -40,7 +40,13 @@ from typing import Any, Optional
 import pandas as pd
 
 import config
-from utils.logger import console_debug, console_error, console_log, console_warning
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
@@ -58,12 +64,12 @@ VERSION_LOC: list[str] = [
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
-    for idx, line_text in enumerate(rocminfo_lines):
+    for idx1, line_text in enumerate(rocminfo_lines):
         gpu_arch = search(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
         if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict():
-            return (gpu_arch, idx)
+            return (gpu_arch, idx1)
 
     console_error("Cannot find a supported arch in rocminfo")
 
@@ -193,13 +199,14 @@ def generate_machine_specs(
     return specs
 
 
+@demarcate
 def extract_machine_info() -> dict[str, Any]:
-    result = {
-        "cpu_model": "",
-        "sbios": "",
-        "linux_kernel_version": "",
-        "cpu_memory": "",
-        "linux_distro": "",
+    result: dict[str, Optional[str]] = {
+        "cpu_model": None,
+        "sbios": None,
+        "linux_kernel_version": None,
+        "cpu_memory": None,
+        "linux_distro": None,
     }
 
     try:
@@ -208,30 +215,27 @@ def extract_machine_info() -> dict[str, Any]:
         version = path("/proc/version").read_text()
         os_release = path("/etc/os-release").read_text()
 
-        cpu_model = search(r"^model name\s*: (.*?)$", cpuinfo)
-        sbios = (
+        result["cpu_memory"] = search(r"^model name\s*: (.*?)$", cpuinfo)
+        result["sbios"] = (
             path("/sys/class/dmi/id/bios_vendor").read_text().strip()
             + path("/sys/class/dmi/id/bios_version").read_text().strip()
         )
-        linux_kernel_version = search(r"version (\S*)", version)
-        cpu_memory = search(r"MemTotal:\s*(\S*)", meminfo)
-        linux_distro = search(r'PRETTY_NAME="(.*?)"', os_release) or ""
+        result["linux_kernel_version"] = search(r"version (\S*)", version)
+        result["cpu_memory"] = search(r"MemTotal:\s*(\S*)", meminfo)
+        result["linux_distro"] = search(r'PRETTY_NAME="(.*?)"', os_release) or ""
 
     except (OSError, IOError) as e:
         console_warning(f"Could not read system files: {e}")
-        return result
+    return result
 
-    return {
-        "cpu_model": cpu_model,
-        "sbios": sbios,
-        "linux_kernel_version": linux_kernel_version,
-        "cpu_memory": cpu_memory,
-        "linux_distro": linux_distro,
+
+@demarcate
+def extract_gpu_info() -> dict[str, Any]:
+    result: dict[str, Optional[str]] = {
+        "vbios": None,
+        "compute_partition": None,
+        "memory_partition": None,
     }
-
-
-def extract_gpu_info() -> dict[str, str]:
-    result = {"vbios": "", "compute_partition": "", "memory_partition": ""}
 
     # Load amd-smi static data for GPU 0
     static_output = run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
@@ -251,7 +255,7 @@ def extract_gpu_info() -> dict[str, str]:
         else static_data.get("gpu_data", [])
     )
     gpu_data = gpu_list[0] if gpu_list else {}
-    vbios = gpu_data.get("vbios", {}).get("part_number")
+    result["vbios"] = gpu_data.get("vbios", {}).get("part_number")
 
     # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
     partition_output = run(
@@ -268,37 +272,38 @@ def extract_gpu_info() -> dict[str, str]:
     current_partition = partition_data.get("current_partition", [{}])[0]
 
     # Extract partition values with gpu_data fallback (amd-smi < 26.0.0)
-    compute_partition = (
+    result["compute_partition"] = (
         current_partition.get("accelerator_type")
         or gpu_data.get("partition", {}).get("accelerator_partition")
         or gpu_data.get("partition", {}).get("compute_partition")
     )
-    memory_partition = current_partition.get("memory") or gpu_data.get(
+    result["memory_partition"] = current_partition.get("memory") or gpu_data.get(
         "partition", {}
     ).get("memory_partition")
 
     # Apply defaults and warnings
-    if not compute_partition:
+    if not result["compute_partition"]:
         console_warning("Cannot detect accelerator partition from amd-smi.")
         console_warning("Applying default accelerator partition: SPX")
-        compute_partition = "SPX"
+        result["compute_partition"] = "SPX"
 
-    if not memory_partition:
+    if not result["memory_partition"]:
         console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
-        f"vbios is {vbios}, compute partition is {compute_partition}, memory partition is {memory_partition}"
+        f"vbios is {result['vbios']}, compute partition is {result['compute_partition']}, memory partition is {result['memory_partition']}"
     )
 
-    return {
-        "vbios": vbios,
-        "compute_partition": compute_partition,
-        "memory_partition": memory_partition,
-    }
+    return result
 
 
+@demarcate
 def extract_soc_info() -> dict[str, Any]:
-    result = {"rocminfo_lines": "", "gpu_arch": "", "gpu_chip_id": ""}
+    result: dict[str, Any] = {
+        "rocminfo_lines": None,
+        "gpu_arch": None,
+        "gpu_chip_id": None,
+    }
 
     # Read rocminfo
     rocminfo_full = run(["rocminfo"])
@@ -311,17 +316,13 @@ def extract_soc_info() -> dict[str, Any]:
     if arch_result is None:
         return result
 
-    gpu_arch, arch_idx = arch_result
-    rocminfo_lines = rocminfo_lines[
+    result["gpu_arch"], arch_idx = arch_result
+    result["rocminfo_lines"] = rocminfo_lines[
         arch_idx + 1 :
     ]  # update rocminfo for target section
-    gpu_chip_id = detect_gpu_chip_id(rocminfo_lines)
+    result["gpu_chip_id"] = detect_gpu_chip_id(rocminfo_lines)
 
-    return {
-        "rocminfo_lines": rocminfo_lines,
-        "gpu_arch": gpu_arch,
-        "gpu_chip_id": gpu_chip_id,
-    }
+    return result
 
 
 @kw_only
@@ -812,7 +813,7 @@ def get_rocm_ver() -> str:
     return ""
 
 
-def run(cmd: list[str], exit_on_error: bool = False) -> str:
+def run(cmd: list[str], exit_on_error: bool = False) -> Any:
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:

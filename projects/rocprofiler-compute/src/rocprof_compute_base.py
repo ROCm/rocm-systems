@@ -144,7 +144,7 @@ class RocProfCompute:
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         """Load OmniSoC instance for RocProfCompute run"""
         self.__mspec = generate_machine_specs(self.__args, sysinfo)
-        if self.__args.specs:
+        if self.__args and self.__args.specs:
             print(self.__mspec)
             sys.exit(0)
 
