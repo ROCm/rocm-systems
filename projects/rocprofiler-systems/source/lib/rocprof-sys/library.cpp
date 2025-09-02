@@ -399,18 +399,6 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
     rocprofsys_preinit_hidden();
 }
 
-bool
-is_selinux_enforcing()
-{
-    std::ifstream ifs("/sys/fs/selinux/enforce");
-    if(!ifs.is_open()) return false;  // SELinux disabled or sysfs not mounted
-
-    int mode = 0;
-    if(!(ifs >> mode)) return false;  // Could not read the file
-
-    return mode == 1;
-}
-
 //======================================================================================//
 
 extern "C" void
@@ -422,10 +410,19 @@ rocprofsys_init_library_hidden()
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
 
-    if(is_selinux_enforcing())
+    int _selinux_mode = 0;
     {
-        std::cerr << "SELinux enforcing mode detected. Consider to disable SELinux "
-                  << "or configure a more permissive setting. Aborting.\n";
+        std::ifstream _fenforcing{ "/sys/fs/selinux/enforce" };
+        if(!(_fenforcing >> _selinux_mode)) _selinux_mode = 0;
+        _fenforcing.close();
+    }
+
+    if(_selinux_mode == 1)
+    {
+        ROCPROFSYS_BASIC_VERBOSE(0, "/sys/fs/selinux/enforce has a value of %i. \n",
+                                 _selinux_mode);
+        std::cerr << "SELinux enforcing mode detected. Consider disabling SELinux "
+                  << "or configure permissive mode with 'sudo setenforce 0'. Aborting.\n";
         std::exit(EXIT_FAILURE);
     }
 
