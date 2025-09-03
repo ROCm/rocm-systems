@@ -83,6 +83,7 @@ struct DIEInfo
         Dwarf_Addr low{std::numeric_limits<Dwarf_Addr>::max()};
         Dwarf_Addr high{0};
 
+        // Makes sure this range includes the "other" range
         void expand(const DRange& other)
         {
             low  = std::min(low, other.low);
