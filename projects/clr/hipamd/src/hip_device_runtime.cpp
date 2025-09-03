@@ -737,11 +737,11 @@ hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr,
   }
 
   *funcPtr = amd::Os::getSymbol(handle, symbolString.c_str());
-  if (funcPtr == nullptr) {
+  if (*funcPtr == nullptr) {
     if (flags == hipEnablePerThreadDefaultStream) {
       *funcPtr = amd::Os::getSymbol(handle, symbol);
     }
-    if (funcPtr == nullptr) {
+    if (*funcPtr == nullptr) {
       if (status != nullptr) {
         *status = hipDriverEntryPointSymbolNotFound;
       }

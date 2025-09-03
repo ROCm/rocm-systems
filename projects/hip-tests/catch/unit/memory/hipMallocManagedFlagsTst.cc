@@ -136,17 +136,14 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
   } else {
     NumStrms = 4;
   }
-  hipStream_t** Stream = new hipStream_t*[NumStrms];
-  for (int i = 0; i < NumStrms; ++i) {
-    Stream[i] = reinterpret_cast<hipStream_t*>(malloc(sizeof(hipStream_t)));
-  }
+  std::vector<hipStream_t> streams(NumStrms);
   float *Ad = NULL, *Ah = NULL;
   Ah = new float[NUM_ELMS];
   for (int i = 0; i < NumStrms; ++i) {
     if (MultiDevice >= 2) {
       HIP_CHECK(hipSetDevice(i));
     }
-    HIP_CHECK(hipStreamCreate(Stream[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]));
   }
   HIP_CHECK(hipSetDevice(0));
   // Testing hipMemAttachGlobal Flag
@@ -168,8 +165,8 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
     }
     HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
     HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
-    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, *(Stream[i])>>>(NUM_ELMS, HmmAG, Ad);
-    HIP_CHECK(hipStreamSynchronize(*(Stream[i])));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAG, Ad);
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
     // Validating the results
     HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
     for (int j = 0; j < NUM_ELMS; ++j) {
@@ -203,8 +200,8 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
       HIP_CHECK(hipSetDevice(i));
     }
     HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)));
-    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, *(Stream[i])>>>(NUM_ELMS, HmmAH1, HmmAH2);
-    HIP_CHECK(hipStreamSynchronize(*(Stream[i])));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAH1, HmmAH2);
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
     for (int j = 0; j < NUM_ELMS; ++j) {
       if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
         DataMismatch++;
@@ -221,7 +218,7 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
   HIP_CHECK(hipFree(HmmAH1));
   HIP_CHECK(hipFree(HmmAH2));
   for (int i = 0; i < NumStrms; ++i) {
-    HIP_CHECK(hipStreamDestroy(*(Stream[i])));
+    HIP_CHECK(hipStreamDestroy(streams[i]));
   }
   REQUIRE(IfTestPassed);
 }

@@ -260,9 +260,8 @@ int Context::create(const intptr_t* properties) {
   }
 
   // Check if OCL context can be associated with any external device
-  if (info_.flags_ &
-      (D3D10DeviceKhr | D3D11DeviceKhr | GLDeviceKhr | D3D9DeviceKhr | D3D9DeviceEXKhr |
-       D3D9DeviceVAKhr)) {
+  if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr | GLDeviceKhr | D3D9DeviceKhr |
+                      D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
     // Loop through all devices
     for (const auto& it : devices_) {
       if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {

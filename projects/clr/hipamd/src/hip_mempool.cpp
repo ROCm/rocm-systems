@@ -380,8 +380,8 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
 
   auto mpool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
   auto hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-      ? hip::getCurrentDevice()->NullStream()
-      : reinterpret_cast<hip::Stream*>(stream);
+                        ? hip::getCurrentDevice()->NullStream()
+                        : reinterpret_cast<hip::Stream*>(stream);
   *dev_ptr = mpool->AllocateMemory(size, hip_stream);
   if (*dev_ptr == nullptr) {
     HIP_RETURN(hipErrorOutOfMemory);
@@ -425,7 +425,7 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
   }
 
   auto device = g_devices[0];
-  auto pool = new hip::MemoryPool(device);
+  auto pool = new hip::MemoryPool(device, nullptr, true);
   if (pool == nullptr) {
     HIP_RETURN(hipErrorOutOfMemory);
   }

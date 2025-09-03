@@ -67,7 +67,6 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
-#include <regex>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -200,10 +199,9 @@ get_uuid()
 auto
 replace_uuid(std::string_view inp)
 {
-    const auto& _repl = get_uuid();
-    return std::regex_replace(std::string{inp},
-                              std::regex{"\\{\\{uuid\\}\\}"},
-                              (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl));
+    const auto& _repl       = get_uuid();
+    const auto  replacement = (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl);
+    return replace_all(std::string{inp}, std::string_view{"{{uuid}}"}, replacement);
 }
 
 auto
@@ -331,7 +329,10 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
                 return sql_insert_value{_name, std::string{"NULL"}};
             }
         }
-        return sql_insert_value{_name, fmt::format("'{}'", _value)};
+        // Sanitize string values before embedding into SQL to escape quotes and remove
+        // problematic control/separator characters.
+        auto _sanitized = sanitize_sql_string(std::string{_value});
+        return sql_insert_value{_name, fmt::format("'{}'", _sanitized)};
     }
     else
     {

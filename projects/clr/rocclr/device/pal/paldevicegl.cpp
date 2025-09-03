@@ -782,8 +782,8 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
   if (wglGetContextGPUInfoAMD(hRC, &glAdapterLuid, &glChainBitMask)) {
     // match the adapter
     canInteroperate = (properties().osProperties.luidHighPart == glAdapterLuid.HighPart) &&
-        (properties().osProperties.luidLowPart == glAdapterLuid.LowPart) &&
-        ((1 << properties().gpuIndex) == glChainBitMask);
+                      (properties().osProperties.luidLowPart == glAdapterLuid.LowPart) &&
+                      ((1 << properties().gpuIndex) == glChainBitMask);
   }
 #else
   GLuint glDeviceId = 0;
@@ -797,9 +797,9 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
     if (pfnMesaGLInteropGLXQueryDeviceInfo(disp, ctx, &info) == 0) {
       // match the adapter
       canInteroperate = (properties().pciProperties.busNumber == info.pci_bus) &&
-          (properties().pciProperties.deviceNumber == info.pci_device) &&
-          (properties().pciProperties.functionNumber == info.pci_function) &&
-          (static_cast<GLuint>(1 << properties().gpuIndex) == glChainMask);
+                        (properties().pciProperties.deviceNumber == info.pci_device) &&
+                        (properties().pciProperties.functionNumber == info.pci_function) &&
+                        (static_cast<GLuint>(1 << properties().gpuIndex) == glChainMask);
     }
   }
 #endif

@@ -28,9 +28,10 @@
 #include "core/debug.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/components/cpu_freq.hpp"
 #include "library/thread_info.hpp"
 
@@ -42,10 +43,12 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <sys/resource.h>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -67,14 +70,6 @@ init_perfetto_counter_tracks(type_list<Types...>)
     (perfetto_counter_track<Types>::init(), ...);
 }
 
-template <typename Category>
-inline std::string
-get_cpu_freq_track_name(uint64_t cpu_id)
-{
-    return std::string(trait::name<Category>::value) + " [" + std::to_string(cpu_id) +
-           "]";
-}
-
 template <typename Func>
 void
 do_for_enabled_cpus(Func&& func)
@@ -84,12 +79,6 @@ do_for_enabled_cpus(Func&& func)
     {
         func(cpu);
     }
-}
-
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
 }
 
 void
@@ -104,8 +93,9 @@ metadata_initialize_cpu_freq_tracks()
 {
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_track(
-            { get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), std::nullopt,
-              "{}" });
+            { trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
+                  .c_str(),
+              std::nullopt, "{}" });
     });
 }
 
@@ -146,9 +136,10 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), "Frequency",
-              trait::name<category::cpu_freq>::description, LONG_DESCRIPTION, COMPONENT,
-              component::cpu_freq::display_unit().c_str(),
+              trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
+                  .c_str(),
+              "Frequency", trait::name<category::cpu_freq>::description, LONG_DESCRIPTION,
+              COMPONENT, component::cpu_freq::display_unit().c_str(),
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
     });
 
@@ -195,41 +186,27 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
           COMPONENT, TIME, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 }
 
-void
-rocpd_process_cpu_usage_events(const uint32_t device_id, uint64_t timestamp,
-                               const component::cpu_freq& freq, double mem_page,
-                               double virt_mem_page, double peak_mem,
-                               double context_switch, double page_fault, double user_time,
-                               double kernel_time)
+std::vector<uint8_t>
+serialize_freqs(const component::cpu_freq& freq)
 {
-    auto&       data_processor   = get_data_processor();
-    const auto* _name            = trait::name<category::cpu_freq>::value;
-    auto        name_primary_key = data_processor.insert_string(_name);
-    auto        event_id         = data_processor.insert_event(name_primary_key, 0, 0, 0);
+    constexpr size_t idx_elements   = sizeof(size_t) / sizeof(uint8_t);
+    constexpr size_t value_elements = sizeof(float) / sizeof(uint8_t);
 
-    auto& agent_mngr = agent_manager::get_instance();
-    auto base_id = agent_mngr.get_agent_by_type_index(device_id, agent_type::CPU).base_id;
+    std::vector<uint8_t> result;
+    const auto enabled_cpus_size = component::cpu_freq::get_enabled_cpus().size();
+    const auto result_size       = enabled_cpus_size * (idx_elements + value_elements);
+    result.resize(result_size);
+    result.assign(result_size, 0);
 
-    auto insert_event_and_sample = [&](const char* name, double value) {
-        data_processor.insert_pmc_event(event_id, base_id, name, value);
-        data_processor.insert_sample(name, timestamp, event_id);
-    };
-
-    do_for_enabled_cpus([&](size_t cpu_id) {
-        insert_event_and_sample(
-            get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), freq.at(cpu_id));
+    size_t offset = 0;
+    do_for_enabled_cpus([&](const auto& idx) {
+        auto value = freq.at(idx);
+        std::memcpy(result.data() + offset, &idx, sizeof(size_t));
+        offset += sizeof(size_t);
+        std::memcpy(result.data() + offset, &value, sizeof(float));
+        offset += sizeof(float);
     });
-
-    insert_event_and_sample(trait::name<category::process_page>::value, mem_page);
-    insert_event_and_sample(trait::name<category::process_virt>::value, virt_mem_page);
-    insert_event_and_sample(trait::name<category::process_peak>::value, peak_mem);
-    insert_event_and_sample(trait::name<category::process_context_switch>::value,
-                            context_switch);
-    insert_event_and_sample(trait::name<category::process_page_fault>::value, page_fault);
-    insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                            user_time);
-    insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                            kernel_time);
+    return result;
 }
 
 }  // namespace
@@ -251,9 +228,15 @@ setup()
                       category::process_page_fault, category::process_user_mode_time,
                       category::process_kernel_mode_time>{});
     }
-
     metadata_initialize_cpu_freq_category();
     metadata_initialize_cpu_usage_tracks();
+}
+
+void
+config()
+{
+    component::cpu_freq::configure();
+
     metadata_initialize_cpu_freq_tracks();
 
     // `get_enabled_cpus()` returns the number of cores enabled for monitoring but
@@ -269,22 +252,25 @@ setup()
 }
 
 void
-config()
-{
-    component::cpu_freq::configure();
-}
-
-void
 sample()
 {
-    auto _ts = tim::get_clock_real_now<size_t, std::nano>();
+    auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
 
     auto _rcache = tim::rusage_cache{ RUSAGE_SELF };
     auto _freqs  = component::cpu_freq{}.sample();
 
     // user and kernel mode times are in microseconds
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::cpu_freq_sample, _timestamp, tim::get_page_rss(),
+        tim::get_virt_mem(), _rcache.get_peak_rss(),
+        _rcache.get_num_priority_context_switch() +
+            _rcache.get_num_voluntary_context_switch(),
+        _rcache.get_num_major_page_faults() + _rcache.get_num_minor_page_faults(),
+        _rcache.get_user_mode_time() * 1000, _rcache.get_kernel_mode_time() * 1000,
+        serialize_freqs(_freqs));
+
     data.emplace_back(
-        _ts, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
+        _timestamp, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
         _rcache.get_num_priority_context_switch() +
             _rcache.get_num_voluntary_context_switch(),
         _rcache.get_num_major_page_faults() + _rcache.get_num_minor_page_faults(),
@@ -419,12 +405,6 @@ post_process()
                                                                                _user);
                 write_perfetto_counter_track<category::process_kernel_mode_time>(_ts,
                                                                                  _kern);
-            }
-            if(get_use_rocpd())
-            {
-                const auto& freq_data = std::get<8>(itr);
-                rocpd_process_cpu_usage_events(0, _ts, freq_data, _page, _virt, _peak,
-                                               _cntx, _flts, _user, _kern);
             }
         }
 

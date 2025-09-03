@@ -478,11 +478,11 @@ template <typename Type> __global__ void bf16_cvt_to_integral(Type* in, float* o
 TEMPLATE_TEST_CASE("Unit_bf16_conversion_to_integral_type", , unsigned short, short, int,
                    unsigned int) {
   constexpr TestType start = std::is_unsigned<TestType>::value
-      ? std::numeric_limits<unsigned short>::min()
-      : std::numeric_limits<short>::min();
+                                 ? std::numeric_limits<unsigned short>::min()
+                                 : std::numeric_limits<short>::min();
   constexpr TestType end = std::is_unsigned<TestType>::value
-      ? std::numeric_limits<unsigned short>::max()
-      : std::numeric_limits<short>::max();
+                               ? std::numeric_limits<unsigned short>::max()
+                               : std::numeric_limits<short>::max();
   const size_t size = (start < 0) ? end - start : end + start;
 
   TestType* d_input;
