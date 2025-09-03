@@ -31,8 +31,8 @@ THE SOFTWARE.
 // set maximum value for hipLimitStackSize. In future, this value
 // might need to change to avoid test case failure. In the same way
 // LOWER_VALUE is empirically determined.
-#define HIGHER_VALUE (16*1024)  // 16 KB
-#define LOWER_VALUE (512)  // 512 bytes
+#define HIGHER_VALUE (16 * 1024)  // 16 KB
+#define LOWER_VALUE (512)         // 512 bytes
 
 /**
  * hipDeviceSetLimit tests =>
@@ -97,12 +97,11 @@ TEST_CASE("Unit_hipDeviceSetLimit_SetGet") {
   // Scenario5
   SECTION("Negative Scenario: Invalid Flag") {
     HIP_CHECK(hipDeviceGetLimit(&value, hipLimitMallocHeapSize));
-    REQUIRE(hipErrorInvalidValue == hipDeviceSetLimit(
-    static_cast<hipLimit_t>(0xffff), value/2));
+    REQUIRE(hipErrorInvalidValue == hipDeviceSetLimit(static_cast<hipLimit_t>(0xffff), value / 2));
   }
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

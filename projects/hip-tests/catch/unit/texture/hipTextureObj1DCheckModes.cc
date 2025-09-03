@@ -28,32 +28,34 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-template<bool normalizedCoords>
-__global__ void tex1DKernel(float *outputData, hipTextureObject_t textureObject,
-                            int width, float offsetX) {
+template <bool normalizedCoords> __global__ void tex1DKernel(float* outputData,
+                                                             hipTextureObject_t textureObject,
+                                                             int width, float offsetX) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
-  outputData[x] = tex1D<float>(textureObject, normalizedCoords ? (x + offsetX) / width : x + offsetX);
+  outputData[x] =
+      tex1D<float>(textureObject, normalizedCoords ? (x + offsetX) / width : x + offsetX);
 #endif
 }
 
-template<hipTextureAddressMode addressMode, hipTextureFilterMode filterMode, bool normalizedCoords>
+template <hipTextureAddressMode addressMode, hipTextureFilterMode filterMode, bool normalizedCoords>
 static void runTest(const int width, const float offsetX) {
-  //printf("%s(addressMode=%d, filterMode=%d, normalizedCoords=%d, width=%d, offsetX=%f)\n", __FUNCTION__,
-  //       addressMode, filterMode, normalizedCoords, width, offsetX);
+  // printf("%s(addressMode=%d, filterMode=%d, normalizedCoords=%d, width=%d, offsetX=%f)\n",
+  // __FUNCTION__,
+  //        addressMode, filterMode, normalizedCoords, width, offsetX);
   unsigned int size = width * sizeof(float);
-  float *hData = (float*) malloc(size);
+  float* hData = (float*)malloc(size);
   memset(hData, 0, size);
   for (int j = 0; j < width; j++) {
     hData[j] = j;
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(
-      32, 0, 0, 0, hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
   HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width));
 
-  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float), 1, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float),
+                               1, hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -72,28 +74,28 @@ static void runTest(const int width, const float offsetX) {
   hipTextureObject_t textureObject = 0;
   HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL));
 
-  float *dData = nullptr;
-  HIP_CHECK(hipMalloc((void**) &dData, size));
+  float* dData = nullptr;
+  HIP_CHECK(hipMalloc((void**)&dData, size));
 
   dim3 dimBlock(16, 1, 1);
-  dim3 dimGrid((width + dimBlock.x - 1)/ dimBlock.x, 1, 1);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, 1, 1);
 
-  hipLaunchKernelGGL(tex1DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData,
-                     textureObject, width, offsetX);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex1DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData, textureObject,
+                     width, offsetX);
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipDeviceSynchronize());
 
-  float *hOutputData = (float*) malloc(size);
+  float* hOutputData = (float*)malloc(size);
   memset(hOutputData, 0, size);
   HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
 
   bool result = true;
   for (int j = 0; j < width; j++) {
-    float expectedValue = getExpectedValue<float, addressMode, filterMode>(width, offsetX + j, hData);
+    float expectedValue =
+        getExpectedValue<float, addressMode, filterMode>(width, offsetX + j, hData);
     if (!hipTextureSamplingVerify<float, filterMode>(hOutputData[j], expectedValue)) {
-      INFO("Mismatch at " << offsetX + j << ":" << hOutputData[j] <<
-           " expected:" << expectedValue);
+      INFO("Mismatch at " << offsetX + j << ":" << hOutputData[j] << " expected:" << expectedValue);
       result = false;
       break;
     }
@@ -169,6 +171,6 @@ TEST_CASE("Unit_hipTextureObj1DCheckModes") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

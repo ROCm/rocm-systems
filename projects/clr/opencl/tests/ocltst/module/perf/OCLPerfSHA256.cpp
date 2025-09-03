@@ -27,7 +27,7 @@
 #include "CL/cl.h"
 #include "Timer.h"
 
-static const char *sha256_kernel =
+static const char* sha256_kernel =
     "typedef uint UINT;\n"
     "\n"
     "#define VECTOR_LEN 1\n"
@@ -267,7 +267,7 @@ static const char *sha256_kernel =
     "	}\n"
     "}\n";
 
-static const char *sha256_opt_kernel =
+static const char* sha256_opt_kernel =
     "typedef uint UINT;\n"
     "\n"
     "#define VECTOR_LEN 1\n"
@@ -523,41 +523,36 @@ OCLPerfSHA256::~OCLPerfSHA256() {}
 
 bool OCLPerfSHA256::setData(cl_mem buffer, unsigned int val) {
   bool retVal = false;
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_, buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL, &error_);
 
   if (error_ != CL_SUCCESS) {
     printf("\nError code : %d\n", error_);
   } else {
     for (unsigned int i = 0; i < width_; i++) data[i] = val;
-    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0,
-                                               NULL, NULL);
+    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
     if (error_ == CL_SUCCESS) retVal = true;
   }
   return retVal;
 }
 
 void OCLPerfSHA256::checkData(cl_mem buffer) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_, buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < width_; i++) {
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
+void OCLPerfSHA256::open(unsigned int test, char* units, double& conversion,
                          unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -582,7 +577,7 @@ void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -592,13 +587,11 @@ void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -619,28 +612,24 @@ void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
    * If we could find our platform, use it. If not, die as we need the AMD
    * platform for these extensions.
    */
-  CHECK_RESULT(platform == 0,
-               "Couldn't find platform with GPU devices, cannot proceed");
+  CHECK_RESULT(platform == 0, "Couldn't find platform with GPU devices, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   char charbuf[1024];
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024,
-                                     charbuf, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024, charbuf, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
@@ -667,32 +656,30 @@ void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
   outBuffer_ = new cl_mem[num_output_buf_];
 
   for (int i = 0; i < num_input_buf_; ++i) {
-    inBuffer_[i] =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    inBuffer_[i] = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(inBuffer_[i] == 0, "clCreateBuffer(inBuffer) failed");
     bool result = setData(inBuffer_[i], 0xdeadbeef);
     CHECK_RESULT(result != true, "clEnqueueMapBuffer buffer failed");
   }
 
   for (int i = 0; i < num_output_buf_; ++i) {
-    outBuffer_[i] =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    outBuffer_[i] = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(outBuffer_[i] == 0, "clCreateBuffer(outBuffer) failed");
     bool result = setData(outBuffer_[i], 0xdeadbeef);
     CHECK_RESULT(result != true, "clEnqueueMapBuffer buffer failed");
   }
 
   if (_openTest >= NUM_BUF_TYPES) {
-    program_ = _wrapper->clCreateProgramWithSource(
-        context_, 1, (const char **)&sha256_opt_kernel, NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&sha256_opt_kernel,
+                                                   NULL, &error_);
     CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
   } else {
-    program_ = _wrapper->clCreateProgramWithSource(
-        context_, 1, (const char **)&sha256_kernel, NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&sha256_kernel, NULL,
+                                                   &error_);
     CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
   }
 
-  const char *buildOps = NULL;
+  const char* buildOps = NULL;
   if (isAMD) {
     // Enable caching
     buildOps = "-fno-alias";
@@ -702,9 +689,8 @@ void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -712,18 +698,15 @@ void OCLPerfSHA256::open(unsigned int test, char *units, double &conversion,
   kernel_ = _wrapper->clCreateKernel(program_, "CryptThread", &error_);
   CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
 
-  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                    (void *)&inBuffer_[0]);
-  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem),
-                                    (void *)&outBuffer_[0]);
-  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint),
-                                    (void *)&blockSize_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&inBuffer_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&outBuffer_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void*)&blockSize_);
   // Foo is not part of the original test, this can be used to see how much of
   // the performance is limited by fetch. Set foo to 0 and all threads will
   // fetch the same 1k block.  This way they will all be in cache and hit max
   // fetch speed.
   unsigned int foo = 1;
-  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_uint), (void *)&foo);
+  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_uint), (void*)&foo);
 }
 
 void OCLPerfSHA256::run(void) {
@@ -739,17 +722,17 @@ void OCLPerfSHA256::run(void) {
   for (unsigned int i = 0; i < 10; i++) {
     if (num_input_buf_ > 1) {
       error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                        (void *)&inBuffer_[i % num_input_buf_]);
+                                        (void*)&inBuffer_[i % num_input_buf_]);
     }
 
     if (num_output_buf_ > 1) {
-      error_ = _wrapper->clSetKernelArg(
-          kernel_, 1, sizeof(cl_mem), (void *)&outBuffer_[i % num_output_buf_]);
+      error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem),
+                                        (void*)&outBuffer_[i % num_output_buf_]);
     }
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
   }
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
@@ -762,17 +745,17 @@ void OCLPerfSHA256::run(void) {
   for (unsigned int i = 0; i < MAX_ITERATIONS; i++) {
     if (num_input_buf_ > 1) {
       error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                        (void *)&inBuffer_[i % num_input_buf_]);
+                                        (void*)&inBuffer_[i % num_input_buf_]);
     }
 
     if (num_output_buf_ > 1) {
-      error_ = _wrapper->clSetKernelArg(
-          kernel_, 1, sizeof(cl_mem), (void *)&outBuffer_[i % num_output_buf_]);
+      error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem),
+                                        (void*)&outBuffer_[i % num_output_buf_]);
     }
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
   }
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
@@ -784,8 +767,7 @@ void OCLPerfSHA256::run(void) {
   // No idea what data should be in here
   // checkData(outBuffer_);
   // Compute GB/s
-  double perf =
-      ((double)bufSize_ * (double)MAX_ITERATIONS * (double)(1e-09)) / sec;
+  double perf = ((double)bufSize_ * (double)MAX_ITERATIONS * (double)(1e-09)) / sec;
 
   _perfInfo = (float)perf;
   if (_openTest >= NUM_BUF_TYPES) {
@@ -806,16 +788,14 @@ unsigned int OCLPerfSHA256::close(void) {
   if (inBuffer_) {
     for (int i = 0; i < num_input_buf_; ++i) {
       error_ = _wrapper->clReleaseMemObject(inBuffer_[i]);
-      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                             "clReleaseMemObject(inBuffer_) failed");
+      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(inBuffer_) failed");
     }
     delete[] inBuffer_;
   }
   if (outBuffer_) {
     for (int i = 0; i < num_output_buf_; ++i) {
       error_ = _wrapper->clReleaseMemObject(outBuffer_[i]);
-      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                             "clReleaseMemObject(outBuffer_) failed");
+      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
     }
     delete[] outBuffer_;
   }
@@ -829,8 +809,7 @@ unsigned int OCLPerfSHA256::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

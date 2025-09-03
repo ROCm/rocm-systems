@@ -136,6 +136,6 @@ TEST_CASE("Unit_hipDeviceTotalMem_NonSelectedDevice") {
 }
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

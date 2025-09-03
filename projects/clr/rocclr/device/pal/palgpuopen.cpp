@@ -135,13 +135,12 @@ bool RgpCaptureMgr::Update(Pal::IPlatform* platform) {
 
     const uint32_t api_version = settings.oclVersion_;
 
-    trace_.gpa_session_ = new GpuUtil::GpaSession(platform, device_.iDev(),
-                                                  api_version >> 4,   // OCL API version major
-                                                  api_version & 0xf,  // OCL API version minor
-                                                  (amd::IS_HIP) ? GpuUtil::ApiType::Hip :
-                                                                  GpuUtil::ApiType::OpenCl,
-                                                  RgpSqttInstrumentationSpecVersion,
-                                                  RgpSqttInstrumentationApiVersion);
+    trace_.gpa_session_ = new GpuUtil::GpaSession(
+        platform, device_.iDev(),
+        api_version >> 4,   // OCL API version major
+        api_version & 0xf,  // OCL API version minor
+        (amd::IS_HIP) ? GpuUtil::ApiType::Hip : GpuUtil::ApiType::OpenCl,
+        RgpSqttInstrumentationSpecVersion, RgpSqttInstrumentationApiVersion);
 
     if (trace_.gpa_session_ == nullptr) {
       result = false;
@@ -562,7 +561,6 @@ Pal::Result RgpCaptureMgr::PrepareRGPTrace(VirtualGPU* gpu) {
   }
 
   if (result == Pal::Result::Success) {
-
     trace_.begin_queue_ = nullptr;
     trace_.status_ = TraceStatus::Preparing;
   } else {
@@ -614,15 +612,16 @@ Pal::Result RgpCaptureMgr::BeginRGPTrace(VirtualGPU* gpu) {
 
     // Fill GPU commands
     gpu->eventBegin(MainEngine);
-    result = trace_.gpa_session_->BeginSample(
-      gpu->queue(MainEngine).iCmd(), sampleConfig, &trace_.gpa_sample_id_);
+    result = trace_.gpa_session_->BeginSample(gpu->queue(MainEngine).iCmd(), sampleConfig,
+                                              &trace_.gpa_sample_id_);
     gpu->eventEnd(MainEngine, trace_.begin_sqtt_event_);
   }
 
   if (result == Pal::Result::Success) {
     GpuUtil::SampleTraceApiInfo sample_trace_api_info = {};
-    sample_trace_api_info.instructionTraceMode = (inst_tracing_enabled_) ?
-        GpuUtil::InstructionTraceMode::FullFrame : GpuUtil::InstructionTraceMode::Disabled;
+    sample_trace_api_info.instructionTraceMode = (inst_tracing_enabled_)
+                                                     ? GpuUtil::InstructionTraceMode::FullFrame
+                                                     : GpuUtil::InstructionTraceMode::Disabled;
     trace_.gpa_session_->SetSampleTraceApiInfo(sample_trace_api_info, trace_.gpa_sample_id_);
   }
 
@@ -846,8 +845,10 @@ void RgpCaptureMgr::WriteMarker(const VirtualGPU* gpu, const void* data, size_t 
   Pal::RgpMarkerSubQueueFlags subQueueFlags = {};
   subQueueFlags.includeMainSubQueue = 1;
 
-  gpu->queue(MainEngine).iCmd()->CmdInsertRgpTraceMarker(
-    subQueueFlags, static_cast<uint32_t>(data_size / sizeof(uint32_t)), data);
+  gpu->queue(MainEngine)
+      .iCmd()
+      ->CmdInsertRgpTraceMarker(subQueueFlags, static_cast<uint32_t>(data_size / sizeof(uint32_t)),
+                                data);
 }
 
 // ================================================================================================
@@ -963,7 +964,8 @@ void RgpCaptureMgr::WriteComputeBindMarker(const VirtualGPU* gpu, uint64_t api_h
   RgpSqttMarkerPipelineBind marker = {};
 
   marker.identifier = RgpSqttMarkerIdentifierBindPipeline;
-  marker.cbID = gpu->queue(MainEngine).cmdBufId();;
+  marker.cbID = gpu->queue(MainEngine).cmdBufId();
+  ;
   marker.bindPoint = 1;
 
   memcpy(marker.apiPsoHash, &api_hash, sizeof(api_hash));
@@ -972,4 +974,4 @@ void RgpCaptureMgr::WriteComputeBindMarker(const VirtualGPU* gpu, uint64_t api_h
 
 }  // namespace amd::pal
 
-#endif // PAL_GPUOPEN_OCL
+#endif  // PAL_GPUOPEN_OCL

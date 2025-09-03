@@ -60,7 +60,7 @@ namespace amd::device {
 // compiler/lib/utils/v0_8/libUtils.h, compiler/lib/backends/gpu/hsail_be.cpp,
 // compiler/legacy-lib/utils/v0_8/libUtils.h,
 // and compiler/legacy-lib/backends/gpu/hsail_be.cpp ?
-inline static std::vector<std::string> splitSpaceSeparatedString(const char *str) {
+inline static std::vector<std::string> splitSpaceSeparatedString(const char* str) {
   std::string s(str);
   std::stringstream ss(s);
   std::istream_iterator<std::string> beg(ss), end;
@@ -93,8 +93,7 @@ Program::Program(amd::Device& device, amd::Program& owner)
       buildStatus_(CL_BUILD_NONE),
       buildError_(CL_SUCCESS),
       globalVariableTotalSize_(0),
-      programOptions_(nullptr)
-{
+      programOptions_(nullptr) {
 #if defined(WITH_COMPILER_LIB)
   memset(&binOpts_, 0, sizeof(binOpts_));
   binOpts_.struct_size = sizeof(binOpts_);
@@ -170,9 +169,9 @@ void Program::extractBuildLog(amd_comgr_data_set_t dataSet) {
 //
 amd_comgr_status_t Program::extractByteCodeBinary(const amd_comgr_data_set_t inDataSet,
                                                   const amd_comgr_data_kind_t dataKind,
-                                                  const std::string& outFileName,
-                                                  char* outBinary[], size_t* outSize) {
-  amd_comgr_data_t  binaryData;
+                                                  const std::string& outFileName, char* outBinary[],
+                                                  size_t* outSize) {
+  amd_comgr_data_t binaryData;
 
   amd_comgr_status_t status = amd::Comgr::action_data_get_data(inDataSet, dataKind, 0, &binaryData);
 
@@ -219,24 +218,20 @@ amd_comgr_status_t Program::extractByteCodeBinary(const amd_comgr_data_set_t inD
     // Pass the dump binary and its size back to the caller
     *outBinary = binary;
     *outSize = binarySize;
-  }
-  else {
+  } else {
     delete[] binary;
   }
   return AMD_COMGR_STATUS_SUCCESS;
 }
 
-amd_comgr_status_t Program::addCodeObjData(const char *source,
-                                           const size_t size,
-                                           const amd_comgr_data_kind_t type,
-                                           const char* name,
-                                           amd_comgr_data_set_t* dataSet)
-{
+amd_comgr_status_t Program::addCodeObjData(const char* source, const size_t size,
+                                           const amd_comgr_data_kind_t type, const char* name,
+                                           amd_comgr_data_set_t* dataSet) {
   amd_comgr_data_t data;
   amd_comgr_status_t status;
 
   status = amd::Comgr::create_data(type, &data);
-  if (status  != AMD_COMGR_STATUS_SUCCESS) {
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
     return status;
   }
 
@@ -255,8 +250,7 @@ amd_comgr_status_t Program::addCodeObjData(const char *source,
   return status;
 }
 
-static amd_comgr_language_t getCOMGRLanguage(bool isHIP, const amd::option::Options &amdOptions) {
-
+static amd_comgr_language_t getCOMGRLanguage(bool isHIP, const amd::option::Options& amdOptions) {
   if (isHIP) {
     return AMD_COMGR_LANGUAGE_HIP;
   } else {
@@ -275,17 +269,14 @@ static amd_comgr_language_t getCOMGRLanguage(bool isHIP, const amd::option::Opti
     }
   }
 
-  DevLogPrintfError("Cannot set Language version for %s \n",
-                    amdOptions.oVariables->CLStd);
+  DevLogPrintfError("Cannot set Language version for %s \n", amdOptions.oVariables->CLStd);
   return AMD_COMGR_LANGUAGE_NONE;
 }
 
 
 amd_comgr_status_t Program::createAction(const amd_comgr_language_t oclver,
                                          const std::vector<std::string>& options,
-                                         amd_comgr_action_info_t* action,
-                                         bool* hasAction) {
-
+                                         amd_comgr_action_info_t* action, bool* hasAction) {
   *hasAction = false;
   amd_comgr_status_t status = amd::Comgr::create_action_info(action);
 
@@ -301,12 +292,13 @@ amd_comgr_status_t Program::createAction(const amd_comgr_language_t oclver,
   }
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    std::vector<const char *> optionsArgv;
+    std::vector<const char*> optionsArgv;
     optionsArgv.reserve(options.size());
-    for (auto &option : options) {
+    for (auto& option : options) {
       optionsArgv.push_back(option.c_str());
     }
-    status = amd::Comgr::action_info_set_option_list(*action, optionsArgv.data(), optionsArgv.size());
+    status =
+        amd::Comgr::action_info_set_option_list(*action, optionsArgv.data(), optionsArgv.size());
   }
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
@@ -320,7 +312,6 @@ bool Program::linkLLVMBitcode(const amd_comgr_data_set_t inputs,
                               const std::vector<std::string>& options,
                               amd::option::Options* amdOptions, amd_comgr_data_set_t* output,
                               char* binaryData[], size_t* binarySize) {
-
   amd_comgr_language_t langver = getCOMGRLanguage(isHIP(), *amdOptions);
   if (langver == AMD_COMGR_LANGUAGE_NONE) {
     return false;
@@ -333,8 +324,7 @@ bool Program::linkLLVMBitcode(const amd_comgr_data_set_t inputs,
   amd_comgr_status_t status = createAction(langver, options, &action, &hasAction);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::do_action(AMD_COMGR_ACTION_LINK_BC_TO_BC, action,
-                                   inputs, *output);
+    status = amd::Comgr::do_action(AMD_COMGR_ACTION_LINK_BC_TO_BC, action, inputs, *output);
     extractBuildLog(*output);
   }
 
@@ -356,10 +346,8 @@ bool Program::linkLLVMBitcode(const amd_comgr_data_set_t inputs,
 
 bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
                                    const std::vector<std::string>& options,
-                                   amd::option::Options* amdOptions,
-                                   char* binaryData[], size_t* binarySize,
-                                   const bool link_dev_libs) {
-
+                                   amd::option::Options* amdOptions, char* binaryData[],
+                                   size_t* binarySize, const bool link_dev_libs) {
   amd_comgr_language_t langver = getCOMGRLanguage(isHIP(), *amdOptions);
   if (langver == AMD_COMGR_LANGUAGE_NONE) {
     return false;
@@ -369,7 +357,7 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   amd_comgr_action_info_t action{};
   amd_comgr_data_set_t output{};
   amd_comgr_data_set_t dataSetPCH{};
-  amd_comgr_data_set_t input = compileInputs ;
+  amd_comgr_data_set_t input = compileInputs;
 
   bool hasAction = false;
   bool hasOutput = false;
@@ -394,7 +382,7 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     hasDataSetPCH = true;
 
-    if (amdOptions->isDumpFlagSet(amd::option::DUMP_I)){
+    if (amdOptions->isDumpFlagSet(amd::option::DUMP_I)) {
       amd_comgr_data_set_t dataSetPreprocessor;
       bool hasDataSetPreprocessor = false;
 
@@ -402,15 +390,15 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
 
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         hasDataSetPreprocessor = true;
-        status = amd::Comgr::do_action(AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR,
-                                       action, input, dataSetPreprocessor);
+        status = amd::Comgr::do_action(AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR, action, input,
+                                       dataSetPreprocessor);
         extractBuildLog(dataSetPreprocessor);
       }
 
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         std::string outFileName = amdOptions->getDumpFileName(".i");
-        status = extractByteCodeBinary(dataSetPreprocessor,
-                                       AMD_COMGR_DATA_KIND_SOURCE, outFileName);
+        status =
+            extractByteCodeBinary(dataSetPreprocessor, AMD_COMGR_DATA_KIND_SOURCE, outFileName);
       }
 
       if (hasDataSetPreprocessor) {
@@ -421,8 +409,8 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
 
   if (!isHIP()) {
     if (status == AMD_COMGR_STATUS_SUCCESS) {
-      status = amd::Comgr::do_action(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS,
-                                     action, input, dataSetPCH);
+      status = amd::Comgr::do_action(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, action, input,
+                                     dataSetPCH);
       extractBuildLog(dataSetPCH);
     }
 
@@ -433,12 +421,10 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   //  Compiling the source codes with precompiled headers or directly compileInputs
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     if (link_dev_libs) {
-      status = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
-                                     action, input, output);
-    }
-    else {
-      status = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC,
-                                     action, input, output);
+      status = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action,
+                                     input, output);
+    } else {
+      status = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, action, input, output);
     }
     extractBuildLog(output);
   }
@@ -446,10 +432,10 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     std::string outFileName;
     if (amdOptions->isDumpFlagSet(amd::option::DUMP_BC_OPTIMIZED)) {
-       outFileName = amdOptions->getDumpFileName("_optimized.bc");
+      outFileName = amdOptions->getDumpFileName("_optimized.bc");
     }
-    status = extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, outFileName, binaryData,
-                                   binarySize);
+    status =
+        extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, outFileName, binaryData, binarySize);
   }
 
   if (hasAction) {
@@ -472,9 +458,8 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
 //  If assembly code is required, the input data set is converted to assembly.
 bool Program::compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
                                        const std::vector<std::string>& options,
-                                       amd::option::Options* amdOptions,
-                                       char* executable[], size_t* executableSize,
-                                       file_type_t continueCompileFrom) {
+                                       amd::option::Options* amdOptions, char* executable[],
+                                       size_t* executableSize, file_type_t continueCompileFrom) {
   // create the linked output
   amd_comgr_action_info_t action;
   amd_comgr_data_set_t output;
@@ -493,8 +478,7 @@ bool Program::compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
     hasOutput = true;
 
     if ((amdOptions->isDumpFlagSet(amd::option::DUMP_ISA)) ||
-        (isHIP() &&
-         amdOptions->origOptionStr.find("-save-temps") != std::string::npos)) {
+        (isHIP() && amdOptions->origOptionStr.find("-save-temps") != std::string::npos)) {
       //  create the assembly data set
       amd_comgr_data_set_t assemblyData;
       bool hasAssemblyData = false;
@@ -502,8 +486,8 @@ bool Program::compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
       status = amd::Comgr::create_data_set(&assemblyData);
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         hasAssemblyData = true;
-        status = amd::Comgr::do_action(AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY,
-                                       action, inputs, assemblyData);
+        status = amd::Comgr::do_action(AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY, action, inputs,
+                                       assemblyData);
         extractBuildLog(assemblyData);
       }
 
@@ -527,8 +511,8 @@ bool Program::compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     hasRelocatableData = true;
     amd_comgr_action_kind_t kind = (continueCompileFrom == FILE_TYPE_ASM_TEXT)
-        ? AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE
-        : AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE;
+                                       ? AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE
+                                       : AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE;
     status = amd::Comgr::do_action(kind, action, inputs, relocatableData);
     extractBuildLog(relocatableData);
   }
@@ -571,23 +555,22 @@ static std::size_t getOCLSourceHash(const std::string& sourceCode) {
   return std::hash<std::string>()(sourceCode);
 }
 
-static std::size_t getOCLOptionsHash(const amd::option::Options &options) {
+static std::size_t getOCLOptionsHash(const amd::option::Options& options) {
   std::string opts;
-  for (const std::string& S : options.clangOptions)
-    opts.append(S);
+  for (const std::string& S : options.clangOptions) opts.append(S);
   return std::hash<std::string>()(opts);
 }
 
 bool Program::compileImplLC(const std::string& sourceCode,
                             const std::vector<const std::string*>& headers,
                             const char** headerIncludeNames, amd::option::Options* options) {
-#if  defined(USE_COMGR_LIBRARY)
+#if defined(USE_COMGR_LIBRARY)
   const char* xLang = options->oVariables->XLang;
   if (xLang != nullptr) {
-    if (strcmp(xLang,"asm") == 0) {
+    if (strcmp(xLang, "asm") == 0) {
       clBinary()->elfOut()->addSection(amd::Elf::SOURCE, sourceCode.data(), sourceCode.size());
       return true;
-    } else if (!strcmp(xLang,"cl")) {
+    } else if (!strcmp(xLang, "cl")) {
       buildLog_ += "Unsupported language: \"" + std::string(xLang) + "\".\n";
       return false;
     }
@@ -614,11 +597,13 @@ bool Program::compileImplLC(const std::string& sourceCode,
   optLevel << "-O" << options->oVariables->OptLevel;
   driverOptions.push_back(optLevel.str());
 
-  if(!isHIP()) {
-    driverOptions.insert(driverOptions.end(), options->clangOptions.begin(), options->clangOptions.end());
+  if (!isHIP()) {
+    driverOptions.insert(driverOptions.end(), options->clangOptions.begin(),
+                         options->clangOptions.end());
     // TODO: Can this be fixed at the source? options->llvmOptions is a flat
     // string, but should really be a vector of strings.
-    std::vector<std::string> splitLlvmOptions = splitSpaceSeparatedString(options->llvmOptions.c_str());
+    std::vector<std::string> splitLlvmOptions =
+        splitSpaceSeparatedString(options->llvmOptions.c_str());
     driverOptions.insert(driverOptions.end(), splitLlvmOptions.begin(), splitLlvmOptions.end());
   }
 
@@ -636,7 +621,8 @@ bool Program::compileImplLC(const std::string& sourceCode,
   if (device().settings().lcWavefrontSize64_) {
     driverOptions.push_back("-mwavefrontsize64");
   }
-  driverOptions.push_back("-mcode-object-version=" + std::to_string(options->oVariables->LCCodeObjectVersion));
+  driverOptions.push_back("-mcode-object-version=" +
+                          std::to_string(options->oVariables->LCCodeObjectVersion));
 
   // Iterate through each source code and dump it into tmp
   std::fstream f;
@@ -663,7 +649,7 @@ bool Program::compileImplLC(const std::string& sourceCode,
   if (!isHIP() && options->isDumpFlagSet(amd::option::DUMP_CL)) {
     std::ostringstream driverOptionsOStrStr;
     std::copy(driverOptions.begin(), driverOptions.end(),
-      std::ostream_iterator<std::string>(driverOptionsOStrStr, " "));
+              std::ostream_iterator<std::string>(driverOptionsOStrStr, " "));
 
     std::ofstream f(options->getDumpFileName(".cl").c_str(), std::ios::trunc);
     if (f.is_open()) {
@@ -674,9 +660,8 @@ bool Program::compileImplLC(const std::string& sourceCode,
            "-c -emit-llvm -target amdgcn-amd-amdhsa -x cl "
         << driverOptionsOStrStr.str() << " -include opencl-c.h "
         << "\nHash to override:"
-        << "\n  Source: 0x" << std::setbase(16) << srcHash
-        << "\n  Source + clang options: 0x" << (srcHash ^ optHash)
-        << "\n*/\n\n"
+        << "\n  Source: 0x" << std::setbase(16) << srcHash << "\n  Source + clang options: 0x"
+        << (srcHash ^ optHash) << "\n*/\n\n"
         << sourceCode;
       f.close();
     } else {
@@ -712,8 +697,7 @@ bool Program::compileImplLC(const std::string& sourceCode,
       // store the original compile options
       clBinary()->storeCompileOptions(compileOptions_);
     }
-  }
-  else {
+  } else {
     buildLog_ += "Error: Failed to compile source (from CL or HIP source to LLVM IR).\n";
   }
 
@@ -727,7 +711,7 @@ bool Program::compileImplLC(const std::string& sourceCode,
 
 // ================================================================================================
 
-#if  defined(WITH_COMPILER_LIB)
+#if defined(WITH_COMPILER_LIB)
 static void logFunction(const char* msg, size_t size) {
   std::cout << "Compiler Log: " << msg << std::endl;
 }
@@ -735,8 +719,8 @@ static void logFunction(const char* msg, size_t size) {
 
 // ================================================================================================
 bool Program::compileImplHSAIL(const std::string& sourceCode,
-  const std::vector<const std::string*>& headers,
-  const char** headerIncludeNames, amd::option::Options* options) {
+                               const std::vector<const std::string*>& headers,
+                               const char** headerIncludeNames, amd::option::Options* options) {
 #if defined(WITH_COMPILER_LIB)
   amd::ScopedLock sl(&buildLock_);
 
@@ -802,7 +786,7 @@ bool Program::compileImplHSAIL(const std::string& sourceCode,
 
   // Insert opencl into binary
   errorCode = amd::Hsail::InsertSection(device().compiler(), binaryElf_, sourceCode.c_str(),
-    strlen(sourceCode.c_str()), aclSOURCE);
+                                        strlen(sourceCode.c_str()), aclSOURCE);
   if (errorCode != ACL_SUCCESS) {
     buildLog_ += "Error: Inserting openCl Source to binary\n";
   }
@@ -824,8 +808,9 @@ bool Program::compileImplHSAIL(const std::string& sourceCode,
 
   // Compile source to IR
   compileOptions_.append(ProcessOptionsFlattened(options));
-  errorCode = amd::Hsail::Compile(device().compiler(), binaryElf_, compileOptions_.c_str(), ACL_TYPE_OPENCL,
-    ACL_TYPE_LLVMIR_BINARY, nullptr /* logFunction */);
+  errorCode =
+      amd::Hsail::Compile(device().compiler(), binaryElf_, compileOptions_.c_str(), ACL_TYPE_OPENCL,
+                          ACL_TYPE_LLVMIR_BINARY, nullptr /* logFunction */);
   buildLog_ += amd::Hsail::GetCompilerLog(device().compiler());
   if (errorCode != ACL_SUCCESS) {
     LogWarning("aclCompile failed");
@@ -843,18 +828,17 @@ bool Program::compileImplHSAIL(const std::string& sourceCode,
 
 // ================================================================================================
 bool Program::linkImpl(const std::vector<device::Program*>& inputPrograms,
-  amd::option::Options* options, bool createLibrary) {
+                       amd::option::Options* options, bool createLibrary) {
   if (isLC()) {
     return linkImplLC(inputPrograms, options, createLibrary);
-  }
-  else {
+  } else {
     return linkImplHSAIL(inputPrograms, options, createLibrary);
   }
 }
 
 // ================================================================================================
-bool Program::linkImplLC(const std::vector<Program*>& inputPrograms,
-                         amd::option::Options* options, bool createLibrary) {
+bool Program::linkImplLC(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
+                         bool createLibrary) {
 #if defined(USE_COMGR_LIBRARY)
   amd_comgr_data_set_t inputs;
 
@@ -876,8 +860,8 @@ bool Program::linkImplLC(const std::vector<Program*>& inputPrograms,
       }
 
       if (result) {
-        result = program->clBinary()->loadLlvmBinary(program->llvmBinary_,
-                                                     program->elfSectionType_);
+        result =
+            program->clBinary()->loadLlvmBinary(program->llvmBinary_, program->elfSectionType_);
       }
     }
 
@@ -888,8 +872,8 @@ bool Program::linkImplLC(const std::vector<Program*>& inputPrograms,
     if (result) {
       std::string llvmName = "LLVM Binary " + std::to_string(idx);
       result = (addCodeObjData(program->llvmBinary_.data(), program->llvmBinary_.size(),
-                               AMD_COMGR_DATA_KIND_BC, llvmName.c_str(), &inputs) ==
-                               AMD_COMGR_STATUS_SUCCESS);
+                               AMD_COMGR_DATA_KIND_BC, llvmName.c_str(),
+                               &inputs) == AMD_COMGR_STATUS_SUCCESS);
     }
 
     if (!result) {
@@ -917,8 +901,7 @@ bool Program::linkImplLC(const std::vector<Program*>& inputPrograms,
   char* binaryData = nullptr;
   size_t binarySize = 0;
   std::vector<std::string> linkOptions;
-  bool ret = linkLLVMBitcode(inputs, linkOptions, options, &output, &binaryData,
-                             &binarySize);
+  bool ret = linkLLVMBitcode(inputs, linkOptions, options, &output, &binaryData, &binarySize);
 
   amd::Comgr::destroy_data_set(output);
   amd::Comgr::destroy_data_set(inputs);
@@ -961,8 +944,8 @@ bool Program::linkImplLC(const std::vector<Program*>& inputPrograms,
 
 // ================================================================================================
 bool Program::linkImplHSAIL(const std::vector<Program*>& inputPrograms,
-  amd::option::Options* options, bool createLibrary) {
-#if  defined(WITH_COMPILER_LIB)
+                            amd::option::Options* options, bool createLibrary) {
+#if defined(WITH_COMPILER_LIB)
   amd::ScopedLock sl(&buildLock_);
 
   acl_error errorCode;
@@ -994,28 +977,27 @@ bool Program::linkImplHSAIL(const std::vector<Program*>& inputPrograms,
     // Check if LLVMIR is in the binary
     size_t boolSize = sizeof(bool);
     bool containsLLLVMIR = false;
-    errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_LLVMIR,
-      nullptr, &containsLLLVMIR, &boolSize);
+    errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_LLVMIR, nullptr,
+                                      &containsLLLVMIR, &boolSize);
 
     if (errorCode != ACL_SUCCESS || !containsLLLVMIR) {
       bool spirv = false;
       size_t boolSize = sizeof(bool);
-      errorCode = amd::Hsail::QueryInfo(
-        device().compiler(), binaryElf_, RT_CONTAINS_SPIRV, nullptr, &spirv, &boolSize);
+      errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_SPIRV, nullptr,
+                                        &spirv, &boolSize);
       if (errorCode != ACL_SUCCESS) {
         spirv = false;
       }
       if (spirv) {
-        errorCode = amd::Hsail::Compile(
-          device().compiler(), binaryElf_, options->origOptionStr.c_str(),
-          ACL_TYPE_SPIRV_BINARY, ACL_TYPE_LLVMIR_BINARY, nullptr);
+        errorCode =
+            amd::Hsail::Compile(device().compiler(), binaryElf_, options->origOptionStr.c_str(),
+                                ACL_TYPE_SPIRV_BINARY, ACL_TYPE_LLVMIR_BINARY, nullptr);
         buildLog_ += amd::Hsail::GetCompilerLog(device().compiler());
         if (errorCode != ACL_SUCCESS) {
           buildLog_ += "Error while linking: Could not load SPIR-V";
           return false;
         }
-      }
-      else {
+      } else {
         buildLog_ += "Error while linking : Invalid binary (Missing LLVMIR section)";
         return false;
       }
@@ -1026,9 +1008,10 @@ bool Program::linkImplHSAIL(const std::vector<Program*>& inputPrograms,
     binaries_to_link.push_back(bin);
   }
 
-  errorCode = amd::Hsail::Link(device().compiler(), binaries_to_link[0], binaries_to_link.size() - 1,
-    binaries_to_link.size() > 1 ? &binaries_to_link[1] : nullptr,
-    ACL_TYPE_LLVMIR_BINARY, "-create-library", nullptr);
+  errorCode =
+      amd::Hsail::Link(device().compiler(), binaries_to_link[0], binaries_to_link.size() - 1,
+                       binaries_to_link.size() > 1 ? &binaries_to_link[1] : nullptr,
+                       ACL_TYPE_LLVMIR_BINARY, "-create-library", nullptr);
   if (errorCode != ACL_SUCCESS) {
     buildLog_ += amd::Hsail::GetCompilerLog(device().compiler());
     buildLog_ += "Error while linking : aclLink failed";
@@ -1057,21 +1040,20 @@ bool Program::linkImplHSAIL(const std::vector<Program*>& inputPrograms,
 bool Program::linkImpl(amd::option::Options* options) {
   if (isLC()) {
     return linkImplLC(options);
-  }
-  else {
+  } else {
     return linkImplHSAIL(options);
   }
 }
 
 static void dumpCodeObject(const std::string& image) {
-    char fname[30];
-    static std::atomic<int> index;
-    sprintf(fname, "_code_object%04d.o", index++);
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Code object saved in %s\n", fname);
-    std::ofstream ofs;
-    ofs.open(fname, std::ios::binary);
-    ofs << image;
-    ofs.close();
+  char fname[30];
+  static std::atomic<int> index;
+  sprintf(fname, "_code_object%04d.o", index++);
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Code object saved in %s\n", fname);
+  std::ofstream ofs;
+  ofs.open(fname, std::ios::binary);
+  ofs << image;
+  ofs.close();
 }
 
 // ================================================================================================
@@ -1079,8 +1061,7 @@ bool Program::linkImplLC(amd::option::Options* options) {
 #if defined(USE_COMGR_LIBRARY)
   file_type_t continueCompileFrom = FILE_TYPE_LLVMIR_BINARY;
 
-  internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ?
-    true : false;
+  internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ? true : false;
 
   amd_comgr_data_set_t inputs;
   if (amd::Comgr::create_data_set(&inputs) != AMD_COMGR_STATUS_SUCCESS) {
@@ -1103,8 +1084,8 @@ bool Program::linkImplLC(amd::option::Options* options) {
       size_t sz;
       clBinary()->elfOut()->getSection(amd::Elf::SOURCE, &section, &sz);
 
-      if (addCodeObjData(section, sz, AMD_COMGR_DATA_KIND_BC, "Assembly Text",
-                         &inputs) != AMD_COMGR_STATUS_SUCCESS) {
+      if (addCodeObjData(section, sz, AMD_COMGR_DATA_KIND_BC, "Assembly Text", &inputs) !=
+          AMD_COMGR_STATUS_SUCCESS) {
         buildLog_ += "Error: COMGR fails to create assembly input.\n";
         amd::Comgr::destroy_data_set(inputs);
         return false;
@@ -1120,8 +1101,8 @@ bool Program::linkImplLC(amd::option::Options* options) {
         dumpCodeObject(std::string{(const char*)isaBinary.first, isaBinary.second});
       }
 
-      if (!createKernels(const_cast<void *>(isaBinary.first), isaBinary.second,
-                           options->oVariables->UniformWorkGroupSize, internal_)) {
+      if (!createKernels(const_cast<void*>(isaBinary.first), isaBinary.second,
+                         options->oVariables->UniformWorkGroupSize, internal_)) {
         buildLog_ += "Error: Cannot create kernels.\n";
         return false;
       }
@@ -1139,22 +1120,22 @@ bool Program::linkImplLC(amd::option::Options* options) {
     std::vector<std::string> linkOptions;
 
     if (options->oVariables->FP32RoundDivideSqrt) {
-        linkOptions.push_back("correctly_rounded_sqrt");
+      linkOptions.push_back("correctly_rounded_sqrt");
     }
     if (options->oVariables->FiniteMathOnly || options->oVariables->FastRelaxedMath) {
-        linkOptions.push_back("finite_only");
+      linkOptions.push_back("finite_only");
     }
     if (options->oVariables->UnsafeMathOpt || options->oVariables->FastRelaxedMath) {
-        linkOptions.push_back("unsafe_math");
+      linkOptions.push_back("unsafe_math");
     }
     if (device().settings().lcWavefrontSize64_) {
-        linkOptions.push_back("wavefrontsize64");
+      linkOptions.push_back("wavefrontsize64");
     }
-    linkOptions.push_back("code_object_v" + std::to_string(options->oVariables->LCCodeObjectVersion));
+    linkOptions.push_back("code_object_v" +
+                          std::to_string(options->oVariables->LCCodeObjectVersion));
 
     amd_comgr_status_t status = addCodeObjData(llvmBinary_.data(), llvmBinary_.size(),
-                                               AMD_COMGR_DATA_KIND_BC,
-                                               "LLVM Binary", &inputs);
+                                               AMD_COMGR_DATA_KIND_BC, "LLVM Binary", &inputs);
 
     amd_comgr_data_set_t linked_bc;
     bool hasLinkedBC = false;
@@ -1186,7 +1167,8 @@ bool Program::linkImplLC(amd::option::Options* options) {
 
   // TODO: Can this be fixed at the source? options->llvmOptions is a flat
   // string, but should really be a vector of strings.
-  std::vector<std::string> splitLlvmOptions = splitSpaceSeparatedString(options->llvmOptions.c_str());
+  std::vector<std::string> splitLlvmOptions =
+      splitSpaceSeparatedString(options->llvmOptions.c_str());
   codegenOptions.insert(codegenOptions.end(), splitLlvmOptions.begin(), splitLlvmOptions.end());
 
   // Set the -O#
@@ -1196,17 +1178,11 @@ bool Program::linkImplLC(amd::option::Options* options) {
 
   // Pass clang options
   if (continueCompileFrom != FILE_TYPE_ASM_TEXT) {
-    std::copy_if(
-      options->clangOptions.begin(),
-      options->clangOptions.end(),
-      std::back_inserter(codegenOptions),
-      [](const std::string& opt) {
-        return opt.rfind("-I", 0) != 0;
-      }
-    );
+    std::copy_if(options->clangOptions.begin(), options->clangOptions.end(),
+                 std::back_inserter(codegenOptions),
+                 [](const std::string& opt) { return opt.rfind("-I", 0) != 0; });
   } else {
-    codegenOptions.insert(codegenOptions.end(),
-                          options->clangOptions.begin(),
+    codegenOptions.insert(codegenOptions.end(), options->clangOptions.begin(),
                           options->clangOptions.end());
   }
 
@@ -1215,8 +1191,7 @@ bool Program::linkImplLC(amd::option::Options* options) {
     std::string appName = {};
     std::string appPathAndName = {};
     amd::Os::getAppPathAndFileName(appName, appPathAndName);
-    if ((appName == "Adobe Media Encoder.exe") ||
-        (appName == "Adobe Premiere Pro.exe") ||
+    if ((appName == "Adobe Media Encoder.exe") || (appName == "Adobe Premiere Pro.exe") ||
         (appName == "AfterFX.exe")) {
       codegenOptions.push_back("-mllvm");
       codegenOptions.push_back("-disable-branch-fold");
@@ -1234,14 +1209,15 @@ bool Program::linkImplLC(amd::option::Options* options) {
   if (device().settings().lcWavefrontSize64_) {
     codegenOptions.push_back("-mwavefrontsize64");
   }
-  codegenOptions.push_back("-mcode-object-version=" + std::to_string(options->oVariables->LCCodeObjectVersion));
+  codegenOptions.push_back("-mcode-object-version=" +
+                           std::to_string(options->oVariables->LCCodeObjectVersion));
 
   // NOTE: The params is also used to identy cached code object. This parameter
   //       should not contain any dyanamically generated filename.
   char* executable = nullptr;
   size_t executableSize = 0;
-  bool ret = compileAndLinkExecutable(inputs, codegenOptions, options, &executable,
-                                      &executableSize, continueCompileFrom);
+  bool ret = compileAndLinkExecutable(inputs, codegenOptions, options, &executable, &executableSize,
+                                      continueCompileFrom);
   amd::Comgr::destroy_data_set(inputs);
 
   if (!ret) {
@@ -1276,50 +1252,50 @@ bool Program::linkImplLC(amd::option::Options* options) {
 
 // ================================================================================================
 bool Program::linkImplHSAIL(amd::option::Options* options) {
-#if  defined(WITH_COMPILER_LIB)
+#if defined(WITH_COMPILER_LIB)
   amd::ScopedLock sl(&buildLock_);
 
   acl_error errorCode;
   bool finalize = true;
   internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ? true : false;
   // If !binaryElf_ then program must have been created using clCreateProgramWithBinary
-  aclType continueCompileFrom = (!binaryElf_) ?
-    static_cast<aclType>(getNextCompilationStageFromBinary(options)) : ACL_TYPE_LLVMIR_BINARY;
+  aclType continueCompileFrom =
+      (!binaryElf_) ? static_cast<aclType>(getNextCompilationStageFromBinary(options))
+                    : ACL_TYPE_LLVMIR_BINARY;
 
   switch (continueCompileFrom) {
-  case ACL_TYPE_SPIRV_BINARY:
-  case ACL_TYPE_SPIR_BINARY:
-    // Compilation from ACL_TYPE_LLVMIR_BINARY to ACL_TYPE_CG in cases:
-    // 1. if the program is not created with binary;
-    // 2. if the program is created with binary and contains only .llvmir & .comment
-    // 3. if the program is created with binary, contains .llvmir, .comment, brig sections,
-    //    but the binary's compile & link options differ from current ones (recompilation);
-  case ACL_TYPE_LLVMIR_BINARY:
-    // Compilation from ACL_TYPE_HSAIL_BINARY to ACL_TYPE_CG in cases:
-    // 1. if the program is created with binary and contains only brig sections
-  case ACL_TYPE_HSAIL_BINARY:
-    // Compilation from ACL_TYPE_HSAIL_TEXT to ACL_TYPE_CG in cases:
-    // 1. if the program is created with binary and contains only hsail text
-  case ACL_TYPE_HSAIL_TEXT: {
-    std::string curOptions =
-      options->origOptionStr + ProcessOptionsFlattened(options);
-    errorCode = amd::Hsail::Compile(device().compiler(), binaryElf_, curOptions.c_str(),
-      continueCompileFrom, ACL_TYPE_CG, logFunction);
-    buildLog_ += amd::Hsail::GetCompilerLog(device().compiler());
-    if (errorCode != ACL_SUCCESS) {
-      buildLog_ += "Error while BRIG Codegen phase: compilation error \n";
-      return false;
+    case ACL_TYPE_SPIRV_BINARY:
+    case ACL_TYPE_SPIR_BINARY:
+      // Compilation from ACL_TYPE_LLVMIR_BINARY to ACL_TYPE_CG in cases:
+      // 1. if the program is not created with binary;
+      // 2. if the program is created with binary and contains only .llvmir & .comment
+      // 3. if the program is created with binary, contains .llvmir, .comment, brig sections,
+      //    but the binary's compile & link options differ from current ones (recompilation);
+    case ACL_TYPE_LLVMIR_BINARY:
+      // Compilation from ACL_TYPE_HSAIL_BINARY to ACL_TYPE_CG in cases:
+      // 1. if the program is created with binary and contains only brig sections
+    case ACL_TYPE_HSAIL_BINARY:
+      // Compilation from ACL_TYPE_HSAIL_TEXT to ACL_TYPE_CG in cases:
+      // 1. if the program is created with binary and contains only hsail text
+    case ACL_TYPE_HSAIL_TEXT: {
+      std::string curOptions = options->origOptionStr + ProcessOptionsFlattened(options);
+      errorCode = amd::Hsail::Compile(device().compiler(), binaryElf_, curOptions.c_str(),
+                                      continueCompileFrom, ACL_TYPE_CG, logFunction);
+      buildLog_ += amd::Hsail::GetCompilerLog(device().compiler());
+      if (errorCode != ACL_SUCCESS) {
+        buildLog_ += "Error while BRIG Codegen phase: compilation error \n";
+        return false;
+      }
+      break;
     }
-    break;
-  }
-  case ACL_TYPE_CG:
-    break;
-  case ACL_TYPE_ISA:
-    finalize = false;
-    break;
-  default:
-    buildLog_ += "Error while BRIG Codegen phase: the binary is incomplete \n";
-    return false;
+    case ACL_TYPE_CG:
+      break;
+    case ACL_TYPE_ISA:
+      finalize = false;
+      break;
+    default:
+      buildLog_ += "Error while BRIG Codegen phase: the binary is incomplete \n";
+      return false;
   }
 
   if (finalize) {
@@ -1342,8 +1318,8 @@ bool Program::linkImplHSAIL(amd::option::Options* options) {
       fin_options.append(" -xnack");
     }
 
-    errorCode = amd::Hsail::Compile(device().compiler(), binaryElf_, fin_options.c_str(), ACL_TYPE_CG,
-      ACL_TYPE_ISA, logFunction);
+    errorCode = amd::Hsail::Compile(device().compiler(), binaryElf_, fin_options.c_str(),
+                                    ACL_TYPE_CG, ACL_TYPE_ISA, logFunction);
     buildLog_ += amd::Hsail::GetCompilerLog(device().compiler());
     if (errorCode != ACL_SUCCESS) {
       buildLog_ += "Error: BRIG finalization to ISA failed.\n";
@@ -1352,8 +1328,8 @@ bool Program::linkImplHSAIL(amd::option::Options* options) {
   }
 
   size_t binSize;
-  void* binary = const_cast<void*>(amd::Hsail::ExtractSection(
-    device().compiler(), binaryElf_, &binSize, aclTEXT, &errorCode));
+  void* binary = const_cast<void*>(
+      amd::Hsail::ExtractSection(device().compiler(), binaryElf_, &binSize, aclTEXT, &errorCode));
   if (errorCode != ACL_SUCCESS) {
     buildLog_ += "Error: cannot extract ISA from compiled binary.\n";
     return false;
@@ -1372,7 +1348,7 @@ bool Program::linkImplHSAIL(amd::option::Options* options) {
   return true;
 #else
   return false;
-#endif // defined(WITH_COMPILER_LIB)
+#endif  // defined(WITH_COMPILER_LIB)
 }
 
 // ================================================================================================
@@ -1431,7 +1407,7 @@ bool Program::initBuild(amd::option::Options* options) {
   }
 
   if (!clBinary()->setElfOut(LP64_SWITCH(ELFCLASS32, ELFCLASS64),
-    (outFileName.size() > 0) ? outFileName.c_str() : nullptr, tempFile)) {
+                             (outFileName.size() > 0) ? outFileName.c_str() : nullptr, tempFile)) {
     LogError("Setup elf out for gpu failed");
     return false;
   }
@@ -1454,9 +1430,9 @@ bool Program::finiBuild(bool isBuildGood) {
 
 // ================================================================================================
 int32_t Program::compile(const std::string& sourceCode,
-                        const std::vector<const std::string*>& headers,
-                        const char** headerIncludeNames, const char* origOptions,
-                        amd::option::Options* options) {
+                         const std::vector<const std::string*>& headers,
+                         const char** headerIncludeNames, const char* origOptions,
+                         amd::option::Options* options) {
   uint64_t start_time = 0;
   if (options->oVariables->EnableBuildTiming) {
     buildLog_ = "\nStart timing major build components.....\n\n";
@@ -1542,7 +1518,7 @@ int32_t Program::compile(const std::string& sourceCode,
 
 // ================================================================================================
 int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* origLinkOptions,
-                     amd::option::Options* linkOptions) {
+                      amd::option::Options* linkOptions) {
   lastBuildOptionsArg_ = origLinkOptions ? origLinkOptions : "";
   if (linkOptions) {
     linkOptions_ = linkOptions->origOptionStr;
@@ -1644,24 +1620,23 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
 }
 
 // ================================================================================================
-static std::pair<std::string, size_t>
-getSubstBinFileName(const char *SubstCfgFile, size_t srcHash, size_t optHash) {
+static std::pair<std::string, size_t> getSubstBinFileName(const char* SubstCfgFile, size_t srcHash,
+                                                          size_t optHash) {
   using namespace std;
   const size_t srcAndOptHash = srcHash ^ optHash;
   ifstream cfgFile(SubstCfgFile);
   if (cfgFile.good()) {
     string line;
-    while(getline(cfgFile, line)) {
+    while (getline(cfgFile, line)) {
       istringstream ss(line);
       size_t hash;
       ss >> setbase(16) >> hash;
-      if (ss.fail() || !isspace(ss.peek()))
-        continue;
+      if (ss.fail() || !isspace(ss.peek())) continue;
 
       if (hash == srcAndOptHash || hash == srcHash) {
         ss >> ws;
         string objFileName;
-        getline(ss, objFileName); // get the rest of line with spaces
+        getline(ss, objFileName);  // get the rest of line with spaces
         return make_pair(objFileName, hash);
       }
     }
@@ -1670,27 +1645,27 @@ getSubstBinFileName(const char *SubstCfgFile, size_t srcHash, size_t optHash) {
   return make_pair(string(), (size_t)0);
 }
 
-bool Program::trySubstObjFile(const char *SubstCfgFile,
-                              const std::string& sourceCode,
+bool Program::trySubstObjFile(const char* SubstCfgFile, const std::string& sourceCode,
                               const amd::option::Options* options) {
   std::string buffer;
   std::ostringstream str(buffer);
 
   size_t srcHash = getOCLSourceHash(sourceCode);
   size_t optHash = getOCLOptionsHash(*options);
-  auto substRes  = getSubstBinFileName(SubstCfgFile, srcHash, optHash);
+  auto substRes = getSubstBinFileName(SubstCfgFile, srcHash, optHash);
   if (substRes.first.empty()) {
-    switch(substRes.second) {
-    default: break;
-    case 1:
-      str << "Subst failure: cannot open config file " << SubstCfgFile << std::endl;
-    break;
+    switch (substRes.second) {
+      default:
+        break;
+      case 1:
+        str << "Subst failure: cannot open config file " << SubstCfgFile << std::endl;
+        break;
     }
     buildLog_ += str.str();
     return false;
   }
 
-  uint8_t *binary = nullptr;
+  uint8_t* binary = nullptr;
   size_t binSize = 0;
   std::ifstream binFile(substRes.first, std::ios::binary | std::ios::ate);
   if (binFile.good()) {
@@ -1711,9 +1686,8 @@ bool Program::trySubstObjFile(const char *SubstCfgFile,
     if (setKernels(binary, binSize)) {
       buildStatus_ = CL_BUILD_SUCCESS;
       buildError_ = 0;
-      str << "Substituted program hash 0x"
-          << std::setbase(16) << substRes.second
-          << " with " << substRes.first << '\n';
+      str << "Substituted program hash 0x" << std::setbase(16) << substRes.second << " with "
+          << substRes.first << '\n';
     }
   }
   buildLog_ += str.str();
@@ -1758,7 +1732,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   std::vector<const char*> headerIncludeNames;
   const std::vector<std::string>& tmpHeaderNames = owner()->headerNames();
   const std::vector<std::string>& tmpHeaders = owner()->headers();
-  for (size_t i = 0; i < tmpHeaders.size(); ++i){
+  for (size_t i = 0; i < tmpHeaders.size(); ++i) {
     headers.push_back(&tmpHeaders[i]);
     headerIncludeNames.push_back(tmpHeaderNames[i].c_str());
   }
@@ -1831,13 +1805,13 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
 
 // ================================================================================================
 bool Program::loadHSAIL() {
-#if  defined(WITH_COMPILER_LIB)
+#if defined(WITH_COMPILER_LIB)
   amd::ScopedLock sl(&buildLock_);
 
   acl_error errorCode;
   size_t binSize;
-  void* bin = const_cast<void*>(amd::Hsail::ExtractSection(device().compiler(), binaryElf_,
-                                &binSize, aclTEXT, &errorCode));
+  void* bin = const_cast<void*>(
+      amd::Hsail::ExtractSection(device().compiler(), binaryElf_, &binSize, aclTEXT, &errorCode));
   if (errorCode != ACL_SUCCESS) {
     LogError("Error: cannot extract ISA from compiled binary.");
     return false;
@@ -1852,8 +1826,8 @@ bool Program::loadHSAIL() {
 // ================================================================================================
 bool Program::loadLC() {
 #if defined(USE_COMGR_LIBRARY)
-  return setKernels(const_cast<void*>(binary().first), binary().second,
-    BinaryFd().first, BinaryFd().second, BinaryURI());
+  return setKernels(const_cast<void*>(binary().first), binary().second, BinaryFd().first,
+                    BinaryFd().second, BinaryURI());
 #else
   return false;
 #endif
@@ -1895,7 +1869,6 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
     optionsVec.push_back("-DFP_FAST_FMAF=1");
     optionsVec.push_back("-DFP_FAST_FMA=1");
   } else {
-
     if (!isHIP()) {
       int major, minor;
       ::sscanf(device().info().version_, "OpenCL %d.%d ", &major, &minor);
@@ -1910,18 +1883,18 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
       optionsVec.push_back("-D__IMAGE_SUPPORT__=1");
     }
 
-      uint clcStd =
+    uint clcStd =
         (options->oVariables->CLStd[2] - '0') * 100 + (options->oVariables->CLStd[4] - '0') * 10;
 
-      if (clcStd >= 200) {
-        std::stringstream opts;
-        // Add only for CL2.0 and later
-        opts << "-D"
-          << "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE=" << device().info().maxGlobalVariableSize_;
-        optionsVec.push_back(opts.str());
-      } else {
-        options->oVariables->UniformWorkGroupSize = true;
-      }
+    if (clcStd >= 200) {
+      std::stringstream opts;
+      // Add only for CL2.0 and later
+      opts << "-D"
+           << "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE=" << device().info().maxGlobalVariableSize_;
+      optionsVec.push_back(opts.str());
+    } else {
+      options->oVariables->UniformWorkGroupSize = true;
+    }
 
     if (!device().settings().useLightning_) {
       if (!device().settings().singleFpDenorm_) {
@@ -1943,7 +1916,7 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
 
         clext << "-cl-ext=+";
         std::copy(extensions.begin(), extensions.end() - 1,
-          std::ostream_iterator<std::string>(clext, ",+"));
+                  std::ostream_iterator<std::string>(clext, ",+"));
         clext << extensions.back();
 
         optionsVec.push_back("-Xclang");
@@ -1964,7 +1937,7 @@ std::string Program::ProcessOptionsFlattened(amd::option::Options* options) {
   std::ostringstream processOptionsOStrStr;
   processOptionsOStrStr << " ";
   std::copy(processOptions.begin(), processOptions.end(),
-    std::ostream_iterator<std::string>(processOptionsOStrStr, " "));
+            std::ostream_iterator<std::string>(processOptionsOStrStr, " "));
   return processOptionsOStrStr.str();
 }
 
@@ -1979,7 +1952,8 @@ bool Program::getCompileOptionsAtLinking(const std::vector<Program*>& inputProgr
 
     amd::option::Options compileOptions2;
     amd::option::Options* thisCompileOptions = i == 0 ? &compileOptions : &compileOptions2;
-    if (!amd::option::parseAllOptions(program->compileOptions_, *thisCompileOptions, false, isLC())) {
+    if (!amd::option::parseAllOptions(program->compileOptions_, *thisCompileOptions, false,
+                                      isLC())) {
       buildLog_ += thisCompileOptions->optionsLog();
       LogError("Parsing compile options failed.");
       return false;
@@ -2028,10 +2002,8 @@ bool Program::getCompileOptionsAtLinking(const std::vector<Program*>& inputProgr
 // ================================================================================================
 bool isSPIRVMagicL(const void* Image, size_t Length) {
   const unsigned SPRVMagicNumber = 0x07230203;
-  if (Image == nullptr || Length < sizeof(unsigned))
-  {
-    DevLogPrintfError("Invalid Argument, Image: 0x%x Length: %u \n",
-                      Image, Length);
+  if (Image == nullptr || Length < sizeof(unsigned)) {
+    DevLogPrintfError("Invalid Argument, Image: 0x%x Length: %u \n", Image, Length);
     return false;
   }
   auto Magic = static_cast<const unsigned*>(Image);
@@ -2071,9 +2043,7 @@ bool Program::initClBinary(const char* binaryIn, size_t size, amd::Os::FileDesc 
     aclBinaryOptions binOpts = {0};
     binOpts.struct_size = sizeof(binOpts);
     binOpts.elfclass =
-        (info().arch_id == aclX64 || info().arch_id == aclHSAIL64)
-        ? ELFCLASS64
-        : ELFCLASS32;
+        (info().arch_id == aclX64 || info().arch_id == aclHSAIL64) ? ELFCLASS64 : ELFCLASS32;
     binOpts.bitness = ELFDATA2LSB;
     binOpts.alloc = &::malloc;
     binOpts.dealloc = &::free;
@@ -2209,8 +2179,7 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
 
 // ================================================================================================
 Program::file_type_t Program::getCompilationStagesFromBinary(
-  std::vector<Program::file_type_t>& completeStages,
-  bool& needOptionsCheck) {
+    std::vector<Program::file_type_t>& completeStages, bool& needOptionsCheck) {
   Program::file_type_t from = FILE_TYPE_DEFAULT;
   if (isLC()) {
 #if defined(USE_COMGR_LIBRARY)
@@ -2238,20 +2207,20 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
       return FILE_TYPE_DEFAULT;
     }
     switch (from) {
-    case FILE_TYPE_CG:
-    case FILE_TYPE_ISA:
-      // do not check options, if LLVMIR is absent or might be absent or options are absent
-      if (!curOptions.oVariables->BinLLVMIR || !containsLlvmirText || !containsOpts) {
-        needOptionsCheck = false;
-      }
-      break;
-      // recompilation might be needed
-    case FILE_TYPE_LLVMIR_BINARY:
-    case FILE_TYPE_DEFAULT:
-    default:
-      break;
+      case FILE_TYPE_CG:
+      case FILE_TYPE_ISA:
+        // do not check options, if LLVMIR is absent or might be absent or options are absent
+        if (!curOptions.oVariables->BinLLVMIR || !containsLlvmirText || !containsOpts) {
+          needOptionsCheck = false;
+        }
+        break;
+        // recompilation might be needed
+      case FILE_TYPE_LLVMIR_BINARY:
+      case FILE_TYPE_DEFAULT:
+      default:
+        break;
     }
-#endif   // defined(USE_COMGR_LIBRARY)
+#endif  // defined(USE_COMGR_LIBRARY)
   } else {
 #if defined(WITH_COMPILER_LIB)
     acl_error errorCode;
@@ -2262,7 +2231,7 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
     // Checking llvmir in .llvmir section
     bool containsSpirv = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_SPIRV, nullptr,
-      &containsSpirv, &boolSize);
+                                      &containsSpirv, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsSpirv = false;
     }
@@ -2272,7 +2241,7 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
     }
     bool containsSpirText = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_SPIR, nullptr,
-      &containsSpirText, &boolSize);
+                                      &containsSpirText, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsSpirText = false;
     }
@@ -2282,14 +2251,14 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
     }
     bool containsLlvmirText = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_LLVMIR, nullptr,
-      &containsLlvmirText, &boolSize);
+                                      &containsLlvmirText, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsLlvmirText = false;
     }
     // Checking compile & link options in .comment section
     bool containsOpts = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_OPTIONS, nullptr,
-      &containsOpts, &boolSize);
+                                      &containsOpts, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsOpts = false;
     }
@@ -2300,29 +2269,28 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
     // Checking HSAIL in .cg section
     bool containsHsailText = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_HSAIL, nullptr,
-      &containsHsailText, &boolSize);
+                                      &containsHsailText, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsHsailText = false;
     }
     // Checking BRIG sections
     bool containsBrig = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_BRIG, nullptr,
-      &containsBrig, &boolSize);
+                                      &containsBrig, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsBrig = false;
     }
     if (containsBrig) {
       completeStages.push_back(from);
       from = FILE_TYPE_HSAIL_BINARY;
-    }
-    else if (containsHsailText) {
+    } else if (containsHsailText) {
       completeStages.push_back(from);
       from = FILE_TYPE_HSAIL_TEXT;
     }
     // Checking Loader Map symbol from CG section
     bool containsLoaderMap = true;
-    errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_LOADER_MAP, nullptr,
-      &containsLoaderMap, &boolSize);
+    errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_LOADER_MAP,
+                                      nullptr, &containsLoaderMap, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsLoaderMap = false;
     }
@@ -2333,7 +2301,7 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
     // Checking ISA in .text section
     bool containsShaderIsa = true;
     errorCode = amd::Hsail::QueryInfo(device().compiler(), binaryElf_, RT_CONTAINS_ISA, nullptr,
-      &containsShaderIsa, &boolSize);
+                                      &containsShaderIsa, &boolSize);
     if (errorCode != ACL_SUCCESS) {
       containsShaderIsa = false;
     }
@@ -2349,32 +2317,32 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
       return FILE_TYPE_DEFAULT;
     }
     switch (from) {
-      // compile from HSAIL text, no matter prev. stages and options
-    case FILE_TYPE_HSAIL_TEXT:
-      needOptionsCheck = false;
-      break;
-    case FILE_TYPE_HSAIL_BINARY:
-      // do not check options, if LLVMIR is absent or might be absent or options are absent
-      if (!curOptions.oVariables->BinLLVMIR || !containsLlvmirText || !containsOpts) {
+        // compile from HSAIL text, no matter prev. stages and options
+      case FILE_TYPE_HSAIL_TEXT:
         needOptionsCheck = false;
-      }
-      break;
-    case FILE_TYPE_CG:
-    case FILE_TYPE_ISA:
-      // do not check options, if LLVMIR is absent or might be absent or options are absent
-      if (!curOptions.oVariables->BinLLVMIR || !containsLlvmirText || !containsOpts) {
-        needOptionsCheck = false;
-      }
-      // do not check options, if BRIG is absent or might be absent or LoaderMap is absent
-      if (!curOptions.oVariables->BinCG || !containsBrig || !containsLoaderMap) {
-        needOptionsCheck = false;
-      }
-      break;
-      // recompilation might be needed
-    case FILE_TYPE_LLVMIR_BINARY:
-    case FILE_TYPE_DEFAULT:
-    default:
-      break;
+        break;
+      case FILE_TYPE_HSAIL_BINARY:
+        // do not check options, if LLVMIR is absent or might be absent or options are absent
+        if (!curOptions.oVariables->BinLLVMIR || !containsLlvmirText || !containsOpts) {
+          needOptionsCheck = false;
+        }
+        break;
+      case FILE_TYPE_CG:
+      case FILE_TYPE_ISA:
+        // do not check options, if LLVMIR is absent or might be absent or options are absent
+        if (!curOptions.oVariables->BinLLVMIR || !containsLlvmirText || !containsOpts) {
+          needOptionsCheck = false;
+        }
+        // do not check options, if BRIG is absent or might be absent or LoaderMap is absent
+        if (!curOptions.oVariables->BinCG || !containsBrig || !containsLoaderMap) {
+          needOptionsCheck = false;
+        }
+        break;
+        // recompilation might be needed
+      case FILE_TYPE_LLVMIR_BINARY:
+      case FILE_TYPE_DEFAULT:
+      default:
+        break;
     }
 #endif  // #if defined(WITH_COMPILER_LIB)
   }
@@ -2398,7 +2366,7 @@ Program::file_type_t Program::getNextCompilationStageFromBinary(amd::option::Opt
         return continueCompileFrom;
       }
     }
-#endif // defined(WITH_COMPILER_LIB)
+#endif  // defined(WITH_COMPILER_LIB)
 
     // save the current options
     std::string sCurCompileOptions = compileOptions_;
@@ -2407,8 +2375,8 @@ Program::file_type_t Program::getNextCompilationStageFromBinary(amd::option::Opt
 
     // Saving binary in the interface class,
     // which also load compile & link options from binary
-    setBinary(static_cast<const char*>(binary.first), binary.second, nullptr,
-              finfo.first, finfo.second, uri);
+    setBinary(static_cast<const char*>(binary.first), binary.second, nullptr, finfo.first,
+              finfo.second, uri);
 
     // Calculate the next stage to compile from, based on sections in binaryElf_;
     // No any validity checks here
@@ -2421,58 +2389,57 @@ Program::file_type_t Program::getNextCompilationStageFromBinary(amd::option::Opt
     bool recompile = false;
     //! @todo Should we also check for ACL_TYPE_OPENCL & ACL_TYPE_LLVMIR_TEXT?
     switch (continueCompileFrom) {
-    case FILE_TYPE_HSAIL_BINARY:
-    case FILE_TYPE_CG:
-    case FILE_TYPE_ISA: {
-      // Compare options loaded from binary with current ones, recompile if differ;
-      // If compile options are absent in binary, do not compare and recompile
-      if (compileOptions_.empty()) break;
+      case FILE_TYPE_HSAIL_BINARY:
+      case FILE_TYPE_CG:
+      case FILE_TYPE_ISA: {
+        // Compare options loaded from binary with current ones, recompile if differ;
+        // If compile options are absent in binary, do not compare and recompile
+        if (compileOptions_.empty()) break;
 
-      std::string sBinOptions;
+        std::string sBinOptions;
 #if defined(WITH_COMPILER_LIB)
-      if (binaryElf_ != nullptr) {
-        const oclBIFSymbolStruct* symbol = findBIF30SymStruct(symOpenclCompilerOptions);
-        assert(symbol && "symbol not found");
-        std::string symName =
-          std::string(symbol->str[bif::PRE]) + std::string(symbol->str[bif::POST]);
-        size_t symSize = 0;
-        acl_error errorCode;
+        if (binaryElf_ != nullptr) {
+          const oclBIFSymbolStruct* symbol = findBIF30SymStruct(symOpenclCompilerOptions);
+          assert(symbol && "symbol not found");
+          std::string symName =
+              std::string(symbol->str[bif::PRE]) + std::string(symbol->str[bif::POST]);
+          size_t symSize = 0;
+          acl_error errorCode;
 
-        const void* opts = amd::Hsail::ExtractSymbol(device().compiler(), binaryElf_, &symSize,
-          aclCOMMENT, symName.c_str(), &errorCode);
-        if (errorCode != ACL_SUCCESS) {
-          recompile = true;
-          break;
+          const void* opts = amd::Hsail::ExtractSymbol(device().compiler(), binaryElf_, &symSize,
+                                                       aclCOMMENT, symName.c_str(), &errorCode);
+          if (errorCode != ACL_SUCCESS) {
+            recompile = true;
+            break;
+          }
+          sBinOptions = std::string((char*)opts, symSize);
+        } else
+#endif  // defined(WITH_COMPILER_LIB)
+        {
+          sBinOptions = sCurOptions;
         }
-        sBinOptions = std::string((char*)opts, symSize);
-      }
-      else
-#endif // defined(WITH_COMPILER_LIB)
-      {
-        sBinOptions = sCurOptions;
-      }
 
-      compileOptions_ = sCurCompileOptions;
-      linkOptions_ = sCurLinkOptions;
+        compileOptions_ = sCurCompileOptions;
+        linkOptions_ = sCurLinkOptions;
 
-      amd::option::Options curOptions, binOptions;
-      if (!amd::option::parseAllOptions(sBinOptions, binOptions, false, isLC())) {
-        buildLog_ += binOptions.optionsLog();
-        LogError("Parsing compile options from binary failed.");
-        return FILE_TYPE_DEFAULT;
+        amd::option::Options curOptions, binOptions;
+        if (!amd::option::parseAllOptions(sBinOptions, binOptions, false, isLC())) {
+          buildLog_ += binOptions.optionsLog();
+          LogError("Parsing compile options from binary failed.");
+          return FILE_TYPE_DEFAULT;
+        }
+        if (!amd::option::parseAllOptions(sCurOptions, curOptions, false, isLC())) {
+          buildLog_ += curOptions.optionsLog();
+          LogError("Parsing compile options failed.");
+          return FILE_TYPE_DEFAULT;
+        }
+        if (!curOptions.equals(binOptions)) {
+          recompile = true;
+        }
+        break;
       }
-      if (!amd::option::parseAllOptions(sCurOptions, curOptions, false, isLC())) {
-        buildLog_ += curOptions.optionsLog();
-        LogError("Parsing compile options failed.");
-        return FILE_TYPE_DEFAULT;
-      }
-      if (!curOptions.equals(binOptions)) {
-        recompile = true;
-      }
-      break;
-    }
-    default:
-      break;
+      default:
+        break;
     }
     if (recompile) {
       while (!completeStages.empty()) {
@@ -2486,8 +2453,7 @@ Program::file_type_t Program::getNextCompilationStageFromBinary(amd::option::Opt
         completeStages.pop_back();
       }
     }
-  }
-  else {
+  } else {
     const char* xLang = options->oVariables->XLang;
     if (xLang != nullptr && strcmp(xLang, "asm") == 0) {
       continueCompileFrom = FILE_TYPE_ASM_TEXT;
@@ -2525,7 +2491,6 @@ ComgrBinaryData::~ComgrBinaryData() {
 }
 
 bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
-
   ComgrBinaryData binaryData;
   if (!binaryData.create(AMD_COMGR_DATA_KIND_EXECUTABLE, binary, binSize)) {
     buildLog_ += "Error: COMGR failed to create code object data object.\n";
@@ -2548,9 +2513,10 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
       return false;
     }
 
-    const amd::Isa *binaryIsa = amd::Isa::findIsa(binaryIsaName.data());
+    const amd::Isa* binaryIsa = amd::Isa::findIsa(binaryIsaName.data());
     if (!binaryIsa) {
-      buildLog_ += "Error: Could not find the program ISA " + std::string(binaryIsaName.data()) + "\n";
+      buildLog_ +=
+          "Error: Could not find the program ISA " + std::string(binaryIsaName.data()) + "\n";
       return false;
     }
 
@@ -2576,8 +2542,7 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Using Code Object V2.");
     hasKernelMD = true;
     codeObjectVer_ = 2;
-  }
-  else {
+  } else {
     amd_comgr_metadata_node_t versionMD, versionNode;
     char major_version, minor_version;
 
@@ -2636,11 +2601,12 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
         codeObjectVer_ = 5;
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-          "Unknown code object metadata minor version [%s.%s].", major_version, minor_version);
+                "Unknown code object metadata minor version [%s.%s].", major_version,
+                minor_version);
       }
     } else {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-        "Unknown code object metadata major version [%s.%s].", major_version, minor_version);
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Unknown code object metadata major version [%s.%s].",
+              major_version, minor_version);
     }
 
     status = amd::Comgr::metadata_lookup(metadata_, "amdhsa.kernels", &kernelsMD);
@@ -2669,20 +2635,18 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
 
     if (status == AMD_COMGR_STATUS_SUCCESS) {
       hasKernelNode = true;
-      status = amd::Comgr::metadata_lookup(kernelNode,
-                                           (codeObjectVer() == 2) ? "Name" : ".name",
+      status = amd::Comgr::metadata_lookup(kernelNode, (codeObjectVer() == 2) ? "Name" : ".name",
                                            &nameMeta);
     }
 
     if (status == AMD_COMGR_STATUS_SUCCESS) {
       hasNameMeta = true;
-      status  = getMetaBuf(nameMeta, &kernelName);
+      status = getMetaBuf(nameMeta, &kernelName);
     }
 
     if (status == AMD_COMGR_STATUS_SUCCESS) {
       kernelMetadataMap_[kernelName] = kernelNode;
-    }
-    else {
+    } else {
       if (hasKernelNode) {
         amd::Comgr::destroy_metadata(kernelNode);
       }
@@ -2714,8 +2678,8 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
     size_t dynamicSize = 0;
     size_t progvarsWriteSize = 0;
 
-    amd::Elf elfIn(ELFCLASSNONE, reinterpret_cast<const char *>(binary), binSize,
-                      nullptr, amd::Elf::ELF_C_READ);
+    amd::Elf elfIn(ELFCLASSNONE, reinterpret_cast<const char*>(binary), binSize, nullptr,
+                   amd::Elf::ELF_C_READ);
 
     if (!elfIn.isSuccessful()) {
       buildLog_ += "Creating input amd::Elf object failed\n";
@@ -2737,8 +2701,7 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
         if (seg->get_flags() & PF_W) {
           progvarsWriteSize += seg->get_memory_size();
         }
-      }
-      else if (seg->get_type() == PT_DYNAMIC) {
+      } else if (seg->get_type() == PT_DYNAMIC) {
         dynamicSize += seg->get_memory_size();
       }
     }
@@ -2755,7 +2718,7 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
     buildLog_ += "Error: create kernel metadata map using COMgr\n";
     return false;
   }
-#endif // defined(USE_COMGR_LIBRARY)
+#endif  // defined(USE_COMGR_LIBRARY)
   return true;
 }
 
@@ -2802,7 +2765,8 @@ amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData
   return status;
 }
 
-bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names, amd_comgr_symbol_type_t sym_type) const {
+bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names,
+                                    amd_comgr_symbol_type_t sym_type) const {
   amd_comgr_status_t status = AMD_COMGR_STATUS_SUCCESS;
   amd_comgr_data_t dataObject;
   SymbolInfo sym_info;
@@ -2818,7 +2782,7 @@ bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names, amd_com
     }
 
     /* Set the binary as a dataObject */
-    status = amd::Comgr::set_data(dataObject,static_cast<size_t>(clBinary_->data().second),
+    status = amd::Comgr::set_data(dataObject, static_cast<size_t>(clBinary_->data().second),
                                   reinterpret_cast<const char*>(clBinary_->data().first));
     if (status != AMD_COMGR_STATUS_SUCCESS) {
       buildLog_ += "COMGR:  Cannot set comgr data \n";
@@ -2845,7 +2809,7 @@ bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names, amd_com
 #endif /* USE_COMGR_LIBRARY */
 
 const bool Program::getLoweredNames(std::vector<std::string>* mangledNames) const {
-#if defined (USE_COMGR_LIBRARY)
+#if defined(USE_COMGR_LIBRARY)
   /* Iterate thru kernel names first */
   for (auto const& kernelMeta : kernelMetadataMap_) {
     mangledNames->emplace_back(kernelMeta.first);
@@ -2893,9 +2857,8 @@ bool Program::getDemangledName(const std::string& mangledName, std::string& dema
 
   demangledName.resize(demangled_size);
 
-  if (AMD_COMGR_STATUS_SUCCESS !=
-      amd::Comgr::get_data(demangled_data, &demangled_size,
-                           const_cast<char*>(demangledName.data()))) {
+  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size,
+                                                       const_cast<char*>(demangledName.data()))) {
     amd::Comgr::release_data(mangled_data);
     amd::Comgr::release_data(demangled_data);
     return false;
@@ -2932,7 +2895,7 @@ amd::Monitor Program::initFiniLock_(true);
 bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const {
   amd::HostQueue* queue = nullptr;
 
-  for (const auto& kernel: kernels) {
+  for (const auto& kernel : kernels) {
     amd::ScopedLock sl(initFiniLock_);
 
     if (queue == nullptr) {

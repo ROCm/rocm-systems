@@ -28,13 +28,13 @@ THE SOFTWARE.
 #include <bitset>
 
 /*
-* This catch test is meant for FP8 OCP conversions
-* tests only supported on gfx1200 and gfx1201 archs
-*/
+ * This catch test is meant for FP8 OCP conversions
+ * tests only supported on gfx1200 and gfx1201 archs
+ */
 
 static_assert(sizeof(unsigned int) == sizeof(float));
 
-std::string arch_type()  {
+std::string arch_type() {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -43,37 +43,34 @@ std::string arch_type()  {
   return gfxName;
 }
 
-#define ARCH_TYPE_GFX1200(name) \
-  (name.find("gfx1200") != std::string::npos) || \
-  (name.find("gfx1201") != std::string::npos)
+#define ARCH_TYPE_GFX1200(name)                                                                    \
+  (name.find("gfx1200") != std::string::npos) || (name.find("gfx1201") != std::string::npos)
 
-#define FP8_OCP_SKIP_TEST \
-  std::string gfxName = arch_type(); \
-  if (!(ARCH_TYPE_GFX1200(gfxName))) { \
-    HipTest::HIP_SKIP_TEST("This test can only be run on GFX1200"); \
-    return; \
+#define FP8_OCP_SKIP_TEST                                                                          \
+  std::string gfxName = arch_type();                                                               \
+  if (!(ARCH_TYPE_GFX1200(gfxName))) {                                                             \
+    HipTest::HIP_SKIP_TEST("This test can only be run on GFX1200");                                \
+    return;                                                                                        \
   }
 
 #define __FP8_DEVICE__ __device__ static inline
 
-template<typename T> __FP8_DEVICE__ void e4m3_ocp_device(T *val)
-{
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3 tmp(*val);
-    *val = tmp;
-  #else
-    *val = 0;
-  #endif
+template <typename T> __FP8_DEVICE__ void e4m3_ocp_device(T* val) {
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3 tmp(*val);
+  *val = tmp;
+#else
+  *val = 0;
+#endif
 }
 
-template<typename T> __FP8_DEVICE__ void e5m2_ocp_device(T *val)
-{
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2 tmp(*val);
-    *val = tmp;
-  #else
-    *val = 0;
-  #endif
+template <typename T> __FP8_DEVICE__ void e5m2_ocp_device(T* val) {
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2 tmp(*val);
+  *val = tmp;
+#else
+  *val = 0;
+#endif
 }
 
 template <typename T, bool is_e4m3_ocp> __global__ void cvt_float_fp8_float(T* in, size_t len) {
@@ -147,24 +144,22 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_compare_host_device", "", float, double) {
   }
 }
 
-__FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2 *val)
-{
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x2_e4m3 tmp(*val);
-    *val = tmp;
-  #else
-    *val = float2(0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2* val) {
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x2_e4m3 tmp(*val);
+  *val = tmp;
+#else
+  *val = float2(0.0, 0.0);
+#endif
 }
 
-__FP8_DEVICE__ void e5m2_fp8x2_ocp_device(float2 *val)
-{
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x2_e5m2 tmp(*val);
-    *val = tmp;
-  #else
-    *val = float2(0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e5m2_fp8x2_ocp_device(float2* val) {
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x2_e5m2 tmp(*val);
+  *val = tmp;
+#else
+  *val = float2(0.0, 0.0);
+#endif
 }
 
 template <bool is_e4m3_ocp> __global__ void cvt_float2_fp8x2_float2(float2* in, size_t size) {
@@ -297,24 +292,22 @@ TEST_CASE("Unit_fp8x2_ocp_split_compare") {
   }
 }
 
-__FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4 *val)
-{
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x4_e4m3 tmp(*val);
-    *val = tmp;
-  #else
-    *val = float4(0.0,0.0,0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x4_e4m3 tmp(*val);
+  *val = tmp;
+#else
+  *val = float4(0.0, 0.0, 0.0, 0.0);
+#endif
 }
 
-__FP8_DEVICE__ void e5m2_fp8x4_ocp_device(float4 *val)
-{
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x4_e5m2 tmp(*val);
-    *val = tmp;
-  #else
-    *val = float4(0.0,0.0,0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e5m2_fp8x4_ocp_device(float4* val) {
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x4_e5m2 tmp(*val);
+  *val = tmp;
+#else
+  *val = float4(0.0, 0.0, 0.0, 0.0);
+#endif
 }
 template <bool is_e4m3_ocp> __global__ void cvt_float4_fp8x4_float4(float4* in, size_t size) {
   int i = threadIdx.x;
@@ -397,29 +390,27 @@ TEST_CASE("Unit_fp8x4_ocp_split_compare") {
   }
 }
 
-__FP8_DEVICE__ bool e4m3_bool_ocp_device(float val)
-{
+__FP8_DEVICE__ bool e4m3_bool_ocp_device(float val) {
   bool x = false;
   float y = val;
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3 tmp(y);
-    x = tmp;
-  #else
-    x = (y == 0);
-  #endif
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3 tmp(y);
+  x = tmp;
+#else
+  x = (y == 0);
+#endif
   return x;
 }
 
-__FP8_DEVICE__ bool e5m2_bool_ocp_device(float val)
-{
+__FP8_DEVICE__ bool e5m2_bool_ocp_device(float val) {
   bool x = false;
   float y = val;
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2 tmp(y);
-    x = tmp;
-  #else
-    x = (y == 0);
-  #endif
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2 tmp(y);
+  x = tmp;
+#else
+  x = (y == 0);
+#endif
   return x;
 }
 template <bool is_e4m3_ocp> __global__ void fp8_2_bool(float* f, bool* ret, size_t size) {
@@ -486,16 +477,15 @@ TEST_CASE("Unit_fp8_ocp_bool_device") {
 std::vector<__hip_fp8_storage_t> get_all_fp8_nums(bool is_e4m3_ocp) {
   std::vector<__hip_fp8_storage_t> ret;
   constexpr unsigned short max_fp8_num = 0b1111'1111;
-  ret.reserve(max_fp8_num + 1 );
+  ret.reserve(max_fp8_num + 1);
 
   for (unsigned short i = 0; i <= max_fp8_num; i++) {
-    if(is_e4m3_ocp) {
-      if ((i & 0x7f) != 0x7f) { // 0xff and 0x7f are nan
+    if (is_e4m3_ocp) {
+      if ((i & 0x7f) != 0x7f) {  // 0xff and 0x7f are nan
         ret.push_back(static_cast<__hip_fp8_storage_t>(i));
       }
-    }
-    else {
-      if ((i & 0x7f) < 0x7c) { // 0x7c 0x7d 0x7e are nan and 0x7f is inf
+    } else {
+      if ((i & 0x7f) < 0x7c) {  // 0x7c 0x7d 0x7e are nan and 0x7f is inf
         ret.push_back(static_cast<__hip_fp8_storage_t>(i));
       }
     }
@@ -503,29 +493,27 @@ std::vector<__hip_fp8_storage_t> get_all_fp8_nums(bool is_e4m3_ocp) {
   return ret;
 }
 
-__FP8_DEVICE__ __hip_fp8_storage_t e4m3_ocp_fp8_device(float val)
-{
+__FP8_DEVICE__ __hip_fp8_storage_t e4m3_ocp_fp8_device(float val) {
   __hip_fp8_storage_t x = 0;
   float y = val;
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3 tmp(y);
-    x = tmp.__x;
-  #else
-    x = (y == 0) ? 0x0 : 0x7f;
-  #endif
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3 tmp(y);
+  x = tmp.__x;
+#else
+  x = (y == 0) ? 0x0 : 0x7f;
+#endif
   return x;
 }
 
-__FP8_DEVICE__ __hip_fp8_storage_t e5m2_ocp_fp8_device(float val)
-{
+__FP8_DEVICE__ __hip_fp8_storage_t e5m2_ocp_fp8_device(float val) {
   __hip_fp8_storage_t x = 0;
   float y = val;
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2 tmp(y);
-    x = tmp.__x;
-  #else
-    x = (y == 0) ? 0x0 : 0x7f;
-  #endif
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2 tmp(y);
+  x = tmp.__x;
+#else
+  x = (y == 0) ? 0x0 : 0x7f;
+#endif
   return x;
 }
 
@@ -633,47 +621,45 @@ TEST_CASE("Unit_all_fp8_ocp_cvt") {
   HIP_CHECK(hipFree(d_res));
 }
 
-template<typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float *cvt1, float *cvt2)
-{
+template <typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float* cvt1, float* cvt2) {
   T y = val;
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3 tmp(y);
-    *cvt1 = tmp;
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3 tmp(y);
+  *cvt1 = tmp;
 
-    __hip_fp8_e4m3 tmp1;
-    tmp1.__x = std::is_same<T, float>::value
-          ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3)
-          : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3);
-      ;
-    *cvt2 = tmp1;
-  #else
-    *cvt1 = (y == 0) ? 0 : y;
-    *cvt2 = (y == 0) ? 0 : y;
-  #endif
+  __hip_fp8_e4m3 tmp1;
+  tmp1.__x = std::is_same<T, float>::value
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3);
+  ;
+  *cvt2 = tmp1;
+#else
+  *cvt1 = (y == 0) ? 0 : y;
+  *cvt2 = (y == 0) ? 0 : y;
+#endif
 }
 
-template<typename T> __FP8_DEVICE__ void e5m2_ocp_fp8_cvt(T val, float *cvt1, float *cvt2)
-{
+template <typename T> __FP8_DEVICE__ void e5m2_ocp_fp8_cvt(T val, float* cvt1, float* cvt2) {
   T y = val;
-  #if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2 tmp(y);
-    *cvt1 = tmp;
+#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2 tmp(y);
+  *cvt1 = tmp;
 
-    __hip_fp8_e5m2 tmp1;
-    tmp1.__x = std::is_same<T, float>::value
-          ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2)
-          : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2);
-      ;
-    *cvt2 = tmp1;
-  #else
-    *cvt1 = (y == 0) ? 0 : y;
-    *cvt2 = (y == 0) ? 0 : y;
-  #endif
+  __hip_fp8_e5m2 tmp1;
+  tmp1.__x = std::is_same<T, float>::value
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2);
+  ;
+  *cvt2 = tmp1;
+#else
+  *cvt1 = (y == 0) ? 0 : y;
+  *cvt2 = (y == 0) ? 0 : y;
+#endif
 }
 
 
 template <typename T, bool is_e4m3_ocp>
-__global__ void Type_to_fp8_cvt(T* f, float *cvt1, float *cvt2, size_t size) {
+__global__ void Type_to_fp8_cvt(T* f, float* cvt1, float* cvt2, size_t size) {
   auto i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < size) {
     if constexpr (is_e4m3_ocp) {
@@ -691,95 +677,51 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness_device", "", float, double) {
     /* These are basically all the fp8 - e4m3_ocp type numbers.
      * They can be generated by iterating over 0'0000'000 and converting them to fp32 number
      * skipping the nan/inf */
-    std::vector<TestType> e4m3_ocp_nums = { 0,           0.00195312,    0.00390625,
-                                             0.00585938,  0.0078125,     0.00976562,
-                                             0.0117188,   0.0136719,     0.015625,
-                                             0.0175781,   0.0195312,     0.0214844,
-                                             0.0234375,   0.0253906,     0.0273438,
-                                             0.0292969,   0.03125,       0.0351562,
-                                             0.0390625,   0.0429688,     0.046875,
-                                             0.0507812,   0.0546875,     0.0585938,
-                                             0.0625,      0.0703125,     0.078125,
-                                             0.0859375,   0.09375,       0.101562,
-                                             0.109375,    0.117188,      0.125,
-                                             0.140625,    0.15625,       0.171875,
-                                             0.1875,      0.203125,      0.21875,
-                                             0.234375,    0.25,          0.28125,
-                                             0.3125,      0.34375,       0.375,
-                                             0.40625,     0.4375,        0.46875,
-                                             0.5,         0.5625,        0.625,
-                                             0.6875,      0.75,          0.8125,
-                                             0.875,       0.9375,        1,
-                                             1.125,       1.25,          1.375,
-                                             1.5,         1.625,         1.75,
-                                             1.875,       2,             2.25,
-                                             2.5,         2.75,          3,
-                                             3.25,        3.5,           3.75,
-                                             4,           4.5,           5,
-                                             5.5,         6,             6.5,
-                                             7,           7.5,           8,
-                                             9,           10,             11,
-                                             12,          13,             14,
-                                             15,          16,             18,
-                                             20,          22,             24,
-                                             26,          28,             30,
-                                             32,          36,             40,
-                                             44,          48,             52,
-                                             56,          60,             64,
-                                             72,          80,             88,
-                                             96,          104,            112,
-                                             120,         128,            144,
-                                             160,         176,            192,
-                                             208,         224,            240,
-                                             256,         288,            320,
-                                             352,         384,            416,
-                                             448,         -0,             -0.00195312,
-                                             -0.00390625, -0.00585938,    -0.0078125,
-                                             -0.00976562, -0.0117188,     -0.0136719,
-                                             -0.015625,   -0.0175781,     -0.0195312,
-                                             -0.0214844,  -0.0234375,     -0.0253906,
-                                             -0.0273438,  -0.0292969,     -0.03125,
-                                             -0.0351562,  -0.0390625,     -0.0429688,
-                                             -0.046875,   -0.0507812,     -0.0546875,
-                                             -0.0585938,  -0.0625,        -0.0703125,
-                                             -0.078125,   -0.0859375,     -0.09375,
-                                             -0.101562,   -0.109375,      -0.117188,
-                                             -0.125,      -0.140625,      -0.15625,
-                                             -0.171875,   -0.1875,        -0.203125,
-                                             -0.21875,    -0.234375,      -0.25,
-                                             -0.28125,    -0.3125,        -0.34375,
-                                             -0.375,      -0.40625,       -0.4375,
-                                             -0.46875,    -0.5,           -0.5625,
-                                             -0.625,      -0.6875,        -0.75,
-                                             -0.8125,     -0.875,         -0.9375,
-                                             -1,          -1.125,         -1.25,
-                                             -1.375,      -1.5,           -1.625,
-                                             -1.75,       -1.875,         -2,
-                                             -2.25,       -2.5,           -2.75,
-                                             -3,          -3.25,          -3.5,
-                                             -3.75,       -4,             -4.5,
-                                             -5,          -5.5,           -6,
-                                             -6.5,        -7,             -7.5,
-                                             -8,          -9,             -10,
-                                             -11,         -12,            -13,
-                                             -14,         -15,            -16,
-                                             -18,         -20,            -22,
-                                             -24,         -26,            -28,
-                                             -30,         -32,            -36,
-                                             -40,         -44,            -48,
-                                             -52,         -56,            -60,
-                                             -64,         -72,            -80,
-                                             -88,         -96,            -104,
-                                             -112,        -120,           -128,
-                                             -144,        -160,           -176,
-                                             -192,        -208,           -224,
-                                             -240,        -256,           -288,
-                                             -320,        -352,           -384,
-                                             -416,        -448};
+    std::vector<TestType> e4m3_ocp_nums = {
+        0,          0.00195312, 0.00390625,  0.00585938,  0.0078125,   0.00976562, 0.0117188,
+        0.0136719,  0.015625,   0.0175781,   0.0195312,   0.0214844,   0.0234375,  0.0253906,
+        0.0273438,  0.0292969,  0.03125,     0.0351562,   0.0390625,   0.0429688,  0.046875,
+        0.0507812,  0.0546875,  0.0585938,   0.0625,      0.0703125,   0.078125,   0.0859375,
+        0.09375,    0.101562,   0.109375,    0.117188,    0.125,       0.140625,   0.15625,
+        0.171875,   0.1875,     0.203125,    0.21875,     0.234375,    0.25,       0.28125,
+        0.3125,     0.34375,    0.375,       0.40625,     0.4375,      0.46875,    0.5,
+        0.5625,     0.625,      0.6875,      0.75,        0.8125,      0.875,      0.9375,
+        1,          1.125,      1.25,        1.375,       1.5,         1.625,      1.75,
+        1.875,      2,          2.25,        2.5,         2.75,        3,          3.25,
+        3.5,        3.75,       4,           4.5,         5,           5.5,        6,
+        6.5,        7,          7.5,         8,           9,           10,         11,
+        12,         13,         14,          15,          16,          18,         20,
+        22,         24,         26,          28,          30,          32,         36,
+        40,         44,         48,          52,          56,          60,         64,
+        72,         80,         88,          96,          104,         112,        120,
+        128,        144,        160,         176,         192,         208,        224,
+        240,        256,        288,         320,         352,         384,        416,
+        448,        -0,         -0.00195312, -0.00390625, -0.00585938, -0.0078125, -0.00976562,
+        -0.0117188, -0.0136719, -0.015625,   -0.0175781,  -0.0195312,  -0.0214844, -0.0234375,
+        -0.0253906, -0.0273438, -0.0292969,  -0.03125,    -0.0351562,  -0.0390625, -0.0429688,
+        -0.046875,  -0.0507812, -0.0546875,  -0.0585938,  -0.0625,     -0.0703125, -0.078125,
+        -0.0859375, -0.09375,   -0.101562,   -0.109375,   -0.117188,   -0.125,     -0.140625,
+        -0.15625,   -0.171875,  -0.1875,     -0.203125,   -0.21875,    -0.234375,  -0.25,
+        -0.28125,   -0.3125,    -0.34375,    -0.375,      -0.40625,    -0.4375,    -0.46875,
+        -0.5,       -0.5625,    -0.625,      -0.6875,     -0.75,       -0.8125,    -0.875,
+        -0.9375,    -1,         -1.125,      -1.25,       -1.375,      -1.5,       -1.625,
+        -1.75,      -1.875,     -2,          -2.25,       -2.5,        -2.75,      -3,
+        -3.25,      -3.5,       -3.75,       -4,          -4.5,        -5,         -5.5,
+        -6,         -6.5,       -7,          -7.5,        -8,          -9,         -10,
+        -11,        -12,        -13,         -14,         -15,         -16,        -18,
+        -20,        -22,        -24,         -26,         -28,         -30,        -32,
+        -36,        -40,        -44,         -48,         -52,         -56,        -60,
+        -64,        -72,        -80,         -88,         -96,         -104,       -112,
+        -120,       -128,       -144,        -160,        -176,        -192,       -208,
+        -224,       -240,       -256,        -288,        -320,        -352,       -384,
+        -416,       -448};
     size_t totalnums = e4m3_ocp_nums.size();
-    TestType *fnums; HIP_CHECK(hipMalloc((void **)&fnums, totalnums * sizeof(TestType)));
-    float *cvt1_dev; HIP_CHECK(hipMalloc((void **)&cvt1_dev, totalnums * sizeof(TestType)));
-    float *cvt2_dev; HIP_CHECK(hipMalloc((void **)&cvt2_dev, totalnums * sizeof(TestType)));
+    TestType* fnums;
+    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)));
+    float* cvt1_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)));
+    float* cvt2_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)));
 
     HIP_CHECK(hipMemcpy(fnums, e4m3_ocp_nums.data(), totalnums * sizeof(TestType),
                         hipMemcpyHostToDevice));
@@ -787,11 +729,11 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness_device", "", float, double) {
     auto fp8_kernel = Type_to_fp8_cvt<TestType, true>;
     fp8_kernel<<<totalnums / 256 + 1, 256>>>(fnums, cvt1_dev, cvt2_dev, totalnums);
 
-    float *cvt1_host = (float *)malloc(sizeof(float) * totalnums);
-    float *cvt2_host = (float *)malloc(sizeof(float) * totalnums);
+    float* cvt1_host = (float*)malloc(sizeof(float) * totalnums);
+    float* cvt2_host = (float*)malloc(sizeof(float) * totalnums);
 
-    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -817,93 +759,261 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness_device", "", float, double) {
     /* These are basically all the fp8 - e5m2_ocp type numbers.
      * They can be generated by iterating over 0'00000'00 converting them to fp32 number skipping
      * the nan/inf */
-    std::vector<TestType> e5m2_ocp_nums = { 0,            1.52588e-05,   3.05176e-05,
-                                            4.57764e-05,  6.10352e-05,   7.62939e-05,
-                                            9.15527e-05,  0.000106812,   0.00012207,
-                                            0.000152588,  0.000183105,   0.000213623,
-                                            0.000244141,  0.000305176,   0.000366211,
-                                            0.000427246,  0.000488281,   0.000610352,
-                                            0.000732422,  0.000854492,   0.000976562,
-                                            0.0012207,    0.00146484,    0.00170898,
-                                            0.00195312,   0.00244141,    0.00292969,
-                                            0.00341797,   0.00390625,    0.00488281,
-                                            0.00585938,   0.00683594,    0.0078125,
-                                            0.00976562,   0.0117188,     0.0136719,
-                                            0.015625,     0.0195312,     0.0234375,
-                                            0.0273438,    0.03125,       0.0390625,
-                                            0.046875,     0.0546875,     0.0625,
-                                            0.078125,     0.09375,       0.109375,
-                                            0.125,        0.15625,       0.1875,
-                                            0.21875,      0.25,          0.3125,
-                                            0.375,        0.4375,        0.5,
-                                            0.625,        0.75,          0.875,
-                                            1,            1.25,          1.5,
-                                            1.75,         2,             2.5,
-                                            3,            3.5,           4,
-                                            5,            6,             7,
-                                            8,            10,            12,
-                                            14,           16,            20,
-                                            24,           28,            32,
-                                            40,           48,            56,
-                                            64,           80,            96,
-                                            112,          128,           160,
-                                            192,          224,           256,
-                                            320,          384,           448,
-                                            512,          640,           768,
-                                            896,          1024,          1280,
-                                            1536,         1792,          2048,
-                                            2560,         3072,          3584,
-                                            4096,         5120,          6144,
-                                            7168,         8192,          10240,
-                                            12288,        14336,         16384,
-                                            20480,        24576,         28672,
-                                            32768,        40960,         49152,
-                                            57344,        -0,            -1.52588e-05,
-                                            -3.05176e-05, -4.57764e-05,  -6.10352e-05,
-                                            -7.62939e-05, -9.15527e-05,  -0.000106812,
-                                            -0.00012207,  -0.000152588,  -0.000183105,
-                                            -0.000213623, -0.000244141,  -0.000305176,
-                                            -0.000366211, -0.000427246,  -0.000488281,
-                                            -0.000610352, -0.000732422,  -0.000854492,
-                                            -0.000976562, -0.0012207,    -0.00146484,
-                                            -0.00170898,  -0.00195312,   -0.00244141,
-                                            -0.00292969,  -0.00341797,   -0.00390625,
-                                            -0.00488281,  -0.00585938,   -0.00683594,
-                                            -0.0078125,   -0.00976562,   -0.0117188,
-                                            -0.0136719,   -0.015625,     -0.0195312,
-                                            -0.0234375,   -0.0273438,    -0.03125,
-                                            -0.0390625,   -0.046875,     -0.0546875,
-                                            -0.0625,      -0.078125,     -0.09375,
-                                            -0.109375,    -0.125,        -0.15625,
-                                            -0.1875,      -0.21875,      -0.25,
-                                            -0.3125,      -0.375,        -0.4375,
-                                            -0.5,         -0.625,        -0.75,
-                                            -0.875,       -1,            -1.25,
-                                            -1.5,         -1.75,         -2,
-                                            -2.5,         -3,            -3.5,
-                                            -4,           -5,            -6,
-                                            -7,           -8,            -10,
-                                            -12,          -14,           -16,
-                                            -20,          -24,           -28,
-                                            -32,          -40,           -48,
-                                            -56,          -64,           -80,
-                                            -96,          -112,          -128,
-                                            -160,         -192,          -224,
-                                            -256,         -320,          -384,
-                                            -448,         -512,          -640,
-                                            -768,         -896,          -1024,
-                                            -1280,        -1536,         -1792,
-                                            -2048,        -2560,         -3072,
-                                            -3584,        -4096,         -5120,
-                                            -6144,        -7168,         -8192,
-                                            -10240,       -12288,        -14336,
-                                            -16384,       -20480,        -24576,
-                                            -28672,       -32768,        -40960,
-                                            -49152,       -57344};
+    std::vector<TestType> e5m2_ocp_nums = {0,
+                                           1.52588e-05,
+                                           3.05176e-05,
+                                           4.57764e-05,
+                                           6.10352e-05,
+                                           7.62939e-05,
+                                           9.15527e-05,
+                                           0.000106812,
+                                           0.00012207,
+                                           0.000152588,
+                                           0.000183105,
+                                           0.000213623,
+                                           0.000244141,
+                                           0.000305176,
+                                           0.000366211,
+                                           0.000427246,
+                                           0.000488281,
+                                           0.000610352,
+                                           0.000732422,
+                                           0.000854492,
+                                           0.000976562,
+                                           0.0012207,
+                                           0.00146484,
+                                           0.00170898,
+                                           0.00195312,
+                                           0.00244141,
+                                           0.00292969,
+                                           0.00341797,
+                                           0.00390625,
+                                           0.00488281,
+                                           0.00585938,
+                                           0.00683594,
+                                           0.0078125,
+                                           0.00976562,
+                                           0.0117188,
+                                           0.0136719,
+                                           0.015625,
+                                           0.0195312,
+                                           0.0234375,
+                                           0.0273438,
+                                           0.03125,
+                                           0.0390625,
+                                           0.046875,
+                                           0.0546875,
+                                           0.0625,
+                                           0.078125,
+                                           0.09375,
+                                           0.109375,
+                                           0.125,
+                                           0.15625,
+                                           0.1875,
+                                           0.21875,
+                                           0.25,
+                                           0.3125,
+                                           0.375,
+                                           0.4375,
+                                           0.5,
+                                           0.625,
+                                           0.75,
+                                           0.875,
+                                           1,
+                                           1.25,
+                                           1.5,
+                                           1.75,
+                                           2,
+                                           2.5,
+                                           3,
+                                           3.5,
+                                           4,
+                                           5,
+                                           6,
+                                           7,
+                                           8,
+                                           10,
+                                           12,
+                                           14,
+                                           16,
+                                           20,
+                                           24,
+                                           28,
+                                           32,
+                                           40,
+                                           48,
+                                           56,
+                                           64,
+                                           80,
+                                           96,
+                                           112,
+                                           128,
+                                           160,
+                                           192,
+                                           224,
+                                           256,
+                                           320,
+                                           384,
+                                           448,
+                                           512,
+                                           640,
+                                           768,
+                                           896,
+                                           1024,
+                                           1280,
+                                           1536,
+                                           1792,
+                                           2048,
+                                           2560,
+                                           3072,
+                                           3584,
+                                           4096,
+                                           5120,
+                                           6144,
+                                           7168,
+                                           8192,
+                                           10240,
+                                           12288,
+                                           14336,
+                                           16384,
+                                           20480,
+                                           24576,
+                                           28672,
+                                           32768,
+                                           40960,
+                                           49152,
+                                           57344,
+                                           -0,
+                                           -1.52588e-05,
+                                           -3.05176e-05,
+                                           -4.57764e-05,
+                                           -6.10352e-05,
+                                           -7.62939e-05,
+                                           -9.15527e-05,
+                                           -0.000106812,
+                                           -0.00012207,
+                                           -0.000152588,
+                                           -0.000183105,
+                                           -0.000213623,
+                                           -0.000244141,
+                                           -0.000305176,
+                                           -0.000366211,
+                                           -0.000427246,
+                                           -0.000488281,
+                                           -0.000610352,
+                                           -0.000732422,
+                                           -0.000854492,
+                                           -0.000976562,
+                                           -0.0012207,
+                                           -0.00146484,
+                                           -0.00170898,
+                                           -0.00195312,
+                                           -0.00244141,
+                                           -0.00292969,
+                                           -0.00341797,
+                                           -0.00390625,
+                                           -0.00488281,
+                                           -0.00585938,
+                                           -0.00683594,
+                                           -0.0078125,
+                                           -0.00976562,
+                                           -0.0117188,
+                                           -0.0136719,
+                                           -0.015625,
+                                           -0.0195312,
+                                           -0.0234375,
+                                           -0.0273438,
+                                           -0.03125,
+                                           -0.0390625,
+                                           -0.046875,
+                                           -0.0546875,
+                                           -0.0625,
+                                           -0.078125,
+                                           -0.09375,
+                                           -0.109375,
+                                           -0.125,
+                                           -0.15625,
+                                           -0.1875,
+                                           -0.21875,
+                                           -0.25,
+                                           -0.3125,
+                                           -0.375,
+                                           -0.4375,
+                                           -0.5,
+                                           -0.625,
+                                           -0.75,
+                                           -0.875,
+                                           -1,
+                                           -1.25,
+                                           -1.5,
+                                           -1.75,
+                                           -2,
+                                           -2.5,
+                                           -3,
+                                           -3.5,
+                                           -4,
+                                           -5,
+                                           -6,
+                                           -7,
+                                           -8,
+                                           -10,
+                                           -12,
+                                           -14,
+                                           -16,
+                                           -20,
+                                           -24,
+                                           -28,
+                                           -32,
+                                           -40,
+                                           -48,
+                                           -56,
+                                           -64,
+                                           -80,
+                                           -96,
+                                           -112,
+                                           -128,
+                                           -160,
+                                           -192,
+                                           -224,
+                                           -256,
+                                           -320,
+                                           -384,
+                                           -448,
+                                           -512,
+                                           -640,
+                                           -768,
+                                           -896,
+                                           -1024,
+                                           -1280,
+                                           -1536,
+                                           -1792,
+                                           -2048,
+                                           -2560,
+                                           -3072,
+                                           -3584,
+                                           -4096,
+                                           -5120,
+                                           -6144,
+                                           -7168,
+                                           -8192,
+                                           -10240,
+                                           -12288,
+                                           -14336,
+                                           -16384,
+                                           -20480,
+                                           -24576,
+                                           -28672,
+                                           -32768,
+                                           -40960,
+                                           -49152,
+                                           -57344};
     size_t totalnums = e5m2_ocp_nums.size();
-    TestType *fnums; HIP_CHECK(hipMalloc((void **)&fnums, totalnums * sizeof(TestType)));
-    float *cvt1_dev; HIP_CHECK(hipMalloc((void **)&cvt1_dev, totalnums * sizeof(TestType)));
-    float *cvt2_dev; HIP_CHECK(hipMalloc((void **)&cvt2_dev, totalnums * sizeof(TestType)));
+    TestType* fnums;
+    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)));
+    float* cvt1_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)));
+    float* cvt2_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)));
 
     HIP_CHECK(hipMemcpy(fnums, e5m2_ocp_nums.data(), totalnums * sizeof(TestType),
                         hipMemcpyHostToDevice));
@@ -911,11 +1021,11 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness_device", "", float, double) {
     auto fp8_kernel = Type_to_fp8_cvt<TestType, false>;
     fp8_kernel<<<totalnums / 256 + 1, 256>>>(fnums, cvt1_dev, cvt2_dev, totalnums);
 
-    float *cvt1_host = (float *)malloc(sizeof(float) * totalnums);
-    float *cvt2_host = (float *)malloc(sizeof(float) * totalnums);
+    float* cvt1_host = (float*)malloc(sizeof(float) * totalnums);
+    float* cvt2_host = (float*)malloc(sizeof(float) * totalnums);
 
-    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipDeviceSynchronize());
 

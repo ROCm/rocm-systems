@@ -44,9 +44,8 @@ coordRec coords[] = {
 
 static unsigned int numCoords = sizeof(coords) / sizeof(coordRec);
 
-template <typename T>
-__global__ void float_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                 uint maxIter) {
+template <typename T> __global__ void float_mad_kernel(uint* out, uint width, T xPos, T yPos,
+                                                       T xStep, T yStep, uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -66,9 +65,9 @@ __global__ void float_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep,
   out[tid] = iter;
 }
 
-template <typename T>
-__global__ void float_mandel_unroll_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                           uint maxIter) {
+template <typename T> __global__ void float_mandel_unroll_kernel(uint* out, uint width, T xPos,
+                                                                 T yPos, T xStep, T yStep,
+                                                                 uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -169,9 +168,8 @@ __global__ void float_mandel_unroll_kernel(uint* out, uint width, T xPos, T yPos
   out[tid] = (uint)ccount;
 }
 
-template <typename T>
-__global__ void double_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                  uint maxIter) {
+template <typename T> __global__ void double_mad_kernel(uint* out, uint width, T xPos, T yPos,
+                                                        T xStep, T yStep, uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -191,9 +189,9 @@ __global__ void double_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep
   out[tid] = iter;
 };
 
-template <typename T>
-__global__ void double_mandel_unroll_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                            uint maxIter) {
+template <typename T> __global__ void double_mandel_unroll_kernel(uint* out, uint width, T xPos,
+                                                                  T yPos, T xStep, T yStep,
+                                                                  uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
 
   int i = tid % width;
@@ -548,7 +546,7 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   // Compute GFLOPS.  There are 7 FLOPs per iteration
   double perf = (static_cast<double>(totalIters * numKernels) * 7 * static_cast<double>(1e-09)) /
-      (totalTime / (double)numLoops);
+                (totalTime / (double)numLoops);
 
 
   std::vector<std::string> kernelName = {"float", "float_unroll", "double", "double_unroll"};

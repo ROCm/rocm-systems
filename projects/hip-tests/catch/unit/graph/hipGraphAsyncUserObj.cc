@@ -35,8 +35,7 @@ std::condition_variable cv;
  *                                 unsigned int flags);`
  * - Create an instance of userObject to manage lifetime of a resource.
  */
-template<typename T>
-__global__ void KernelFn(T *Ad, int clockrate, int WaitSecs) {
+template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitSecs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * 1000 * WaitSecs;
   uint64_t start = clock64(), cycles = 0;
@@ -53,7 +52,7 @@ __global__ void KernelFn(T *Ad, int clockrate, int WaitSecs) {
 }
 void threadFunc_dltMemory() {
   std::unique_lock lk(m);
-  cv.wait(lk, []{ return setVar; });
+  cv.wait(lk, [] { return setVar; });
   REQUIRE(globalPtr != nullptr);
   HIP_CHECK(hipHostFree(globalPtr));
   setVar = false;
@@ -64,31 +63,25 @@ void destroyPinnedObj(void* ptr) {
   cv.notify_one();
 }
 template <typename T>
-void hipUserObjectCreate_int_float_Objects(T* hostArr,
-                        T* devArr, void destroyObj(void*)) {
+void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyObj(void*)) {
   int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate,
-          hipDeviceAttributeMemoryClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   hipGraph_t graph = nullptr;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamBeginCapture(stream,
-                                  hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int),
-                           hipMemcpyHostToDevice, stream));
-  KernelFn<<< 1, 1, 0, stream>>>(devArr, clockrate, 5);
-  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int),
-                           hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int), hipMemcpyHostToDevice, stream));
+  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, 5);
+  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
   int refCount = 1;
-  HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyObj, refCount,
-            hipUserObjectNoDestructorSync));
+  HIP_CHECK(
+      hipUserObjectCreate(&Uobj, hostArr, destroyObj, refCount, hipUserObjectNoDestructorSync));
   HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
   hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
   SECTION("graph_instance is destroyed before async launch completes") {
     HIP_CHECK(hipGraphLaunch(graph_instance, stream));
@@ -124,11 +117,11 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr,
 TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
   SECTION("Called with Int Obj") {
     std::thread t1(threadFunc_dltMemory);
-    int *hostArr = nullptr;
+    int* hostArr = nullptr;
     HIP_CHECK(hipHostMalloc(&hostArr, sizeof(int)));
     REQUIRE(hostArr != nullptr);
     *hostArr = 1111;
-    int *devArr = nullptr;
+    int* devArr = nullptr;
     HIP_CHECK(hipMalloc(&devArr, sizeof(int)));
     REQUIRE(devArr != nullptr);
     hipUserObjectCreate_int_float_Objects(hostArr, devArr, destroyPinnedObj);
@@ -137,11 +130,11 @@ TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
   }
   SECTION("Called with float Obj") {
     std::thread t1(threadFunc_dltMemory);
-    float *hostArr = nullptr;
+    float* hostArr = nullptr;
     HIP_CHECK(hipHostMalloc(&hostArr, sizeof(float)));
     REQUIRE(hostArr != nullptr);
     *hostArr = 1111.0f;
-    float *devArr = nullptr;
+    float* devArr = nullptr;
     HIP_CHECK(hipMalloc(&devArr, sizeof(float)));
     REQUIRE(devArr != nullptr);
     hipUserObjectCreate_int_float_Objects(hostArr, devArr, destroyPinnedObj);
@@ -171,10 +164,9 @@ void destroyHostRegObj(void* ptr) {
  */
 TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate,
-          hipDeviceAttributeMemoryClockRate, 0));
-  int *A_h = new  int();
-  int *A_d = nullptr;
+  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
+  int* A_h = new int();
+  int* A_d = nullptr;
   HIP_CHECK(hipHostRegister(A_h, sizeof(int), 0));
   REQUIRE(A_h != nullptr);
   *A_h = 1;
@@ -183,19 +175,17 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   hipGraph_t graph = nullptr;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamBeginCapture(stream,
-                                  hipStreamCaptureModeGlobal));
-  KernelFn<<< 1, 1, 0, stream>>>(A_d, clockrate, 5);
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  KernelFn<<<1, 1, 0, stream>>>(A_d, clockrate, 5);
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
   int refCount = 1;
-  HIP_CHECK(hipUserObjectCreate(&Uobj, A_h, destroyHostRegObj, refCount,
-            hipUserObjectNoDestructorSync));
+  HIP_CHECK(
+      hipUserObjectCreate(&Uobj, A_h, destroyHostRegObj, refCount, hipUserObjectNoDestructorSync));
   HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
   hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
@@ -205,9 +195,7 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostUnregister(A_h));
 }
-template <typename T>
-__global__ void StructClassKernelFn(T *Obj,
-                                 int clockrate, int WaitSecs) {
+template <typename T> __global__ void StructClassKernelFn(T* Obj, int clockrate, int WaitSecs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * 1000 * WaitSecs;
   uint64_t start = clock64(), cycles = 0;
@@ -216,31 +204,25 @@ __global__ void StructClassKernelFn(T *Obj,
   }
   Obj->count = 9999;
 }
-template <typename T>
-void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T* Obj_d) {
+template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T* Obj_d) {
   int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate,
-            hipDeviceAttributeMemoryClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   hipGraph_t graph = nullptr;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamBeginCapture(stream,
-                                  hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyAsync(Obj_d, Obj_h, sizeof(BoxStruct),
-                           hipMemcpyHostToDevice, stream));
-  StructClassKernelFn<<< 1, 1, 0, stream>>>(Obj_d, clockrate, 5);
-  HIP_CHECK(hipMemcpyAsync(Obj_h, Obj_d, sizeof(BoxStruct),
-                           hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipMemcpyAsync(Obj_d, Obj_h, sizeof(BoxStruct), hipMemcpyHostToDevice, stream));
+  StructClassKernelFn<<<1, 1, 0, stream>>>(Obj_d, clockrate, 5);
+  HIP_CHECK(hipMemcpyAsync(Obj_h, Obj_d, sizeof(BoxStruct), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
   int refCount = 1;
-  HIP_CHECK(hipUserObjectCreate(&Uobj, Obj_h, destroyPinnedObj, refCount,
-            hipUserObjectNoDestructorSync));
+  HIP_CHECK(
+      hipUserObjectCreate(&Uobj, Obj_h, destroyPinnedObj, refCount, hipUserObjectNoDestructorSync));
   HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
   hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
@@ -277,8 +259,7 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
     BoxStruct* structObj_d;
     HIP_CHECK(hipMalloc(&structObj_d, sizeof(BoxStruct)));
     REQUIRE(structObj_d != nullptr);
-    hipUserObjectCreate_Struct_Class_Objects<BoxStruct>(structObj_h,
-                                     structObj_d);
+    hipUserObjectCreate_Struct_Class_Objects<BoxStruct>(structObj_h, structObj_d);
     t1.join();
   }
   SECTION("Called with Class Object") {
@@ -290,8 +271,7 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
     BoxClass* classObj_d;
     HIP_CHECK(hipMalloc(&classObj_d, sizeof(BoxClass)));
     REQUIRE(classObj_d != nullptr);
-    hipUserObjectCreate_Struct_Class_Objects<BoxClass>(classObj_h,
-                                     classObj_d);
+    hipUserObjectCreate_Struct_Class_Objects<BoxClass>(classObj_h, classObj_d);
     t1.join();
   }
 }
@@ -313,45 +293,39 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
  */
 TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate,
-          hipDeviceAttributeMemoryClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);
-  int *hostArr = nullptr;
+  int* hostArr = nullptr;
   HIP_CHECK(hipHostMalloc(&hostArr, sizeof(int)));
   REQUIRE(hostArr != nullptr);
   *hostArr = 1111;
-  int *devArr = nullptr;
+  int* devArr = nullptr;
   HIP_CHECK(hipMalloc(&devArr, sizeof(int)));
   REQUIRE(devArr != nullptr);
   hipGraph_t graph = nullptr, clonedgraph = nullptr;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamBeginCapture(stream,
-                                  hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int),
-                           hipMemcpyHostToDevice, stream));
-  KernelFn<<< 1, 1, 0, stream>>>(devArr, clockrate, 5);
-  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int),
-                           hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int), hipMemcpyHostToDevice, stream));
+  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, 5);
+  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyPinnedObj, refCount,
-            hipUserObjectNoDestructorSync));
+                                hipUserObjectNoDestructorSync));
   HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
   hipGraphExec_t originalGraphInstance, clonedGraphInstance;
   // Instantiate and launch the original graph
-  HIP_CHECK(hipGraphInstantiate(&originalGraphInstance, graph,
-                                nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&originalGraphInstance, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(originalGraphInstance, stream));
   HIP_CHECK(hipGraphExecDestroy(originalGraphInstance));
   REQUIRE(*hostArr == 1111);
   HIP_CHECK(hipGraphClone(&clonedgraph, graph));
   REQUIRE(clonedgraph != nullptr);
   // Instantiate and launch the cloned graph
-  HIP_CHECK(hipGraphInstantiate(&clonedGraphInstance, clonedgraph,
-                                nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&clonedGraphInstance, clonedgraph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphDestroy(clonedgraph));
   HIP_CHECK(hipGraphLaunch(clonedGraphInstance, stream));
@@ -363,7 +337,7 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
-__global__ void ManualGraphKernelFn(int *Ad, int clockrate, int WaitSecs) {
+__global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitSecs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * 1000 * WaitSecs;
   uint64_t start = clock64(), cycles = 0;
@@ -390,25 +364,23 @@ __global__ void ManualGraphKernelFn(int *Ad, int clockrate, int WaitSecs) {
  */
 TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate,
-            hipDeviceAttributeMemoryClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);
   hipGraph_t graph;
   hipGraphNode_t memcpyNode, kNode;
   hipKernelNodeParams kNodeParams{};
   hipStream_t stream;
-  int *hostArr = nullptr;
+  int* hostArr = nullptr;
   HIP_CHECK(hipHostMalloc(&hostArr, sizeof(int)));
   REQUIRE(hostArr != nullptr);
   *hostArr = 1111;
-  int *devArr = nullptr;
+  int* devArr = nullptr;
   HIP_CHECK(hipMalloc(&devArr, sizeof(int)));
   REQUIRE(devArr != nullptr);
   std::vector<hipGraphNode_t> dependencies;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, devArr,
-                                    hostArr, sizeof(int),
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, devArr, hostArr, sizeof(int),
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
   kNodeParams.func = reinterpret_cast<void*>(ManualGraphKernelFn);
@@ -417,23 +389,20 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   kNodeParams.gridDim = dim3(1);
   kNodeParams.blockDim = dim3(1);
   kNodeParams.kernelParams = kernelArgs;
-  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, dependencies.data(),
-                                  dependencies.size(), &kNodeParams));
+  HIP_CHECK(
+      hipGraphAddKernelNode(&kNode, graph, dependencies.data(), dependencies.size(), &kNodeParams));
   dependencies.clear();
   dependencies.push_back(kNode);
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, dependencies.data(),
-                                    dependencies.size(),
-                                    hostArr, devArr, sizeof(int),
-                                    hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                    hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyPinnedObj, refCount,
-            hipUserObjectNoDestructorSync));
+                                hipUserObjectNoDestructorSync));
   HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
   hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
@@ -445,7 +414,6 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   HIP_CHECK(hipFree(devArr));
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

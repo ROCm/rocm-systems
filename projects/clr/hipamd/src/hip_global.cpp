@@ -28,24 +28,18 @@ THE SOFTWARE.
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
 
-const char* amd_dbgapi_get_build_name(void) {
-  return HIP_VERSION_BUILD_NAME;
-}
+const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
-const char* amd_dbgapi_get_git_hash() {
-  return HIP_VERSION_GITHASH;
-}
+const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
 
-size_t amd_dbgapi_get_build_id() {
-  return HIP_VERSION_BUILD_ID;
-}
+size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
 
 #ifdef __HIP_ENABLE_PCH
 extern const char __hip_pch_wave32[];
 extern const char __hip_pch_wave64[];
 extern unsigned __hip_pch_wave32_size;
 extern unsigned __hip_pch_wave64_size;
-void __hipGetPCH(const char** pch, unsigned int *size) {
+void __hipGetPCH(const char** pch, unsigned int* size) {
   hipDeviceProp_t deviceProp;
   int deviceId;
   hipError_t error = hipGetDevice(&deviceId);
@@ -64,20 +58,15 @@ namespace hip {
 // forward declaration of methods required for managed variables
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
-//Device Vars
-DeviceVar::DeviceVar(std::string name,
-                     hipModule_t hmod,
-                     int deviceId) :
-                     shadowVptr(nullptr), name_(name),
-                     amd_mem_obj_(nullptr), device_ptr_(nullptr),
-                     size_(0) {
+// Device Vars
+DeviceVar::DeviceVar(std::string name, hipModule_t hmod, int deviceId)
+    : shadowVptr(nullptr), name_(name), amd_mem_obj_(nullptr), device_ptr_(nullptr), size_(0) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
-  device::Program* dev_program =
-                   program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
+  device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
 
-  guarantee (dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
+  guarantee(dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
 
-  if(!dev_program->createGlobalVarObj(&amd_mem_obj_, &device_ptr_, &size_, name.c_str())) {
+  if (!dev_program->createGlobalVarObj(&amd_mem_obj_, &device_ptr_, &size_, name.c_str())) {
     guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
   }
 
@@ -96,7 +85,7 @@ DeviceVar::~DeviceVar() {
   // ihipFree in hip::StatCO::removeFatBinary however in DynCO path, it seems to bypass
   // ihipFree and hence it needs to be removed+released here. In order to avoid issue with
   // StatCO, It is better to check if mem obj is found.
-  if (amd::MemObjMap::FindMemObj(device_ptr_) !=  nullptr && amd_mem_obj_ != nullptr) {
+  if (amd::MemObjMap::FindMemObj(device_ptr_) != nullptr && amd_mem_obj_ != nullptr) {
     amd::MemObjMap::RemoveMemObj(device_ptr_);
     amd_mem_obj_->release();
   }
@@ -111,12 +100,12 @@ DeviceVar::~DeviceVar() {
   size_ = 0;
 }
 
-//Device Functions
-DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod) : dflock_("function lock"),
-                       name_(name), kernel_(nullptr) {
+// Device Functions
+DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
+    : dflock_("function lock"), name_(name), kernel_(nullptr) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
 
-  const amd::Symbol *symbol = program->findSymbol(name.c_str());
+  const amd::Symbol* symbol = program->findSymbol(name.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
 
   kernel_ = new amd::Kernel(*program, *symbol, name);
@@ -129,9 +118,9 @@ DeviceFunc::~DeviceFunc() {
   }
 }
 
-//Abstract functions
+// Abstract functions
 Function::Function(const std::string& name, FatBinaryInfo** modules)
-                   : name_(name), modules_(modules) {
+    : name_(name), modules_(modules) {
   dFunc_.resize(g_devices.size());
 }
 
@@ -180,7 +169,6 @@ hipError_t Function::getStatFunc(hipFunction_t* hfunc, int deviceId) {
 }
 
 hipError_t Function::getStatFuncAttr(hipFuncAttributes* func_attr, int deviceId) {
-
   if (modules_ == nullptr || *modules_ == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
@@ -198,9 +186,9 @@ hipError_t Function::getStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   amd::Kernel* kernel = dFunc_[deviceId]->kernel();
   auto* device_handle = devices[deviceId];
   const device::Kernel::WorkGroupInfo* wginfo =
-              kernel->getDeviceKernel(*device_handle)->workGroupInfo();
-  int binaryVersion = device_handle->isa().versionMajor() * 10 +
-                      device_handle->isa().versionMinor();
+      kernel->getDeviceKernel(*device_handle)->workGroupInfo();
+  int binaryVersion =
+      device_handle->isa().versionMajor() * 10 + device_handle->isa().versionMinor();
   func_attr->sharedSizeBytes = static_cast<int>(wginfo->localMemSize_);
   func_attr->binaryVersion = binaryVersion;
   func_attr->cacheModeCA = 0;
@@ -214,10 +202,17 @@ hipError_t Function::getStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   return hipSuccess;
 }
 
-//Abstract Vars
+// Abstract Vars
 Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
-         FatBinaryInfo** modules) : name_(name), dVarKind_(dVarKind), size_(size),
-         type_(type), norm_(norm), modules_(modules), managedVarPtr_(nullptr), align_(0) {
+         FatBinaryInfo** modules)
+    : name_(name),
+      dVarKind_(dVarKind),
+      size_(size),
+      type_(type),
+      norm_(norm),
+      modules_(modules),
+      managedVarPtr_(nullptr),
+      align_(0) {
   dVar_.resize(g_devices.size());
 }
 
@@ -246,8 +241,7 @@ hipError_t Var::getDeviceVarPtr(DeviceVar** dvar, int deviceId) {
   guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
   guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
             "Invalid DeviceId, greater than no of code objects");
-  guarantee((dVar_.size() == g_devices.size()),
-             "Device Var not initialized to size");
+  guarantee((dVar_.size() == g_devices.size()), "Device Var not initialized to size");
   *dvar = dVar_[deviceId];
   return hipSuccess;
 }
@@ -256,8 +250,7 @@ hipError_t Var::getDeviceVar(DeviceVar** dvar, int deviceId, hipModule_t hmod) {
   guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
   guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
             "Invalid DeviceId, greater than no of code objects");
-  guarantee((dVar_.size() == g_devices.size()),
-             "Device Var not initialized to size");
+  guarantee((dVar_.size() == g_devices.size()), "Device Var not initialized to size");
 
   if (dVar_[deviceId] == nullptr) {
     dVar_[deviceId] = new DeviceVar(name_, hmod, deviceId);
@@ -268,7 +261,7 @@ hipError_t Var::getDeviceVar(DeviceVar** dvar, int deviceId, hipModule_t hmod) {
 }
 
 hipError_t Var::getStatDeviceVar(DeviceVar** dvar, int deviceId) {
-  guarantee((deviceId >= 0) , "Invalid DeviceId, less than zero");
+  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
   guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
             "Invalid DeviceId, greater than no of code objects");
   if (dVar_[deviceId] == nullptr) {
@@ -285,14 +278,14 @@ hipError_t Var::allocateManagedVarPtr() {
   void** pointer = static_cast<void**>(managedVarPtr_);
   // check if it is deffered allocation
   if (!allocFlag_) {
-   // Allocate managed memory for this var
-   const bool use_host_ptr = true;
-   IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
-   allocFlag_ = true;
+    // Allocate managed memory for this var
+    const bool use_host_ptr = true;
+    IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
+    allocFlag_ = true;
   }
   if (dVar_.empty()) {
-   resize_dVar(g_devices.size());
+    resize_dVar(g_devices.size());
   }
   return hipSuccess;
 }
-}; //namespace: hip
+};  // namespace hip

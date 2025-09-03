@@ -56,10 +56,7 @@ class HSAILKernel;
 
 struct AqlPacketMgmt : public amd::EmbeddedObject {
   static constexpr uint32_t kAqlPacketsListSize = 4 * Ki;
-  AqlPacketMgmt()
-      : packet_index_(0) {
-    memset(aql_vgpus_, 0, sizeof(aql_vgpus_));
-  }
+  AqlPacketMgmt() : packet_index_(0) { memset(aql_vgpus_, 0, sizeof(aql_vgpus_)); }
 
   hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
   GpuEvent aql_events_[kAqlPacketsListSize];    //!< The list of gpu for each AQL packet
@@ -67,12 +64,12 @@ struct AqlPacketMgmt : public amd::EmbeddedObject {
   std::atomic<uint64_t> packet_index_;          //!< The active packet slot index
 };
 
- enum class BarrierType : uint8_t {
-   KernelToKernel = 0,
-   KernelToCopy,
-   CopyToKernel,
-   CopyToCopy,
-   FlushL2
+enum class BarrierType : uint8_t {
+  KernelToKernel = 0,
+  KernelToCopy,
+  CopyToKernel,
+  CopyToCopy,
+  FlushL2
 };
 
 //! Virtual GPU
@@ -200,12 +197,12 @@ class VirtualGPU : public device::VirtualDevice {
 
    private:
     void DumpMemoryReferences() const;
-    VirtualGPU& gpu_;        //!< ROCCLR virtual GPU object
-    Pal::IDevice* iDev_;     //!< PAL device
-    uint cmdBufIdSlot_;      //!< Command buffer ID slot for submissions
-    uint cmdBufIdCurrent_;   //!< Current global command buffer ID
-    uint cmbBufIdRetired_;   //!< The last retired command buffer ID
-    uint cmdCnt_;            //!< Counter of commands
+    VirtualGPU& gpu_;       //!< ROCCLR virtual GPU object
+    Pal::IDevice* iDev_;    //!< PAL device
+    uint cmdBufIdSlot_;     //!< Command buffer ID slot for submissions
+    uint cmdBufIdCurrent_;  //!< Current global command buffer ID
+    uint cmbBufIdRetired_;  //!< The last retired command buffer ID
+    uint cmdCnt_;           //!< Counter of commands
     std::unordered_map<GpuMemoryReference*, uint> memReferences_;
     Util::VirtualLinearAllocator vlAlloc_;
     std::vector<Pal::GpuMemoryRef> palMemRefs_;
@@ -320,13 +317,12 @@ class VirtualGPU : public device::VirtualDevice {
   void submitMapMemory(amd::MapMemoryCommand& vcmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& vcmd);
   void submitKernel(amd::NDRangeKernelCommand& vcmd);
-  bool submitKernelInternal(
-      const amd::NDRangeContainer& sizes,  //!< Workload sizes
-      const amd::Kernel& kernel,           //!< Kernel for execution
-      const_address parameters,            //!< Parameters for the kernel
-      bool nativeMem = true,               //!< Native memory objects
-      uint32_t sharedMemBytes = 0,         //!< Shared memory size
-      bool anyOrder = false                //!< TRUE if any order launch mode is enabled
+  bool submitKernelInternal(const amd::NDRangeContainer& sizes,  //!< Workload sizes
+                            const amd::Kernel& kernel,           //!< Kernel for execution
+                            const_address parameters,            //!< Parameters for the kernel
+                            bool nativeMem = true,               //!< Native memory objects
+                            uint32_t sharedMemBytes = 0,         //!< Shared memory size
+                            bool anyOrder = false  //!< TRUE if any order launch mode is enabled
   );
   void submitNativeFn(amd::NativeFnCommand& vcmd);
   void submitFillMemory(amd::FillMemoryCommand& vcmd);
@@ -492,29 +488,27 @@ class VirtualGPU : public device::VirtualDevice {
 
   void addBarrier(RgpSqqtBarrierReason reason = RgpSqqtBarrierReason::MemDependency,
                   BarrierType type = BarrierType::KernelToKernel) const {
-    Pal::AcquireReleaseInfo barrier = {
-      .srcGlobalStageMask = Pal::PipelineStageCs,
-      .dstGlobalStageMask = Pal::PipelineStageCs,
-      .srcGlobalAccessMask = Pal::CoherShader,
-      .dstGlobalAccessMask = Pal::CoherShader,
-      .memoryBarrierCount = 0,
-      .pMemoryBarriers = nullptr,
-      .imageBarrierCount = 0,
-      .pImageBarriers = nullptr,
-      .reason = static_cast<uint32_t>(reason)
-    };
+    Pal::AcquireReleaseInfo barrier = {.srcGlobalStageMask = Pal::PipelineStageCs,
+                                       .dstGlobalStageMask = Pal::PipelineStageCs,
+                                       .srcGlobalAccessMask = Pal::CoherShader,
+                                       .dstGlobalAccessMask = Pal::CoherShader,
+                                       .memoryBarrierCount = 0,
+                                       .pMemoryBarriers = nullptr,
+                                       .imageBarrierCount = 0,
+                                       .pImageBarriers = nullptr,
+                                       .reason = static_cast<uint32_t>(reason)};
 
     if (type == BarrierType::KernelToCopy) {
       barrier.dstGlobalStageMask = Pal::PipelineStageBlt;
       barrier.dstGlobalAccessMask = Pal::CoherCopy;
     } else if (type == BarrierType::CopyToKernel) {
       barrier.srcGlobalStageMask = Pal::PipelineStageBlt;
-      barrier.srcGlobalAccessMask  = Pal::CoherCopy;
+      barrier.srcGlobalAccessMask = Pal::CoherCopy;
     } else if (type == BarrierType::CopyToCopy) {
       barrier.srcGlobalStageMask = barrier.dstGlobalStageMask = Pal::PipelineStageBlt;
       barrier.srcGlobalAccessMask = barrier.dstGlobalAccessMask = Pal::CoherCopy;
     } else if (type == BarrierType::FlushL2) {
-      barrier.srcGlobalStageMask |= Pal::PipelineStageBlt; 
+      barrier.srcGlobalStageMask |= Pal::PipelineStageBlt;
       barrier.dstGlobalStageMask |= Pal::PipelineStageBlt;
       barrier.srcGlobalAccessMask = barrier.dstGlobalAccessMask = Pal::CoherCopy | Pal::CoherCpu;
     }
@@ -645,7 +639,7 @@ class VirtualGPU : public device::VirtualDevice {
                             bool nativeMem,             //!< Native memory objects
                             size_t& ldsAddess,          //!< Returns LDS size, used in the kernel
                             bool& imageBufferWrtBack,   //!< Image buffer write back is required
-                            std::vector<Image*>& wrtBackImageBuffer //!< images for write back
+                            std::vector<Image*>& wrtBackImageBuffer  //!< images for write back
   );
 
   //! Common function for fill memory used by both svm Fill and non-svm fill
@@ -666,9 +660,8 @@ class VirtualGPU : public device::VirtualDevice {
                   const amd::Coord3D& dstOrigin,   //!< destination memory object
                   const amd::Coord3D& size,        //!< copy size
                   const amd::BufferRect& srcRect,  //!< region of source for copy
-                  const amd::BufferRect& dstRect,   //!< region of destination for copy
-                  amd::CopyMetadata copyMetadata =
-                           amd::CopyMetadata()      //!< Memory copy MetaData
+                  const amd::BufferRect& dstRect,  //!< region of destination for copy
+                  amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   );
 
   void PrintChildren(const HSAILKernel& hsaKernel,  //!< The parent HSAIL kernel
@@ -690,7 +683,7 @@ class VirtualGPU : public device::VirtualDevice {
       GpuEvent* gpuEvent             //!< [Return] GPU event associated with the device enqueue
   );
 
-  Device& gpuDevice_;       //!< physical GPU device
+  Device& gpuDevice_;  //!< physical GPU device
 
   PrintfDbgHSA* printfDbgHSA_;  //!< HSAIL printf implemenation
 
@@ -722,10 +715,10 @@ class VirtualGPU : public device::VirtualDevice {
   uint deviceQueueSize_;       //!< Device queue size
   uint maskGroups_;  //!< The number of mask groups processed in the scheduler by one thread
 
-  Memory* hsaQueueMem_;                     //!< Memory for the amd_queue_t object
-  Pal::ICmdAllocator* cmdAllocator_;        //!< Command buffer allocator
-  Queue* queues_[AllEngines];               //!< HW queues for all engines
-  MemoryRange sdmaRange_;                   //!< SDMA memory range for write access
+  Memory* hsaQueueMem_;               //!< Memory for the amd_queue_t object
+  Pal::ICmdAllocator* cmdAllocator_;  //!< Command buffer allocator
+  Queue* queues_[AllEngines];         //!< HW queues for all engines
+  MemoryRange sdmaRange_;             //!< SDMA memory range for write access
 
   void* hostcallBuffer_;  //!< Hostcall buffer
 

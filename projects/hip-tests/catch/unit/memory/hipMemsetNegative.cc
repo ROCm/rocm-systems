@@ -71,7 +71,6 @@ TEST_CASE("Unit_hipMemset_Negative_InvalidPtr") {
 
 
 TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsSize") {
-
 #if !HT_AMD
   void* dst;
   constexpr size_t outOfBoundsSize{width + 1};
@@ -219,7 +218,7 @@ TEST_CASE("Unit_hipMemset3D_Negative_OutOfBounds") {
   HIP_CHECK(hipMalloc3D(&pitchedDevPtr, validExtent));
   hipPitchedPtr outOfBoundsPtr{pitchedDevPtr};
   outOfBoundsPtr.ptr = reinterpret_cast<char*>(pitchedDevPtr.ptr) +
-      pitchedDevPtr.pitch * validExtent.height * validExtent.depth + 1;
+                       pitchedDevPtr.pitch * validExtent.height * validExtent.depth + 1;
 
   SECTION("Extent Equal to 0") {
     hipExtent zeroExtent{0, 0, 0};

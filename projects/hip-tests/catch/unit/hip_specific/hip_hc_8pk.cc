@@ -172,6 +172,6 @@ TEST_CASE("Unit_Device__hip_hc_8pk_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

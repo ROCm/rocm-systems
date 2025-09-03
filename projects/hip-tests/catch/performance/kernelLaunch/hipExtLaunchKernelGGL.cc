@@ -21,15 +21,15 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip/hip_ext.h>
 #include <hip_array_common.hh>
-#define THREADS_PER_BLOCK 64 // 64 threads per wave on Mi300, 32 threads per wave on Navi31
-#define MAXITERS 100000 // maximum iteration number in a thread
-#define FUNC1(K, I) (K + K * I / 37 - I) / 1091; // Shared by kernel and host
+#define THREADS_PER_BLOCK 64  // 64 threads per wave on Mi300, 32 threads per wave on Navi31
+#define MAXITERS 100000       // maximum iteration number in a thread
+#define FUNC1(K, I) (K + K * I / 37 - I) / 1091;  // Shared by kernel and host
 
 using namespace std;
 constexpr int w1 = 34;
 
-//#define SHOW_DETAILS // Show statics details
-//#define VERIFY // Verify data
+// #define SHOW_DETAILS // Show statics details
+// #define VERIFY // Verify data
 
 /**
  * @addtogroup kernelLaunch clock
@@ -37,8 +37,8 @@ constexpr int w1 = 34;
  * @ingroup PerformanceTest
  * Contains unit tests for clock, clock64, wall_clock64 and hipExtLaunchKernelGGL APIs
  */
-__global__ void
-kernel1(uint64_t* out, size_t maxIter, uint64_t* clockCount, uint64_t* wallClockCount) {
+__global__ void kernel1(uint64_t* out, size_t maxIter, uint64_t* clockCount,
+                        uint64_t* wallClockCount) {
   uint64_t wallClock = wall_clock64();
   uint64_t clock = clock64();
   size_t tid = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
@@ -47,8 +47,8 @@ kernel1(uint64_t* out, size_t maxIter, uint64_t* clockCount, uint64_t* wallClock
     k = FUNC1(k, i);
   }
   out[tid] = k;
-  clockCount[tid] = clock64() - clock; // GPU cycle count
-  wallClockCount[tid] = wall_clock64() - wallClock; // Wall clock cycle count
+  clockCount[tid] = clock64() - clock;               // GPU cycle count
+  wallClockCount[tid] = wall_clock64() - wallClock;  // Wall clock cycle count
 }
 
 #ifdef VERIFY
@@ -66,17 +66,17 @@ static void host1(uint64_t* out, size_t maxIter, size_t totalThreadsSize) {
 /*
  * Roughly query the variable gpu frequency
  */
-static bool query_gpu_frequency(
-  void (*kernel)(uint64_t* out, size_t maxIter, uint64_t* clockCount, uint64_t* wallClockCount),
-  const int wall_clock_rate, const uint32_t blocksMax, const uint32_t blockSizeMax,
-  const int CUs) {
+static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, uint64_t* clockCount,
+                                               uint64_t* wallClockCount),
+                                const int wall_clock_rate, const uint32_t blocksMax,
+                                const uint32_t blockSizeMax, const int CUs) {
   hipStream_t stream;
   hipEvent_t start_event, end_event;
 
   const size_t totalThreadsSize = static_cast<size_t>(blockSizeMax) * blocksMax;
   const size_t totalBytesSize = totalThreadsSize * sizeof(uint64_t);
   const size_t maxIter = MAXITERS;
-  uint64_t* out; // Data to verify kernel rightness
+  uint64_t* out;  // Data to verify kernel rightness
   uint64_t* clockCount;
   uint64_t* wallClockCount;
 
@@ -98,58 +98,52 @@ static bool query_gpu_frequency(
 #endif
   for (uint32_t blocks = 1; blocks <= blocksMax; blocks++) {
     for (uint32_t blockSize = THREADS_PER_BLOCK; blockSize <= blockSizeMax; blockSize *= 2) {
-        hipExtLaunchKernelGGL(kernel, dim3(blocks), dim3(blockSize), 0, stream, start_event,
-                              end_event, 0, out, maxIter, clockCount, wallClockCount);
-        HIP_CHECK(hipStreamSynchronize(stream));
-        float totalGpuTime = 0; // Total GPU time
-        HIP_CHECK(hipEventElapsedTime(&totalGpuTime, start_event, end_event));
+      hipExtLaunchKernelGGL(kernel, dim3(blocks), dim3(blockSize), 0, stream, start_event,
+                            end_event, 0, out, maxIter, clockCount, wallClockCount);
+      HIP_CHECK(hipStreamSynchronize(stream));
+      float totalGpuTime = 0;  // Total GPU time
+      HIP_CHECK(hipEventElapsedTime(&totalGpuTime, start_event, end_event));
 
-        const size_t curThreadsSize = static_cast<size_t>(blockSize) * blocks;
-        const size_t curBytesSize = curThreadsSize * sizeof(uint64_t);
-        HIP_CHECK(hipMemcpy(hostClockCount.data(), clockCount, curBytesSize,
-                            hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(hostWallClockCount.data(), wallClockCount, curBytesSize,
-                            hipMemcpyDeviceToHost));
+      const size_t curThreadsSize = static_cast<size_t>(blockSize) * blocks;
+      const size_t curBytesSize = curThreadsSize * sizeof(uint64_t);
+      HIP_CHECK(hipMemcpy(hostClockCount.data(), clockCount, curBytesSize, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostWallClockCount.data(), wallClockCount, curBytesSize,
+                          hipMemcpyDeviceToHost));
 
-        double clockMean = 0;
-        double wallClockMean = 0;
-      #ifdef SHOW_DETAILS
-        double clockDeviation = 0;
-        double wallClockDeviation = 0;
-        getStatics(hostClockCount.data(), curThreadsSize, clockMean, &clockDeviation);
-        getStatics(hostWallClockCount.data(), curThreadsSize, wallClockMean, &wallClockDeviation);
-      #else
-        getStatics(hostClockCount.data(), curThreadsSize, clockMean);
-        getStatics(hostWallClockCount.data(), curThreadsSize, wallClockMean);
-      #endif
+      double clockMean = 0;
+      double wallClockMean = 0;
+#ifdef SHOW_DETAILS
+      double clockDeviation = 0;
+      double wallClockDeviation = 0;
+      getStatics(hostClockCount.data(), curThreadsSize, clockMean, &clockDeviation);
+      getStatics(hostWallClockCount.data(), curThreadsSize, wallClockMean, &wallClockDeviation);
+#else
+      getStatics(hostClockCount.data(), curThreadsSize, clockMean);
+      getStatics(hostWallClockCount.data(), curThreadsSize, wallClockMean);
+#endif
 
-        double aveGpuTime = wallClockMean / wall_clock_rate; // in ms, should be < totalGpuTime
-        double avgGpuFrequency = clockMean / aveGpuTime; // in KHz
+      double aveGpuTime = wallClockMean / wall_clock_rate;  // in ms, should be < totalGpuTime
+      double avgGpuFrequency = clockMean / aveGpuTime;      // in KHz
 
-        cout <<
-          setw(8) << blocks <<
-          setw(11) << blockSize <<
-          setw(22) << fixed << setprecision(3) << avgGpuFrequency / 1000. <<
-          setw(20) << fixed << setprecision(3) << aveGpuTime <<
-          setw(20) << fixed << setprecision(3) << totalGpuTime <<
-          setw(26) << fixed << setprecision(6) << curBytesSize / totalGpuTime / 1000. <<
-          setw(31) << fixed << setprecision(6) << curBytesSize / totalGpuTime / 1000. / CUs;
+      cout << setw(8) << blocks << setw(11) << blockSize << setw(22) << fixed << setprecision(3)
+           << avgGpuFrequency / 1000. << setw(20) << fixed << setprecision(3) << aveGpuTime
+           << setw(20) << fixed << setprecision(3) << totalGpuTime << setw(26) << fixed
+           << setprecision(6) << curBytesSize / totalGpuTime / 1000. << setw(31) << fixed
+           << setprecision(6) << curBytesSize / totalGpuTime / 1000. / CUs;
 
-      #ifdef SHOW_DETAILS
-        cout <<
-          setw(15) << fixed << setprecision(3) << wallClockMean <<
-          setw(15) << fixed << setprecision(3) << wallClockDeviation <<
-          setw(15) << fixed << setprecision(3) << clockMean <<
-          setw(15) << fixed << setprecision(3) << clockDeviation;
-      #endif
-        cout << endl;
+#ifdef SHOW_DETAILS
+      cout << setw(15) << fixed << setprecision(3) << wallClockMean << setw(15) << fixed
+           << setprecision(3) << wallClockDeviation << setw(15) << fixed << setprecision(3)
+           << clockMean << setw(15) << fixed << setprecision(3) << clockDeviation;
+#endif
+      cout << endl;
 
 #ifdef VERIFY
-        HIP_CHECK(hipMemcpy(hostOut.data(), out, curBytesSize, hipMemcpyDeviceToHost));
-        host1(hostOutExpected.data(), maxIter, curThreadsSize);
-        verified = verify(hostOutExpected.data(), hostOut.data(), curThreadsSize);
+      HIP_CHECK(hipMemcpy(hostOut.data(), out, curBytesSize, hipMemcpyDeviceToHost));
+      host1(hostOutExpected.data(), maxIter, curThreadsSize);
+      verified = verify(hostOutExpected.data(), hostOut.data(), curThreadsSize);
 #endif
-      if(!verified) {
+      if (!verified) {
         cout << "Failed" << endl;
         break;
       }
@@ -178,7 +172,7 @@ static bool query_gpu_frequency(
  */
 TEST_CASE("Performance_hipExtLaunchKernelGGL_QueryGPUFrequency") {
   HIP_CHECK(hipSetDevice(0));
-  int clock_rate = 0;  // in kHz
+  int clock_rate = 0;       // in kHz
   int wall_clock_rate = 0;  // in kHz
   int occupancyBlocks = 0;
   int occupancyBlockSize = 0;
@@ -190,42 +184,31 @@ TEST_CASE("Performance_hipExtLaunchKernelGGL_QueryGPUFrequency") {
 
   cout << left;
   cout << setw(w1)
-    << "--------------------------------------------------------------------------------"
-    << endl;
+       << "--------------------------------------------------------------------------------"
+       << endl;
   cout << setw(w1) << "device#" << 0 << endl;
   cout << setw(w1) << "Name: " << props.name << endl;
   cout << setw(w1) << "gcnArchName: " << props.gcnArchName << endl;
   cout << setw(w1) << "multiProcessorCount: " << props.multiProcessorCount << endl;
-  cout << setw(w1) << "maxThreadsPerMultiProcessor: " << props.maxThreadsPerMultiProcessor
-    << endl;
+  cout << setw(w1) << "maxThreadsPerMultiProcessor: " << props.maxThreadsPerMultiProcessor << endl;
   cout << setw(w1) << "maxThreadsPerBlock: " << props.maxThreadsPerBlock << endl;
   cout << setw(w1) << "occupancyBlocks: " << occupancyBlocks << endl;
   cout << setw(w1) << "occupancyBlockSize: " << occupancyBlockSize << endl;
   cout << setw(w1) << "waveSize: " << props.warpSize << endl;
   cout << setw(w1) << "clockRate: " << clock_rate / 1000.0 << " Mhz" << endl;
   cout << setw(w1) << "wallClockRate: " << wall_clock_rate / 1000.0 << " Mhz" << endl;
-  cout << setw(w1) << "memoryClockRate: " << props.memoryClockRate / 1000.0 << " Mhz"
-    << endl;
+  cout << setw(w1) << "memoryClockRate: " << props.memoryClockRate / 1000.0 << " Mhz" << endl;
   cout << setw(w1) << "totalGlobalMem: " << fixed << setprecision(2)
-    << props.totalGlobalMem / 1000000000. << " GB" << endl;
-  cout << setw(w1) << "sharedMemPerBlock: " << props.sharedMemPerBlock / 1024.0 << " KiB"
-    << endl;
+       << props.totalGlobalMem / 1000000000. << " GB" << endl;
+  cout << setw(w1) << "sharedMemPerBlock: " << props.sharedMemPerBlock / 1024.0 << " KiB" << endl;
   cout << setw(w1) << "l2CacheSize: " << props.l2CacheSize << endl;
 
-  cout <<
-    setw(8) << "Blocks " <<
-    setw(11) << "BlockSize" <<
-    setw(22) << "avgGpuFrequency(MHz)" <<
-    setw(20) << "aveGpuTime(ms)" <<
-    setw(20) << "totalGpuTime(ms)" <<
-    setw(26) << "processCapacity(Mbytes/s)" <<
-    setw(31) << "processCapacityPerCU(Mbytes/s)";
+  cout << setw(8) << "Blocks " << setw(11) << "BlockSize" << setw(22) << "avgGpuFrequency(MHz)"
+       << setw(20) << "aveGpuTime(ms)" << setw(20) << "totalGpuTime(ms)" << setw(26)
+       << "processCapacity(Mbytes/s)" << setw(31) << "processCapacityPerCU(Mbytes/s)";
 #ifdef SHOW_DETAILS
-    cout <<
-    setw(15) << "mean wallClock" <<
-    setw(15) << "deviation" <<
-    setw(15) << "mean clock" <<
-    setw(15) << "deviation";
+  cout << setw(15) << "mean wallClock" << setw(15) << "deviation" << setw(15) << "mean clock"
+       << setw(15) << "deviation";
 #endif
   cout << endl;
 

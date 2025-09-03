@@ -29,8 +29,7 @@ class OCLReadWriteImage : public OCLTestImp {
   virtual ~OCLReadWriteImage();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -43,8 +42,8 @@ class OCLReadWriteImage : public OCLTestImp {
   size_t imageDepth;
   size_t bufferSize;
   cl_sampler sampler;
-  bool verifyImageData(unsigned char* inputImageData, unsigned char* output,
-                       size_t width, size_t height);
+  bool verifyImageData(unsigned char* inputImageData, unsigned char* output, size_t width,
+                       size_t height);
 };
 
 #endif  // _OCL_READ_WRITE_IMAGE_H_

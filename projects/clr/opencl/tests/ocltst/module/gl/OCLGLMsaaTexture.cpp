@@ -84,17 +84,14 @@ void OCLGLMsaaTexture::open(unsigned int test, char* units, double& conversion,
   _currentTest = test;
 
   // Build the kernel
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateProgramWithSource()  failed (%d)", error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -154,8 +151,7 @@ unsigned int OCLGLMsaaTexture::close(void) {
   return OCLGLCommon::close();
 }
 
-bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat,
-                                    unsigned int numSamples) {
+bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat, unsigned int numSamples) {
   size_t dimSizes[] = {c_dimSize, c_dimSize};
 
   unsigned int bufferSize = c_dimSize * c_dimSize * 4;
@@ -171,19 +167,17 @@ bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat,
   // create   textures
   glGenTextures(1, &msaaColorBuffer_);
   glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msaaColorBuffer_);
-  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, numSamples, GL_RGBA8,
-                          c_dimSize, c_dimSize, GL_TRUE);
+  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, numSamples, GL_RGBA8, c_dimSize, c_dimSize,
+                          GL_TRUE);
 
   glGenTextures(1, &msaaDepthBuffer_);
   glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msaaDepthBuffer_);
-  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, numSamples,
-                          GL_DEPTH_COMPONENT24, c_dimSize, c_dimSize, GL_TRUE);
+  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, numSamples, GL_DEPTH_COMPONENT24, c_dimSize,
+                          c_dimSize, GL_TRUE);
 
   //
-  glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, msaaColorBuffer_,
-                       0);
-  glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, msaaDepthBuffer_,
-                       0);
+  glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, msaaColorBuffer_, 0);
+  glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, msaaDepthBuffer_, 0);
 
   // verify all resource allocations are well.
   GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -199,32 +193,27 @@ bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat,
   glLoadIdentity();
   glEnable(GL_DEPTH_TEST);
   // The Type Of Depth Testing To Do
-  glClear(GL_COLOR_BUFFER_BIT |
-          GL_DEPTH_BUFFER_BIT);     // Clear Screen And Depth Buffer
-  glBegin(GL_QUADS);                // Draw A Quad
-  glVertex3f(-1.0f, 1.0f, -6.0f);   // Top Left
-  glVertex3f(1.0f, 1.0f, -6.0f);    // Top Right
-  glVertex3f(1.0f, -1.0f, -3.0f);   // Bottom Right
-  glVertex3f(-1.0f, -1.0f, -3.0f);  // Bottom Left
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);  // Clear Screen And Depth Buffer
+  glBegin(GL_QUADS);                                   // Draw A Quad
+  glVertex3f(-1.0f, 1.0f, -6.0f);                      // Top Left
+  glVertex3f(1.0f, 1.0f, -6.0f);                       // Top Right
+  glVertex3f(1.0f, -1.0f, -3.0f);                      // Bottom Right
+  glVertex3f(-1.0f, -1.0f, -3.0f);                     // Bottom Left
   glEnd();
 
   glFinish();
   cl_int error;
-  clOutputBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY,
-                                             bufferSize, NULL, &error);
+  clOutputBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufferSize, NULL, &error);
   if (CL_SUCCESS != error) return false;
 
-  clMsaa_ = _wrapper->clCreateFromGLTexture(context_, CL_MEM_READ_WRITE,
-                                            GL_TEXTURE_2D_MULTISAMPLE, 0,
-                                            msaaColorBuffer_, &error);
+  clMsaa_ = _wrapper->clCreateFromGLTexture(context_, CL_MEM_READ_WRITE, GL_TEXTURE_2D_MULTISAMPLE,
+                                            0, msaaColorBuffer_, &error);
   if (CL_SUCCESS != error) return false;
 
   GLsizei samples;
-  error = _wrapper->clGetGLTextureInfo(clMsaa_, CL_GL_NUM_SAMPLES,
-                                       sizeof(samples), &samples, NULL);
+  error = _wrapper->clGetGLTextureInfo(clMsaa_, CL_GL_NUM_SAMPLES, sizeof(samples), &samples, NULL);
 
-  error = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 1,
-                                              &clMsaa_, 0, NULL, NULL);
+  error = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 1, &clMsaa_, 0, NULL, NULL);
   if (CL_SUCCESS != error) return false;
 
   _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &clOutputBuffer_);
@@ -233,17 +222,16 @@ bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat,
 
   _wrapper->clSetKernelArg(kernel_, 2, sizeof(unsigned int), &numSamples);
 
-  _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL,
-                                   dimSizes, NULL, 0, NULL, NULL);
+  _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL, dimSizes, NULL, 0, NULL,
+                                   NULL);
 
-  _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 1, &clMsaa_, 0,
-                                      NULL, NULL);
+  _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 1, &clMsaa_, 0, NULL, NULL);
 
   pGLOutput_ = (unsigned int*)malloc(bufferSize);
   pCLOutput_ = (unsigned int*)malloc(bufferSize);
 
-  _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], clOutputBuffer_, CL_TRUE,
-                                0, bufferSize, pCLOutput_, 0, NULL, NULL);
+  _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], clOutputBuffer_, CL_TRUE, 0, bufferSize,
+                                pCLOutput_, 0, NULL, NULL);
 
   // down sample
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -251,8 +239,7 @@ bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat,
   glUseProgram(glprogram_);
 
   glUniform1i(glGetUniformLocation(glprogram_, "numSamples"), numSamples);
-  glUniform2i(glGetUniformLocation(glprogram_, "resolution"), c_dimSize,
-              c_dimSize);
+  glUniform2i(glGetUniformLocation(glprogram_, "resolution"), c_dimSize, c_dimSize);
   glUniform1i(glGetUniformLocation(glprogram_, "MsaaTex"), 0);
 
   // printOpenGLError();
@@ -271,8 +258,7 @@ bool OCLGLMsaaTexture::testMsaaRead(GLint internalFormat,
   glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
   glUseProgram(0);
 
-  glReadPixels(0, 0, c_dimSize, c_dimSize, GL_BGRA, GL_UNSIGNED_BYTE,
-               pGLOutput_);
+  glReadPixels(0, 0, c_dimSize, c_dimSize, GL_BGRA, GL_UNSIGNED_BYTE, pGLOutput_);
 
   if (absDiff(pGLOutput_, pCLOutput_, c_dimSize)) retVal = true;
 
