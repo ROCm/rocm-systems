@@ -263,6 +263,9 @@ struct formatter<hipMemAllocationType> : rocprofiler::hip::details::base_formatt
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Invalid);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Pinned);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Max);
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Uncached);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemAllocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
