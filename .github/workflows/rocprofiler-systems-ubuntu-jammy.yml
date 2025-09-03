@@ -375,9 +375,11 @@ jobs:
 
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+      options: --cap-add CAP_SYS_ADMIN
 
     env:
       ROCPROFSYS_VERBOSE: 2
+      ROCPROFSYS_CAUSAL_BACKEND: perf
       ROCPROFSYS_CI: 'ON'
 
     steps:
