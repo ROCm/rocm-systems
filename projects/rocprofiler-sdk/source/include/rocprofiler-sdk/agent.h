@@ -126,8 +126,7 @@ ROCPROFILER_CXX_CODE(
  */
 typedef struct rocprofiler_agent_fw_info_v0_t
 {
-    uint64_t size;  ///< set to sizeof(rocprofiler_agent_fw_info_v0_t) by rocprofiler. This can be used for
-                    ///< versioning and compatibility handling
+    uint64_t size;  ///< size of this struct
     uint32_t mec2_fw_version;      ///< Firmware version for MEC2 engine
     uint32_t mec_fw_version;       ///< Firmware version for MEC engine
     uint32_t rlc_fw_version;       ///< Firmware version for RLC engine

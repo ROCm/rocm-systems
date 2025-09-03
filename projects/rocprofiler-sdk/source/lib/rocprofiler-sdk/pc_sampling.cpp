@@ -159,9 +159,6 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-    if(!rocprofiler::pc_sampling::ioctl::is_pc_sampling_firmware_version_correct(agent, method))
-        return ROCPROFILER_STATUS_FIRMWARE_INCOMPATIBLE;
-
     // checking if the registered context exists
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
@@ -201,7 +198,6 @@ rocprofiler_query_pc_sampling_agent_configurations(
 
     std::vector<rocprofiler_pc_sampling_configuration_t> configs;
     auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, configs);
-
     return (status == ROCPROFILER_STATUS_SUCCESS) ? cb(configs.data(), configs.size(), user_data)
                                                   : status;
 #else

@@ -118,8 +118,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,
                           "Agent HW architecture is not supported, no counter metrics found.")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,
                           "Required permission (CAP_PERFMON) is not set, permission denied")
-ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_FIRMWARE_INCOMPATIBLE,
-                          "Installed firmware version is incompatible with the selected service")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_INCOMPATIBLE_FIRMWARE,
+                          "The selected service is incompatible with the installed firmware version")
 
 template <size_t Idx, size_t... Tail>
 const char*

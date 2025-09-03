@@ -620,7 +620,7 @@ read_fw_info(const char* fname, uint32_t drm_render_minor)
             return static_cast<uint32_t>(std::stoul(fw_value, nullptr, 0));
         } catch(const std::exception&)
         {
-            // ignore parse error, fall through to return 0
+            ROCP_WARNING << "Failed to parse firmware version from file: " << fw_path.string();
         }
     }
     return kInvalidFirmwareVersion;
