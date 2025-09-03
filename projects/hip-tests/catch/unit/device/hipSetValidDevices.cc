@@ -102,7 +102,7 @@ static void performOperations() {
 TEST_CASE("Unit_hipSetValidDevices_Negative") {
   auto totalDevices = HipTest::getDeviceCount();
   int device_arr1[] = {0};
-  int device_arr2[] = {totalDevices, 1};
+  int device_arr2[] = {totalDevices};
 
   SECTION("Devicearray - nullptr") {
     HIP_CHECK_ERROR(hipSetValidDevices(nullptr, 1), hipErrorInvalidValue);
@@ -111,7 +111,7 @@ TEST_CASE("Unit_hipSetValidDevices_Negative") {
     HIP_CHECK_ERROR(hipSetValidDevices(device_arr1, totalDevices + 2), hipErrorInvalidValue);
   }
   SECTION("DeviceId is not valid") {
-    HIP_CHECK_ERROR(hipSetValidDevices(device_arr2, 2), hipErrorInvalidDevice);
+    HIP_CHECK_ERROR(hipSetValidDevices(device_arr2, 1), hipErrorInvalidDevice);
   }
 }
 
