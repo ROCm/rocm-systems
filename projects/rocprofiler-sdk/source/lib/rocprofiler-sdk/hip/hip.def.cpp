@@ -597,6 +597,28 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange_fn, handle, dptr, size, handleType, flags);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetFunctionCount, hipModuleGetFunctionCount, hipModuleGetFunctionCount_fn, count, mod);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8, hipMemsetD2D8, hipMemsetD2D8_fn, dst, dstPitch, value, width, height);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8Async, hipMemsetD2D8Async, hipMemsetD2D8Async_fn, dst, dstPitch, value, width, height, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16, hipMemsetD2D16, hipMemsetD2D16_fn, dst, dstPitch, value, width, height);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16Async, hipMemsetD2D16Async, hipMemsetD2D16Async_fn, dst, dstPitch, value, width, height, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32, hipMemsetD2D32, hipMemsetD2D32_fn, dst, dstPitch, value, width, height);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32Async, hipMemsetD2D32Async, hipMemsetD2D32Async_fn, dst, dstPitch, value, width, height, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetAttribute, hipStreamGetAttribute, hipStreamGetAttribute_fn, stream, attr, value_out);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamSetAttribute, hipStreamSetAttribute, hipStreamSetAttribute_fn, stream, attr, value);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleLoadFatBinary, hipModuleLoadFatBinary, hipModuleLoadFatBinary_fn, module, fatbin);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyBatchAsync, hipMemcpyBatchAsync, hipMemcpyBatchAsync_fn, dsts, srcs, sizes, attrs, attrsIdxs, numAttrs, failIdx, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DBatchAsync, hipMemcpy3DBatchAsync, hipMemcpy3DBatchAsync_fn, numOps, opList, failIdx, flags, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DPeer, hipMemcpy3DPeer, hipMemcpy3DPeer_fn, p);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DPeerAsync, hipMemcpy3DPeerAsync, hipMemcpy3DPeerAsync_fn, p, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGetDriverEntryPoint, hipGetDriverEntryPoint, hipGetDriverEntryPoint_fn, symbol, funcPtr, flags, driverStatus);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGetDriverEntryPoint_spt, hipGetDriverEntryPoint_spt, hipGetDriverEntryPoint_spt_fn, symbol, funcPtr, flags, driverStatus);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchAsync_v2, hipMemPrefetchAsync_v2, hipMemPrefetchAsync_v2_fn, dev_ptr, count, location, flags, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemAdvise_v2, hipMemAdvise_v2, hipMemAdvise_v2_fn, dev_ptr, count, advice, location);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetId, hipStreamGetId, hipStreamGetId_fn, stream, streamId);
+#endif
 // clang-format on
 
 #else
