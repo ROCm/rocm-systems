@@ -78,6 +78,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GPU_RUNNER: 'rocprofiler-mi300a-dind'
       GCC_COMPILER_VERSION: 11
       ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
