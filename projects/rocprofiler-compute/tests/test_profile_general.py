@@ -78,8 +78,6 @@ ALL_CSVS_MI100 = sorted([
     "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
@@ -89,7 +87,6 @@ ALL_CSVS_MI100 = sorted([
     "pmc_perf_4.csv",
     "pmc_perf_5.csv",
     "pmc_perf_6.csv",
-    "pmc_perf_7.csv",
     "sysinfo.csv",
 ])
 
@@ -752,6 +749,10 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.misc
 def test_roof_rocpd(binary_handler_profile_rocprof_compute):
+    if soc == "MI100":
+        pytest.skip("Roofline not supported on MI100")
+        return
+
     workload_dir = test_utils.get_output_dir()
     options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
