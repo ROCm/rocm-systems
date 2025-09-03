@@ -54,6 +54,7 @@ env:
   mi3xx_EXCLUDE_LABEL_REGEX: ""
   navi4_EXCLUDE_LABEL_REGEX: ""
   GLOBAL_CMAKE_OPTIONS: ""
+  DISABLE_ROCR_BUILD: "true"
 
 jobs:
   code-coverage:
@@ -262,6 +263,7 @@ jobs:
         echo "✅ ROCProfiler-Register Installation complete!"
 
     - name: Build and Install ROCR-Runtime
+      if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
