@@ -617,7 +617,7 @@ struct formatter<hipDriverEntryPointQueryResult> : rocprofiler::hip::details::ba
         {
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, Success);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, SymbolNotFound);
-            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, VersionNotSufficent);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, VersionNotSufficient);
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipDriverEntryPointQueryResult);
         }
         return fmt::format_to(ctx.out(), "Unknown");
