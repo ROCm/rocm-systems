@@ -288,7 +288,8 @@ def process_table_data(
                     table_type == "metric_table" and header not in hidden_cols
                 ):
                     if run_name != base_run:
-                        # Calculate percentage difference between current and base dataframe.
+                        # Calculate percentage difference between current and
+                        # base dataframe.
                         base_values = [
                             float(x) if x != "" else 0.0 for x in base_df[header]
                         ]
@@ -332,7 +333,8 @@ def process_table_data(
                                     percentage_diff.abs() > args.report_diff
                                 ]
                                 console_warning(
-                                    f"Dataframe diff exceeds {args.report_diff}% threshold requirement\n"
+                                    f"Dataframe diff exceeds {args.report_diff}% "
+                                    "threshold requirement\n"
                                     f"See metric {violation_idx.to_numpy()}"
                                 )
                                 console_warning(result_df)

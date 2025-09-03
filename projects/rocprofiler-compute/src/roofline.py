@@ -202,8 +202,10 @@ class Roofline:
         if unique_kernels != len(args.kernel):
             console_debug(f"Profiled kernels: {df_list}\n`--kernel`: {args.kernel}")
             console_error(
-                "Roofline cannot profile - kernels requested with `--kernel` missing from profiling data!\n"
-                "\tRe-profile workload in full or specify subset of available kernels using `--kernel` option.\n"
+                "Roofline cannot profile - kernels requested with `--kernel` missing "
+                "from profiling data!\n"
+                "\tRe-profile workload in full or specify subset of available kernels "
+                "using `--kernel` option.\n"
                 "\tComplete profiled kernels list can be found in pmc_perf file.",
                 exit=True,
             )
@@ -655,7 +657,10 @@ class Roofline:
                         (
                             None
                             if self.__run_parameters["is_standalone"]
-                            else f"{to_int(self.__ceiling_data['valu'][2])} G{ops_flops}/s"
+                            else (
+                                f"{to_int(self.__ceiling_data['valu'][2])} G"
+                                f"{ops_flops}/s"
+                            )
                         ),
                         f"{to_int(self.__ceiling_data['valu'][2])} G{ops_flops}/s",
                     ],
@@ -676,7 +681,8 @@ class Roofline:
                         (
                             None
                             if self.__run_parameters["is_standalone"]
-                            else f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s"
+                            else
+                            (f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s")
                         ),
                         f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s",
                     ],
@@ -710,7 +716,8 @@ class Roofline:
         if not (str(dtype) in SUPPORTED_DATATYPES[self.__mspec.gpu_arch]):
             console_error(
                 f"{dtype} is not a supported datatype for roofline profiling on "
-                f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: {self.__mspec.gpu_arch})",
+                f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: "
+                f"{self.__mspec.gpu_arch})",
                 exit=False,
             )
             return
@@ -844,8 +851,10 @@ class Roofline:
             )
             console_debug(
                 "roofline",
-                f"{cache_level}: [{self.__ceiling_data[cache_key][0][0]},{self.__ceiling_data[cache_key][0][1]}], "
-                f"[{self.__ceiling_data[cache_key][1][0]},{self.__ceiling_data[cache_key][1][1]}], "
+                f"{cache_level}: [{self.__ceiling_data[cache_key][0][0]},"
+                f"{self.__ceiling_data[cache_key][0][1]}], "
+                f"[{self.__ceiling_data[cache_key][1][0]},"
+                f"{self.__ceiling_data[cache_key][1][1]}], "
                 f"{self.__ceiling_data[cache_key][2]}",
             )
 
@@ -871,8 +880,10 @@ class Roofline:
             )
             console_debug(
                 "roofline",
-                f"VALU: [{self.__ceiling_data['valu'][0][0]},{self.__ceiling_data['valu'][0][1]}], "
-                f"[{self.__ceiling_data['valu'][1][0]},{self.__ceiling_data['valu'][1][1]}], "
+                f"VALU: [{self.__ceiling_data['valu'][0][0]},"
+                f"{self.__ceiling_data['valu'][0][1]}], "
+                f"[{self.__ceiling_data['valu'][1][0]},"
+                f"{self.__ceiling_data['valu'][1][1]}], "
                 f"{self.__ceiling_data['valu'][2]}",
             )
         else:
@@ -899,8 +910,10 @@ class Roofline:
             )
             console_debug(
                 "roofline",
-                f"MFMA: [{self.__ceiling_data['mfma'][0][0]},{self.__ceiling_data['mfma'][0][1]}], "
-                f"[{self.__ceiling_data['mfma'][1][0]},{self.__ceiling_data['mfma'][1][1]}], "
+                f"MFMA: [{self.__ceiling_data['mfma'][0][0]},"
+                f"{self.__ceiling_data['mfma'][0][1]}], "
+                f"[{self.__ceiling_data['mfma'][1][0]},"
+                f"{self.__ceiling_data['mfma'][1][1]}], "
                 f"{self.__ceiling_data['mfma'][2]}",
             )
         else:
@@ -925,10 +938,14 @@ class Roofline:
                     )
                 console_debug(
                     "roofline",
-                    f"AI_{kernel_names[i]}: {self.__ai_data[key][0][i] if i < len(self.__ai_data[key][0]) else 'N/A'}, "
-                    f"{self.__ai_data[key][1][i] if i < len(self.__ai_data[key][1]) else 'N/A'}",
+                    f"AI_{kernel_names[i]}: "
+                    f"{self.__ai_data[key][0][i]
+                    if i < len(self.__ai_data[key][0])
+                    else 'N/A'}, "
+                    f"{self.__ai_data[key][1][i]
+                    if i < len(self.__ai_data[key][1])
+                    else 'N/A'}",
                 )
-
         plt.xlabel(f"Arithmetic Intensity ({ops_flops}s/Byte)")
         plt.ylabel("Performance (GFLOP/sec)")
         plt.title(f"Roofline ({dtype}) - {base_path}")

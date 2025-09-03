@@ -237,7 +237,8 @@ def detect_rocprof(args: Any) -> str:
     if os.environ.get("ROCPROF") == "rocprofiler-sdk":
         if not Path(args.rocprofiler_sdk_library_path).exists():
             console_error(
-                f"Could not find rocprofiler-sdk library at {args.rocprofiler_sdk_library_path}"
+                "Could not find rocprofiler-sdk library at "
+                f"{args.rocprofiler_sdk_library_path}"
             )
         rocprof_cmd = "rocprofiler-sdk"
         console_debug(f"rocprof_cmd is {rocprof_cmd}")
@@ -1193,7 +1194,8 @@ def detect_roofline(mspec: Any) -> dict[str, Any]:
         else:
             console_error(
                 "roofline",
-                f"user-supplied path to binary not accessible --> ROOFLINE_BIN = {rooflineBinary}\n",
+                "user-supplied path to binary not accessible --> "
+                f"ROOFLINE_BIN = {rooflineBinary}\n",
             )
 
     # Must be a valid RHEL machine
@@ -1364,7 +1366,8 @@ def is_workload_empty(path: str) -> None:
         if temp_df.dropna().empty:
             console_error(
                 "profiling",
-                f"Found empty cells in {pmc_perf_path}.\nProfiling data could be corrupt.",
+                f"Found empty cells in {pmc_perf_path}.\n"
+                "Profiling data could be corrupt.",
             )
     else:
         console_error("analysis", "No profiling data found.")

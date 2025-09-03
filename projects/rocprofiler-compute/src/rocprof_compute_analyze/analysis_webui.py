@@ -440,7 +440,10 @@ def determine_chart_type(
 
     # subtitle for each table in a panel if existing
     if table_config.get("title"):
-        subtitle = f"{table_config['id'] // 100}.{table_config['id'] % 100} {table_config['title']}\n"
+        subtitle = (
+            f"{table_config['id'] // 100}.{table_config['id'] % 100} "
+            f"{table_config['title']}\n"
+        )
 
         content.insert(
             0,

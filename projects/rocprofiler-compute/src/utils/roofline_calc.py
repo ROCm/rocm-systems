@@ -27,7 +27,7 @@
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import pandas as pd
 
@@ -227,7 +227,7 @@ def calc_ceilings(
 
     peak_ops = 0.0
     if dtype in PEAK_OPS_DATATYPES:
-        peakOps = float(
+        peak_ops = float(
             benchmark_data[f"{dtype}{ops_flops}"][roofline_parameters["device_id"]]
         )
 

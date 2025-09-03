@@ -509,7 +509,8 @@ class OmniSoC_Base:
                 # return code should be 1 so success should be False
                 if success:
                     console_error(
-                        f"Failed to list rocprof supported counters using command: {command}"
+                        "Failed to list rocprof supported counters using command: "
+                        f"{command}"
                     )
 
                 for line in output.splitlines():
@@ -524,7 +525,8 @@ class OmniSoC_Base:
             # return code should be 1 so success should be False
             if success:
                 console_error(
-                    f"Failed to list rocprof supported counters using command: {command}"
+                    "Failed to list rocprof supported counters using command: "
+                    f"{command}"
                 )
 
             for line in output.splitlines():
@@ -610,7 +612,8 @@ class OmniSoC_Base:
 
         if not_supported_counters:
             console_warning(
-                f"Following counters might not be supported by rocprof: {', '.join(not_supported_counters)}"
+                "Following counters might not be supported by rocprof: "
+                f"{', '.join(not_supported_counters)}"
             )
 
         # We might be providing definitions of unsupported counters, so still try to
@@ -705,9 +708,12 @@ class OmniSoC_Base:
 
             console_debug(
                 "profiling",
-                f"spatial_multiplexing node_idx {node_idx}, node_count {node_count}, gpu_count: {gpu_count},\n"
-                f"old_group_num {old_group_num}, new_bucket_count {new_bucket_count}, groups_per_bucket {groups_per_bucket},\n"
-                f"max_groups_per_node {max_groups_per_node}, group_start {group_start}, group_end {group_end}",
+                f"spatial_multiplexing node_idx {node_idx}, node_count {node_count}, "
+                f"gpu_count: {gpu_count},\n"
+                f"old_group_num {old_group_num}, new_bucket_count {new_bucket_count}, "
+                f"groups_per_bucket {groups_per_bucket},\n"
+                f"max_groups_per_node {max_groups_per_node}, "
+                f"group_start {group_start}, group_end {group_end}",
             )
 
             for f_idx in range(groups_per_bucket):

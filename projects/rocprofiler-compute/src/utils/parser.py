@@ -1148,7 +1148,8 @@ def apply_filters(
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(
                         f"{kernel_id} is an invalid kernel id. "
-                        f"Please enter an id between 0-{len(kernels_df['Kernel_Name']) - 1}"
+                        f"Please enter an id between 0-"
+                        f"{len(kernels_df['Kernel_Name']) - 1}"
                     )
 
             kernels = []
@@ -1620,8 +1621,8 @@ def load_non_mertrics_table(workload: Any, directory: str, args: Any) -> None:
                 )
         elif "from_csv_columnwise" in df.columns:
             if table_id == 101:
-                # NB: Special case for sysinfo. Probably room for improvement in this whole
-                # function design
+                # NB: Special case for sysinfo. Probably room for improvement in this
+                # whole function design
                 tmp[table_id] = workload.sys_info.transpose()
                 # All transposed columns should be marked with a general header
                 tmp[table_id].columns = ["Info"]

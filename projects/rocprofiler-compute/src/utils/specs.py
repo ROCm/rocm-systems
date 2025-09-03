@@ -118,7 +118,8 @@ def generate_machine_specs(
 
             if sysinfo_ver != curr_ver:
                 console_warning(
-                    "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
+                    "Detected mismatch in sysinfo versioning. "
+                    "You need to reprofile to update data."
                 )
 
             return MachineSpecs(**sysinfo)
@@ -301,7 +302,9 @@ def extract_gpu_info() -> dict[str, Any]:
         console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
-        f"vbios is {result['vbios']}, compute partition is {result['compute_partition']}, memory partition is {result['memory_partition']}"
+        f"vbios is {result['vbios']}, compute partition is "
+        f"{result['compute_partition']}, memory partition is "
+        f"{result['memory_partition']}"
     )
 
     return result
@@ -861,7 +864,8 @@ def get_rocm_ver() -> str:
     if ROCM_VER_USER:
         console_log(
             "profiling",
-            f"Overriding missing ROCm version detection with ROCM_VER = {ROCM_VER_USER}",
+            "Overriding missing ROCm version detection with "
+            f"ROCM_VER = {ROCM_VER_USER}",
         )
         return ROCM_VER_USER
 

@@ -322,18 +322,20 @@ class RocProfCompute_Base:
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
 
-        if not self.__args.remaining:
+        if not args.remaining:
             console_error(
                 "profiling",
                 "Profiling command required. Pass application executable after -- "
                 "at the end of options.\n"
-                "\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256",
+                "\t\ti.e. rocprof-compute profile -n vcopy "
+                "-- ./vcopy -n 1048576 -b 256",
             )
 
         # Ensure that command points to an executable
         if not shutil.which(args.remaining[0]):
             console_error(
-                f"Your command {self.__args.remaining[0]} doesn't point to a executable. Please verify."
+                f"Your command {args.remaining[0]} doesn't point to an executable."
+                "Please verify."
             )
         args.remaining = " ".join(args.remaining)
 
@@ -457,7 +459,8 @@ class RocProfCompute_Base:
                 total_profiling_time += duration
 
                 console_debug(
-                    f"The time of run_prof of {fname} is {int(duration / 60)} m {duration % 60} sec"
+                    f"The time of run_prof of {fname} is {int(duration / 60)} min"
+                    f" {duration % 60} sec"
                 )
             else:
                 console_error("Profiler not supported")
@@ -489,7 +492,8 @@ class RocProfCompute_Base:
         duration = end_time - start_time
         console_debug(
             "profiling",
-            f"The time of pc sampling profiling is {int(duration / 60)} m {duration % 60} sec",
+            f"The time of pc sampling profiling is {int(duration / 60)} m "
+            f"{duration % 60} sec",
         )
 
     @abstractmethod
