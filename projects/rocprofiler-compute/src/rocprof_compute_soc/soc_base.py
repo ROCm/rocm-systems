@@ -32,7 +32,7 @@ import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import yaml
 

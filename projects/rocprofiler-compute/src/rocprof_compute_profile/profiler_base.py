@@ -141,7 +141,7 @@ class RocProfCompute_Base:
                 key = current_df.groupby("Kernel_Name").cumcount()
                 current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
             elif args.join_type == "grid":
-                key = _df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
+                key = current_df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
                 current_df["key"] = (
                     current_df["Kernel_Name"]
                     + " - "

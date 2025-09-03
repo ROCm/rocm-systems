@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-from typing import Any, Optional
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
