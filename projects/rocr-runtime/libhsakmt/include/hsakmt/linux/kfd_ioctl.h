@@ -43,9 +43,10 @@
  * - 1.15 - Enable managing mappings in compute VMs with GEM_VA ioctl
  * - 1.16 - Add contiguous VRAM allocation flag
  * - 1.17 - Add SDMA queue creation with target SDMA engine ID
+ * - 1.18 - Rename pad in set_memory_policy_args to misc_process_flag
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 17
+#define KFD_IOCTL_MINOR_VERSION 18
 
 struct kfd_ioctl_get_version_args {
 	__u32 major_version;	/* from KFD */
@@ -364,7 +365,7 @@ enum kfd_dbg_trap_exception_code {
 			(!!(KFD_EC_MASK(ecode) & KFD_EC_MASK_PROCESS))
 
 /* Misc. per process flags */
-#define ENABLE_MFMA_HIGH_PRECISION              (1 << 0)
+#define KFD_PROC_FLAG_MFMA_HIGH_PRECISION              (1 << 0)
 
 enum kfd_dbg_runtime_state {
 	DEBUG_RUNTIME_STATE_DISABLED = 0,
