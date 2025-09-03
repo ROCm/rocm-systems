@@ -23,15 +23,18 @@
 
 ##############################################################################
 
+from typing import Any
+
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 
 
 class gfx908_soc(OmniSoC_Base):
-    def __init__(self, args, mspec):
+    def __init__(self, args: Any, mspec: Any) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx908")
+
         self.set_compatible_profilers(["rocprofv1", "rocprofv3", "rocprofiler-sdk"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx908"))
@@ -45,20 +48,21 @@ class gfx908_soc(OmniSoC_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def profiling_setup(self):
+    def profiling_setup(self) -> None:
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         if self.get_args().roof_only:
-            console_error("%s does not support roofline analysis" % self.get_arch())
+            console_error(f"{self.get_arch()} does not support roofline analysis")
+
         # Perfmon filtering
         self.perfmon_filter(self.get_args().roof_only)
 
     @demarcate
-    def post_profiling(self):
+    def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
 
     @demarcate
-    def analysis_setup(self):
+    def analysis_setup(self) -> None:
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()

@@ -32,7 +32,9 @@ import shutil
 import time
 from abc import abstractmethod
 from pathlib import Path
+from typing import Any, Optional
 
+import numpy as np
 import pandas as pd
 
 from utils.logger import (
@@ -53,29 +55,34 @@ from utils.utils import (
 
 
 class RocProfCompute_Base:
-    def __init__(self, args, profiler_mode, soc, supported_archs):
+    def __init__(
+        self, args: Any, profiler_mode: str, soc: Any, supported_archs: dict[str, Any]
+    ) -> None:
         self.__args = args
         self.__profiler = profiler_mode
         self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
 
-    def get_args(self):
+    def get_args(self) -> Any:
         return self.__args
 
-    def get_profiler_options(self, fname, soc):
+    def get_profiler_options(self, fname: str, soc: Any) -> Any:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
-        return []
+        return {}
 
     @demarcate
-    def join_prof(self, out=None):
+    def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
         """Manually join separated rocprof runs"""
-        if self.get_args().format_rocprof_output == "rocpd":
+        args = self.get_args()
+        output_file = out or f"{args.path}/pmc_perf.csv"
+
+        # handle rocpd format
+        if args.format_rocprof_output == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = glob.glob(self.get_args().path + "/results_*.csv")
-            if out is None:
-                out = self.__args.path + "/pmc_perf.csv"
-            with open(out, "w", newline="") as outfile:
+            result_files = glob.glob(f"{args.path}/results_*.csv")
+
+            with open(output_file, "w", newline="") as outfile:
                 writer = None
                 for file in result_files:
                     with open(file, "r", newline="") as infile:
@@ -87,7 +94,9 @@ class RocProfCompute_Base:
                             writer.writerow(header)
                         for row in reader:
                             writer.writerow(row)
-            console_debug(f"Created file: {out}")
+
+            console_debug(f"Created file: {output_file}")
+
             # Delete results_*.csv files
             for file in result_files:
                 os.remove(file)
@@ -95,14 +104,12 @@ class RocProfCompute_Base:
             return
 
         # Set default output directory if not specified
-        if isinstance(self.__args.path, str):
-            if out is None:
-                out = self.__args.path + "/pmc_perf.csv"
-            files = glob.glob(self.__args.path + "/" + "pmc_perf_*.csv")
-            files.extend(glob.glob(self.__args.path + "/" + "SQ_*.csv"))
-            files.extend(glob.glob(self.__args.path + "/" + "SQC_*.csv"))
+        if isinstance(args.path, str):
+            files = glob.glob(args.path + "/" + "pmc_perf_*.csv")
+            files.extend(glob.glob(args.path + "/" + "SQ_*.csv"))
+            files.extend(glob.glob(args.path + "/" + "SQC_*.csv"))
 
-            if self.get_args().hip_trace:
+            if args.hip_trace:
                 # remove hip api trace ouputs from this list
                 files = [
                     f
@@ -112,7 +119,7 @@ class RocProfCompute_Base:
                     )
                 ]
 
-            if self.get_args().kokkos_trace:
+            if args.kokkos_trace:
                 # remove marker api trace ouputs from this list
                 files = [
                     f
@@ -121,39 +128,39 @@ class RocProfCompute_Base:
                         os.path.basename(f)
                     )
                 ]
-        elif isinstance(self.__args.path, list):
-            files = self.__args.path
+        elif isinstance(args.path, list):
+            files = args.path
         else:
-            console_error(
-                "Invalid workload directory. Cannot resolve %s" % self.__args.path
-            )
+            console_error(f"Invalid workload directory. Cannot resolve {args.path}")
 
+        # Process files and create joined dataframe
         df = None
         for i, file in enumerate(files):
-            _df = pd.read_csv(file) if isinstance(self.__args.path, str) else file
-            if self.__args.join_type == "kernel":
-                key = _df.groupby("Kernel_Name").cumcount()
-                _df["key"] = _df.Kernel_Name + " - " + key.astype(str)
-            elif self.__args.join_type == "grid":
+            current_df = pd.read_csv(file) if isinstance(args.path, str) else file
+            if args.join_type == "kernel":
+                key = current_df.groupby("Kernel_Name").cumcount()
+                current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
+            elif args.join_type == "grid":
                 key = _df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
-                _df["key"] = (
-                    _df["Kernel_Name"]
+                current_df["key"] = (
+                    current_df["Kernel_Name"]
                     + " - "
-                    + _df["Grid_Size"].astype(str)
+                    + current_df["Grid_Size"].astype(str)
                     + " - "
                     + key.astype(str)
                 )
             else:
                 console_error(
-                    "%s is an unrecognized option for --join-type"
-                    % self.__args.join_type
+                    f"{args.join_type} is an unrecognized option for --join-type"
                 )
 
             if df is None:
-                df = _df
+                df = current_df
             else:
                 # join by unique index of kernel
-                df = pd.merge(df, _df, how="inner", on="key", suffixes=("", f"_{i}"))
+                df = pd.merge(
+                    df, current_df, how="inner", on="key", suffixes=("", f"_{i}")
+                )
 
         if df is None or df.empty:
             return
@@ -173,6 +180,7 @@ class RocProfCompute_Base:
             ],
             "SGPR": [col for col in df.columns if col.startswith("SGPR")],
         }
+
         # Check for vgpr counter in ROCm < 5.3
         if "vgpr" in df.columns:
             duplicate_cols["vgpr"] = [
@@ -186,108 +194,106 @@ class RocProfCompute_Base:
             duplicate_cols["Accum_VGPR"] = [
                 col for col in df.columns if col.startswith("Accum_VGPR")
             ]
+
         for key, cols in duplicate_cols.items():
-            _df = df[cols]
-            if not test_df_column_equality(_df):
-                msg = "Detected differing {} values while joining pmc_perf.csv".format(
-                    key
+            current_df = df[cols]
+            if not test_df_column_equality(current_df):
+                console_warning(
+                    f"Detected differing {key} values while joining pmc_perf.csv"
                 )
-                console_warning(msg)
             else:
-                msg = "Successfully joined {} in pmc_perf.csv".format(key)
-                console_debug(msg)
+                console_debug(f"Successfully joined {key} in pmc_perf.csv")
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
+        columns_to_remove = [
+            # rocprofv2 headers
+            "GPU_ID_",
+            "Grid_Size_",
+            "Workgroup_Size_",
+            "LDS_Per_Workgroup_",
+            "Scratch_Per_Workitem_",
+            "vgpr_",
+            "Arch_VGPR_",
+            "Accum_VGPR_",
+            "SGPR_",
+            "Dispatch_ID_",
+            "Queue_ID",
+            "Queue_Index",
+            "PID",
+            "TID",
+            "SIG",
+            "OBJ",
+            "Correlation_ID_",
+            "Wave_Size_",
+            # rocscope specific merged counters, keep original
+            "dispatch_",
+            # extras
+            "sig",
+            "queue-id",
+            "queue-index",
+            "pid",
+            "tid",
+            "fbar",
+        ]
+
         df = df[
             [
-                k
-                for k in df.keys()
-                if not any(
-                    k.startswith(check)
-                    for check in [
-                        # rocprofv2 headers
-                        "GPU_ID_",
-                        "Grid_Size_",
-                        "Workgroup_Size_",
-                        "LDS_Per_Workgroup_",
-                        "Scratch_Per_Workitem_",
-                        "vgpr_",
-                        "Arch_VGPR_",
-                        "Accum_VGPR_",
-                        "SGPR_",
-                        "Dispatch_ID_",
-                        "Queue_ID",
-                        "Queue_Index",
-                        "PID",
-                        "TID",
-                        "SIG",
-                        "OBJ",
-                        "Correlation_ID_",
-                        "Wave_Size_",
-                        # rocscope specific merged counters, keep original
-                        "dispatch_",
-                        # extras
-                        "sig",
-                        "queue-id",
-                        "queue-index",
-                        "pid",
-                        "tid",
-                        "fbar",
-                    ]
-                )
+                col
+                for col in df.columns
+                if not any(col.startswith(prefix) for prefix in columns_to_remove)
             ]
         ]
+
         #   B) any timestamps that are _not_ the duration,
         #      which is the one we care about
+        timestamp_patterns = ["DispatchNs", "CompleteNs", "HostDuration"]
+
         df = df[
             [
-                k
-                for k in df.keys()
-                if not any(
-                    check in k
-                    for check in [
-                        "DispatchNs",
-                        "CompleteNs",
-                        # rocscope specific timestamp
-                        "HostDuration",
-                    ]
-                )
+                col
+                for col in df.columns
+                if not any(pattern in col for pattern in timestamp_patterns)
             ]
         ]
+
         #   C) sanity check the name and key
-        namekeys = [k for k in df.keys() if "Kernel_Name" in k]
-        assert len(namekeys)
-        for k in namekeys[1:]:
-            assert (df[namekeys[0]] == df[k]).all()
-        df = df.drop(columns=namekeys[1:])
+        name_cols = [col for col in df.columns if "Kernel_Name" in col]
+        if not name_cols:
+            return df
+
+        for col in name_cols[1:]:
+            assert (df[name_cols[0]] == df[col]).all()
+
+        df = df.drop(columns=name_cols[1:])
+
         # now take the median of the durations
-        bkeys = []
-        ekeys = []
-        for k in df.keys():
-            if "Start_Timestamp" in k:
-                bkeys.append(k)
-            if "End_Timestamp" in k:
-                ekeys.append(k)
-        # compute mean begin and end timestamps
-        endNs = df[ekeys].mean(axis=1)
-        beginNs = df[bkeys].mean(axis=1)
-        # and replace
-        df = df.drop(columns=bkeys)
-        df = df.drop(columns=ekeys)
-        df["Start_Timestamp"] = beginNs
-        df["End_Timestamp"] = endNs
+        start_cols = [col for col in df.columns if "Start_Timestamp" in col]
+        end_cols = [col for col in df.columns if "End_Timestamp" in col]
+
+        # compute mean mean timestamps
+        if start_cols and end_cols:
+            mean_start = df[start_cols].mean(axis=1)
+            mean_end = df[end_cols].mean(axis=1)
+
+            # Replace with consolidated timestamps
+            df = df.drop(columns=start_cols + end_cols)
+            df["Start_Timestamp"] = mean_start
+            df["End_Timestamp"] = mean_end
+
         # finally, join the drop key
         df = df.drop(columns=["key"])
+
         # save to file and delete old file(s)
         # skip if we're being called outside of rocprof-compute
-        if isinstance(self.__args.path, str):
+        if isinstance(args.path, str):
             df.to_csv(out, index=False)
-            if not self.__args.verbose:
+            if not args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
                     if "SQ_" not in file or "SQC_" not in file:
                         os.remove(file)
+            return None
         else:
             return df
 
@@ -295,99 +301,92 @@ class RocProfCompute_Base:
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
     @abstractmethod
-    def pre_processing(self):
+    def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to profiling."""
-        console_debug("profiling", "pre-processing using %s profiler" % self.__profiler)
+        args = self.get_args()
+        console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
 
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
             console_error(
-                "%s is not enabled in %s. Available profilers include: %s"
-                % (
-                    self._soc.get_arch(),
-                    self.__profiler,
-                    self._soc.get_compatible_profilers(),
-                )
+                f"{self._soc.get_arch()} is not enabled in {self.__profiler}. "
+                f"Available profilers include: {self._soc.get_compatible_profilers()}"
             )
+
         # verify not accessing parent directories
-        if ".." in str(self.__args.path):
+        if ".." in str(args.path):
             console_error(
                 "Access denied. Cannot access parent directories in path (i.e. ../)"
             )
 
         # verify correct formatting for application binary
-        self.__args.remaining = self.__args.remaining[1:]
-        if self.__args.remaining:
-            # Ensure that command points to an executable
-            if not shutil.which(self.__args.remaining[0]):
-                console_error(
-                    "Your command %s doesn't point to a executable. Please verify."
-                    % self.__args.remaining[0]
-                )
-            self.__args.remaining = " ".join(self.__args.remaining)
-        else:
+        args.remaining = args.remaining[1:]
+
+        if not self.__args.remaining:
             console_error(
-                (
-                    "Profiling command required. Pass application executable after -- "
-                    "at the end of options.\n"
-                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
-                    "./vcopy -n 1048576 -b 256"
-                )
+                "profiling",
+                "Profiling command required. Pass application executable after -- "
+                "at the end of options.\n"
+                "\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256",
             )
 
+        # Ensure that command points to an executable
+        if not shutil.which(args.remaining[0]):
+            console_error(
+                f"Your command {self.__args.remaining[0]} doesn't point to a executable. Please verify."
+            )
+        args.remaining = " ".join(args.remaining)
+
         gen_sysinfo(
-            workload_name=self.__args.name,
-            workload_dir=self.get_args().path,
-            app_cmd=self.__args.remaining,
-            skip_roof=self.__args.no_roof,
+            workload_name=args.name,
+            workload_dir=args.path,
+            app_cmd=args.remaining,
+            skip_roof=args.no_roof,
             mspec=self._soc._mspec,
             soc=self._soc,
         )
 
     @abstractmethod
-    def run_profiling(self, version: str, prog: str):
+    def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
         console_debug(
-            "profiling", "performing profiling using %s profiler" % self.__profiler
+            "profiling", f"performing profiling using {self.__profiler} profiler"
         )
+        args = self.get_args()
 
         # log basic info
-        console_log(str(prog).title() + " version: " + str(version))
-        console_log("Profiler choice: %s" % self.__profiler)
-        console_log("Path: " + str(Path(self.__args.path).absolute().resolve()))
-        console_log("Target: " + str(self._soc._mspec.gpu_model))
-        console_log("Command: " + str(self.__args.remaining))
-        console_log("Kernel Selection: " + str(self.__args.kernel))
-        console_log("Dispatch Selection: " + str(self.__args.dispatch))
+        console_log(f"{str(prog).title()} version: {version}")
+        console_log(f"Profiler choice: {self.__profiler}")
+        console_log(f"Path: {Path(self.__args.path).absolute().resolve()}")
+        console_log(f"Target: {self._soc._mspec.gpu_model}")
+        console_log(f"Command: {args.remaining}")
+        console_log(f"Kernel Selection: {args.kernel}")
+        console_log(f"Dispatch Selection: {args.dispatch}")
 
-        if self.get_args().set_selected:
-            console_log("Set Selection: " + str(self.__args.set_selected))
+        if args.set_selected:
+            console_log(f"Set Selection: {self.__args.set_selected}")
 
-        if self.get_args().filter_blocks is None:
+        if args.filter_blocks is None:
             console_log("Report Sections: All")
         else:
-            console_log("Report Sections: " + str(self.get_args().filter_blocks))
+            console_log(f"Report Sections: {args.filter_blocks}")
 
         msg = "Collecting Performance Counters"
-        (
-            print_status(msg)
-            if not self.__args.roof_only
-            else print_status(msg + " (Roofline Only)")
-        )
+        status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
+        print_status(status_msg)
 
         # Run profiling on each input file
-        input_files = glob.glob(self.get_args().path + "/perfmon/*.txt")
-        input_files.sort()
-
+        input_files = sorted(glob.glob(f"{args.path}/perfmon/*.txt"))
         total_runs = len(input_files)
-        total_profiling_time_so_far = 0
-        avg_profiling_time = 0
+        total_profiling_time = 0.0
 
         for i, fname in enumerate(input_files):
             run_number = i + 1
+
+            # Log progress and time estimation
             if i > 0:
-                avg_profiling_time = total_profiling_time_so_far / i
-                time_left_seconds = (total_runs - run_number) * avg_profiling_time
+                avg_time = total_profiling_time / i
+                time_left_seconds = (total_runs - run_number) * avg_time
                 time_left = format_time(time_left_seconds)
                 console_log(
                     f"[Run {run_number}/{total_runs}]"
@@ -401,17 +400,16 @@ class RocProfCompute_Base:
                 )
 
             # Kernel filtering (in-place replacement)
-            if not self.__args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    "s%^(kernel:).*%"
-                    + "kernel: "
-                    + ",".join(self.__args.kernel)
-                    + "%g",
-                    fname,
-                ])
+            if not args.kernel == None:
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -419,88 +417,88 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             # Dispatch filtering (inplace replacement)
-            if not self.__args.dispatch == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    "s%^(range:).*%"
-                    + "range: "
-                    + " ".join(self.__args.dispatch)
-                    + "%g",
-                    fname,
-                ])
+            if not args.dispatch == None:
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)
                 else:
                     console_debug(output)
-            console_log("profiling", "Current input file: %s" % fname)
 
-            options = self.get_profiler_options(fname, self._soc)
-            if (
-                self.__profiler == "rocprofv1"
-                or self.__profiler == "rocprofv2"
-                or self.__profiler == "rocprofv3"
-                or self.__profiler == "rocprofiler-sdk"
+            console_log("profiling", f"Current input file: {fname}")
+
+            if self.__profiler in (
+                "rocprofv1",
+                "rocprofv2",
+                "rocprofv3",
+                "rocprofiler-sdk",
             ):
-                start_run_prof = time.time()
+                options = self.get_profiler_options(fname, self._soc)
+                start_time = time.time()
                 run_prof(
                     fname=fname,
                     profiler_options=options,
-                    workload_dir=self.get_args().path,
+                    workload_dir=args.path,
                     mspec=self._soc._mspec,
-                    loglevel=self.get_args().loglevel,
-                    format_rocprof_output=self.get_args().format_rocprof_output,
-                    retain_rocpd_output=self.get_args().retain_rocpd_output,
+                    loglevel=args.loglevel,
+                    format_rocprof_output=args.format_rocprof_output,
+                    retain_rocpd_output=args.retain_rocpd_output,
                 )
-                end_run_prof = time.time()
-                actual_profiling_duration = end_run_prof - start_run_prof
+                end_time = time.time()
+                duration = end_time - start_time
+                total_profiling_time += duration
+
                 console_debug(
-                    "The time of run_prof of {} is {} m {} sec".format(
-                        fname,
-                        int((end_run_prof - start_run_prof) / 60),
-                        str((end_run_prof - start_run_prof) % 60),
-                    )
+                    f"The time of run_prof of {fname} is {int(duration / 60)} m {duration % 60} sec"
                 )
             else:
                 console_error("Profiler not supported")
-            total_profiling_time_so_far += actual_profiling_duration
-        # PC sampling data is only collected when block "21" is specified
-        if "21" in self.get_args().filter_blocks and self.__profiler in (
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ):
-            console_log(
-                f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]"
-            )
-            start_run_prof = time.time()
-            pc_sampling_prof(
-                method=self.get_args().pc_sampling_method,
-                interval=self.get_args().pc_sampling_interval,
-                workload_dir=self.get_args().path,
-                appcmd=shlex.split(
-                    self.get_args().remaining
-                ),  # FIXME: the right solution is applying it when argparsing once!
-                rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
-            )
-            end_run_prof = time.time()
-            pc_sampling_duration = end_run_prof - start_run_prof
-            console_debug(
-                "The time of pc sampling profiling is {} m {} sec".format(
-                    int((pc_sampling_duration) / 60),
-                    str((pc_sampling_duration) % 60),
-                )
-            )
 
-    @abstractmethod
-    def post_processing(self):
-        """Perform any post-processing steps prior to profiling."""
+        # PC sampling data is only collected when block "21" is specified
+        if not (
+            "21" in args.filter_blocks
+            and self.__profiler in ("rocprofv3", "rocprofiler-sdk")
+        ):
+            return
+
+        input_files = glob.glob(f"{args.path}/perfmon/*.txt")
+        total_runs = len(input_files)
+
+        console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
+
+        start_time = time.time()
+        pc_sampling_prof(
+            method=args.pc_sampling_method,
+            interval=args.pc_sampling_interval,
+            workload_dir=args.path,
+            appcmd=shlex.split(
+                args.remaining
+            ),  # FIXME: the right solution is applying it when argparsing once!
+            rocprofiler_sdk_library_path=args.rocprofiler_sdk_library_path,
+        )
+        end_time = time.time()
+
+        duration = end_time - start_time
         console_debug(
             "profiling",
-            "performing post-processing using %s profiler" % self.__profiler,
+            f"The time of pc sampling profiling is {int(duration / 60)} m {duration % 60} sec",
+        )
+
+    @abstractmethod
+    def post_processing(self) -> None:
+        """Perform any post-processing steps prior to profiling."""
+        console_debug(
+            "profiling", f"performing post-processing using {self.__profiler} profiler"
         )
 
 
-def test_df_column_equality(df):
+def test_df_column_equality(df: pd.DataFrame) -> np.bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()

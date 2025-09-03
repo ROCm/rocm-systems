@@ -25,6 +25,7 @@
 
 import copy
 from pathlib import Path
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -39,17 +40,17 @@ from utils.logger import console_error, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
-    def __init__(self, args, supported_archs, path):
+    def __init__(self, args: Any, supported_archs: dict[str, Any], path: Path) -> None:
         super().__init__(args, supported_archs)
         self.path = str(path)
         self.args = self.get_args()
-        self.raw_dfs = {}
+        self.raw_dfs: dict[str, Any] = {}
 
     # -----------------------
     # Required child methods
     # -----------------------
     @demarcate
-    def pre_processing(self):
+    def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
         self._runs = self.initalize_runs()
 
@@ -106,7 +107,9 @@ class tui_analysis(OmniAnalyze_Base):
 
             self.raw_dfs[kernel_name] = kernel_dfs
 
-    def initalize_runs(self, normalization_filter=None):
+    def initalize_runs(
+        self, normalization_filter: Optional[str] = None
+    ) -> dict[str, schema.Workload]:
         # Load system info and configure
         sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
@@ -141,7 +144,7 @@ class tui_analysis(OmniAnalyze_Base):
         self._runs[self.path] = w
         return self._runs
 
-    def run_kernel_analysis(self):
+    def run_kernel_analysis(self) -> dict[str, Any]:
         arch = list(self._arch_configs.keys())[0]
         return {
             kernel_name: process_panels_to_dataframes(
@@ -150,5 +153,5 @@ class tui_analysis(OmniAnalyze_Base):
             for kernel_name, df in self.raw_dfs.items()
         }
 
-    def run_top_kernel(self):
+    def run_top_kernel(self) -> Any:
         return get_top_kernels_and_dispatch_ids(self._runs)

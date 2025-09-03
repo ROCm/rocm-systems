@@ -25,13 +25,20 @@
 
 import shlex
 from pathlib import Path
+from typing import Any
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from utils.logger import console_error, console_log, demarcate
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
-    def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
+    def __init__(
+        self,
+        profiling_args: Any,
+        profiler_mode: str,
+        soc: Any,
+        supported_archs: dict[str, Any],
+    ) -> None:
         super().__init__(profiling_args, profiler_mode, soc, supported_archs)
         self.ready_to_profile = (
             self.get_args().roof_only
@@ -39,15 +46,17 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname, soc):
-        app_cmd = shlex.split(self.get_args().remaining)
-        rocm_libdir = str(Path(self.get_args().rocprofiler_sdk_library_path).parent)
+    def get_profiler_options(self, fname: str, soc: Any) -> Any:
+        args = self.get_args()
+        app_cmd = shlex.split(args.remaining)
+
+        rocm_libdir = str(Path(args.rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(
-            Path(rocm_libdir).joinpath("rocprofiler-sdk/librocprofiler-sdk-tool.so")
+            Path(rocm_libdir) / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
         )
         ld_preload = [
             rocprofiler_sdk_tool_path,
-            self.get_args().rocprofiler_sdk_library_path,
+            args.rocprofiler_sdk_library_path,
         ]
         options = {
             "ROCPROFILER_LIBRARY_CTOR": "1",
@@ -55,38 +64,38 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCP_TOOL_LIBRARIES": rocprofiler_sdk_tool_path,
             "LD_LIBRARY_PATH": rocm_libdir,
             "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": self.get_args().format_rocprof_output,
-            "ROCPROF_OUTPUT_PATH": self.get_args().path + "/out/pmc_1",
+            "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
+            "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
         }
 
-        if self.get_args().kokkos_trace:
+        if args.kokkos_trace:
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
             console_error(
                 "The option '--kokkos-trace' is not supported in the current "
                 "version of rocprof-compute. This functionality is planned for a "
                 "future release. Please adjust your profiling options accordingly."
             )
-        if self.get_args().hip_trace:
+        if args.hip_trace:
             options["ROCPROF_HIP_COMPILER_API_TRACE"] = "1"
             options["ROCPROF_HIP_RUNTIME_API_TRACE"] = "1"
 
         # Kernel filtering
-        if self.get_args().kernel:
-            options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(
-                self.get_args().kernel
-            )
+        if args.kernel:
+            options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(args.kernel)
+
         # Dispatch filtering
         dispatch = []
         # rocprof sdk dispatch indexing is inclusive and starts from 1
-        if self.get_args().dispatch:
-            for dispatch_id in self.get_args().dispatch:
+        if args.dispatch:
+            for dispatch_id in args.dispatch:
                 if ":" in dispatch_id:
-                    tokens = dispatch_id.split(":")
                     # 4:7 -> 5-7
-                    dispatch.append(f"{int(tokens[0]) + 1}-{tokens[1]}")
+                    start, end = dispatch_id.split(":")
+                    dispatch.append(f"{int(start) + 1}-{end}")
                 else:
                     # 4 -> 5
                     dispatch.append(f"{int(dispatch_id) + 1}")
+
         if dispatch:
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
         options["APP_CMD"] = app_cmd
@@ -96,25 +105,25 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def pre_processing(self):
+    def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
 
     @demarcate
-    def run_profiling(self, version, prog):
+    def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.ready_to_profile:
-            if self.get_args().roof_only:
-                console_log(
-                    "roofline", "Generating pmc_perf.csv (roofline counters only)."
-                )
-            # Log profiling options and setup filtering
-            super().run_profiling(version, prog)
-        else:
+        if not self.ready_to_profile:
             console_log("roofline", "Detected existing pmc_perf.csv")
+            return
+
+        if self.get_args().roof_only:
+            console_log("roofline", "Generating pmc_perf.csv (roofline counters only).")
+
+        # Log profiling options and setup filtering
+        super().run_profiling(version, prog)
 
     @demarcate
-    def post_processing(self):
+    def post_processing(self) -> None:
         """Perform any post-processing steps prior to profiling."""
         super().post_processing()
 
