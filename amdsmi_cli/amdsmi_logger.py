@@ -1003,8 +1003,8 @@ class AMDSMILogger():
 
         # print the version information first
         amd_smi_version = str(output['version_info']['amd-smi'])
-        if len(amd_smi_version) > 20:
-            amd_smi_version = amd_smi_version[:17] + "..."
+        if len(amd_smi_version) > 60:
+            amd_smi_version = amd_smi_version[:57] + "..."
         rocm_version = "N/A"
         if output['version_info']['rocm version'][0]:
             rocm_version = str(output['version_info']['rocm version'][1]).ljust(8)
