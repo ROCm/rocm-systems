@@ -34,7 +34,7 @@ import config
 from utils import mem_chart, parser
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import convert_metric_id_to_panel_info
+from utils.utils import convert_metric_id_to_panel_info, get_uuid
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -140,6 +140,14 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
     else:
         hidden_cols = config.HIDDEN_COLUMNS_CLI
+
+    if args.output_format == "csv":
+        if args.output_name:
+            csv_dir = Path(f"{args.output_name}")
+        else:
+            csv_dir = Path(f"rocprof_compute_{get_uuid()}")
+        if not csv_dir.exists():
+            csv_dir.mkdir()
 
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
@@ -484,17 +492,15 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     ):
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
-                    if args.df_file_dir:
-                        p = Path(args.df_file_dir)
-                        if not p.exists():
-                            p.mkdir()
-                        if p.is_dir():
-                            if "title" in table_config and table_config["title"]:
-                                table_id_str += "_" + table_config["title"]
-                            df.to_csv(
-                                p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
-                                index=False,
-                            )
+                    if args.output_format == "csv" and csv_dir.is_dir():
+                        if "title" in table_config and table_config["title"]:
+                            table_id_str += "_" + table_config["title"]
+                        csv_filename = str(
+                            csv_dir.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                        )
+                        df.to_csv(csv_filename, index=False)
+                        console_warning(f"Created file: {csv_filename}")
+
                     # Only show top N kernels (as specified in --max-kernel-num)
                     # in "Top Stats" section
                     if type == "raw_csv_table" and (

@@ -21,10 +21,13 @@
 // SOFTWARE.
 
 #pragma once
+#include <cstdint>
 #include <stdint.h>
 #include <string>
 #include <unistd.h>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/version.h>
@@ -182,6 +185,43 @@ struct pmc_event_with_sample : in_time_sample
     size_t      value;
 };
 
+struct amd_smi_sample : storage_parsed_type_base
+{
+    enum class settings_positions : uint8_t
+    {
+        busy = 0,
+        temp,
+        power,
+        mem_usage,
+        vcn_activity,
+        jpeg_activity
+    };
+
+    uint64_t             settings;  // bitfield
+    uint32_t             device_id;
+    size_t               timestamp;
+    uint32_t             gfx_activity;
+    uint32_t             umc_activity;
+    uint32_t             mm_activity;
+    uint32_t             power;
+    int64_t              temperature;
+    size_t               mem_usage;
+    std::vector<uint8_t> xcp_activity;
+};
+
+struct cpu_freq_sample : storage_parsed_type_base
+{
+    size_t               timestamp;
+    int64_t              page_rss;
+    int64_t              virt_mem_usage;
+    int64_t              peak_rss;
+    int64_t              context_switch_count;
+    int64_t              page_faults;
+    int64_t              user_mode_time;
+    int64_t              kernel_mode_time;
+    std::vector<uint8_t> freqs;
+};
+
 enum class entry_type : uint32_t
 {
     in_time_sample        = 0x0000,
@@ -192,6 +232,8 @@ enum class entry_type : uint32_t
 #if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
     memory_alloc = 0x0005,
 #endif
+    amd_smi_sample   = 0x0006,
+    cpu_freq_sample  = 0x0007,
     fragmented_space = 0xFFFF
 };
 }  // namespace trace_cache

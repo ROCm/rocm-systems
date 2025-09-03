@@ -492,7 +492,7 @@ Here are the contents of ``scratch_memory_trace.csv`` file:
 
 .. csv-table:: Scratch memory trace
    :file: /data/scratch_memory_trace.csv
-   :widths: 10,10,10,10,10,10,20,20
+   :widths: 10,10,10,10,10,10,20,20,20
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
