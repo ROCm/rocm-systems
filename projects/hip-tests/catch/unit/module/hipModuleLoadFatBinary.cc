@@ -16,15 +16,16 @@ LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include <hip_test_common.hh>
 #include "hip_module_common.hh"
+#include <array>
+#include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 /**
  * @addtogroup hipModuleLoadFatBinary hipModuleLoadFatBinary
  * @{
  * @ingroup ModuleTest
- * `hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin)` -
- * Loads fatbin object
+ * `hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin)`
+ * - Loads fatbin object
  */
 
 /**
@@ -41,13 +42,15 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipModuleLoadFatBinary_NegativeTsts") {
   hipModule_t Module;
   SECTION("fatCubin as nullptr") {
-    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, nullptr),
+                    hipErrorInvalidValue);
   }
   SECTION("Fatbin as Empty String") {
     HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, ""), hipErrorInvalidImage);
   }
   SECTION("Invalid fatbin") {
-    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, "not_a_module.txt"), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, "not_a_module.txt"),
+                    hipErrorInvalidImage);
   }
   SECTION("Load Module with No Kernel function") {
     const auto loaded_module = LoadModuleIntoBuffer("emptyModuleCount.code");
@@ -59,49 +62,52 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_NegativeTsts") {
 #if HT_AMD
 void loadKernelData(hipFunction_t kernel) {
   constexpr int LEN = 64;
-  constexpr int SIZE = LEN << 2;
-  float *A, *B, *Ad, *Bd;
-  A = new float[LEN];
-  B = new float[LEN];
+  constexpr int SIZE = LEN * sizeof(float);
+  float *Ad, *Bd;
+
+  std::array<float, LEN> A;
+  std::array<float, LEN> B;
 
   for (uint32_t i = 0; i < LEN; i++) {
-    A[i] = i * 1.0f;
-    B[i] = 0.0f;
+    A.fill(i * 1.0f);
+    B.fill(0.0f);
   }
-
   HIP_CHECK(hipMalloc(&Ad, SIZE));
   HIP_CHECK(hipMalloc(&Bd, SIZE));
 
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Ad, &A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, &B, SIZE, hipMemcpyHostToDevice));
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
   struct {
-    void* _Ad;
-    void* _Bd;
+    void *_Ad;
+    void *_Bd;
     size_t size;
   } args;
-  args._Ad = reinterpret_cast<void*>(Ad);
-  args._Bd = reinterpret_cast<void*>(Bd);
+  args._Ad = reinterpret_cast<void *>(Ad);
+  args._Bd = reinterpret_cast<void *>(Bd);
   args.size = SIZE;
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                    HIP_LAUNCH_PARAM_END};
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
-                                  reinterpret_cast<void**>(&config)));
+                                  reinterpret_cast<void **>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream));
-
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
-
-  for (uint32_t i = 0; i < LEN; i++) {
-    REQUIRE(A[i] == B[i]);
+  HIP_CHECK(hipMemcpy(&B, Bd, SIZE, hipMemcpyDeviceToHost));
+  // Validation
+  for (size_t i = 0; i < A.size(); i++) {
+    if (A[i] != B[i]) {
+      INFO("Array Failed at index: " << i
+                                     << "\nA value at failed index: " << A[i]
+                                     << "\nB value at failed index: " << B[i]);
+      REQUIRE(false);
+    }
   }
-  delete[] A;
-  delete[] B;
+
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));
 }
@@ -122,7 +128,8 @@ void loadKernelData(hipFunction_t kernel) {
 TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
   hipModule_t Module;
   SECTION("Compiled module with regular target in compressed fatbin") {
-    const auto loaded_module = LoadModuleIntoBuffer("copyKernelCompressed.code");
+    const auto loaded_module =
+        LoadModuleIntoBuffer("copyKernelCompressed.code");
     HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
     REQUIRE(Module != nullptr);
     hipFunction_t kernel = nullptr;
@@ -133,10 +140,11 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
   }
   SECTION("Compiled module with Generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      INFO("Generic target test is skipped\n");
       return;
     }
-    const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
+    const auto loaded_module =
+        LoadModuleIntoBuffer("copyKernelGenericTarget.code");
     HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
     REQUIRE(Module != nullptr);
     hipFunction_t kernel = nullptr;
@@ -147,10 +155,11 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
   }
   SECTION("Compiled module with Generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      INFO("Generic target test is skipped\n");
       return;
     }
-    const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
+    const auto loaded_module =
+        LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
     HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
     REQUIRE(Module != nullptr);
     hipFunction_t kernel = nullptr;
