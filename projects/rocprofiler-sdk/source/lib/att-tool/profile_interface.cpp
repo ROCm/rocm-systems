@@ -91,7 +91,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         for(size_t j = 0; j < wave.instructions_size; j++)
         {
             const auto& inst = wave.instructions_array[j];
-            if(inst.pc.code_object_id == 0 && inst.pc.addr == 0) continue;
+            if(inst.pc.code_object_id == 0 && inst.pc.address == 0) continue;
 
             try
             {
@@ -154,7 +154,7 @@ ToolData::get(pcinfo_t _pc)
             for(auto& [vaddr, symbol] : cfile->table->getSymbolMap(_pc.code_object_id))
                 symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.code_object_id});
 
-            auto addr_range = symbol_table.find_codeobj_in_range(_pc.addr);
+            auto addr_range = symbol_table.find_codeobj_in_range(_pc.address);
             try
             {
                 auto symbol = cfile->table->getSymbolMap(_pc.code_object_id).at(addr_range.addr);
@@ -168,7 +168,7 @@ ToolData::get(pcinfo_t _pc)
 
             for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
             {
-                pcinfo_t info{.addr = addr, .code_object_id = addr_range.id};
+                pcinfo_t info{.address = addr, .code_object_id = addr_range.id};
                 auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);
 
                 cline.line_number         = isa_map.size() + cfile->kernel_names.size() - 1;
@@ -188,7 +188,7 @@ ToolData::get(pcinfo_t _pc)
     cline.line_number        = isa_map.size();
     cfile->line_numbers[_pc] = cline.line_number;
 
-    cline.code_line = cfile->table->get(_pc.code_object_id, _pc.addr);
+    cline.code_line = cfile->table->get(_pc.code_object_id, _pc.address);
 
     return cline;
 }

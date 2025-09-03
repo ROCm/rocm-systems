@@ -92,7 +92,7 @@ CodeFile::~CodeFile()
             {
                 csv_encoder::write_row(ofs,
                                        pc.code_object_id,
-                                       pc.addr,
+                                       pc.address,
                                        "; " + kernel_names.at(pc).name,
                                        0,
                                        0,
@@ -102,7 +102,7 @@ CodeFile::~CodeFile()
             }
             csv_encoder::write_row(ofs,
                                    pc.code_object_id,
-                                   pc.addr,
+                                   pc.address,
                                    line->code_line->inst,
                                    line->hitcount,
                                    line->latency,
@@ -138,14 +138,14 @@ CodeFile::~CodeFile()
             std::stringstream code;
             code << "[\"; " << kernel_names.at(line.first).name << "\",0," << (isa.line_number - 1)
                  << ",\"" << kernel_names.at(line.first).demangled << "\","
-                 << line.first.code_object_id << "," << line.first.addr << ",0,0,0,0]";
+                 << line.first.code_object_id << "," << line.first.address << ",0,0,0,0]";
             jcode.push_back(nlohmann::json::parse(code.str()));
         }
 
         std::stringstream code;
         code << "[\"" << isa.code_line->inst << "\",0," << isa.line_number << ",\""
              << isa.code_line->comment << "\"," << line.first.code_object_id << ","
-             << line.first.addr << "," << isa.hitcount << "," << isa.latency << "," << isa.stall
+             << line.first.address << "," << isa.hitcount << "," << isa.latency << "," << isa.stall
              << "," << isa.idle << "]";
 
         jcode.push_back(nlohmann::json::parse(code.str()));

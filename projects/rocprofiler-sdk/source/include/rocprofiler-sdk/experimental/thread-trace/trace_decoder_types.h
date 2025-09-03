@@ -49,7 +49,7 @@ typedef enum rocprofiler_thread_trace_decoder_info_t
  */
 typedef struct rocprofiler_thread_trace_decoder_pc_t
 {
-    uint64_t addr;            ///< Address (code_object_id == 0), or ELF vaddr (code_object_id != 0)
+    uint64_t address;         ///< Address (code_object_id == 0), or ELF vaddr (code_object_id != 0)
     uint64_t code_object_id;  ///< Zero if no code object was found.
 } rocprofiler_thread_trace_decoder_pc_t;
 

@@ -127,7 +127,7 @@ gen_output_stream()
     {
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
-        auto  inst    = table->get(addr.code_object_id, addr.addr);
+        auto  inst    = table->get(addr.code_object_id, addr.address);
 
         auto   comment = inst->comment;
         size_t pos     = comment.rfind('/');

@@ -230,7 +230,7 @@ operator==(rocprofiler_version_triplet_t lhs, rocprofiler_version_triplet_t rhs)
 inline bool
 operator==(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
 {
-    return std::tie(lhs.code_object_id, lhs.addr) == std::tie(rhs.code_object_id, rhs.addr);
+    return std::tie(lhs.code_object_id, lhs.address) == std::tie(rhs.code_object_id, rhs.address);
 }
 
 // definitions of operator!=
@@ -332,7 +332,7 @@ operator<(rocprofiler_version_triplet_t lhs, rocprofiler_version_triplet_t rhs)
 inline bool
 operator<(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
 {
-    return std::tie(lhs.code_object_id, lhs.addr) < std::tie(rhs.code_object_id, rhs.addr);
+    return std::tie(lhs.code_object_id, lhs.address) < std::tie(rhs.code_object_id, rhs.address);
 }
 
 // definitions of operator>, operator<=, operator>=
