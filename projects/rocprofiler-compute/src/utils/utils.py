@@ -943,7 +943,7 @@ def pc_sampling_prof(
     if rocprof_cmd == "rocprofiler-sdk":
         rocm_libdir = str(Path(rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(
-            Path(rocm_libdir).joinPath("rocprofiler-sdk/librocprofiler-sdk-tool.so")
+            Path(rocm_libdir).joinpath("rocprofiler-sdk/librocprofiler-sdk-tool.so")
         )
         ld_preload = [
             rocprofiler_sdk_tool_path,
