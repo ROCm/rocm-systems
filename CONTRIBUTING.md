@@ -139,11 +139,10 @@ If your development does not involve these files, you do not need to install `dv
 
 ### Installing DVC
 
-`dvc` can be installed as a python module via pip and is cross-platform. Visit the [dvc installation page](https://dvc.org/doc/install) if you want to use another method of installation. Due to our use of an AWS S3 bucket with `dvc`, the `dvc-s3` module also needs to be installed. The configuration to download the large files from the AWS S3 bucket is already set in this repository.
+`dvc` can be installed as a python module via pip and is cross-platform. Visit the [dvc installation page](https://dvc.org/doc/install) if you want to use another method of installation. Due to our use of an AWS S3 bucket with `dvc`, the `dvc[s3]` module should be installed. The configuration to download the large files from the AWS S3 bucket is already set in this repository.
 
 ```bash
-pip install dvc
-pip install dvc-s3
+pip install dvc[s3]
 ```
 
 ### Retrieving large files:
