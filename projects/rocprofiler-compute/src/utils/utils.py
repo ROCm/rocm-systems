@@ -175,7 +175,7 @@ def using_v3() -> bool:
 def get_version(rocprof_compute_home: Path) -> dict[str, str]:
     """Return ROCm Compute Profiler versioning info"""
 
-    # symantic version info - note that version file(s) can reside in
+    # semantic version info - note that version file(s) can reside in
     # two locations depending on development vs formal install
     search_dirs = [rocprof_compute_home, rocprof_compute_home.parent]
     found = False
