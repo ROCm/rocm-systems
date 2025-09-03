@@ -213,6 +213,21 @@ jobs:
       with:
         key: ccache-${{ matrix.os }}-rocprofiler-mi300a-dind-${{ matrix.runner }}
         max-size: 2G
+        save: true
+
+    - name: Install Missing ROCm Dependencies
+      shell: bash
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo -e "Building & Installing ROCDecode..."
+        cmake -B build-rocdecode \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          ${GITHUB_WORKSPACE}/rocDecode
         cmake --build build-rocdecode --target all --parallel 16
         cmake --build build-rocdecode --target install
         echo -e "ROCDecode Installed Successfully!"
