@@ -191,7 +191,7 @@ constexpr char FAULT_MIGRATE_CHAR = 'M';  // Fault resolved with a migration
 constexpr char FAULT_UPDATE_CHAR  = 'U';  // Fault resolved with an update
 // Queue was not restored, will be restored later
 constexpr char QUEUE_RESTORE_RESCHEDULED_CHAR = 'R';
-constexpr char QUEUE_RESTORE_CHAR = '0';
+constexpr char QUEUE_RESTORE_CHAR             = '0';
 
 template <>
 kfd_event_record
@@ -517,11 +517,11 @@ parse_event<KFD_EVENT_QUEUE_RESTORE>(const agent_id_map_t& agents, std::string_v
 
     if(scan_count == 5)
     {
-        if (_rescheduled == QUEUE_RESTORE_RESCHEDULED_CHAR)
+        if(_rescheduled == QUEUE_RESTORE_RESCHEDULED_CHAR)
         {
             e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED;
         }
-        else if (_rescheduled == QUEUE_RESTORE_CHAR)
+        else if(_rescheduled == QUEUE_RESTORE_CHAR)
         {
             e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE;
         }

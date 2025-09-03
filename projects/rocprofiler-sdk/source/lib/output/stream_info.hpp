@@ -136,17 +136,15 @@ struct tool_buffer_tracing_hip_api_ext_record_t : rocprofiler_buffer_tracing_hip
 
 struct tool_buffer_tracing_kfd_record_t
 {
-    rocprofiler_buffer_tracing_kind_t kind;
-    union {
-        rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t   event_page_migrate_record;
-        rocprofiler_buffer_tracing_kfd_event_page_fault_record_t     event_page_fault_record;
-        rocprofiler_buffer_tracing_kfd_event_queue_record_t          event_queue_record;
-        rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t event_unmap_from_gpu_record;
-        rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t event_dropped_events_record;
-        rocprofiler_buffer_tracing_kfd_page_migrate_record_t         page_migrate_record;
-        rocprofiler_buffer_tracing_kfd_page_fault_record_t           page_fault_record;
-        rocprofiler_buffer_tracing_kfd_queue_record_t                queue_record;
-    };
+    std::variant<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_page_fault_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_queue_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t,
+                 rocprofiler_buffer_tracing_kfd_page_migrate_record_t,
+                 rocprofiler_buffer_tracing_kfd_page_fault_record_t,
+                 rocprofiler_buffer_tracing_kfd_queue_record_t>
+        record;
 };
 
 }  // namespace tool
@@ -193,35 +191,9 @@ save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_hip_api_ext_re
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t & data)
+save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
 {
-    SAVE_DATA_FIELD(kind);
-    switch (data.kind) {
-    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
-        SAVE_DATA_FIELD(event_page_migrate_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT:
-        SAVE_DATA_FIELD(event_page_fault_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
-        SAVE_DATA_FIELD(event_queue_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU:
-        SAVE_DATA_FIELD(event_unmap_from_gpu_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS:
-        SAVE_DATA_FIELD(event_dropped_events_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE:
-        SAVE_DATA_FIELD(page_migrate_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT:
-        SAVE_DATA_FIELD(page_fault_record);
-        break;
-    case ROCPROFILER_BUFFER_TRACING_KFD_QUEUE:
-        SAVE_DATA_FIELD(queue_record);
-        break;
-    }
+    SAVE_DATA_FIELD(record);
 }
 
 #undef SAVE_DATA_FIELD
