@@ -225,7 +225,7 @@ def extract_machine_info() -> dict[str, Any]:
         version = path("/proc/version").read_text()
         os_release = path("/etc/os-release").read_text()
 
-        result["cpu_memory"] = search(r"^model name\s*: (.*?)$", cpuinfo)
+        result["cpu_model"] = search(r"^model name\s*: (.*?)$", cpuinfo)
         result["sbios"] = (
             path("/sys/class/dmi/id/bios_vendor").read_text().strip()
             + path("/sys/class/dmi/id/bios_version").read_text().strip()
