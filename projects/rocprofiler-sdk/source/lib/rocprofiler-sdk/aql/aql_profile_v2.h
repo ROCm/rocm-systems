@@ -109,7 +109,6 @@ typedef union
     {
         uint32_t accum     : 3; /**< One of aqlprofile_accumulation_type_t */
         uint32_t _reserved : 29;
-        uint32_t depth     : 4; /**< One of aqlprofile_spm_depth_t */
     } sq_flags;
     struct
     {

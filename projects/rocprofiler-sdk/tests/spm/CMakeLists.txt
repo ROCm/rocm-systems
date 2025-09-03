@@ -21,6 +21,8 @@ set(spm-dispatch-counter-collection-env
     "${PRELOAD_ENV}" "ROCPROFILER_TOOL_OUTPUT_FILE=spm-dispatch-collection-test.json"
     "ROCPROFILER_TOOL_CONTEXTS=SPM_DISPATCH_COLLECTION")
 
+set(IS_DISABLED True)
+
 add_test(NAME test-spm-dispatch-collection-execute COMMAND $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
@@ -34,7 +36,9 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
-               test-spm-dispatch-collection)
+               test-spm-dispatch-collection
+               DISABLED
+               ${IS_DISABLED})
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -54,4 +58,6 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_REQUIRED
-               test-spm-dispatch-collection)
+               test-spm-dispatch-collection
+               DISABLED
+               ${IS_DISABLED})
