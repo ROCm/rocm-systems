@@ -751,6 +751,8 @@ read_topology()
         agent_info.product_name = "";
         agent_info.vendor_name  = "";
         memset(&agent_info.uuid.bytes, 0, sizeof(agent_info.uuid.bytes));
+
+        agent_info.firmware_info = common::init_public_api_struct(rocprofiler_agent_fw_info_t{});
         if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             constexpr auto workgrp_max = 1024;
