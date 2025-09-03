@@ -205,5 +205,4 @@ init_counters(rocprofiler_agent_id_t id)
 
     return counters;
 }
-
 }  // namespace common
