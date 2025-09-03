@@ -76,8 +76,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_SYSTEMS=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=${{ github.workspace }}"
-          # extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_SYSTEMS=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_SYSTEMS=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
