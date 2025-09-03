@@ -410,6 +410,22 @@ rocprofsys_init_library_hidden()
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
 
+    int _selinux_mode = 0;
+    {
+        std::ifstream _fenforcing{ "/sys/fs/selinux/enforce" };
+        if(!(_fenforcing >> _selinux_mode)) _selinux_mode = 0;
+        _fenforcing.close();
+    }
+
+    if(_selinux_mode == 1)
+    {
+        ROCPROFSYS_BASIC_VERBOSE(0, "/sys/fs/selinux/enforce has a value of %i. \n",
+                                 _selinux_mode);
+        std::cerr << "SELinux enforcing mode detected. Consider disabling SELinux "
+                  << "or configure permissive mode with 'sudo setenforce 0'. Aborting.\n";
+        std::exit(EXIT_FAILURE);
+    }
+
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
 
