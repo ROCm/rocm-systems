@@ -135,3 +135,4 @@ endif()
 include(rocprofiler_config_packaging)
 
 rocprofiler_print_features()
+
