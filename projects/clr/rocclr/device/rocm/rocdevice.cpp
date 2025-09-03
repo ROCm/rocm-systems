@@ -19,8 +19,6 @@
  THE SOFTWARE. */
 
 #include "cl.h"
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
@@ -62,7 +60,6 @@
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
 #include <sstream>
 #include <vector>
-#endif  // WITHOUT_HSA_BACKEND
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
 #define OPENCL_C_VERSION_STR XSTR(OPENCL_C_MAJOR) "." XSTR(OPENCL_C_MINOR)
@@ -78,42 +75,6 @@ static_assert(static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite) ==
                   static_cast<uint32_t>(HSA_ACCESS_PERMISSION_RW),
               "Vmm Access Flag Read Write mismatch with ROC-runtime!");
 
-#ifndef WITHOUT_HSA_BACKEND
-
-namespace {
-
-inline bool getIsaMeta(std::string isaName, amd_comgr_metadata_node_t& isaMeta) {
-  amd_comgr_status_t status;
-  status = amd::Comgr::get_isa_metadata(isaName.c_str(), &isaMeta);
-  return (status == AMD_COMGR_STATUS_SUCCESS) ? true : false;
-}
-
-inline bool releaseIsaMeta(amd_comgr_metadata_node_t& isaMeta) {
-  return AMD_COMGR_STATUS_SUCCESS == amd::Comgr::destroy_metadata(isaMeta);
-}
-
-bool getValueFromIsaMeta(amd_comgr_metadata_node_t& isaMeta, const char* key,
-                         std::string& retValue) {
-  amd_comgr_status_t status;
-  amd_comgr_metadata_node_t valMeta;
-  size_t size = 0;
-
-  status = amd::Comgr::metadata_lookup(isaMeta, key, &valMeta);
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::get_metadata_string(valMeta, &size, NULL);
-  }
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    retValue.resize(size - 1);
-    status = amd::Comgr::get_metadata_string(valMeta, &size, &(retValue[0]));
-  }
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::destroy_metadata(valMeta);
-  }
-
-  return (status == AMD_COMGR_STATUS_SUCCESS) ? true : false;
-}
-
-}  // namespace
 
 namespace amd::device {
 extern const char* HipExtraSourceCode;
@@ -1621,36 +1582,38 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxOnDeviceQueues_ = 1;
   info_.maxOnDeviceEvents_ = settings().numDeviceEvents_;
 
-  // Get Values from from Comgr
-  amd_comgr_metadata_node_t isaMeta;
-  if (getIsaMeta(std::move(isa().isaName()), isaMeta)) {
-    std::string addressableNumVGPRs, totalNumVGPRs, vGPRAllocGranule;
-    info_.availableVGPRs_ = getValueFromIsaMeta(isaMeta, "AddressableNumVGPRs", addressableNumVGPRs)
-                                ? atoi(addressableNumVGPRs.c_str())
-                                : 0;
-    info_.vgprsPerSimd_ = getValueFromIsaMeta(isaMeta, "TotalNumVGPRs", totalNumVGPRs)
-                              ? atoi(totalNumVGPRs.c_str())
-                              : 0;
-    info_.vgprAllocGranularity_ = getValueFromIsaMeta(isaMeta, "VGPRAllocGranule", vGPRAllocGranule)
-                                      ? atoi(vGPRAllocGranule.c_str())
-                                      : 0;
+  std::string addressableNumVGPRs, totalNumVGPRs, vGPRAllocGranule;
+  std::string isaName = isa().isaName();
+  info_.availableVGPRs_ =
+      amd::device::getValueFromIsaMeta(isaName, "AddressableNumVGPRs", addressableNumVGPRs)
+      ? atoi(addressableNumVGPRs.c_str())
+      : 0;
+  info_.vgprsPerSimd_ = amd::device::getValueFromIsaMeta(isaName, "TotalNumVGPRs", totalNumVGPRs)
+      ? atoi(totalNumVGPRs.c_str())
+      : 0;
+  info_.vgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "VGPRAllocGranule", vGPRAllocGranule)
+      ? atoi(vGPRAllocGranule.c_str())
+      : 0;
 
-    info_.availableRegistersPerCU_ = info_.vgprsPerSimd_ * info_.simdPerCU_ * info_.wavefrontWidth_;
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-            "addressableNumVGPRs=%u, totalNumVGPRs=%u, vGPRAllocGranule=%u,"
-            " availableRegistersPerCU_=%u",
-            info_.availableVGPRs_, info_.vgprsPerSimd_, info_.vgprAllocGranularity_,
-            info_.availableRegistersPerCU_);
+  info_.availableRegistersPerCU_ = info_.vgprsPerSimd_ * info_.simdPerCU_ * info_.wavefrontWidth_;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "addressableNumVGPRs=%u, totalNumVGPRs=%u, vGPRAllocGranule=%u,"
+          " availableRegistersPerCU_=%u",
+          info_.availableVGPRs_, info_.vgprsPerSimd_, info_.vgprAllocGranularity_,
+          info_.availableRegistersPerCU_);
 
-    std::string sgprValue;
-    info_.availableSGPRs_ = (getValueFromIsaMeta(isaMeta, "AddressableNumSGPRs", sgprValue))
-                                ? (atoi(sgprValue.c_str()))
-                                : 0;
-    if (!releaseIsaMeta(isaMeta)) {
-      LogInfo("Can not release the isa meta node");
-    }
+  std::string sgprValue;
+  info_.availableSGPRs_ =
+      (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
+      ? (atoi(sgprValue.c_str()))
+      : 0;
+  std::string imageSupport;
+  if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
+    info_.imageSupport_ = atoi(imageSupport.c_str());
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "imageSupport=%u", info_.imageSupport_);
   } else {
-    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", isa().isaName().c_str());
+    LogInfo("Can not get image support info from ISA meta");
   }
 
   // Generic support for HMM interfaces
@@ -3655,4 +3618,3 @@ device::UriLocator* Device::createUriLocator() const { return new roc::UriLocato
 #endif
 #endif
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND

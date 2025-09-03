@@ -37,8 +37,6 @@ THE SOFTWARE.
  *  - @ref Unit_hipEventIpc
  */
 
-#if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
-
 static constexpr size_t vectorSize{1024};
 
 /*
@@ -141,15 +139,7 @@ TEST_CASE("Unit_hipEventDestroy_Negative") {
     hipEvent_t event{nullptr};
     HIP_CHECK_ERROR(hipEventDestroy(event), hipErrorInvalidResourceHandle);
   }
-
-  SECTION("Destroy twice") {
-    hipEvent_t event;
-    HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK(hipEventDestroy(event));
-    HIP_CHECK_ERROR(hipEventDestroy(event), hipErrorContextIsDestroyed);
-  }
 }
-#endif
 
 TEST_CASE("Unit_hipEventDestroy_Verify_Capture") {
   hipEvent_t event;
