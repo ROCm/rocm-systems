@@ -23,8 +23,6 @@
 
 #include <algorithm>
 
-#ifndef WITHOUT_HSA_BACKEND
-
 namespace amd::roc {
 
 #if defined(USE_COMGR_LIBRARY)
@@ -163,4 +161,3 @@ bool Kernel::postLoad() {
 #endif  // defined(USE_COMGR_LIBRARY)
 
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND
