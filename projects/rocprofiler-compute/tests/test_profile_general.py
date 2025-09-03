@@ -749,7 +749,7 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.misc
 def test_roof_rocpd(binary_handler_profile_rocprof_compute):
-    if soc in ("MI100"):
+    if soc == "MI100":
         pytest.skip("Roofline not supported on MI100")
         return
 
