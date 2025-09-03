@@ -543,7 +543,6 @@ def show_all(
                         table_type,
                         runs,
                         output,
-                        csv_dir,
                     )
 
         if panel_content:

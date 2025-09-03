@@ -456,6 +456,11 @@ def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
         ]
     }
 
+    print(dispatches)
+    import sys
+
+    sys.exit(1)
+
     for d in dispatches:
         dispatch_info = d["dispatch_data"]["dispatch_info"]
         agent_id = dispatch_info["agent_id"]["handle"]
@@ -1353,6 +1358,8 @@ def get_submodules(package_name: str) -> list[str]:
 
 def is_workload_empty(path: str) -> None:
     """Peek workload directory to verify valid profiling output"""
+    pmc_perf_path = Path(path) / "pmc_perf.csv"
+    if pmc_perf_path.is_file():
         temp_df = pd.read_csv(str(pmc_perf_path))
         if temp_df.dropna().empty:
             console_error(

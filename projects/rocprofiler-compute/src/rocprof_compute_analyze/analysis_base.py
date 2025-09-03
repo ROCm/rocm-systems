@@ -243,7 +243,7 @@ class OmniAnalyze_Base:
                 if not getattr(args, "no_roof", False):
                     try:
                         roofline_csv_path = Path(sysinfo_path) / "roofline.csv"
-                        roofline_df = pd.read_csv(roofline_csv_path)
+                        roofline_df = pd.read_csv(str(roofline_csv_path))
                         w.roofline_peaks = roofline_df
                     except FileNotFoundError:
                         console_warning("roofline.csv not found.")

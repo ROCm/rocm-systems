@@ -1545,7 +1545,7 @@ def load_pc_sampling_data(
 
     # No kernel filter, return grouped and sorted csv directly
     if not workload.filter_kernel_ids:
-        df = pd.read_csv(csv_file_path)
+        df = pd.read_csv(str(csv_file_path))
         # Group by 'Instruction_Comment' and count occurrences
         grouped_counts = (
             df.groupby("Instruction_Comment")
@@ -1583,7 +1583,7 @@ def load_pc_sampling_data(
         #   We should find better way to remove the dependency on kernel_top_table
         kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
         file_path = Path(directory) / kernel_top_df.loc[0, "from_csv"]
-        kernel_name = pd.read_csv(file_path).loc[
+        kernel_name = pd.read_csv(str(file_path)).loc[
             workload.filter_kernel_ids[0], "Kernel_Name"
         ]
 
@@ -1612,7 +1612,7 @@ def load_non_mertrics_table(workload: Any, directory: str, args: Any) -> None:
         if "from_csv" in df.columns:
             file_path = Path(directory) / df.loc[0, "from_csv"]
             if file_path.exists():
-                tmp[table_id] = pd.read_csv(file_path)
+                tmp[table_id] = pd.read_csv(str(file_path))
             else:
                 console_warning(
                     f"Couldn't load {file_path.name}. "
@@ -1631,7 +1631,7 @@ def load_non_mertrics_table(workload: Any, directory: str, args: Any) -> None:
                 #   But we need to figure out headers and comparison properly.
                 file_path = Path(directory) / df.loc[0, "from_csv_columnwise"]
                 if file_path.exists():
-                    tmp[table_id] = pd.read_csv(file_path).transpose()
+                    tmp[table_id] = pd.read_csv(str(file_path)).transpose()
                     # NB:
                     #   All transposed columns should be marked with a general header,
                     #   so tty could detect them and show them correctly in comparison.

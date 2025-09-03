@@ -575,7 +575,7 @@ class OmniSoC_Base:
         Sort and bucket all related performance counters to minimize required
         application passes
         """
-        if not hasattr(self._args, "path"):
+        if not hasattr(self.__args, "path"):
             return
         args = self.get_args()
 
@@ -596,7 +596,7 @@ class OmniSoC_Base:
             os.unlink(workload_dir)
             os.makedirs(workload_dir)
 
-        workload_perfmon_dir = workload_dir / "/perfmon"
+        workload_perfmon_dir = workload_dir / "perfmon"
         os.makedirs(workload_perfmon_dir)
 
         # Sanity check whether counters are supported by underlying rocprof tool
@@ -675,7 +675,7 @@ class OmniSoC_Base:
             # All files are full, create a new file
             if not added:
                 output_files.append(
-                    CounterFile(f"pmc_perf_{file_count}.txt", self._perfmon_config)
+                    CounterFile(f"pmc_perf_{file_count}.txt", self.__perfmon_config)
                 )
                 file_count += 1
                 output_files[-1].add(ctr)

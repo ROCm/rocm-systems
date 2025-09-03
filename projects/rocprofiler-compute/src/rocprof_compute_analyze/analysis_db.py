@@ -92,7 +92,7 @@ class db_analysis(OmniAnalyze_Base):
         self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
         self._pmc_df_per_workload = {
             workload_path: rocpd_data.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
+                pd.read_csv(str(Path(workload_path) / "pmc_perf.csv"))
             )
             for workload_path in self._runs.keys()
         }
