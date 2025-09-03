@@ -457,11 +457,6 @@ def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
         ]
     }
 
-    print(dispatches)
-    import sys
-
-    sys.exit(1)
-
     for d in dispatches:
         dispatch_info = d["dispatch_data"]["dispatch_info"]
         agent_id = dispatch_info["agent_id"]["handle"]

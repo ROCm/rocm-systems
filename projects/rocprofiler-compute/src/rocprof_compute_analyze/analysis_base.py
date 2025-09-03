@@ -308,19 +308,19 @@ class OmniAnalyze_Base:
         #   However, because of reading soc depends on sys spec, and sys
         #   spec depends on sys_info. And we read sys_info too early so we
         # . can not do it now. There should be a way to make it simpler.
-        if not args.list_nodes:
-            return
-
-        # NB:
-        #   There are 2 ways to do it: one is doing like the below, checking
-        #   sub dirs only as we assume the profiling stage generate sub dirs
-        #   with node name. The 2nd way would be checkign host name in each
-        #   sub dir and very those.
-        nodes = [
-            subdir.name for subdir in Path(args.path[0][0]).iterdir() if subdir.is_dir()
-        ]
-        print("Node list:", "  ".join(nodes))
-        sys.exit(0)
+        if args.list_nodes:
+            # NB:
+            #   There are 2 ways to do it: one is doing like the below, checking
+            #   sub dirs only as we assume the profiling stage generate sub dirs
+            #   with node name. The 2nd way would be checkign host name in each
+            #   sub dir and very those.
+            nodes = [
+                subdir.name
+                for subdir in Path(args.path[0][0]).iterdir()
+                if subdir.is_dir()
+            ]
+            print("Node list:", "  ".join(nodes))
+            sys.exit(0)
 
         # Ensure analysis output does not overwrite existing files
         if not args.output_name:
