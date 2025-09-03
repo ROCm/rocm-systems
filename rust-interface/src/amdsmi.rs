@@ -20,6 +20,7 @@
 
 use crate::amdsmi_wrapper;
 use crate::utils::*;
+use libc::free;
 use std::mem::MaybeUninit;
 use std::os::raw::c_void;
 use std::ptr::null_mut;
@@ -1982,7 +1983,7 @@ pub fn amdsmi_set_gpu_fan_speed(
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_busy_percent` call fails.
 pub fn amdsmi_get_gpu_busy_percent(
     processor_handle: AmdsmiProcessorHandle
-) -> AmdsmiResult<(u32)> {
+) -> AmdsmiResult<u32> {
     let mut gpu_busy_percent = 0;
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_busy_percent(
         processor_handle,
@@ -2597,7 +2598,9 @@ pub fn amdsmi_get_gpu_pm_metrics_info(
         unsafe { std::slice::from_raw_parts(pm_metrics_ptr, num_of_metrics as usize) };
     let pm_metrics = pm_metrics_slice.to_vec();
 
-    unsafe { amdsmi_wrapper::amdsmi_free_name_value_pairs(pm_metrics_ptr as *mut c_void) };
+    if !pm_metrics_ptr.is_null() {
+        unsafe { free(pm_metrics_ptr as *mut c_void) };
+    }
 
     Ok(pm_metrics)
 }
@@ -2668,7 +2671,9 @@ pub fn amdsmi_get_gpu_reg_table_info(
         unsafe { std::slice::from_raw_parts(reg_metrics_ptr, num_of_metrics as usize) };
     let reg_metrics = reg_metrics_slice.to_vec();
 
-    unsafe { amdsmi_wrapper::amdsmi_free_name_value_pairs(reg_metrics_ptr as *mut c_void) };
+    if !reg_metrics_ptr.is_null() {
+        unsafe { free(reg_metrics_ptr as *mut c_void) };
+    }
 
     Ok(reg_metrics)
 }
@@ -2973,18 +2978,29 @@ pub fn amdsmi_set_gpu_od_volt_info(
 pub fn amdsmi_get_gpu_od_volt_curve_regions(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<Vec<AmdsmiFreqVoltRegionT>> {
-    let mut num_regions = MaybeUninit::<u32>::uninit();
-    let buffer_ptr: *mut AmdsmiFreqVoltRegionT = std::ptr::null_mut();
+    let mut num_regions: u32 = 0;
 
+    // First call to get the number of regions
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_od_volt_curve_regions(
         processor_handle,
-        num_regions.as_mut_ptr(),
-        buffer_ptr
+        &mut num_regions,
+        null_mut()
     ));
 
-    let num_regions = unsafe { num_regions.assume_init() };
-    let buffer_slice = unsafe { std::slice::from_raw_parts(buffer_ptr, num_regions as usize) };
-    let buffer = buffer_slice.to_vec();
+    if num_regions == 0 {
+        return Ok(Vec::new());
+    }
+
+    // Allocate buffer and make second call
+    let mut buffer = Vec::with_capacity(num_regions as usize);
+    unsafe {
+        buffer.set_len(num_regions as usize);
+    }
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_od_volt_curve_regions(
+        processor_handle,
+        &mut num_regions,
+        buffer.as_mut_ptr()
+    ));
 
     Ok(buffer)
 }
@@ -4628,7 +4644,7 @@ pub fn amdsmi_is_p2p_accessible(
 ///
 /// # Returns
 ///
-/// * `AmdsmiResult<(u64, AmdsmiIoLinkTypeT)>` - Returns a tuple containing the number of hops and the link type if successful, or an error if it fails.
+/// * `AmdsmiResult<(u64, AmdsmiLinkTypeT)>` - Returns a tuple containing the number of hops and the link type if successful, or an error if it fails.
 ///
 /// # Example
 ///
@@ -4660,9 +4676,9 @@ pub fn amdsmi_is_p2p_accessible(
 pub fn amdsmi_topo_get_link_type(
     processor_handle_src: AmdsmiProcessorHandle,
     processor_handle_dst: AmdsmiProcessorHandle,
-) -> AmdsmiResult<(u64, AmdsmiIoLinkTypeT)> {
+) -> AmdsmiResult<(u64, AmdsmiLinkTypeT)> {
     let mut hops: u64 = 0;
-    let mut link_type: AmdsmiIoLinkTypeT = AmdsmiIoLinkTypeT::AmdsmiIolinkTypeUndefined;
+    let mut link_type: AmdsmiLinkTypeT = AmdsmiLinkTypeT::AmdsmiLinkTypeUnknown;
 
     call_unsafe!(amdsmi_wrapper::amdsmi_topo_get_link_type(
         processor_handle_src,
@@ -4685,7 +4701,7 @@ pub fn amdsmi_topo_get_link_type(
 ///
 /// # Returns
 ///
-/// * `AmdsmiResult<(AmdsmiIoLinkTypeT, AmdsmiP2pCapabilityT)>` - Returns a tuple containing the link type and P2P capability if successful, or an error if it fails.
+/// * `AmdsmiResult<(AmdsmiLinkTypeT, AmdsmiP2pCapabilityT)>` - Returns a tuple containing the link type and P2P capability if successful, or an error if it fails.
 ///
 /// # Example
 ///
@@ -4717,8 +4733,8 @@ pub fn amdsmi_topo_get_link_type(
 pub fn amdsmi_topo_get_p2p_status(
     processor_handle_src: AmdsmiProcessorHandle,
     processor_handle_dst: AmdsmiProcessorHandle,
-) -> AmdsmiResult<(AmdsmiIoLinkTypeT, AmdsmiP2pCapabilityT)> {
-    let mut link_type: AmdsmiIoLinkTypeT = AmdsmiIoLinkTypeT::AmdsmiIolinkTypeUndefined;
+) -> AmdsmiResult<(AmdsmiLinkTypeT, AmdsmiP2pCapabilityT)> {
+    let mut link_type: AmdsmiLinkTypeT = AmdsmiLinkTypeT::AmdsmiLinkTypeUnknown;
     let mut p2p_capability = MaybeUninit::<AmdsmiP2pCapabilityT>::uninit();
 
     call_unsafe!(amdsmi_wrapper::amdsmi_topo_get_p2p_status(

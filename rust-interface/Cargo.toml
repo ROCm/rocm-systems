@@ -1,12 +1,15 @@
 [package]
 name = "amdsmi"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A rust binding for the AMD System Management Interface (AMD-SMI) library"
 repository = "https://github.com/ROCm/amdsmi/rust-interface"
 readme = "README.md"
 keywords = ["amdsmi", "rust binding"]
 license = "Copyright (c) 2019-2024 Advanced Micro Devices, Inc"
+
+[dependencies]
+libc = "0.2"
 
 [build-dependencies]
 bindgen = "0.70.1"

@@ -27,8 +27,8 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiCachePropertyTypeT, AmdsmiCardFormFactorT, AmdsmiClkLimitTypeT, AmdsmiClkTypeT,
     AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT, AmdsmiDevPerfLevelT, AmdsmiEventGroupT,
     AmdsmiEventTypeT, AmdsmiEvtNotificationTypeT, AmdsmiFreqIndT, AmdsmiFwBlockT, AmdsmiGpuBlockT,
-    AmdsmiInitFlagsT, AmdsmiIoLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
-    AmdsmiPowerProfilePresetMasksT, AmdsmiPowerTypeT, AmdsmiRasErrStateT, AmdsmiStatusT,
+    AmdsmiInitFlagsT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
+    AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
     AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT, AmdsmiUtilizationCounterTypeT,
     AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, ProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
 };
@@ -40,7 +40,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiDriverInfoT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiEvtNotificationDataT,
     AmdsmiFreqVoltRegionT, AmdsmiFrequenciesT, AmdsmiFrequencyRangeT, AmdsmiFwInfoT,
     AmdsmiGpuCacheInfoT, AmdsmiGpuCacheInfoTCache, AmdsmiGpuMetricsT, AmdsmiKfdInfoT,
-    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiLinkTypeT, AmdsmiNameValueT,
+    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiNameValueT,
     AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT, AmdsmiPcieInfoT,
     AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT, AmdsmiPowerInfoT,
     AmdsmiPowerProfileStatusT, AmdsmiProcInfoT, AmdsmiProcInfoTEngineUsage,
