@@ -673,7 +673,7 @@ spm_dispatch_callback(rocprofiler_agent_id_t agent_id,
 void
 spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   size_t                            record_count,
-                  rocprofiler_spm_record_flags_t    flags,
+                  uint8_t                           flags,
                   rocprofiler_user_data_t /* userdata*/)
 {
     static std::shared_mutex m_mutex = {};

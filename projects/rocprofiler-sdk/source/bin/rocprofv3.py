@@ -1479,11 +1479,6 @@ def run(app_args, args, **kwargs):
         update_env(
             "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
         )
-    else:
-        update_env("ROCPROF_COUNTER_COLLECTION", False, overwrite=True)
-
-    if args.log_level in ("info", "trace", "env"):
-        log_config(app_env)
 
     if args.pmc_groups:
         group_env = ""

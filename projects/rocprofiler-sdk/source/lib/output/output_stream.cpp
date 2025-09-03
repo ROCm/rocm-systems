@@ -86,18 +86,6 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     return _ofname;
 }
 
-std::string
-get_spm_filename(const output_config& cfg,
-                 uint64_t             agent_handle,
-                 uint64_t             dispatch_id,
-                 uint64_t             buffer_id)
-{
-    std::stringstream ss;
-    ss << "spm_agent_" << agent_handle << "_dispatch_" << dispatch_id << "_buffer_" << buffer_id;
-
-    return rocprofiler::tool::get_output_filename(cfg, ss.str(), ".spm");
-}
-
 output_stream
 get_output_stream(const output_config& cfg,
                   std::string_view     fname,

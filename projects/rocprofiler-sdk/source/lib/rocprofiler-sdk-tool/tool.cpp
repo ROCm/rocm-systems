@@ -1507,13 +1507,13 @@ spm_dispatch_callback(rocprofiler_agent_id_t /**/,
 void
 spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   size_t                            record_count,
-                  rocprofiler_spm_record_flags_t    flags,
+                  uint8_t                           flags,
                   rocprofiler_user_data_t           userdata)
 {
     auto lk = std::shared_lock{tool_metadata->spm_mut};
     if(record_count == 0) return;
 
-    if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA)
+    if(flags >> ROCPROFILER_SPM_RECORD_FLAG_DATA)
     {
         auto counter_record        = tool::tool_spm_counter_record_t{};
         counter_record.dispatch_id = userdata.value;
@@ -1539,8 +1539,7 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
 
     if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST)
     {
-        ROCP_CI_LOG(WARNING) << "Data Lost. Agent:" << records[0].agent_id.handle
-                             << " dispatch_id:" << userdata.value;
+        ROCP_CI_LOG(WARNING) << " Dispatch_id:" << userdata.value;
     }
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;

@@ -51,7 +51,8 @@ struct output_stream
     {}
 
     ~output_stream() { close(); }
-    output_stream(const output_stream&) = delete;
+    output_stream(const output_stream&)     = delete;
+    output_stream(output_stream&&) noexcept = default;
     output_stream& operator=(const output_stream&) = delete;
     output_stream& operator=(output_stream&&) noexcept = default;
 
@@ -77,12 +78,6 @@ struct output_stream
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);
-
-std::string
-get_spm_filename(const output_config& cfg,
-                 uint64_t             agent_handle,
-                 uint64_t             dispatch_id,
-                 uint64_t             buffer_id);
 
 output_stream
 get_output_stream(const output_config& cfg,

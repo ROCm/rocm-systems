@@ -67,6 +67,7 @@ public:
                const std::vector<CodeobjLoadInfo>& codeobj_files,
                const std::vector<std::string>&     counters_names,
                const std::string&                  output_formats);
+
     bool valid() const;
 
 protected:
