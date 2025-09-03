@@ -754,7 +754,7 @@ Example configuration output structure:
               "ROCPROF_OUTPUT_FORMAT": "csv",
               "ROCPROF_HIP_COMPILER_API_TRACE": "1",
               "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
-               ....
+               ".... Output truncated for brevity ...."
             }
           }
         }
