@@ -62,9 +62,10 @@
  * - 1.9 - hsa_amd_portable_export_dmabuf_v2
  * - 1.10 - hsa_amd_vmem_address_reserve: HSA_AMD_VMEM_ADDRESS_NO_REGISTER
  * - 1.11 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_CLOCK_COUNTERS
+ * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 11
+#define HSA_AMD_INTERFACE_VERSION_MINOR 12
 
 #ifdef __cplusplus
 extern "C" {
@@ -1578,7 +1579,10 @@ typedef enum hsa_amd_memory_pool_flag_s {
    *  Allocates executable memory
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
-
+  /**
+   *  Allocates uncached memory
+   */
+  HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
 
 /**
@@ -1806,8 +1810,6 @@ hsa_status_t HSA_API
  *
  * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Agent does not have available SDMA engines.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT dst_agent and src_agent are the same as
- * dst_agent == src_agent is generally used for shader copies.
  */
 hsa_status_t HSA_API
 hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
@@ -1824,8 +1826,6 @@ hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
  *
  * @retval ::HSA_STATUS_SUCCESS For mask returned
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT dst_agent and src_agent are the same as
- * dst_agent == src_agent is generally used for shader copies.
  */
 hsa_status_t HSA_API
 hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
@@ -2362,7 +2362,11 @@ typedef enum {
   /*
   No backend memory but virtual address
   */
-  HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5
+  HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5,
+  /*
+  Memory was allocated with an HSA virtual memory allocator
+  */
+  HSA_EXT_POINTER_TYPE_HSA_VMEM = 6
 } hsa_amd_pointer_type_t;
 
 /**

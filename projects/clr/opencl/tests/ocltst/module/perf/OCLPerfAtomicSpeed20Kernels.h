@@ -18,7 +18,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-static const char *global_atomics_sum_reduction_all_to_zero =
+static const char* global_atomics_sum_reduction_all_to_zero =
     "#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable\n"
     " __kernel void global_atomics_sum_reduction_all_to_zero(uint "
     "ItemsPerThread, __global uint *Input, __global atomic_int *Output )\n"
@@ -45,7 +45,7 @@ static const char *global_atomics_sum_reduction_all_to_zero =
     "memory_scope_device);\n"
     "}\n";
 
-static const char *global_atomics_sum_reduction_workgroup =
+static const char* global_atomics_sum_reduction_workgroup =
     "#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable\n"
     " __kernel void global_atomics_sum_reduction_workgroup(uint "
     "ItemsPerThread, __global uint *Input, __global atomic_int *Output )\n"

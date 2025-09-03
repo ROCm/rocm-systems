@@ -230,9 +230,10 @@ RUNTIME_EXIT
  *
  *  \version 1.0r33
  */
-RUNTIME_ENTRY_RET(cl_sampler, clCreateSampler, (cl_context context, cl_bool normalized_coords,
-                                                cl_addressing_mode addressing_mode,
-                                                cl_filter_mode filter_mode, cl_int* errcode_ret)) {
+RUNTIME_ENTRY_RET(cl_sampler, clCreateSampler,
+                  (cl_context context, cl_bool normalized_coords,
+                   cl_addressing_mode addressing_mode, cl_filter_mode filter_mode,
+                   cl_int* errcode_ret)) {
   const cl_sampler_properties sprops[] = {CL_SAMPLER_NORMALIZED_COORDS,
                                           static_cast<cl_sampler_properties>(normalized_coords),
                                           CL_SAMPLER_ADDRESSING_MODE,

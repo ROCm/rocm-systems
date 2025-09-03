@@ -31,10 +31,12 @@
 #include "core/defines.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/json.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <optional>
 
 #include <timemory/api/kokkosp.hpp>
 #include <timemory/backends/process.hpp>
@@ -157,47 +159,41 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
 
 namespace
 {
-rocprofsys::rocpd::data_processor&
-get_data_processor()
-{
-    return rocprofsys::rocpd::data_processor::get_instance();
-}
-
 void
-rocpd_initialize_kokkos_category()
+metadata_initialize_kokkos_category()
 {
-    get_data_processor().insert_category(
-        rocprofsys::category_enum_id<category::kokkos>::value,
+    rocprofsys::trace_cache::get_metadata_registry().add_string(
         rocprofsys::trait::name<category::kokkos>::value);
 }
 
 void
-rocpd_initialize_kokkos_track()
+metadata_initialize_kokkos_track()
 {
-    auto& data_processor = get_data_processor();
-    auto& n_info         = rocprofsys::node_info::get_instance();
-    auto  thread_id      = std::nullopt;
-
-    data_processor.insert_track(rocprofsys::trait::name<category::kokkos>::value,
-                                n_info.id, getpid(), thread_id);
+    rocprofsys::trace_cache::get_metadata_registry().add_track(
+        { rocprofsys::trait::name<category::kokkos>::value, std::nullopt, "{}" });
 }
 
 void
-rocpd_process_kokkos_event(const char* name, const char* event_type, const char* target,
-                           uint64_t timestamp_ns)
+cache_kokkos_event(const char* name, const char* event_type, const char* target,
+                   uint64_t timestamp_ns)
 {
-    auto& data_processor = get_data_processor();
-    auto  event_metadata = rocpd::json::create();
+    auto event_metadata = rocpd::json::create();
 
     event_metadata->set("name", name);
     event_metadata->set("event_type", event_type);
     event_metadata->set("target", target);
 
-    auto event_id = data_processor.insert_event(
-        rocprofsys::category_enum_id<category::kokkos>::value, 0, 0, 0, "{}", "{}",
-        event_metadata->to_string().c_str());
-    data_processor.insert_sample(rocprofsys::trait::name<category::kokkos>::value,
-                                 timestamp_ns, event_id, "{}");
+    const size_t stack_id        = 0;
+    const size_t parent_stack_id = 0;
+    const size_t correlation_id  = 0;
+    const char*  call_stack      = "{}";
+    const char*  line_info       = "{}";
+
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::entry_type::in_time_sample,
+        rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
+        event_metadata->to_string().c_str(), stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info);
 }
 
 }  // namespace
@@ -308,11 +304,8 @@ extern "C"
             rocprofsys_init_hidden(_mode.c_str(), false, _arg0.c_str());
             rocprofsys_push_trace_hidden("kokkos_main");
 
-            if(rocprofsys::get_use_rocpd())
-            {
-                rocpd_initialize_kokkos_category();
-                rocpd_initialize_kokkos_track();
-            }
+            metadata_initialize_kokkos_category();
+            metadata_initialize_kokkos_track();
         }
 
         setup_kernel_logger();
@@ -619,12 +612,8 @@ extern "C"
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
 
-        if(rocprofsys::config::get_use_rocpd())
-        {
-            rocpd_process_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(),
-                                       "[dual_view_sync]",
-                                       (is_device) ? "device" : "host", timestamp);
-        }
+        cache_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(), "[dual_view_sync]",
+                           (is_device) ? "device" : "host", timestamp);
     }
 
     void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
@@ -648,12 +637,8 @@ extern "C"
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
 
-        if(rocprofsys::config::get_use_rocpd())
-        {
-            rocpd_process_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(),
-                                       "[dual_view_modify]",
-                                       (is_device) ? "device" : "host", timestamp);
-        }
+        cache_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(), "[dual_view_modify]",
+                           (is_device) ? "device" : "host", timestamp);
     }
 
     //----------------------------------------------------------------------------------//

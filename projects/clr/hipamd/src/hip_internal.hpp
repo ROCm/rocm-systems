@@ -303,6 +303,7 @@ public:
     unsigned int flags_;
     bool null_;
     const std::vector<uint32_t> cuMask_;
+    uint64_t stream_id_;
 
     /// Stream capture related parameters
 
@@ -331,6 +332,11 @@ public:
       return p == Priority::High ? amd::CommandQueue::Priority::High : p == Priority::Low ?
                     amd::CommandQueue::Priority::Low : amd::CommandQueue::Priority::Normal;
     }
+    /// Generates unique stream Id for the lifetime of the process
+    uint64_t GenerateStreamId() {
+      static std::atomic<uint64_t> uniqueId{0};
+      return ++uniqueId;
+    }
 
   public:
     Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
@@ -356,6 +362,8 @@ public:
     /// Returns the CU mask for the current stream
     const std::vector<uint32_t> GetCUMask() const { return cuMask_; }
 
+    /// Fetch the stream Id
+    uint64_t GetStreamId() const { return stream_id_; }
     /// Check whether any blocking stream running
     static bool StreamCaptureBlocking();
 
@@ -680,6 +688,8 @@ public:
                                         size_t sizeBytes);
   hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                         hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
+  hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream = nullptr,
+                          bool isAsync = false);
   constexpr bool kOptionChangeable = true;
   constexpr bool kNewDevProg = false;
 

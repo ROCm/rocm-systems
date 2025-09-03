@@ -1,0 +1,57 @@
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+parameters:
+- name: pipelinesRepoRef
+  type: string
+  default: refs/heads/develop
+- name: triggerDownstreamJobs
+  type: boolean
+  default: true
+
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+    ref: ${{ parameters.pipelinesRepoRef }}
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/clr
+    - projects/hip
+    - projects/hipother
+    exclude:
+    - projects/clr/CODEOWNERS
+    - projects/clr/LICENCE
+    - projects/clr/**/*.md
+    - projects/hip/docs
+    - projects/hip/.github
+    - projects/hip/.jenkins
+    - projects/hip/.*.yaml
+    - projects/hip/CODEOWNERS
+    - projects/hip/Jenkinsfile
+    - projects/hip/LICENSE.txt
+    - projects/hip/**/*.md
+    - projects/hip/VERSION
+    - projects/hipother/.github
+    - projects/hipother/CODEOWNERS
+    - projects/hipother/LICENSE.txt
+    - projects/hipother/**/*.md
+
+pr: none
+
+stages:
+- stage: hip_clr
+  jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/HIP.yml@pipelines_repo
+    parameters:
+      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

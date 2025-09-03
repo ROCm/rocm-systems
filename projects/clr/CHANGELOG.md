@@ -2,6 +2,42 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.1 for ROCm 7.1
+
+### Added
+
+* New HIP APIs
+    - `hipModuleGetFunctionCount`  returns the number of functions within a module
+    - `hipMemsetD2D8` Used for setting 2D memory range with specified 8-bit values
+    - `hipMemsetD2D8Async` Used for setting 2D memory range with specified 8-bit values asynchronously
+    - `hipMemsetD2D16` Used for setting 2D memory range with specified 16-bit values
+    - `hipMemsetD2D16Async` Used for setting 2D memory range with specified 16-bit values asynchronously
+    - `hipMemsetD2D32` Used for setting 2D memory range with specified 32-bit values
+    - `hipMemsetD2D32Async` Used for setting 2D memory range with specified 32-bit values asynchronously
+    - `hipStreamSetAttribute` sets attributes such as synchronization policy for a given stream
+    - `hipStreamGetAttribute` returns attributes such as priority for a given stream
+    - `hipModuleLoadFatBinary`  loads fatbin binary to a module
+    - `hipMemcpyBatchAsync` Performs a batch of 1D or 2D memory copied asynchronously
+    - `hipMemcpy3DBatchAsync` Performs a batch of 3D memory copied asynchronously
+    - `hipMemcpy3DPeer` Copies memory between devices
+    - `hipMemcpy3DPeerAsync`Copied memory between devices asynchronously
+    - `hipMemsetD2D32Async` Used for setting 2D memory range with specified 32-bit values
+      asynchronously
+    - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
+    - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
+    - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
+    - `hipStreamGetId`          queries the id of a stream
+* Changed HIP APIs
+    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
+    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
+      hipMemAllocationType and allocates uncached memory if so
+
+### Optimized
+
+* Improved hip module loading latency
+* Optimized kernel metadata retrieval during module post load
+
 ## HIP 7.0 for ROCm 7.0
 
 ### Added
@@ -17,11 +53,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - HIP APIs for `FP4`/`FP6`/`FP8`, which are compatible with corresponding CUDA APIs.
     - HIP Extensions APIs for microscaling formats, which are supported on AMD GPUs.
 * New `wptr` and `rptr` values in `ClPrint`, for better logging in dispatch barrier methods.
-* New debug mask, to print precise code object information for logging.
-* The `_sync()` version of crosslane builtins such as `shfl_sync()` and `__reduce_add_sync` are enabled by default. These can be disabled by setting the preprocessor macro `HIP_DISABLE_WARP_SYNC_BUILTINS`.
+* The `_sync()` version of crosslane builtins such as `shfl_sync()` are enabled by default. These can be disabled by setting the preprocessor macro `HIP_DISABLE_WARP_SYNC_BUILTINS`.
 * Added `constexpr` operators for `fp16`/`bf16`.
-* Added `__syncwarp` operation.
-* Extended fine grained system memory pool.
+* Added warp level primitives: `__syncwarp` and reduce intrinsics (e.g. `__reduce_add_sync()`)
+* Support for the flags in APIs as following, now allows uncached memory allocation.
+    - `hipExtHostRegisterUncached`, used in `hipHostRegister`.
+    - `hipHostMallocUncached` and `hipHostAllocUncached`, used in `hipHostMalloc` and `hipHostAlloc`.
 * `num_threads`  total number of threads in the group. The legacy API size is alias.
 * Added PCI CHIP ID information as the device attribute.
 * Added new tests applications for OCP data types `FP4`/`FP6`/`FP8`.
@@ -30,8 +67,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 * Deprecated GPUs.
 Some unsupported GPUs such as gfx9, gfx8 and gfx7 are deprecated on Microsoft Windows.
+* Removal of Beta warnings in HIP Graph APIs
+All Beta warnings in usage of HIP Graph APIs are removed, they are now officially and fully supported.
 * Behavior changes
-    - `hipGetLastError`  now gets the error code returned by `hipGetLastError` which should be the last actual error caught in the current thread during the application execution.
+    - `hipGetLastError`  now returns the error code which is the last actual error caught in the current thread during the application execution.
     - Cooperative groups  in `hipLaunchCooperativeKernelMultiDevice` and `hipLaunchCooperativeKernel` functions, additional input parameter validation checks are added.
     - `hipPointerGetAttributes` returns `hipSuccess` instead of an error with invalid value `hipErrorInvalidValue`, in case `NULL` host or attribute pointer is passed as input parameter. It now matches the functionality of `cudaPointerGetAttributes` which changed with CUDA 11 and above releases.
     - `hipFree` previously there was an implicit wait which was applicable for all memory allocations, for synchronization purpose. This wait is now disabled for allocations made with `hipMallocAsync` and `hipMallocFromPoolAsync`, to match the behavior of CUDA API `cudaFree`
@@ -145,14 +184,13 @@ HIP runtime has the following functional improvements which greatly improve runt
 * Refactored memory validation, creates a unique function to validate a variety of memory copy operations.
 * Improved kernel logging using demangling shader names.
 * Advanced support for SPIRV, now kernel compilation caching is enabled by default. This feature is controlled by the environment variable `AMD_COMGR_CACHE`, for details, see [hip_rtc document](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html).
-* Programmatic support for scratch limits on MI300 and MI350 series up GPU devices. More enumeration values were added in `hipLimit_t` as following, 
-   - `hipExtLimitScratchMin`, minimum allowed value in bytes for scratch limit on the device. 
-   - `hipExtLimitScratchMax`, maximum allowed value in bytes for scratch limit on the device. 
+* Programmatic support for scratch limits on MI300 and MI350 series up GPU devices. More enumeration values were added in `hipLimit_t` as following,
+   - `hipExtLimitScratchMin`, minimum allowed value in bytes for scratch limit on the device.
+   - `hipExtLimitScratchMax`, maximum allowed value in bytes for scratch limit on the device.
    - `hipExtLimitScratchCurrent`, current scratch limit threshold in bytes on the device. Must be between the value `hipExtLimitScratchMin` and `hipExtLimitScratchMax`.
  Developers can now use the environment variable `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` to change the default allocation size with expected scratch limit in ROCR runtime. On top of it, this value can also be overwritten programmatically in the application using the HIP API `hipDeviceSetLimit(hipExtLimitScratchCurrent, value)` to reset the scratch limit value.
 * HIP runtime now enables peer-to-peer (P2P) memory copies to utilize all available SDMA engines, rather than being limited to a single engine. It also selects the best engine first to give optimal bandwidth.
 * Improved launch latency for `D2D` copies and `memset` on MI300 series.
-* Memory manager was implemented to improve the efficiency of memory usage and speed-up memory allocation/free in memory pools.
 * Introduced a threshold to handle the command submission patch to the GPU device(s), considering the synchronization with CPU, for performance improvement.
 
 ### Resolved issues
@@ -165,7 +203,8 @@ HIP runtime has the following functional improvements which greatly improve runt
 * Failures in roc-obj tools. HIP runtime now makes `DEPRECATED` message in roc-obj tools as `STDERR`.
 * Support of `hipDeviceMallocContiguous` flags in `hipExtMallocWithFlags()`. It now enables `HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG` in the memory pool allocation on GPU device.
 * Compilation failure, HIP runtime refactored the vector type alignment with `__hip_vec_align_v`
-
+* A numerical error/corruption found in Pytorch  during graph replay. HIP runtime fixed the input sizes of kernel launch dimensions in hipExtModuleLaunchKernel for the execution of hipGraph capture.
+* A crash during kernel execution in a customer application. The structure of kernel arguments was updated via adding the size of kernel arguments, and HIP runtime does validation before launch kernel with the structured arguments.
 
 ## HIP 6.4.2 for ROCm 6.4.2
 
@@ -189,7 +228,7 @@ HIP runtime has the following functional improvements which greatly improve runt
 * The memory leak in virtual memory management (VMM). HIP runtime now uses the size of handle for allocated memory range instead of actual size for physical memory, which fixed the issue of address clash with VMM.
 * Large memory allocation issue. HIP runtime now checks GPU video RAM and system RAM properly and sets size limits during memory allocation either on the host or the GPU device.
 * Support of `hipDeviceMallocContiguous` flags in `hipExtMallocWithFlags()`. It now enables `HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG` in the memory pool allocation on GPU device.
-* Radom memory segmentation fault in handling `GraphExec` object release and `hipDeviceSyncronization`. HIP runtime now uses internal device synchronize function in `__hipUnregisterFatBinary`. 
+* Radom memory segmentation fault in handling `GraphExec` object release and `hipDeviceSyncronization`. HIP runtime now uses internal device synchronize function in `__hipUnregisterFatBinary`.
 
 ## HIP 6.4.1 for ROCm 6.4.1
 
@@ -279,7 +318,7 @@ The following are the list of backwards incompatible changes planned for the upc
     - `hipModuleLoad`
     - `hipLaunchCooperativeKernelMultiDevice`
     - `hipExtLaunchCooperativeKernelMultiDevice`
- 
+
 * HIPRTC implementation, the compilation of hiprtc now uses  namespace ` __hip_internal`, instead of the standard headers `std`.
 * Stream capture mode update in the following hip APIs. Stream can only be captured in relax mode, to match the behavior of the corresponding CUDA APIs,
    - `hipMallocManaged`

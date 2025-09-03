@@ -51,9 +51,6 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_Default") {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
     return;
   }
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
-  const StreamGuard stream_guard(stream_type);
-  const hipStream_t stream = stream_guard.stream();
 
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
 
@@ -64,6 +61,11 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_Default") {
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));
+
+  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const StreamGuard stream_guard(stream_type);
+  const hipStream_t stream = stream_guard.stream();
+
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
   if (can_access_peer) {
     HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
@@ -195,12 +197,14 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_ZeroSize") {
     const auto block_count = element_count / thread_count + 1;
     constexpr int set_value_s = 22;
     HIP_CHECK(hipSetDevice(src_device));
-    VectorSet<<<block_count, thread_count, 0, stream>>>(src_alloc.ptr(), set_value_s, element_count);
+    VectorSet<<<block_count, thread_count, 0, stream>>>(src_alloc.ptr(), set_value_s,
+                                                        element_count);
     HIP_CHECK(hipGetLastError());
 
     constexpr int expected_value = 20;
     HIP_CHECK(hipSetDevice(dst_device));
-    VectorSet<<<block_count, thread_count, 0, stream>>>(dst_alloc.ptr(), expected_value, element_count);
+    VectorSet<<<block_count, thread_count, 0, stream>>>(dst_alloc.ptr(), expected_value,
+                                                        element_count);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipSetDevice(src_device));
 
@@ -309,6 +313,6 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters") {
 }
 
 /**
-* End doxygen group PeerToPeerTest.
-* @}
-*/
+ * End doxygen group PeerToPeerTest.
+ * @}
+ */

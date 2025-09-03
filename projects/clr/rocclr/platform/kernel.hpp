@@ -54,30 +54,32 @@ class KernelSignature : public HeapObject {
   std::vector<KernelParameterDescriptor> params_;
   std::string attributes_;  //!< The kernel attributes
 
-  uint32_t  numParameters_; //!< Number of OCL arguments in the kernel
-  uint32_t  paramsSize_;    //!< The size of all arguments
-  uint32_t  numMemories_;   //!< The number of memory objects used in the kernel
-  uint32_t  numSamplers_;   //!< The number of sampler objects used in the kernel
-  uint32_t  numQueues_;     //!< The number of queue objects used in the kernel
-  uint32_t  version_;       //!< The ABI version
+  uint32_t numParameters_;  //!< Number of OCL arguments in the kernel
+  uint32_t paramsSize_;     //!< The size of all arguments
+  uint32_t numMemories_;    //!< The number of memory objects used in the kernel
+  uint32_t numSamplers_;    //!< The number of sampler objects used in the kernel
+  uint32_t numQueues_;      //!< The number of queue objects used in the kernel
+  uint32_t version_;        //!< The ABI version
 
  public:
   enum {
-    ABIVersion_0 = 0,   //! ABI constructed based on the OCL semantics
-    ABIVersion_1 = 1,   //! ABI constructed based on the HW ABI returned from HSAIL
-    ABIVersion_2 = 2    //! ABI constructed based on the HW ABI returned from LC
+    ABIVersion_0 = 0,  //! ABI constructed based on the OCL semantics
+    ABIVersion_1 = 1,  //! ABI constructed based on the HW ABI returned from HSAIL
+    ABIVersion_2 = 2   //! ABI constructed based on the HW ABI returned from LC
   };
 
   //! Default constructor
-  KernelSignature():
-    numParameters_(0), paramsSize_(0), numMemories_(0), numSamplers_(0),
-    numQueues_(0), version_(ABIVersion_0) {}
+  KernelSignature()
+      : numParameters_(0),
+        paramsSize_(0),
+        numMemories_(0),
+        numSamplers_(0),
+        numQueues_(0),
+        version_(ABIVersion_0) {}
 
   //! Construct a new signature.
-  KernelSignature(const std::vector<KernelParameterDescriptor>& params,
-    const std::string& attrib,
-    uint32_t numParameters,
-    uint32_t version);
+  KernelSignature(const std::vector<KernelParameterDescriptor>& params, const std::string& attrib,
+                  uint32_t numParameters, uint32_t version);
 
   //! Return the number of parameters
   uint32_t numParameters() const { return numParameters_; }
@@ -111,8 +113,7 @@ class KernelSignature : public HeapObject {
   //! Return the kernel attributes
   const std::string& attributes() const { return attributes_; }
 
-  const std::vector<KernelParameterDescriptor>& parameters() const
-    { return params_; }
+  const std::vector<KernelParameterDescriptor>& parameters() const { return params_; }
 };
 
 // @todo: look into a copy-on-write model instead of copy-on-read.
@@ -127,21 +128,21 @@ class KernelParameters : protected HeapObject {
   std::vector<void*> execSvmPtr_;       //!< The non argument svm pointers for kernel
   FGSStatus svmSystemPointersSupport_;  //!< The flag for the status of the kernel
                                         //   support of fine-grain system sharing.
-  uint32_t  memoryObjOffset_;       //!< The number of memory objects
-  uint32_t  samplerObjOffset_;      //!< The number of sampler objects
-  uint32_t  queueObjOffset_;        //!< The number of queue objects
-  amd::Memory** memoryObjects_;     //!< Memory objects, associated with the kernel
-  amd::Sampler** samplerObjects_;   //!< Sampler objects, associated with the kernel
-  amd::DeviceQueue** queueObjects_; //!< Queue objects, associated with the kernel
+  uint32_t memoryObjOffset_;            //!< The number of memory objects
+  uint32_t samplerObjOffset_;           //!< The number of sampler objects
+  uint32_t queueObjOffset_;             //!< The number of queue objects
+  amd::Memory** memoryObjects_;         //!< Memory objects, associated with the kernel
+  amd::Sampler** samplerObjects_;       //!< Sampler objects, associated with the kernel
+  amd::DeviceQueue** queueObjects_;     //!< Queue objects, associated with the kernel
 
-  uint32_t  totalSize_;             //!< The total size of all captured parameters
+  uint32_t totalSize_;  //!< The total size of all captured parameters
 
   struct {
-    uint32_t validated_ : 1;        //!< True if all parameters are defined.
-    uint32_t execNewVcop_ : 1;      //!< special new VCOP for kernel execution
-    uint32_t execPfpaVcop_ : 1;     //!< special PFPA VCOP for kernel execution
-    uint32_t deviceKernelArgs_:1;   //!< Kernel arguments allocated on device
-    uint32_t unused : 28;           //!< unused
+    uint32_t validated_ : 1;         //!< True if all parameters are defined.
+    uint32_t execNewVcop_ : 1;       //!< special new VCOP for kernel execution
+    uint32_t execPfpaVcop_ : 1;      //!< special PFPA VCOP for kernel execution
+    uint32_t deviceKernelArgs_ : 1;  //!< Kernel arguments allocated on device
+    uint32_t unused : 28;            //!< unused
   };
 
  public:
@@ -157,9 +158,11 @@ class KernelParameters : protected HeapObject {
         execNewVcop_(0),
         execPfpaVcop_(0),
         deviceKernelArgs_(false) {
-    totalSize_ = signature.paramsSize() + (signature.numMemories() +
-        signature.numSamplers() + signature.numQueues()) * sizeof(void*);
-    values_ = reinterpret_cast<address>(this) + alignUp(sizeof(KernelParameters), PARAMETERS_MIN_ALIGNMENT);
+    totalSize_ =
+        signature.paramsSize() +
+        (signature.numMemories() + signature.numSamplers() + signature.numQueues()) * sizeof(void*);
+    values_ = reinterpret_cast<address>(this) +
+              alignUp(sizeof(KernelParameters), PARAMETERS_MIN_ALIGNMENT);
     memoryObjOffset_ = signature_.paramsSize();
     memoryObjects_ = reinterpret_cast<amd::Memory**>(values_ + memoryObjOffset_);
     samplerObjOffset_ = memoryObjOffset_ + signature_.numMemories() * sizeof(amd::Memory*);
@@ -183,7 +186,8 @@ class KernelParameters : protected HeapObject {
         execNewVcop_(rhs.execNewVcop_),
         execPfpaVcop_(rhs.execPfpaVcop_),
         deviceKernelArgs_(false) {
-    values_ = reinterpret_cast<address>(this) + alignUp(sizeof(KernelParameters), PARAMETERS_MIN_ALIGNMENT);
+    values_ = reinterpret_cast<address>(this) +
+              alignUp(sizeof(KernelParameters), PARAMETERS_MIN_ALIGNMENT);
     memoryObjOffset_ = signature_.paramsSize();
     memoryObjects_ = reinterpret_cast<amd::Memory**>(values_ + memoryObjOffset_);
     samplerObjOffset_ = memoryObjOffset_ + signature_.numMemories() * sizeof(amd::Memory*);
@@ -220,9 +224,9 @@ class KernelParameters : protected HeapObject {
   //! Allocate memory for this instance as well as the required storage for
   //  the values_, defined_, and rawPointer_ arrays.
   void* operator new(size_t size, const KernelSignature& signature) {
-    size_t requiredSize = alignUp(size, PARAMETERS_MIN_ALIGNMENT) + signature.paramsSize() +
-      (signature.numMemories() + signature.numSamplers() + signature.numQueues()) *
-       sizeof(void*);
+    size_t requiredSize =
+        alignUp(size, PARAMETERS_MIN_ALIGNMENT) + signature.paramsSize() +
+        (signature.numMemories() + signature.numSamplers() + signature.numQueues()) * sizeof(void*);
     return AlignedMemory::allocate(requiredSize, PARAMETERS_MIN_ALIGNMENT);
   }
   //! Deallocate the memory reserved for this instance.
@@ -325,7 +329,7 @@ class Kernel : public RuntimeObject {
 
   //! Return the kernel entry point for the given device.
   const device::Kernel* getDeviceKernel(const Device& device  //!< Device object
-                                        ) const;
+  ) const;
 
   //! Return the parameters.
   KernelParameters& parameters() const { return *parameters_; }

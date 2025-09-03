@@ -38,7 +38,7 @@ class MemcpyFromSymbolBenchmark : public Benchmark<MemcpyFromSymbolBenchmark> {
   }
 };
 
-static void RunBenchmark(const void* source, void* result, size_t size=1, size_t offset=0) {
+static void RunBenchmark(const void* source, void* result, size_t size = 1, size_t offset = 0) {
   MemcpyFromSymbolBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
   benchmark.AddSectionName(std::to_string(offset));
@@ -112,7 +112,8 @@ TEST_CASE("Performance_hipMemcpyFromSymbol_WithOffset") {
   std::fill_n(result.data(), size, 0);
 
   size_t offset = GENERATE_REF(0, size / 2);
-  RunBenchmark(array.data() + offset, result.data() + offset, sizeof(int) * (size - offset), offset * sizeof(int));
+  RunBenchmark(array.data() + offset, result.data() + offset, sizeof(int) * (size - offset),
+               offset * sizeof(int));
 }
 
 /**

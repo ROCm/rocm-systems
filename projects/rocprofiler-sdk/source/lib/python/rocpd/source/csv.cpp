@@ -319,7 +319,7 @@ write_memory_allocation_csv(
         memory_alloc_gen,
         [](CsvManager& cm, CsvType type, const rocpd::types::memory_allocation& malloc) {
             std::string normalized_type = malloc.type;
-            if (normalized_type == "ALLOC")
+            if(normalized_type == "ALLOC")
             {
                 normalized_type = "ALLOCATE";
             }

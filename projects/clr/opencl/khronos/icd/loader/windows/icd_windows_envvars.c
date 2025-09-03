@@ -20,59 +20,59 @@
 #include <stdbool.h>
 #include <windows.h>
 
-char *khrIcd_getenv(const char *name) {
-    char *retVal;
-    DWORD valSize;
+char* khrIcd_getenv(const char* name) {
+  char* retVal;
+  DWORD valSize;
 
-    valSize = GetEnvironmentVariableA(name, NULL, 0);
+  valSize = GetEnvironmentVariableA(name, NULL, 0);
 
-    // valSize DOES include the null terminator, so for any set variable
-    // will always be at least 1. If it's 0, the variable wasn't set.
-    if (valSize == 0) return NULL;
+  // valSize DOES include the null terminator, so for any set variable
+  // will always be at least 1. If it's 0, the variable wasn't set.
+  if (valSize == 0) return NULL;
 
-    // Allocate the space necessary for the registry entry
-    retVal = (char *)malloc(valSize);
+  // Allocate the space necessary for the registry entry
+  retVal = (char*)malloc(valSize);
 
-    if (NULL != retVal) {
-        GetEnvironmentVariableA(name, retVal, valSize);
+  if (NULL != retVal) {
+    GetEnvironmentVariableA(name, retVal, valSize);
+  }
+
+  return retVal;
+}
+
+static bool khrIcd_IsHighIntegrityLevel() {
+  bool isHighIntegrityLevel = false;
+
+  HANDLE processToken;
+  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_QUERY_SOURCE, &processToken)) {
+    // Maximum possible size of SID_AND_ATTRIBUTES is maximum size of a SID + size of attributes
+    // DWORD.
+    char mandatoryLabelBuffer[SECURITY_MAX_SID_SIZE + sizeof(DWORD)] = {0};
+    DWORD bufferSize;
+    if (GetTokenInformation(processToken, TokenIntegrityLevel, mandatoryLabelBuffer,
+                            sizeof(mandatoryLabelBuffer), &bufferSize) != 0) {
+      const TOKEN_MANDATORY_LABEL* mandatoryLabel =
+          (const TOKEN_MANDATORY_LABEL*)(mandatoryLabelBuffer);
+      const DWORD subAuthorityCount = *GetSidSubAuthorityCount(mandatoryLabel->Label.Sid);
+      const DWORD integrityLevel =
+          *GetSidSubAuthority(mandatoryLabel->Label.Sid, subAuthorityCount - 1);
+
+      isHighIntegrityLevel = integrityLevel > SECURITY_MANDATORY_MEDIUM_RID;
     }
 
-    return retVal;
+    CloseHandle(processToken);
+  }
+
+  return isHighIntegrityLevel;
 }
 
-static bool khrIcd_IsHighIntegrityLevel()
-{
-    bool isHighIntegrityLevel = false;
+char* khrIcd_secure_getenv(const char* name) {
+  if (khrIcd_IsHighIntegrityLevel()) {
+    KHR_ICD_TRACE("Running at a high integrity level, so secure_getenv is returning NULL\n");
+    return NULL;
+  }
 
-    HANDLE processToken;
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_QUERY_SOURCE, &processToken)) {
-        // Maximum possible size of SID_AND_ATTRIBUTES is maximum size of a SID + size of attributes DWORD.
-        char mandatoryLabelBuffer[SECURITY_MAX_SID_SIZE + sizeof(DWORD)] = {0};
-        DWORD bufferSize;
-        if (GetTokenInformation(processToken, TokenIntegrityLevel, mandatoryLabelBuffer, sizeof(mandatoryLabelBuffer),
-                                &bufferSize) != 0) {
-            const TOKEN_MANDATORY_LABEL* mandatoryLabel = (const TOKEN_MANDATORY_LABEL*)(mandatoryLabelBuffer);
-            const DWORD subAuthorityCount = *GetSidSubAuthorityCount(mandatoryLabel->Label.Sid);
-            const DWORD integrityLevel = *GetSidSubAuthority(mandatoryLabel->Label.Sid, subAuthorityCount - 1);
-
-            isHighIntegrityLevel = integrityLevel > SECURITY_MANDATORY_MEDIUM_RID;
-        }
-
-        CloseHandle(processToken);
-    }
-
-    return isHighIntegrityLevel;
+  return khrIcd_getenv(name);
 }
 
-char *khrIcd_secure_getenv(const char *name) {
-    if (khrIcd_IsHighIntegrityLevel()) {
-        KHR_ICD_TRACE("Running at a high integrity level, so secure_getenv is returning NULL\n");
-        return NULL;
-    }
-
-    return khrIcd_getenv(name);
-}
-
-void khrIcd_free_getenv(char *val) {
-    free((void *)val);
-}
+void khrIcd_free_getenv(char* val) { free((void*)val); }

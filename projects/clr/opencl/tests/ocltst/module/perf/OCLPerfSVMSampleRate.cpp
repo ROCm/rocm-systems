@@ -35,12 +35,11 @@
 #endif
 
 #define NUM_TYPES 3
-static const char *types[NUM_TYPES] = {"float", "float2", "float4"};
+static const char* types[NUM_TYPES] = {"float", "float2", "float4"};
 static const unsigned int typeSizes[NUM_TYPES] = {4, 8, 16};
 
 #define NUM_SIZES 12
-static const unsigned int sizes[NUM_SIZES] = {1,  2,   4,   8,   16,   32,
-                                              64, 128, 256, 512, 1024, 2048};
+static const unsigned int sizes[NUM_SIZES] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048};
 
 #define NUM_BUFS 6
 #define MAX_BUFS (1 << (NUM_BUFS - 1))
@@ -95,12 +94,12 @@ void OCLPerfSVMSampleRate::setKernel(void) {
   // printf("Shader -> %s\n", shader_.c_str());
 }
 
-void OCLPerfSVMSampleRate::setData(void *buffer, unsigned int val) {
+void OCLPerfSVMSampleRate::setData(void* buffer, unsigned int val) {
 #if defined(CL_VERSION_2_0)
-  error_ = _wrapper->clEnqueueSVMMemFill(
-      cmd_queue_, buffer, &val, sizeof(unsigned int), bufSize_, 0, NULL, NULL);
-  if ((error_ == CL_MEM_OBJECT_ALLOCATION_FAILURE) ||
-      (error_ == CL_OUT_OF_RESOURCES) || (error_ == CL_OUT_OF_HOST_MEMORY)) {
+  error_ = _wrapper->clEnqueueSVMMemFill(cmd_queue_, buffer, &val, sizeof(unsigned int), bufSize_,
+                                         0, NULL, NULL);
+  if ((error_ == CL_MEM_OBJECT_ALLOCATION_FAILURE) || (error_ == CL_OUT_OF_RESOURCES) ||
+      (error_ == CL_OUT_OF_HOST_MEMORY)) {
     error_ = CL_SUCCESS;
     skip_ = true;
     testDescString = "Not enough memory, skipped";
@@ -110,16 +109,15 @@ void OCLPerfSVMSampleRate::setData(void *buffer, unsigned int val) {
 #endif
 }
 
-void OCLPerfSVMSampleRate::checkData(void *buffer) {
+void OCLPerfSVMSampleRate::checkData(void* buffer) {
 #if defined(CL_VERSION_2_0)
-  error_ = _wrapper->clEnqueueSVMMap(cmd_queue_, true, CL_MAP_READ, buffer,
-                                     outBufSize_, 0, NULL, NULL);
+  error_ =
+      _wrapper->clEnqueueSVMMap(cmd_queue_, true, CL_MAP_READ, buffer, outBufSize_, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueSVMMap failed");
-  float *data = (float *)buffer;
+  float* data = (float*)buffer;
   for (unsigned int i = 0; i < outBufSize_ / sizeof(float); i++) {
     if (data[i] != (float)numBufs_) {
-      printf("Data validation failed at %d! Got %f, expected %f\n", i, data[i],
-             (float)numBufs_);
+      printf("Data validation failed at %d! Got %f, expected %f\n", i, data[i], (float)numBufs_);
       break;
     }
   }
@@ -128,12 +126,11 @@ void OCLPerfSVMSampleRate::checkData(void *buffer) {
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfSVMSampleRate::open(unsigned int test, char *units,
-                                double &conversion, unsigned int deviceId) {
+void OCLPerfSVMSampleRate::open(unsigned int test, char* units, double& conversion,
+                                unsigned int deviceId) {
   cl_device_id device;
   error_ = CL_SUCCESS;
 
@@ -160,8 +157,8 @@ void OCLPerfSVMSampleRate::open(unsigned int test, char *units,
 
 #if defined(CL_VERSION_2_0)
   cl_device_svm_capabilities caps;
-  error_ = clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES,
-                           sizeof(cl_device_svm_capabilities), &caps, NULL);
+  error_ = clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES, sizeof(cl_device_svm_capabilities),
+                           &caps, NULL);
   if (svmMode_ == 0) {
     if (caps & CL_DEVICE_SVM_COARSE_GRAIN_BUFFER) {
       coarseGrainBuffer_ = true;
@@ -196,11 +193,10 @@ void OCLPerfSVMSampleRate::open(unsigned int test, char *units,
 
   cmd_queue_ = cmdQueues_[_deviceId];
 
-  outBufSize_ =
-      sizes[NUM_SIZES - 1] * sizes[NUM_SIZES - 1] * typeSizes[NUM_TYPES - 1];
+  outBufSize_ = sizes[NUM_SIZES - 1] * sizes[NUM_SIZES - 1] * typeSizes[NUM_TYPES - 1];
   if ((svmMode_ == 0) || (svmMode_ == 1)) {
-    inBuffer_ = (void **)malloc(sizeof(void *) * numBufs_);
-    memset(inBuffer_, 0, sizeof(void *) * numBufs_);
+    inBuffer_ = (void**)malloc(sizeof(void*) * numBufs_);
+    memset(inBuffer_, 0, sizeof(void*) * numBufs_);
     cl_mem_flags flags;
     flags = CL_MEM_READ_ONLY;
     if (svmMode_ == 1) flags |= CL_MEM_SVM_FINE_GRAIN_BUFFER;
@@ -214,8 +210,8 @@ void OCLPerfSVMSampleRate::open(unsigned int test, char *units,
     outBuffer_ = _wrapper->clSVMAlloc(context_, flags, outBufSize_, 0);
     CHECK_RESULT(outBuffer_ == NULL, "clCreateBuffer(outBuffer) failed");
   } else {
-    inBuffer_ = (void **)malloc(sizeof(void *) * numBufs_);
-    memset(inBuffer_, 0, sizeof(void *) * numBufs_);
+    inBuffer_ = (void**)malloc(sizeof(void*) * numBufs_);
+    memset(inBuffer_, 0, sizeof(void*) * numBufs_);
     for (unsigned int i = 0; i < numBufs_; i++) {
       inBuffer_[i] = malloc(bufSize_);
       CHECK_RESULT(inBuffer_[i] == NULL, "malloc(inBuffer) failed");
@@ -225,24 +221,21 @@ void OCLPerfSVMSampleRate::open(unsigned int test, char *units,
   }
 
   setKernel();
-  char *tmp = (char *)shader_.c_str();
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&tmp, NULL, &error_);
+  char* tmp = (char*)shader_.c_str();
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
-  const char *buildOps = NULL;
+  const char* buildOps = NULL;
   // Have to force OCL 2.0 to use SVM
-  SNPRINTF(charbuf, sizeof(charbuf), "-cl-std=CL2.0 -D DATATYPE=%s",
-           types[typeIdx_]);
+  SNPRINTF(charbuf, sizeof(charbuf), "-cl-std=CL2.0 -D DATATYPE=%s", types[typeIdx_]);
   buildOps = charbuf;
   error_ = _wrapper->clBuildProgram(program_, 1, &device, buildOps, NULL, NULL);
 
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -253,12 +246,10 @@ void OCLPerfSVMSampleRate::open(unsigned int test, char *units,
   error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, 0, outBuffer_);
   CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg(outBuffer) failed");
   unsigned int sizeDW = width_ * width_;
-  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(unsigned int),
-                                    (void *)&sizeDW);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(unsigned int), (void*)&sizeDW);
   CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg(sizeDW) failed");
   unsigned int writeIt = 0;
-  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(unsigned int),
-                                    (void *)&writeIt);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(unsigned int), (void*)&writeIt);
   CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg(writeIt) failed");
   for (unsigned int i = 0; i < numBufs_; i++) {
     error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, i + 3, inBuffer_[i]);
@@ -289,9 +280,9 @@ void OCLPerfSVMSampleRate::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < maxIter; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
   }
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
@@ -303,13 +294,10 @@ void OCLPerfSVMSampleRate::run(void) {
   // Test doesn't write anything, so nothing to check
   // checkData(outBuffer_);
   // Compute GB/s
-  double perf =
-      ((double)outBufSize_ * NUM_READS * (double)maxIter * (double)(1e-09)) /
-      sec;
+  double perf = ((double)outBufSize_ * NUM_READS * (double)maxIter * (double)(1e-09)) / sec;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), "Domain %dx%d, %2d %s bufs, %6s, %4dx%4d (GB/s)",
-           sizes[NUM_SIZES - 1], sizes[NUM_SIZES - 1], numBufs_,
-           testdesc.c_str(), types[typeIdx_], width_, width_);
+  SNPRINTF(buf, sizeof(buf), "Domain %dx%d, %2d %s bufs, %6s, %4dx%4d (GB/s)", sizes[NUM_SIZES - 1],
+           sizes[NUM_SIZES - 1], numBufs_, testdesc.c_str(), types[typeIdx_], width_, width_);
 
   _perfInfo = (float)perf;
   testDescString = buf;
@@ -324,8 +312,7 @@ unsigned int OCLPerfSVMSampleRate::close(void) {
       for (unsigned int i = 0; i < numBufs_; i++) {
         if (inBuffer_[i]) {
           _wrapper->clSVMFree(context_, inBuffer_[i]);
-          CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                                 "clSVMFree(inBuffer_) failed");
+          CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clSVMFree(inBuffer_) failed");
         }
       }
       free(inBuffer_);

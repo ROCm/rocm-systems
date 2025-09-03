@@ -36,7 +36,7 @@ Kernel::Kernel(Program& program, const Symbol& symbol, const std::string& name)
 
 Kernel::Kernel(const Kernel& rhs)
     : program_(rhs.program_()), symbol_(rhs.symbol_), name_(rhs.name_) {
-  parameters_ = new(signature()) KernelParameters(*rhs.parameters_);
+  parameters_ = new (signature()) KernelParameters(*rhs.parameters_);
   fixme_guarantee(parameters_ != NULL, "out of memory");
 }
 
@@ -75,10 +75,10 @@ size_t KernelParameters::localMemSize(size_t minDataTypeAlignment) const {
     if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
       if (desc.size_ == 8) {
         memSize = alignUp(memSize, minDataTypeAlignment) +
-          *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
+                  *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
       } else {
         memSize = alignUp(memSize, minDataTypeAlignment) +
-          *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
+                  *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
       }
     }
   }
@@ -87,15 +87,14 @@ size_t KernelParameters::localMemSize(size_t minDataTypeAlignment) const {
 
 // =================================================================================================
 address KernelParameters::alloc(device::VirtualDevice& vDev) {
-
   //! Information about which arguments are SVM pointers is stored after
   // the actual parameters, but only if the device has any SVM capability
   const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
 
   address mem = vDev.allocKernelArguments(totalSize_ + execInfoSize, 128);
   if (mem == nullptr) {
-    mem = reinterpret_cast<address>(AlignedMemory::allocate(totalSize_ + execInfoSize,
-                                                            PARAMETERS_MIN_ALIGNMENT));
+    mem = reinterpret_cast<address>(
+        AlignedMemory::allocate(totalSize_ + execInfoSize, PARAMETERS_MIN_ALIGNMENT));
   } else {
     deviceKernelArgs_ = true;
   }
@@ -174,8 +173,8 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
 
   void* param = values_ + desc.offset_;
   assert((desc.type_ == T_POINTER || value != NULL ||
-    (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL)) &&
-    "not a valid local mem arg");
+          (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL)) &&
+         "not a valid local mem arg");
 
   uint32_t uint32_value = 0;
   uint64_t uint64_value = 0;
@@ -184,8 +183,8 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
     if (svmBound) {
       desc.info_.rawPointer_ = true;
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      memoryObjects_[desc.info_.arrayIndex_] = amd::MemObjMap::FindMemObj(
-        *reinterpret_cast<const void* const*>(value));
+      memoryObjects_[desc.info_.arrayIndex_] =
+          amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
     } else if ((value == NULL) || (static_cast<const cl_mem*>(value) == NULL)) {
       desc.info_.rawPointer_ = false;
       memoryObjects_[desc.info_.arrayIndex_] = nullptr;
@@ -196,12 +195,11 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
     }
   } else if (desc.type_ == T_SAMPLER) {
     // convert cl_sampler to amd::Sampler*
-    samplerObjects_[desc.info_.arrayIndex_] =
-      as_amd(*static_cast<const cl_sampler*>(value));
+    samplerObjects_[desc.info_.arrayIndex_] = as_amd(*static_cast<const cl_sampler*>(value));
   } else if (desc.type_ == T_QUEUE) {
     // convert cl_command_queue to amd::DeviceQueue*
     queueObjects_[desc.info_.arrayIndex_] =
-      as_amd(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
+        as_amd(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
   } else {
     switch (desc.size_) {
       case 4:
@@ -238,7 +236,8 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
   desc.info_.defined_ = true;
 }
 
-address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error) {
+address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSize,
+                                  int32_t* error) {
   const Device& device = vDev.device();
   *error = CL_SUCCESS;
 
@@ -248,8 +247,8 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
 
   address mem = vDev.allocKernelArguments(totalSize_ + execInfoSize, 128);
   if (mem == nullptr) {
-    mem = reinterpret_cast<address>(AlignedMemory::allocate(totalSize_ + execInfoSize,
-                                                            PARAMETERS_MIN_ALIGNMENT));
+    mem = reinterpret_cast<address>(
+        AlignedMemory::allocate(totalSize_ + execInfoSize, PARAMETERS_MIN_ALIGNMENT));
   } else {
     deviceKernelArgs_ = true;
   }
@@ -271,8 +270,8 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
           }
           // Write GPU VA addreess to the arguments
           if (!desc.info_.rawPointer_) {
-            *reinterpret_cast<uintptr_t*>(mem + desc.offset_) = static_cast<uintptr_t>
-              (devMem->virtualAddress());
+            *reinterpret_cast<uintptr_t*>(mem + desc.offset_) =
+                static_cast<uintptr_t>(devMem->virtualAddress());
           }
         } else if (desc.info_.rawPointer_) {
           if (!device.isFineGrainedSystem(true)) {
@@ -288,8 +287,8 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
           }
           samplerArg->retain();
           // todo: It's uint64_t type
-          *reinterpret_cast<uintptr_t*>(mem + desc.offset_) = static_cast<uintptr_t>(
-            samplerArg->getDeviceSampler(device)->hwSrd());
+          *reinterpret_cast<uintptr_t*>(mem + desc.offset_) =
+              static_cast<uintptr_t>(samplerArg->getDeviceSampler(device)->hwSrd());
         }
       } else if (desc.type_ == T_QUEUE) {
         DeviceQueue* queue = queueObjects_[desc.info_.arrayIndex_];
@@ -301,10 +300,10 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
       } else if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
         if (desc.size_ == 8) {
           lclMemSize = alignUp(lclMemSize, device.info().minDataTypeAlignSize_) +
-            *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
+                       *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
         } else {
           lclMemSize = alignUp(lclMemSize, device.info().minDataTypeAlignSize_) +
-            *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
+                       *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
         }
       }
     }
@@ -356,7 +355,8 @@ void KernelParameters::release(address mem) const {
     }
   }
   if (signature_.numSamplers() > 0) {
-    amd::Sampler* const* samplers = reinterpret_cast<amd::Sampler* const*>(mem + samplerObjOffset());
+    amd::Sampler* const* samplers =
+        reinterpret_cast<amd::Sampler* const*>(mem + samplerObjOffset());
     for (uint32_t i = 0; i < signature_.numSamplers(); ++i) {
       Sampler* samplerArg = samplers[i];
       if (samplerArg != nullptr) {
@@ -365,7 +365,8 @@ void KernelParameters::release(address mem) const {
     }
   }
   if (signature_.numQueues() > 0) {
-    amd::DeviceQueue* const* queues = reinterpret_cast<amd::DeviceQueue* const*>(mem + queueObjOffset());
+    amd::DeviceQueue* const* queues =
+        reinterpret_cast<amd::DeviceQueue* const*>(mem + queueObjOffset());
     for (uint32_t i = 0; i < signature_.numQueues(); ++i) {
       DeviceQueue* queue = queues[i];
       if (queue != nullptr) {
@@ -380,17 +381,16 @@ void KernelParameters::release(address mem) const {
 }
 
 KernelSignature::KernelSignature(const std::vector<KernelParameterDescriptor>& params,
-  const std::string& attrib,
-  uint32_t numParameters,
-  uint32_t version)
-  : params_(params)
-  , attributes_(attrib)
-  , numParameters_(numParameters)
-  , paramsSize_(0)
-  , numMemories_(0)
-  , numSamplers_(0)
-  , numQueues_(0)
-  , version_(version) {
+                                 const std::string& attrib, uint32_t numParameters,
+                                 uint32_t version)
+    : params_(params),
+      attributes_(attrib),
+      numParameters_(numParameters),
+      paramsSize_(0),
+      numMemories_(0),
+      numSamplers_(0),
+      numQueues_(0),
+      version_(version) {
   size_t maxOffset = 0;
   size_t last = 0;
   // Find the last entry
@@ -414,7 +414,7 @@ KernelSignature::KernelSignature(const std::vector<KernelParameterDescriptor>& p
     }
     // Collect all OCL queues
     else if (desc.type_ == T_QUEUE) {
-      params_[i].info_.arrayIndex_ = numQueues_   ;
+      params_[i].info_.arrayIndex_ = numQueues_;
       ++numQueues_;
     }
   }

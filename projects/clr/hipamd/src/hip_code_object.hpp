@@ -81,10 +81,10 @@ struct ClangOffloadBundleCompressedHeader {
 };
 }  // namespace symbols
 
-//Forward Declaration for friend usage
+// Forward Declaration for friend usage
 class PlatformState;
 
-//Code Object base class
+// Code Object base class
 class CodeObject {
  public:
   virtual ~CodeObject() {}
@@ -96,21 +96,22 @@ class CodeObject {
   friend const std::vector<hipModule_t>& modules();
 };
 
-//Dynamic Code Object
+// Dynamic Code Object
 class DynCO : public CodeObject {
   // Guards Dynamic Code object
   amd::Monitor dclock_{true};
 
-public:
+ public:
   DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
   virtual ~DynCO();
 
-  //LoadsCodeObject and its data
-  hipError_t loadCodeObject(const char* fname, const void* image=nullptr);
+  // LoadsCodeObject and its data
+  hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
   hipModule_t getModule() const { return module_; };
 
-  //Gets GlobalVar/Functions from a dynamically loaded code object
+  // Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, std::string func_name);
+  hipError_t getFuncCount(unsigned int* count);
   bool isValidDynFunc(const void* hfunc);
   hipError_t getDeviceVar(DeviceVar** dvar, std::string var_name);
 
@@ -127,60 +128,62 @@ public:
     return hipSuccess;
   }
 
-private:
+ private:
   int device_id_;
   FatBinaryInfo* fb_info_;
   hipModule_t module_;
 
-  //Maps for vars/funcs, could be keyed in with std::string name
+  // Maps for vars/funcs, could be keyed in with std::string name
   std::unordered_map<std::string, Function*> functions_;
   std::unordered_map<std::string, Var*> vars_;
 
-  //Populate Global Vars/Funcs from an code object(@ module_load)
+  // Populate Global Vars/Funcs from an code object(@ module_load)
   hipError_t populateDynGlobalFuncs();
   hipError_t populateDynGlobalVars();
   hipError_t initDynManagedVars(const std::string& managedVar);
 };
 
-//Static Code Object
-class StatCO: public CodeObject {
+// Static Code Object
+class StatCO : public CodeObject {
   // Guards Static Code object
   amd::Monitor sclock_{true};
-public:
+
+ public:
   StatCO();
   virtual ~StatCO();
 
-  //Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
+  // Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
   FatBinaryInfo** addFatBinary(const void* data, bool initialized, bool& success);
   hipError_t removeFatBinary(FatBinaryInfo** module);
   hipError_t digestFatBinary(const void* data, FatBinaryInfo*& programs);
 
-  //Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
+  // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
   hipError_t registerStatFunction(const void* hostFunction, Function* func);
   hipError_t registerStatGlobalVar(const void* hostVar, Var* var);
-  hipError_t registerStatManagedVar(Var *var);
+  hipError_t registerStatManagedVar(Var* var);
 
-  //Retrive Vars/Funcs for a given hostSidePtr(const void*), unless stated otherwise.
+  // Retrive Vars/Funcs for a given hostSidePtr(const void*), unless stated otherwise.
   const char* getStatFuncName(const void* hostFunction);
   hipError_t getStatFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
   hipError_t getStatFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
   hipError_t getStatGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
                               size_t* size_ptr);
 
-  //Managed variable is a defined symbol in code object
-  //pointer to the alocated managed memory has to be copied to the address of symbol
+  // Managed variable is a defined symbol in code object
+  // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t initStatManagedVarDevicePtr(int deviceId);
-private:
+
+ private:
   friend class hip::PlatformState;
-  //Populated during __hipRegisterFatBinary
+  // Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;
-  //Populated during __hipRegisterFuncs
+  // Populated during __hipRegisterFuncs
   std::unordered_map<const void*, Function*> functions_;
-  //Populated during __hipRegisterVars
+  // Populated during __hipRegisterVars
   std::unordered_map<const void*, Var*> vars_;
-  //Populated during __hipRegisterManagedVar
+  // Populated during __hipRegisterManagedVar
   std::unordered_map<FatBinaryInfo**, std::vector<Var*> > managedVars_;
-  //Reverse mapping of modules to speed up removal
+  // Reverse mapping of modules to speed up removal
   std::unordered_map<FatBinaryInfo**, const void*> module_to_hostModule_;
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;

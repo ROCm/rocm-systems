@@ -18,10 +18,10 @@
  */
 
 /**
-* @addtogroup hipPerfDispatchSpeed hipPerfDispatchSpeed
-* @{
-* @ingroup perfDispatchTest
-*/
+ * @addtogroup hipPerfDispatchSpeed hipPerfDispatchSpeed
+ * @{
+ * @ingroup perfDispatchTest
+ */
 
 // #define ENABLE_DEBUG 1
 
@@ -29,145 +29,179 @@
 #include <string.h>
 #include <complex>
 
-typedef struct {
-    unsigned int iterations;
-    int flushEvery;
-} testStruct;
-
-testStruct testList[] = {
-    { 1, -1},
-    { 1, -1},
-    { 10, 1},
-    { 10, -1},
-    { 100, 1},
-    { 100, 10},
-    { 100, -1},
-    { 1000, 1},
-    { 1000, 10},
-    { 1000, 100},
-    { 1000, -1},
-    { 10000, 1},
-    { 10000, 10},
-    { 10000, 100},
-    { 10000, 1000},
-    { 10000, -1},
-    { 100000, 1},
-    { 100000, 10},
-    { 100000, 100},
-    { 100000, 1000},
-    { 100000, 10000},
-    { 100000, -1},
-};
-
-unsigned int mapTestList[] = {1, 1, 10, 100, 1000, 10000, 100000};
-
-__global__ void _dispatchSpeed(float *outBuf) {
-  int i = (blockIdx.x * blockDim.x + threadIdx.x);
-  if (i < 0)
-    outBuf[i] = 0.0f;
-};
-
 /**
-* Test Description
-* ------------------------
-*  - Verify the hipPerf Dispatch speed.
-* Test source
-* ------------------------
-*  - perftests/compute/hipPerfMandelbrot.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify the hipPerf Dispatch and Execution speed, AKA total kernel latency
+ * Test source
+ * ------------------------
+ *  - perftests/dispatch/hipPerfDispatchSpeed.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
-TEST_CASE("Perf_hipPerfDispatchSpeed") {
-  int p_gpuDevice = 0;
-  int p_tests = -1;
+unsigned int testList[] = {1, 10, 100, 1000, 10000};
+
+// dummy kernel that just dispatches and does nothing
+__global__ void _dispatchSpeed(float* outBuf) {
+  int i = (blockIdx.x * blockDim.x + threadIdx.x);
+  if (i < 0) outBuf[i] = 0.0f;
+};
+
+// kernel that has an execution of count, in GPU clock ticks
+__global__ void _TimingKernel(uint64_t count) {
+  uint64_t begin_time = __builtin_amdgcn_s_memrealtime();
+  uint64_t curr_time = begin_time;
+  do {
+    curr_time = __builtin_amdgcn_s_memrealtime();
+  } while (begin_time + count > curr_time);
+}
+
+enum TimingMode { TimingMode_WallTime, TimingMode_HIPEvent, TimingMode_NumModes };
+
+TEST_CASE("Perf_hipPerfDispatchAndExecutionSpeed") {
   hipError_t err = hipSuccess;
-  hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, p_gpuDevice));
 
-  unsigned int testListSize = sizeof(testList) / sizeof(testStruct);
-  int numTests = (p_tests == -1) ? (2*2*testListSize - 1) : p_tests;
-  int test = (p_tests == -1) ? 0 : p_tests;
+  unsigned int testListSize = sizeof(testList) / sizeof(testList[0]);
+  int numTests = testListSize;
+  int warmup = 10;  // number of warmup iterations
 
   DEBUG_PRINT("numTests %d", numTests);
 
+  // set up timing kernel
+  uint64_t timer_freq_in_hz;
+  int clock_rate = 0;  // in kHz
+  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0));
+  timer_freq_in_hz = clock_rate * 1000;
+  uint64_t timing_in_us = 4;  // CHANGE THIS TO CHANGE EXECUTION TIME
+  const uint64_t timing_count = timer_freq_in_hz * timing_in_us / 1000000;
+
+  int iterations = 100;  // number of times to run the test to get an average time
+
   float* srcBuffer = NULL;
-  unsigned int bufSize_ = 64*sizeof(float);
+  unsigned int bufSize_ = 64 * sizeof(float);
   err = hipMalloc(&srcBuffer, bufSize_);
   REQUIRE(err == hipSuccess);
 
-  for (; test <= numTests; test++) {
-    int openTest = test % testListSize;
-    bool sleep = false;
+  hipEvent_t startEvent, stopEvent;
 
-    if (test >= (testListSize * 2)) {
-        sleep = true;
+  HIP_CHECK(hipEventCreate(&startEvent));
+  HIP_CHECK(hipEventCreate(&stopEvent));
+
+
+  // run twice for both dispatch speed and full kernel latency
+  for (int j = 0; j < 2; j++) {
+    bool useTimingKernel = (j == 1);
+    if (useTimingKernel) {
+      CONSOLE_PRINT("\nTIMING KERNEL TEST ()");
+      CONSOLE_PRINT("--------------------------------------------------------------");
+
+    } else {
+      CONSOLE_PRINT("EMPTY KERNEL TEST");
+      CONSOLE_PRINT("--------------------------------------------------------------");
     }
-    int threads = (bufSize_ / sizeof(float));
-    int threads_per_block  = 64;
-    int blocks = (threads/threads_per_block) + (threads % threads_per_block);
 
-    // warmup
-    hipLaunchKernelGGL(_dispatchSpeed, dim3(blocks), dim3(threads_per_block),
-                       0, hipStream_t(0), srcBuffer);
-    err = hipDeviceSynchronize();
-    REQUIRE(err == hipSuccess);
 
-    auto start = std::chrono::high_resolution_clock::now();
-    for (unsigned int i = 0; i < testList[openTest].iterations; i++) {
-      hipLaunchKernelGGL(_dispatchSpeed, dim3(blocks),
-                      dim3(threads_per_block), 0, hipStream_t(0), srcBuffer);
-      if ((testList[openTest].flushEvery > 0) &&
-        (((i + 1) % testList[openTest].flushEvery) == 0)) {
-          if (sleep) {
-            err = hipDeviceSynchronize();
-            REQUIRE(err == hipSuccess);
-          } else {
-            do {
-              err = hipStreamQuery(NULL);
-          } while (err == hipErrorNotReady);
+    // loop through all possible timing methods
+    for (unsigned int i = 0; i < TimingMode_NumModes; i++) {
+      TimingMode mode = static_cast<TimingMode>(i);
+      CONSOLE_PRINT("\nTIMING METHOD:");
+
+      switch (mode) {
+        case TimingMode_WallTime:
+          CONSOLE_PRINT("Wall Time");
+          break;
+        case TimingMode_HIPEvent:
+          CONSOLE_PRINT("HIP Events");
+          break;
+        default:
+          CONSOLE_PRINT("Unknown Mode");
+      }
+
+      // go through test iterations
+      for (int test = 0; test < numTests; test++) {
+        int openTest = test % testListSize;
+
+        int threads = (bufSize_ / sizeof(float));
+        int threads_per_block = 64;
+        int blocks = (threads / threads_per_block) + (threads % threads_per_block);
+        double finalPerf = 0.0;
+        double wallMicroSec = 0.0;
+
+        std::chrono::high_resolution_clock::time_point startWall, stopWall;
+
+        // warmup
+        for (int i = 0; i < warmup; i++) {
+          hipLaunchKernelGGL(_TimingKernel, dim3(blocks), dim3(threads_per_block), 0,
+                             hipStream_t(0), timing_count);
         }
+        HIP_CHECK(hipStreamSynchronize(0));
+
+        for (int it = 0; it < iterations; it++) {
+          switch (mode) {
+            case TimingMode_WallTime:
+              startWall = std::chrono::high_resolution_clock::now();
+              break;
+            case TimingMode_HIPEvent:
+              HIP_CHECK(hipEventRecord(startEvent, 0));
+              break;
+            default:
+              CONSOLE_PRINT("Unknown Mode");
+          }
+
+          for (unsigned int i = 0; i < testList[openTest]; i++) {
+            if (useTimingKernel) {
+              // use the timing kernel to measure dispatch and execution speed
+              hipLaunchKernelGGL(_TimingKernel, dim3(blocks), dim3(threads_per_block), 0,
+                                 hipStream_t(0), timing_count);
+            } else {
+              // use the dispatch speed kernel
+              hipLaunchKernelGGL(_dispatchSpeed, dim3(blocks), dim3(threads_per_block), 0,
+                                 hipStream_t(0), srcBuffer);
+            }
+          }
+
+          switch (mode) {
+            case TimingMode_WallTime: {
+              err = hipStreamSynchronize(0);
+              REQUIRE(err == hipSuccess);
+              stopWall = std::chrono::high_resolution_clock::now();
+              wallMicroSec =
+                  std::chrono::duration<double, std::micro>(stopWall - startWall).count();
+              finalPerf += wallMicroSec / testList[openTest];
+              break;
+            }
+            case TimingMode_HIPEvent: {
+              HIP_CHECK(hipEventRecord(stopEvent, 0));
+              HIP_CHECK(hipEventSynchronize(stopEvent));
+              float elapsed;
+              HIP_CHECK(hipEventElapsedTime(&elapsed, startEvent, stopEvent));  // in milliseconds
+              finalPerf += (elapsed * 1000.0f) / testList[openTest];            // convert ms to µs
+              break;
+            }
+            default:
+              CONSOLE_PRINT("Unknown Mode");
+          }
+        }
+
+        finalPerf /= iterations;  // average the performance over all iterations
+
+
+        CONSOLE_PRINT("HIPPerfDispatchSpeed[%3d] %7d dispatches              (us/disp) %3f", test,
+                      testList[openTest], (float)finalPerf);
       }
     }
-    if (sleep) {
-      err = hipDeviceSynchronize();
-      REQUIRE(err == hipSuccess);
-    } else {
-      do {
-        err = hipStreamQuery(NULL);
-      } while (err == hipErrorNotReady);
-    }
-    auto stop = std::chrono::high_resolution_clock::now();
-    double microSec = std::chrono::duration<double, std::micro>(stop - start).count();
-
-    // microseconds per launch
-    double perf = (microSec/testList[openTest].iterations);
-    const char *waitType;
-    const char *extraChar;
-    const char *n;
-    if (sleep) {
-      waitType = "sleep";
-      extraChar = "";
-      n = "";
-    } else {
-      waitType = "spin";
-      n = "n";
-      extraChar = " ";
-    }
-    if (testList[openTest].flushEvery > 0) {
-      CONSOLE_PRINT("HIPPerfDispatchSpeed[%3d] %7d dispatches %s%sing every %5d (us/disp) %3f",
-                    test, testList[openTest].iterations, waitType, n, testList[openTest].flushEvery,
-                    (float)perf);
-    } else {
-      CONSOLE_PRINT("HIPPerfDispatchSpeed[%3d] %7d dispatches (%s%s)              (us/disp) %3f",
-                    test, testList[openTest].iterations, waitType, extraChar, (float)perf);
-    }
   }
+
+  HIP_CHECK(hipEventDestroy(startEvent));
+  HIP_CHECK(hipEventDestroy(stopEvent));
+
   HIP_CHECK(hipFree(srcBuffer));
 }
 
+
 /**
-* End doxygen group perfDispatchTest.
-* @}
-*/
+ * End doxygen group perfDispatchTest.
+ * @}
+ */

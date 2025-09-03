@@ -83,6 +83,6 @@ TEST_CASE("Performance_hipEventCreateWithFlags") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

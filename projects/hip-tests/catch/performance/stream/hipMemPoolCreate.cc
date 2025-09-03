@@ -31,9 +31,7 @@ class MemPoolCreateBenchmark : public Benchmark<MemPoolCreateBenchmark> {
     hipMemPool_t mem_pool{nullptr};
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
 
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props)); }
 
     REQUIRE(mem_pool != nullptr);
     HIP_CHECK(hipMemPoolDestroy(mem_pool));
@@ -63,14 +61,15 @@ static void RunBenchmark() {
  */
 TEST_CASE("Performance_hipMemPoolCreate") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   RunBenchmark();
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

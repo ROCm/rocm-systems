@@ -21,10 +21,12 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_internal.hpp"
+#include "hip_conversions.hpp"
+
 
 namespace hip {
 
-hipError_t canAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId){
+hipError_t canAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId) {
   amd::Device* device = nullptr;
   amd::Device* peer_device = nullptr;
   if (canAccessPeer == nullptr) {
@@ -36,21 +38,20 @@ hipError_t canAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId){
     return hipSuccess;
   }
   /* Cannot exceed the max number of devices */
-  if (static_cast<size_t>(deviceId) >= g_devices.size()
-       || static_cast<size_t>(peerDeviceId) >= g_devices.size()) {
+  if (static_cast<size_t>(deviceId) >= g_devices.size() ||
+      static_cast<size_t>(peerDeviceId) >= g_devices.size()) {
     return hipErrorInvalidDevice;
   }
   device = g_devices[deviceId]->devices()[0];
   peer_device = g_devices[peerDeviceId]->devices()[0];
-  *canAccessPeer = static_cast<int>(std::find(device->p2pDevices_.begin(),
-                                              device->p2pDevices_.end(), as_cl(peer_device))
-                                              != device->p2pDevices_.end());
+  *canAccessPeer =
+      static_cast<int>(std::find(device->p2pDevices_.begin(), device->p2pDevices_.end(),
+                                 as_cl(peer_device)) != device->p2pDevices_.end());
   return hipSuccess;
 }
 
 hipError_t findLinkInfo(int device1, int device2,
                         std::vector<amd::Device::LinkAttrType>* link_attrs) {
-
   amd::Device* amd_dev_obj1 = nullptr;
   amd::Device* amd_dev_obj2 = nullptr;
   const int numDevices = static_cast<int>(g_devices.size());
@@ -69,12 +70,12 @@ hipError_t findLinkInfo(int device1, int device2,
   return hipSuccess;
 }
 
-hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2,
-                                        uint32_t* linktype, uint32_t* hopcount) {
+hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
+                                        uint32_t* hopcount) {
   HIP_INIT_API(hipExtGetLinkTypeAndHopCount, device1, device2, linktype, hopcount);
 
-  if (linktype == nullptr || hopcount == nullptr ||
-      device1 == device2  || device1 < 0 || device2 < 0) {
+  if (linktype == nullptr || hopcount == nullptr || device1 == device2 || device1 < 0 ||
+      device2 < 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   // Fill out the list of LinkAttributes
@@ -90,35 +91,35 @@ hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr,
-                                    int srcDevice, int dstDevice) {
+hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
+                                    int dstDevice) {
   HIP_INIT_API(hipDeviceGetP2PAttribute, value, attr, srcDevice, dstDevice);
 
   if (value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (srcDevice == dstDevice || srcDevice >= static_cast<int>(g_devices.size())
-      || dstDevice >= static_cast<int>(g_devices.size())) {
+  if (srcDevice == dstDevice || srcDevice >= static_cast<int>(g_devices.size()) ||
+      dstDevice >= static_cast<int>(g_devices.size())) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
   std::vector<amd::Device::LinkAttrType> link_attrs;
 
   switch (attr) {
-    case hipDevP2PAttrPerformanceRank : {
+    case hipDevP2PAttrPerformanceRank: {
       link_attrs.push_back(std::make_pair(amd::Device::LinkAttribute::kLinkLinkType, 0));
       break;
     }
-    case hipDevP2PAttrAccessSupported : {
+    case hipDevP2PAttrAccessSupported: {
       HIP_RETURN_ONFAIL(canAccessPeer(value, srcDevice, dstDevice));
       break;
     }
-    case hipDevP2PAttrNativeAtomicSupported : {
+    case hipDevP2PAttrNativeAtomicSupported: {
       link_attrs.push_back(std::make_pair(amd::Device::LinkAttribute::kLinkAtomicSupport, 0));
       break;
     }
-    case hipDevP2PAttrHipArrayAccessSupported : {
+    case hipDevP2PAttrHipArrayAccessSupported: {
       hipDeviceProp_t srcDeviceProp;
       hipDeviceProp_t dstDeviceProp;
       HIP_RETURN_ONFAIL(hipGetDeviceProperties(&srcDeviceProp, srcDevice));
@@ -134,7 +135,7 @@ hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr,
       }
       break;
     }
-    default : {
+    default: {
       LogPrintfError("Invalid attribute attr: %d ", attr);
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -191,13 +192,12 @@ hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevic
   HIP_INIT_API(hipMemcpyPeer, dst, dstDevice, src, srcDevice, sizeBytes);
   CHECK_STREAM_CAPTURING();
   if (srcDevice >= static_cast<int>(g_devices.size()) ||
-      dstDevice >= static_cast<int>(g_devices.size()) ||
-      srcDevice < 0 || dstDevice < 0) {
+      dstDevice >= static_cast<int>(g_devices.size()) || srcDevice < 0 || dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip::getNullStream(),
-                        true, false));
+  HIP_RETURN(
+      ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip::getNullStream(), true, false));
 }
 
 hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice,
@@ -205,8 +205,7 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
   HIP_INIT_API(hipMemcpyPeerAsync, dst, dstDevice, src, srcDevice, sizeBytes, stream);
 
   if (srcDevice >= static_cast<int>(g_devices.size()) ||
-      dstDevice >= static_cast<int>(g_devices.size()) ||
-      srcDevice < 0 || dstDevice < 0) {
+      dstDevice >= static_cast<int>(g_devices.size()) || srcDevice < 0 || dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
   getStreamPerThread(stream);
@@ -215,6 +214,39 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
     return hipErrorInvalidValue;
   }
   HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip_stream, true, true));
+}
+
+hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
+  HIP_INIT_API(hipMemcpy3DPeer, p);
+  if (p == NULL) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (p->srcDevice >= static_cast<int>(g_devices.size()) ||
+      p->dstDevice >= static_cast<int>(g_devices.size()) || p->srcDevice < 0 || p->dstDevice < 0) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
+  HIP_RETURN(ihipMemcpy3D(&copyParms, nullptr));
+}
+
+hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpy3DPeerAsync, p, stream);
+  if (p == NULL) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (p->srcDevice >= static_cast<int>(g_devices.size()) ||
+      p->dstDevice >= static_cast<int>(g_devices.size()) || p->srcDevice < 0 || p->dstDevice < 0) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
+  HIP_RETURN(ihipMemcpy3D(&copyParms), stream, true);
 }
 
 hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags) {

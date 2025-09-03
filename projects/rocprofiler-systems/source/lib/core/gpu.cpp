@@ -124,19 +124,20 @@ query_rocm_agents()
         auto& _agent_manager = agent_manager::get_instance();
         for(size_t i = 0; i < num_agents; ++i)
         {
-            const auto* _agent    = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
-            auto        cur_agent = agent{
+            const auto* _agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+            agent       cur_agent;
+            cur_agent.type =
                 (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                                   : agent_type::CPU),
-                _agent->device_id,
-                _agent->node_id,
-                _agent->logical_node_id,
-                _agent->logical_node_type_id,
-                std::string(_agent->name),
-                std::string(_agent->vendor_name),
-                std::string(_agent->product_name),
-                std::string(_agent->model_name),
-            };
+                                                            : agent_type::CPU);
+            cur_agent.handle               = _agent->id.handle;
+            cur_agent.device_id            = _agent->device_id;
+            cur_agent.node_id              = _agent->node_id;
+            cur_agent.logical_node_id      = _agent->logical_node_id;
+            cur_agent.logical_node_type_id = _agent->logical_node_type_id;
+            cur_agent.name                 = std::string(_agent->name);
+            cur_agent.model_name           = std::string(_agent->model_name);
+            cur_agent.vendor_name          = std::string(_agent->vendor_name);
+            cur_agent.product_name         = std::string(_agent->product_name);
             _agent_manager.insert_agent(cur_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;

@@ -21,16 +21,13 @@ THE SOFTWARE.
 */
 
 #include "hip/hip_runtime_api.h"
-#include "llvm/BinaryFormat/ELF.h"
-
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
-
 #include <unordered_map>
 #include "hip_code_object.hpp"
 #include "hip_platform.hpp"
 #include "comgrctx.hpp"
-
+#include "amd_hsa_elf.hpp"
 namespace hip {
 namespace comgr_helper {
 
@@ -40,10 +37,9 @@ template <typename comgr_T> class ComgrUniqueHandle {
   // constructor which takes ownership of a correctly initialzed handle
   ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
 
-  template <typename T = comgr_T,
-            std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
-                                 std::is_same_v<T, amd_comgr_action_info_t>,
-                             bool> = true>
+  template <typename T = comgr_T, std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
+                                                       std::is_same_v<T, amd_comgr_action_info_t>,
+                                                   bool> = true>
   [[nodiscard]] amd_comgr_status_t Create() {
     if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
       return amd::Comgr::create_data_set(&comgr_obj_);
@@ -251,7 +247,7 @@ static bool IsCodeObjectCompressed(const void* image) {
 
 static bool IsCodeObjectElf(const void* image) {
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
-  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == llvm::ELF::ELFOSABI_AMDGPU_HSA;
+  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
 static bool UncompressAndPopulateCodeObject(
@@ -276,8 +272,7 @@ static bool UncompressAndPopulateCodeObject(
     bundle_ids.push_back(bundle_id_str.c_str());
   }
 
-  const auto obheader =
-      reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
+  const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
   const size_t size = obheader->totalSize;
 
   bool passed = false;
@@ -723,7 +718,8 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   }
   if (CL_SUCCESS !=
       program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
-                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()), binary_offset, uri_)) {
+                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),
+                                binary_offset, uri_)) {
     return hipErrorInvalidKernelFile;
   }
   return hipSuccess;
@@ -739,9 +735,9 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
 
   // If Program was already built skip this step and return success
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
-    if (CL_SUCCESS !=
-        dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr, nullptr, nullptr,
-                                        kOptionChangeable, kNewDevProg)) {
+    if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
+                                                      nullptr, nullptr, kOptionChangeable,
+                                                      kNewDevProg)) {
       return hipErrorNoBinaryForGpu;
     }
     if (!dev_programs_[device_id]->load()) {

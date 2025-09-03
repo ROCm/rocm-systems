@@ -38,69 +38,69 @@
 #define snprintf sprintf_s
 #endif
 
-#define CHECK_ERROR(error, msg)                       \
-  if (error != CL_SUCCESS) {                          \
-    _errorFlag = true;                                \
-    printf("\n\n%s\nError code: %d\n\n", msg, error); \
-    _errorMsg = msg;                                  \
-    _crcword += 1;                                    \
-    return;                                           \
+#define CHECK_ERROR(error, msg)                                                                    \
+  if (error != CL_SUCCESS) {                                                                       \
+    _errorFlag = true;                                                                             \
+    printf("\n\n%s\nError code: %d\n\n", msg, error);                                              \
+    _errorMsg = msg;                                                                               \
+    _crcword += 1;                                                                                 \
+    return;                                                                                        \
   }
 
-#define CHECK_ERROR_NO_RETURN(error, msg)             \
-  if (error != CL_SUCCESS) {                          \
-    _errorFlag = true;                                \
-    printf("\n\n%s\nError code: %d\n\n", msg, error); \
-    _errorMsg = msg;                                  \
-    _crcword += 1;                                    \
+#define CHECK_ERROR_NO_RETURN(error, msg)                                                          \
+  if (error != CL_SUCCESS) {                                                                       \
+    _errorFlag = true;                                                                             \
+    printf("\n\n%s\nError code: %d\n\n", msg, error);                                              \
+    _errorMsg = msg;                                                                               \
+    _crcword += 1;                                                                                 \
   }
 
-#define CHECK_RESULT(test, msg, ...)                  \
-  if ((test)) {                                       \
-    char* buf = (char*)malloc(4096);                  \
-    _errorFlag = true;                                \
-    int rc = snprintf(buf, 4096, msg, ##__VA_ARGS__); \
-    assert(rc >= 0 && rc < (int)4096);                \
-    printf("%s:%d - %s\n", __FILE__, __LINE__, buf);  \
-    _errorMsg = std::string(buf);                     \
-    _crcword += 1;                                    \
-    free(buf);                                        \
-    return;                                           \
+#define CHECK_RESULT(test, msg, ...)                                                               \
+  if ((test)) {                                                                                    \
+    char* buf = (char*)malloc(4096);                                                               \
+    _errorFlag = true;                                                                             \
+    int rc = snprintf(buf, 4096, msg, ##__VA_ARGS__);                                              \
+    assert(rc >= 0 && rc < (int)4096);                                                             \
+    printf("%s:%d - %s\n", __FILE__, __LINE__, buf);                                               \
+    _errorMsg = std::string(buf);                                                                  \
+    _crcword += 1;                                                                                 \
+    free(buf);                                                                                     \
+    return;                                                                                        \
   }
 
 #define CHECK_RESULT_ARGS CHECK_RESULT
 
-#define CHECK_RESULT_NO_RETURN(test, msg, ...)        \
-  if ((test)) {                                       \
-    char* buf = (char*)malloc(4096);                  \
-    _errorFlag = true;                                \
-    int rc = snprintf(buf, 4096, msg, ##__VA_ARGS__); \
-    assert(rc >= 0 && rc < (int)4096);                \
-    printf("%s:%d - %s\n", __FILE__, __LINE__, buf);  \
-    _errorMsg = std::string(msg);                     \
-    _crcword += 1;                                    \
-    free(buf);                                        \
+#define CHECK_RESULT_NO_RETURN(test, msg, ...)                                                     \
+  if ((test)) {                                                                                    \
+    char* buf = (char*)malloc(4096);                                                               \
+    _errorFlag = true;                                                                             \
+    int rc = snprintf(buf, 4096, msg, ##__VA_ARGS__);                                              \
+    assert(rc >= 0 && rc < (int)4096);                                                             \
+    printf("%s:%d - %s\n", __FILE__, __LINE__, buf);                                               \
+    _errorMsg = std::string(msg);                                                                  \
+    _crcword += 1;                                                                                 \
+    free(buf);                                                                                     \
   }
 
 #define CHECK_RESULT_NO_RETURN_ARGS CHECK_RESULT_NO_RETURN
 
-#define CHECK_RESULT_SHUTDOWN(test, msg) \
-  if ((test)) {                          \
-    _errorFlag = true;                   \
-    printf("%s\n", msg);                 \
-    _errorMsg = msg;                     \
-    _crcword += 1;                       \
-    close();                             \
-    return;                              \
+#define CHECK_RESULT_SHUTDOWN(test, msg)                                                           \
+  if ((test)) {                                                                                    \
+    _errorFlag = true;                                                                             \
+    printf("%s\n", msg);                                                                           \
+    _errorMsg = msg;                                                                               \
+    _crcword += 1;                                                                                 \
+    close();                                                                                       \
+    return;                                                                                        \
   }
 
-#define CHECK_RESULT_CL(test, msg) \
-  if ((test)) {                    \
-    _errorFlag = true;             \
-    printf("%s\n", msg);           \
-    _errorMsg = msg;               \
-    _crcword += 1;                 \
-    return 1;                      \
+#define CHECK_RESULT_CL(test, msg)                                                                 \
+  if ((test)) {                                                                                    \
+    _errorFlag = true;                                                                             \
+    printf("%s\n", msg);                                                                           \
+    _errorMsg = msg;                                                                               \
+    _crcword += 1;                                                                                 \
+    return 1;                                                                                      \
   }
 
 class BaseTestImp : public OCLTest {
@@ -114,16 +114,14 @@ class BaseTestImp : public OCLTest {
 
   //! Abstract functions being defined here
   virtual void open();
-  virtual void open(unsigned int test, const char* deviceName,
-                    unsigned int architecture);
+  virtual void open(unsigned int test, const char* deviceName, unsigned int architecture);
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId, unsigned int platformIndex) {
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId,
+                    unsigned int platformIndex) {
     return open(test, "", platformIndex);
   }
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId) {
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
     return open(test, "", 0);
   }
 
@@ -131,8 +129,7 @@ class BaseTestImp : public OCLTest {
   virtual unsigned int close(void);
 
   //! Functions to set class members
-  virtual void checkComplib(unsigned int test, const char* deviceName,
-                            unsigned int architecture);
+  virtual void checkComplib(unsigned int test, const char* deviceName, unsigned int architecture);
   virtual void setDeviceName(const char*);
   virtual const char* getDeviceName();
   virtual void setErrorMsg(const char* error);

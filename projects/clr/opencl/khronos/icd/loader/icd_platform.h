@@ -21,13 +21,13 @@
 
 #if defined(__linux__) || defined(__APPLE__)
 
-#define PATH_SEPARATOR  ':'
+#define PATH_SEPARATOR ':'
 #define DIRECTORY_SYMBOL '/'
 #ifdef __ANDROID__
 #define ICD_VENDOR_PATH "/system/vendor/Khronos/OpenCL/vendors/";
 #else
 #define ICD_VENDOR_PATH "/etc/OpenCL/vendors/";
-#endif // ANDROID
+#endif  // ANDROID
 
 #elif defined(_WIN32)
 

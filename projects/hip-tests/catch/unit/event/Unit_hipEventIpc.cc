@@ -45,87 +45,86 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipEventIpc") {
-    size_t N = 4 * 1024 * 1024;
-    unsigned threadsPerBlock = 256;
-    int iterations = 1;
+  size_t N = 4 * 1024 * 1024;
+  unsigned threadsPerBlock = 256;
+  int iterations = 1;
 
-    unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
-    if (blocks > 1024) blocks = 1024;
-    if (blocks == 0) blocks = 1;
+  unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+  if (blocks > 1024) blocks = 1024;
+  if (blocks == 0) blocks = 1;
 
-    printf("N=%zu (A+B+C= %6.1f MB total) blocks=%u threadsPerBlock=%u iterations=%d\n", N,
-           ((double)3 * N * sizeof(float)) / 1024 / 1024, blocks, threadsPerBlock, iterations);
-    printf("iterations=%d\n", iterations);
+  printf("N=%zu (A+B+C= %6.1f MB total) blocks=%u threadsPerBlock=%u iterations=%d\n", N,
+         ((double)3 * N * sizeof(float)) / 1024 / 1024, blocks, threadsPerBlock, iterations);
+  printf("iterations=%d\n", iterations);
 
-    size_t Nbytes = N * sizeof(float);
+  size_t Nbytes = N * sizeof(float);
 
-    float *A_h, *B_h, *C_h;
-    float *A_d, *B_d, *C_d;
-    HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N);
+  float *A_h, *B_h, *C_h;
+  float *A_d, *B_d, *C_d;
+  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N);
 
-    hipEvent_t start, stop;
+  hipEvent_t start, stop;
 
-    // NULL stream check:
-    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming|hipEventInterprocess));
-    HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming|hipEventInterprocess));
+  // NULL stream check:
+  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming | hipEventInterprocess));
+  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming | hipEventInterprocess));
 
-    HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-
-
-    for (int i = 0; i < iterations; i++) {
-        //--- START TIMED REGION
-        long long hostStart = HipTest::get_time();
-        // Record the start event
-        HIP_CHECK(hipEventRecord(start, NULL));
-
-        hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
-                        static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d, N);
-        HIP_CHECK(hipGetLastError());
-
-        HIP_CHECK(hipEventRecord(stop, NULL));
-        HIP_CHECK(hipEventSynchronize(stop));
-        HIP_CHECK(hipEventQuery(stop));
-        long long hostStop = HipTest::get_time();
-        //--- STOP TIMED REGION
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
 
-        float eventMs = 1.0f;
-        // should fail due to hipEventDisableTiming
-        REQUIRE(hipSuccess != hipEventElapsedTime(&eventMs, start, stop));
-        float hostMs = HipTest::elapsed_time(hostStart, hostStop);
+  for (int i = 0; i < iterations; i++) {
+    //--- START TIMED REGION
+    long long hostStart = HipTest::get_time();
+    // Record the start event
+    HIP_CHECK(hipEventRecord(start, NULL));
 
-        printf("host_time (chrono)                =%6.3fms\n", hostMs);
-        printf("kernel_time (hipEventElapsedTime) =%6.3fms\n", eventMs);
-        printf("\n");
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                       static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d, N);
+    HIP_CHECK(hipGetLastError());
 
-    }
+    HIP_CHECK(hipEventRecord(stop, NULL));
+    HIP_CHECK(hipEventSynchronize(stop));
+    HIP_CHECK(hipEventQuery(stop));
+    long long hostStop = HipTest::get_time();
+    //--- STOP TIMED REGION
 
-    hipIpcEventHandle_t ipc_handle;
-    HIP_CHECK(hipIpcGetEventHandle(&ipc_handle, start));
 
-    hipEvent_t ipc_event;
-    hipError_t err = hipIpcOpenEventHandle(&ipc_event, ipc_handle);
+    float eventMs = 1.0f;
+    // should fail due to hipEventDisableTiming
+    REQUIRE(hipSuccess != hipEventElapsedTime(&eventMs, start, stop));
+    float hostMs = HipTest::elapsed_time(hostStart, hostStop);
 
-    #if HT_WIN
-    // always different process Id on Windows
-    HIP_CHECK(err);
-    #else
-    // hipIpcOpenEventHandle() should be called in a different process, hence it should fail here
-    REQUIRE(err == hipErrorInvalidContext);
-    #endif
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-    #if HT_AMD
-    HIP_CHECK(hipEventDestroy(ipc_event));
-    #endif
-    HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    printf("host_time (chrono)                =%6.3fms\n", hostMs);
+    printf("kernel_time (hipEventElapsedTime) =%6.3fms\n", eventMs);
+    printf("\n");
+  }
 
-    HipTest::checkVectorADD(A_h, B_h, C_h, N, true);
-    HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  hipIpcEventHandle_t ipc_handle;
+  HIP_CHECK(hipIpcGetEventHandle(&ipc_handle, start));
+
+  hipEvent_t ipc_event;
+  hipError_t err = hipIpcOpenEventHandle(&ipc_event, ipc_handle);
+
+#if HT_WIN
+  // always different process Id on Windows
+  HIP_CHECK(err);
+#else
+  // hipIpcOpenEventHandle() should be called in a different process, hence it should fail here
+  REQUIRE(err == hipErrorInvalidContext);
+#endif
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
+#if HT_AMD
+  HIP_CHECK(hipEventDestroy(ipc_event));
+#endif
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+
+  HipTest::checkVectorADD(A_h, B_h, C_h, N, true);
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

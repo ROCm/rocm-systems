@@ -28,7 +28,7 @@ THE SOFTWARE.
  * Query the priority of a stream
  */
 
- /**
+/**
  * Test Description
  * ------------------------
  * - Test to create a stream and check priority.
@@ -64,26 +64,22 @@ TEST_CASE("Unit_hipStreamGetPriority_spt_BasicTst") {
       REQUIRE(priority >= priority_high);
     }
     SECTION("High Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault,
-                                            priority_high));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_high));
       HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
       REQUIRE(priority == priority_high);
     }
     SECTION("Higher Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking,
-                                            priority_high - 1));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_high - 1));
       HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
       REQUIRE(priority == priority_high);
     }
     SECTION("Low Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault,
-                                            priority_low));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_low));
       HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
       REQUIRE(priority_low == priority);
     }
     SECTION("Lower Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking,
-                                            priority_low + 1));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_low + 1));
       HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
       REQUIRE(priority_low == priority);
     }
@@ -91,7 +87,7 @@ TEST_CASE("Unit_hipStreamGetPriority_spt_BasicTst") {
   }
 }
 
- /**
+/**
  * Test Description
  * ------------------------
  * - Test check stream priority with negative cases.
@@ -116,7 +112,7 @@ TEST_CASE("Unit_hipStreamGetPriority_spt_NegativeCases") {
   int priority = -1;
   HIP_CHECK(hipStreamGetPriority_spt(nullptr, &priority));
 }
- /**
+/**
  * Test Description
  * ------------------------
  * - Create stream with CUMask and check priority is returned as expected.
@@ -151,6 +147,6 @@ TEST_CASE("Unit_hipStreamGetPriority_spt_StreamsWithCUMask") {
 #endif
 
 /**
-* End doxygen group StreamTest.
-* @}
-*/
+ * End doxygen group StreamTest.
+ * @}
+ */

@@ -21,19 +21,15 @@
 #pragma once
 
 #include <memory>
-#include <cxxabi.h>
 #include "rocprogram.hpp"
 #include "top.hpp"
 #include "rocprintf.hpp"
-
-#ifndef WITHOUT_HSA_BACKEND
 
 namespace amd::roc {
 
 class Kernel : public device::Kernel {
  public:
-  Kernel(std::string name, Program* prog)
-   : device::Kernel(prog->device(), name, *prog) {}
+  Kernel(std::string name, Program* prog) : device::Kernel(prog->device(), name, *prog) {}
 
   virtual ~Kernel() {
     if (program() != nullptr) {
@@ -61,10 +57,7 @@ class Kernel : public device::Kernel {
  private:
   void initDemangledName() {
     if (demangled_name_.empty()) {
-      int status = 0;
-      char* demangled = abi::__cxa_demangle(name().c_str(), nullptr, nullptr, &status);
-      demangled_name_ = (status == 0 && demangled != nullptr) ? demangled : name().c_str();
-      free(demangled);
+      amd::Os::CxaDemangle(name(), &demangled_name_);
     }
   }
 
@@ -73,4 +66,3 @@ class Kernel : public device::Kernel {
 
 }  // namespace amd::roc
 
-#endif  // WITHOUT_HSA_BACKEND

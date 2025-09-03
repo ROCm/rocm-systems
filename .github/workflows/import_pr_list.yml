@@ -1,0 +1,68 @@
+name: Import Subrepo PRs
+
+on:
+  workflow_dispatch:
+    inputs:
+      subrepo-prefix:
+        description: "Super‐repo path prefix (e.g., projects/rocblas)"
+        required: true
+      subrepo-pr-numbers:
+        description: "Comma‐separated list of Subrepo PR numbers to import"
+        required: true
+      subrepo-repo:
+        description: "Full name of subrepo repo or fork (e.g., ROCm/rocBLAS or user/rocBLAS-fork)"
+        required: true
+      subrepo-upstream:
+        description: "Canonical subrepo repo (e.g., ROCm/rocBLAS)"
+        required: true
+      super-repo-target-branch:
+        description: "Target branch in the super‐repo"
+        required: false
+        default: "develop"
+
+jobs:
+  import-prs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Generate GitHub App token
+        id: gen_token
+        uses: actions/create-github-app-token@v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout super‐repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.gen_token.outputs.token }}
+          fetch-depth: 0
+          sparse-checkout: |
+            .github/scripts/import_subrepo_prs.py
+            ${{ github.event.inputs.subrepo-prefix }}
+          sparse-checkout-cone-mode: true
+          
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+          
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyGithub GitPython
+          
+      - name: Import Subrepo PRs
+        env:
+          GITHUB_TOKEN: ${{ steps.gen_token.outputs.token }}
+          SUBPREFIX: ${{ github.event.inputs.subrepo-prefix }}
+          SUBREPO:   ${{ github.event.inputs.subrepo-repo }}
+          UPSTREAM:  ${{ github.event.inputs.subrepo-upstream }}
+          TARGET:    ${{ github.event.inputs.super-repo-target-branch }}
+          PR_LIST:   ${{ github.event.inputs.subrepo-pr-numbers }}
+        run: |
+          python .github/scripts/import_subrepo_prs.py

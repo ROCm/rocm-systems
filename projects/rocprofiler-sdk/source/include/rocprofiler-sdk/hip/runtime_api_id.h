@@ -531,5 +531,26 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetHandleForAddressRange,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetFunctionCount,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8Async,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16Async,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32Async,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetAttribute,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamSetAttribute,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleLoadFatBinary,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DPeer,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DPeerAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGetDriverEntryPoint,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGetDriverEntryPoint_spt,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchAsync_v2,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemAdvise_v2,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetId,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

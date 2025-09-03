@@ -37,16 +37,17 @@
 
 namespace amd {
 
+// ================================================================================================
 bool Os::isValidFileDesc(const amd::Os::FileDesc& desc) {
-  #if defined(_WIN32)
-    return reinterpret_cast<int>(desc) > 0;
-  #else
-    return static_cast<int>(desc) > 0;
-  #endif
+#if IS_WINDOWS
+  return desc != nullptr;
+#else
+  return desc > 0;
+#endif
   return false;
 }
 
-
+// ================================================================================================
 void* Os::loadLibrary(const char* libraryname) {
   void* handle;
 
@@ -57,7 +58,7 @@ void* Os::loadLibrary(const char* libraryname) {
   namestart = (namestart != std::string::npos) ? namestart + 1 : 0;
 
   if (namestart == 0) {
-#if defined(ATI_OS_WIN)
+#if IS_WINDOWS
     // Try with the path of the current loaded dll(OCL runtime) first
     HMODULE hm = NULL;
     if (!GetModuleHandleExA(

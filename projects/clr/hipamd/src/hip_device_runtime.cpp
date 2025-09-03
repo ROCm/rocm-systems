@@ -21,6 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_internal.hpp"
+#include "hip_platform.hpp"
 
 #undef hipChooseDevice
 #undef hipDeviceProp_t
@@ -46,10 +47,9 @@ hipError_t ihipChooseDevice(int* device, const DeviceProp* properties) {
     cl_uint matchedCount = 0;
     hipError_t err = hipSuccess;
 
-    if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>){
+    if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>) {
       err = ihipGetDeviceProperties(&currentProp, i);
-    }
-    else {
+    } else {
       err = hip::hipGetDevicePropertiesR0000(&currentProp, i);
     }
 
@@ -447,13 +447,13 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       *pi = prop.accessPolicyMaxWindowSize;
-       break;
+      break;
     case hipDeviceAttributeNumberOfXccs:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().numberOfXccs_);
-       break;
+      break;
     case hipDeviceAttributeMaxAvailableVgprsPerThread:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().availableVGPRs_);
-       break;
+      break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
   }
@@ -532,7 +532,8 @@ hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
       *pValue = hip::getCurrentDevice()->devices()[0]->info().scratchLimitMin;
       break;
     case hipExtLimitScratchMax:
-      *pValue = hip::getCurrentDevice()->devices()[0]->info().scratchLimitMax;;
+      *pValue = hip::getCurrentDevice()->devices()[0]->info().scratchLimitMax;
+      ;
       break;
     case hipExtLimitScratchCurrent:
       *pValue = hip::getCurrentDevice()->devices()[0]->ScratchLimitCurrent();
@@ -562,11 +563,8 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
   hipDeviceProp_tR0600 prop;
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   auto* deviceHandle = g_devices[device]->devices()[0];
-  snprintf (pciBusId, len, "%04x:%02x:%02x.%01x",
-                    prop.pciDomainID,
-                    prop.pciBusID,
-                    prop.pciDeviceID,
-                    deviceHandle->info().deviceTopology_.pcie.function);
+  snprintf(pciBusId, len, "%04x:%02x:%02x.%01x", prop.pciDomainID, prop.pciBusID, prop.pciDeviceID,
+           deviceHandle->info().deviceTopology_.pcie.function);
 
   HIP_RETURN(len <= 12 ? hipErrorInvalidValue : hipSuccess);
 }
@@ -652,7 +650,7 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
 }
 
 hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
- const hipChannelFormatDesc* fmtDesc, int device) {
+                                               const hipChannelFormatDesc* fmtDesc, int device) {
   HIP_INIT_API(hipDeviceGetTexture1DLinearMaxWidth, maxWidthInElements, fmtDesc, device);
   if (maxWidthInElements == nullptr || fmtDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -660,8 +658,8 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
   hipDeviceProp_tR0600 prop = {0};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   // Calculate element size according to fmtDesc
-  size_t elementSize = (fmtDesc->x + fmtDesc->y
-  + fmtDesc->z + fmtDesc->w) / 8; // Convert from bits to bytes
+  size_t elementSize =
+      (fmtDesc->x + fmtDesc->y + fmtDesc->z + fmtDesc->w) / 8;  // Convert from bits to bytes
   if (elementSize == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -714,6 +712,61 @@ hipError_t hipGetDeviceFlags(unsigned int* flags) {
   }
   *flags = hip::getCurrentDevice()->getFlags();
   HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr,
+                                         unsigned long long flags,
+                                         hipDriverEntryPointQueryResult* status) {
+  std::string symbolString = symbol;
+  if (symbol == nullptr || symbolString == "" || funcPtr == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (flags != hipEnableDefault && flags != hipEnableLegacyStream &&
+      flags != hipEnablePerThreadDefaultStream) {
+    return hipErrorInvalidValue;
+  }
+
+  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  if (handle == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (flags == hipEnablePerThreadDefaultStream) {
+    symbolString += "_spt";
+  }
+
+  *funcPtr = amd::Os::getSymbol(handle, symbolString.c_str());
+  if (*funcPtr == nullptr) {
+    if (flags == hipEnablePerThreadDefaultStream) {
+      *funcPtr = amd::Os::getSymbol(handle, symbol);
+    }
+    if (*funcPtr == nullptr) {
+      if (status != nullptr) {
+        *status = hipDriverEntryPointSymbolNotFound;
+      }
+      return hipErrorInvalidValue;
+    }
+  }
+
+  if (status != nullptr) {
+    *status = hipDriverEntryPointSuccess;
+  }
+
+  return hipSuccess;
+}
+
+hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned long long flags,
+                                  hipDriverEntryPointQueryResult* status) {
+  HIP_INIT_API(hipGetDriverEntryPoint, symbol, funcPtr, flags, status);
+  HIP_RETURN(hipGetDriverEntryPoint_common(symbol, funcPtr, flags, status));
+}
+
+hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
+                                      hipDriverEntryPointQueryResult* status) {
+  HIP_INIT_API(hipGetDriverEntryPoint, symbol, funcPtr, flags, status);
+  flags = (flags == hipEnableDefault) ? hipEnablePerThreadDefaultStream : flags;
+  HIP_RETURN(hipGetDriverEntryPoint_common(symbol, funcPtr, flags, status));
 }
 
 hipError_t hipSetDevice(int device) {
@@ -811,7 +864,7 @@ hipError_t hipSetValidDevices(int* device_arr, int len) {
   amd::Os::setPreferredNumaNode(preferredNumaNode);
   HIP_RETURN(hipSuccess);
 }
-} //namespace hip
+}  // namespace hip
 
 extern "C" hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0000* properties) {
   return hip::hipChooseDeviceR0000(device, properties);

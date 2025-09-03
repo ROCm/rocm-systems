@@ -64,13 +64,11 @@ void OCLStablePState::open(unsigned int test, char* units, double& conversion,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
 #if 0
     }
 #endif
@@ -80,15 +78,13 @@ void OCLStablePState::open(unsigned int test, char* units, double& conversion,
    * If we could find our platform, use it. If not, die as we need the AMD
    * platform for these extensions.
    */
-  CHECK_RESULT(platform == 0,
-               "Couldn't find platform with GPU devices, cannot proceed");
+  CHECK_RESULT(platform == 0, "Couldn't find platform with GPU devices, cannot proceed");
 
   devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
@@ -96,8 +92,7 @@ void OCLStablePState::open(unsigned int test, char* units, double& conversion,
   gpu_device = device;
 }
 
-static void CL_CALLBACK notify_callback(cl_event event,
-                                        cl_int event_command_exec_status,
+static void CL_CALLBACK notify_callback(cl_event event, cl_int event_command_exec_status,
                                         void* user_data) {}
 
 void OCLStablePState::run(void) {
@@ -107,8 +102,7 @@ void OCLStablePState::run(void) {
   cl_set_device_clock_mode_input_amd setClockModeInput;
   setClockModeInput.clock_mode = CL_DEVICE_CLOCK_MODE_PROFILING_AMD;
   cl_set_device_clock_mode_output_amd setClockModeOutput = {};
-  error_ = _wrapper->clSetDeviceClockModeAMD(gpu_device, setClockModeInput,
-                                             &setClockModeOutput);
+  error_ = _wrapper->clSetDeviceClockModeAMD(gpu_device, setClockModeInput, &setClockModeOutput);
 #ifdef _WIN32
   CHECK_RESULT(error_ != CL_SUCCESS, "SetClockMode profiling failed\n");
 #else
@@ -117,8 +111,7 @@ void OCLStablePState::run(void) {
 
   setClockModeInput.clock_mode = CL_DEVICE_CLOCK_MODE_DEFAULT_AMD;
   setClockModeOutput = {};
-  error_ = _wrapper->clSetDeviceClockModeAMD(gpu_device, setClockModeInput,
-                                             &setClockModeOutput);
+  error_ = _wrapper->clSetDeviceClockModeAMD(gpu_device, setClockModeInput, &setClockModeOutput);
 #ifdef _WIN32
   CHECK_RESULT(error_ != CL_SUCCESS, "SetClockMode default failed\n");
 #else

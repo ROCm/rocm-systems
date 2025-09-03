@@ -73,8 +73,9 @@ static void RunBenchmark(const size_t array_size) {
  */
 TEST_CASE("Performance_hipMallocFromPoolAsync") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -82,6 +83,6 @@ TEST_CASE("Performance_hipMallocFromPoolAsync") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

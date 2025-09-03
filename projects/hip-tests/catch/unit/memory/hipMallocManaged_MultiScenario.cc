@@ -224,17 +224,17 @@ TEST_CASE("Unit_hipMallocManaged_OverSubscription") {
     return;
   }
 
-  #if HT_AMD
-    int isPageableHMM = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM,
-                                    hipDeviceAttributePageableMemoryAccess, 0));
-    if (!isPageableHMM) {
-      SUCCEED("Running on a system  where all the memory requested in hipMallocManged "
-              "is allocated on the host.\nThis can cause instability because of out of memory failures.\n"
-              "Hence skipping the test with Pass result.\n");
-      return;
-    }
-  #endif
+#if HT_AMD
+  int isPageableHMM = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
+  if (!isPageableHMM) {
+    SUCCEED(
+        "Running on a system  where all the memory requested in hipMallocManged "
+        "is allocated on the host.\nThis can cause instability because of out of memory failures.\n"
+        "Hence skipping the test with Pass result.\n");
+    return;
+  }
+#endif
 
   void* A = nullptr;
   size_t total = 0, free = 0;

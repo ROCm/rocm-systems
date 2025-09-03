@@ -19,18 +19,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#define LLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING 1
-#include "llvm/BinaryFormat/ELF.h"
-
+#include "hip_comgr_helper.hpp"
 #if defined(_WIN32)
 #include <io.h>
-#if defined(__has_attribute)
-// MS compiler doesn't support __has_attribute
-#undef __has_attribute
 #endif
-#endif
-#include "hip_comgr_helper.hpp"
-using namespace llvm::ELF;
+#include "../src/amd_hsa_elf.hpp"
 
 namespace hip {
 std::unordered_set<LinkProgram*> LinkProgram::linker_set_;
@@ -110,7 +103,8 @@ static bool getTargetIDValue(std::string& input, std::string& processor, char& s
 }
 
 bool isCodeObjectCompatibleWithDevice(std::string co_triple_target_id,
-         std::string agent_triple_target_id, unsigned& genericVersion) {
+                                      std::string agent_triple_target_id,
+                                      unsigned& genericVersion) {
   // Primitive Check
   if (co_triple_target_id == agent_triple_target_id) return true;
 
@@ -144,8 +138,7 @@ bool isCodeObjectCompatibleWithDevice(std::string co_triple_target_id,
   // Check for compatibility
   if (genericVersion >= EF_AMDGPU_GENERIC_VERSION_MIN) {
     // co_processor is generic target
-    if (!IsCompatibleWithGenericTarget(co_processor, agent_isa_processor))
-    return false;
+    if (!IsCompatibleWithGenericTarget(co_processor, agent_isa_processor)) return false;
   } else if (agent_isa_processor != co_processor) {
     return false;
   }
@@ -163,8 +156,8 @@ bool isCodeObjectCompatibleWithDevice(std::string co_triple_target_id,
 static inline unsigned int getGenericVersion(const void* image) {
   const Elf64_Ehdr* ehdr = reinterpret_cast<const Elf64_Ehdr*>(image);
   return ehdr->e_ident[EI_ABIVERSION] == ELFABIVERSION_AMDGPU_HSA_V6
-      ? ((ehdr->e_flags & EF_AMDGPU_GENERIC_VERSION) >> EF_AMDGPU_GENERIC_VERSION_OFFSET)
-      : 0;
+             ? ((ehdr->e_flags & EF_AMDGPU_GENERIC_VERSION) >> EF_AMDGPU_GENERIC_VERSION_OFFSET)
+             : 0;
 }
 
 static inline bool isGenericTarget(const void* image) {
@@ -185,10 +178,9 @@ bool UnbundleBitCode(const std::vector<char>& bundled_llvm_bitcode, const std::s
   const void* data = reinterpret_cast<const void*>(bundled_llvm_bitcode_s.c_str());
   const auto obheader = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
   const auto* desc = &obheader->desc[0];
-  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects; ++idx,
-                desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
-                    reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) +
-                    desc->bundleEntryIdSize)) {
+  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects;
+       ++idx, desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
+                  reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) + desc->bundleEntryIdSize)) {
     const void* image =
         reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) + desc->offset);
     const size_t image_size = desc->size;
@@ -462,29 +454,27 @@ bool compileToBitCode(const amd_comgr_data_set_t compileInputs, const std::strin
 }
 
 bool CheckIfBundled(std::vector<char>& llvm_bitcode) {
-  std::string magic(llvm_bitcode.begin(),
-                    llvm_bitcode.begin() + bundle_magic_string_size);
+  std::string magic(llvm_bitcode.begin(), llvm_bitcode.begin() + bundle_magic_string_size);
 
   if (magic.compare(CLANG_OFFLOAD_BUNDLER_MAGIC_STR) == 0) {
     return true;
   }
   // File is not bundled
   return false;
-
 }
 // Unbundle Bitcode using COMGR action
 // Supports only 1 Bundle Entry ID for now
 bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
                         std::vector<std::string>& linkOptions, std::string& buildLog,
-                        std::vector<char>& unbundled_bitcode, const char *bundleEntryIDs[],
+                        std::vector<char>& unbundled_bitcode, const char* bundleEntryIDs[],
                         size_t bundleEntryIDsCount) {
   amd_comgr_data_set_t linkinput;
   if (amd::Comgr::create_data_set(&linkinput) != AMD_COMGR_STATUS_SUCCESS) {
-     return false;
+    return false;
   }
   std::string name = "UnbundleCode.bc";
   if (!helpers::addCodeObjData(linkinput, source, name, AMD_COMGR_DATA_KIND_BC_BUNDLE)) {
-   return false;
+    return false;
   }
 
   amd_comgr_action_info_t action;
@@ -497,7 +487,8 @@ bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
     return false;
   }
 
-  if(amd::Comgr::action_info_set_bundle_entry_ids(action, bundleEntryIDs, bundleEntryIDsCount) != AMD_COMGR_STATUS_SUCCESS) {
+  if (amd::Comgr::action_info_set_bundle_entry_ids(action, bundleEntryIDs, bundleEntryIDsCount) !=
+      AMD_COMGR_STATUS_SUCCESS) {
     amd::Comgr::destroy_action_info(action);
     return false;
   }
@@ -508,15 +499,14 @@ bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
     return false;
   }
 
-  if (auto res =
-          amd::Comgr::do_action(AMD_COMGR_ACTION_UNBUNDLE, action, linkinput, output);
+  if (auto res = amd::Comgr::do_action(AMD_COMGR_ACTION_UNBUNDLE, action, linkinput, output);
       res != AMD_COMGR_STATUS_SUCCESS) {
     amd::Comgr::destroy_action_info(action);
     amd::Comgr::destroy_data_set(output);
     return false;
   }
 
-   if (!extractBuildLog(output, buildLog)) {
+  if (!extractBuildLog(output, buildLog)) {
     amd::Comgr::destroy_action_info(action);
     amd::Comgr::destroy_data_set(output);
     return false;
@@ -540,8 +530,7 @@ bool linkLLVMBitcode(const amd_comgr_data_set_t linkInputs, const std::string& i
   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   amd_comgr_action_info_t action;
 
-  if (auto res = createAction(action, linkOptions, isa, lang);
-      res != AMD_COMGR_STATUS_SUCCESS) {
+  if (auto res = createAction(action, linkOptions, isa, lang); res != AMD_COMGR_STATUS_SUCCESS) {
     return false;
   }
 
@@ -576,8 +565,8 @@ bool linkLLVMBitcode(const amd_comgr_data_set_t linkInputs, const std::string& i
 }
 
 bool convertSPIRVToLLVMBC(const amd_comgr_data_set_t linkInputs, const std::string& isa,
-                      std::vector<std::string>& linkOptions, std::string& buildLog,
-                      std::vector<char>& LinkedLLVMBitcode) {
+                          std::vector<std::string>& linkOptions, std::string& buildLog,
+                          std::vector<char>& LinkedLLVMBitcode) {
   amd_comgr_action_info_t action;
 
   if (auto res = createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE);
@@ -746,9 +735,8 @@ bool demangleName(const std::string& mangledName, std::string& demangledName) {
 
   demangledName.resize(demangled_size);
 
-  if (AMD_COMGR_STATUS_SUCCESS !=
-      amd::Comgr::get_data(demangled_data, &demangled_size,
-                           const_cast<char*>(demangledName.data()))) {
+  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size,
+                                                       const_cast<char*>(demangledName.data()))) {
     amd::Comgr::release_data(mangled_data);
     amd::Comgr::release_data(demangled_data);
     return false;
@@ -839,39 +827,39 @@ bool fillMangledNames(std::vector<char>& dataVec, std::map<std::string, std::str
 const std::map<std::string, std::string>& GenericTargetMapping() {
   // The map is subject to change per removing policy
   static const std::map<std::string, std::string> genericTargetMap{
-    // "gfx9-generic"
-    {"gfx900", "gfx9-generic"},
-    {"gfx902", "gfx9-generic"},
-    {"gfx904", "gfx9-generic"},
-    {"gfx906", "gfx9-generic"},
-    {"gfx909", "gfx9-generic"},
-    {"gfx90c", "gfx9-generic"},
-    // "gfx9-4-generic"
-    {"gfx942", "gfx9-4-generic"},
-    {"gfx950", "gfx9-4-generic"},
-    // "gfx10-1-generic"
-    {"gfx1010", "gfx10-1-generic"},
-    {"gfx1011", "gfx10-1-generic"},
-    {"gfx1012", "gfx10-1-generic"},
-    {"gfx1013", "gfx10-1-generic"},
-    // "gfx10-3-generic"
-    {"gfx1030", "gfx10-3-generic"},
-    {"gfx1031", "gfx10-3-generic"},
-    {"gfx1032", "gfx10-3-generic"},
-    {"gfx1033", "gfx10-3-generic"},
-    {"gfx1034", "gfx10-3-generic"},
-    {"gfx1035", "gfx10-3-generic"},
-    {"gfx1036", "gfx10-3-generic"},
-    // "gfx11-generic"
-    {"gfx1100", "gfx11-generic"},
-    {"gfx1101", "gfx11-generic"},
-    {"gfx1102", "gfx11-generic"},
-    {"gfx1103", "gfx11-generic"},
-    {"gfx1150", "gfx11-generic"},
-    {"gfx1151", "gfx11-generic"},
-    // "gfx12-generic"
-    {"gfx1200", "gfx12-generic"},
-    {"gfx1201", "gfx12-generic"},
+      // "gfx9-generic"
+      {"gfx900", "gfx9-generic"},
+      {"gfx902", "gfx9-generic"},
+      {"gfx904", "gfx9-generic"},
+      {"gfx906", "gfx9-generic"},
+      {"gfx909", "gfx9-generic"},
+      {"gfx90c", "gfx9-generic"},
+      // "gfx9-4-generic"
+      {"gfx942", "gfx9-4-generic"},
+      {"gfx950", "gfx9-4-generic"},
+      // "gfx10-1-generic"
+      {"gfx1010", "gfx10-1-generic"},
+      {"gfx1011", "gfx10-1-generic"},
+      {"gfx1012", "gfx10-1-generic"},
+      {"gfx1013", "gfx10-1-generic"},
+      // "gfx10-3-generic"
+      {"gfx1030", "gfx10-3-generic"},
+      {"gfx1031", "gfx10-3-generic"},
+      {"gfx1032", "gfx10-3-generic"},
+      {"gfx1033", "gfx10-3-generic"},
+      {"gfx1034", "gfx10-3-generic"},
+      {"gfx1035", "gfx10-3-generic"},
+      {"gfx1036", "gfx10-3-generic"},
+      // "gfx11-generic"
+      {"gfx1100", "gfx11-generic"},
+      {"gfx1101", "gfx11-generic"},
+      {"gfx1102", "gfx11-generic"},
+      {"gfx1103", "gfx11-generic"},
+      {"gfx1150", "gfx11-generic"},
+      {"gfx1151", "gfx11-generic"},
+      // "gfx12-generic"
+      {"gfx1200", "gfx12-generic"},
+      {"gfx1201", "gfx12-generic"},
   };
   return genericTargetMap;
 }
@@ -907,7 +895,6 @@ RTCProgram::RTCProgram(std::string name) : name_(name) {
 }
 
 bool RTCProgram::findIsa() {
-
 #ifdef BUILD_SHARED_LIBS
   const char* libName;
 #ifdef _WIN32
@@ -1016,7 +1003,7 @@ bool LinkProgram::isLinkerValid(LinkProgram* link_program) {
 }
 
 bool LinkProgram::AddLinkerOptions(unsigned int num_options, hipJitOption* options_ptr,
-                                      void** options_vals_ptr) {
+                                   void** options_vals_ptr) {
   for (size_t opt_idx = 0; opt_idx < num_options; ++opt_idx) {
     if (options_vals_ptr[opt_idx] == nullptr) {
       LogError("Options value can not be nullptr");
@@ -1037,7 +1024,6 @@ bool LinkProgram::AddLinkerOptions(unsigned int num_options, hipJitOption* optio
 
   return true;
 }
-
 
 
 amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) {
@@ -1068,7 +1054,7 @@ amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) 
 
 
 bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputType input_type,
-                                       std::string& link_file_name) {
+                                    std::string& link_file_name) {
   std::vector<char> llvm_code_object;
   is_bundled_ = helpers::CheckIfBundled(link_data);
 
@@ -1086,20 +1072,20 @@ bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputTyp
 
     llvm_code_object.assign(link_data.begin() + co_offset, link_data.begin() + co_offset + co_size);
   } else if (is_bundled_ && input_type == hipJitInputSpirv) {
-    const char* bundleEntryIDs[] = { helpers::SPIRV_BUNDLE_ENTRY_ID };
+    const char* bundleEntryIDs[] = {helpers::SPIRV_BUNDLE_ENTRY_ID};
     size_t bundleEntryIDsCount = sizeof(bundleEntryIDs) / sizeof(bundleEntryIDs[0]);
-    if(!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_, llvm_code_object,
-                                    bundleEntryIDs, bundleEntryIDsCount)) {
+    if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_, llvm_code_object,
+                                     bundleEntryIDs, bundleEntryIDsCount)) {
       LogError("Error in hip Linker: Unable to unbundle SPIRV Bitcode");
       return false;
     }
   } else {
-      llvm_code_object.assign(link_data.begin(), link_data.end());
+    llvm_code_object.assign(link_data.begin(), link_data.end());
   }
 
   if ((data_kind_ = GetCOMGRDataKind(input_type)) == AMD_COMGR_DATA_KIND_UNDEF) {
-      LogError("Cannot find the correct COMGR data kind");
-      return false;
+    LogError("Cannot find the correct COMGR data kind");
+    return false;
   }
 
   if (!helpers::addCodeObjData(link_input_, llvm_code_object, link_file_name, data_kind_)) {
@@ -1133,7 +1119,7 @@ bool LinkProgram::AddLinkerFile(std::string file_path, hipJitInputType input_typ
 }
 
 bool LinkProgram::AddLinkerData(void* image_ptr, size_t image_size, std::string link_file_name,
-                                   hipJitInputType input_type) {
+                                hipJitInputType input_type) {
   char* image_char_buf = reinterpret_cast<char*>(image_ptr);
   std::vector<char> llvm_code_object(image_char_buf, image_char_buf + image_size);
 
@@ -1153,13 +1139,15 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
   if (data_kind_ == AMD_COMGR_DATA_KIND_SPIRV) {
     // Convert SPIRV Unbundled code object to LLVM Bitcode
     std::vector<char> llvmbc_from_spirv;
-    if (!helpers::convertSPIRVToLLVMBC(link_input_, isa_, link_options_, build_log_, llvmbc_from_spirv)) {
+    if (!helpers::convertSPIRVToLLVMBC(link_input_, isa_, link_options_, build_log_,
+                                       llvmbc_from_spirv)) {
       LogError("Error in hip Linker: unable to convert SPIRV to BC");
       return false;
     }
 
     std::string linkedFileName = "LLVMBitcodeFromSPIRV.bc";
-    if (!helpers::addCodeObjData(link_input, llvmbc_from_spirv, linkedFileName, AMD_COMGR_DATA_KIND_BC)) {
+    if (!helpers::addCodeObjData(link_input, llvmbc_from_spirv, linkedFileName,
+                                 AMD_COMGR_DATA_KIND_BC)) {
       LogError("Error in hip Linker: unable to add linked LLVM bitcode");
       return false;
     }
@@ -1189,7 +1177,7 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
                 }()
                     .c_str());
   if (!helpers::createExecutable(exec_input_, isa_, exe_options, build_log_, executable_,
-                        data_kind_ == AMD_COMGR_DATA_KIND_SPIRV)) {
+                                 data_kind_ == AMD_COMGR_DATA_KIND_SPIRV)) {
     LogPrintfInfo("Error in hip linker: unable to create exectuable: %s", build_log_.c_str());
     return false;
   }

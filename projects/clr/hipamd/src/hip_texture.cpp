@@ -34,16 +34,13 @@ struct __hip_texture {
   hipTextureDesc texDesc;
   hipResourceViewDesc resViewDesc;
 
-  __hip_texture(amd::Image* image_,
-                amd::Sampler* sampler_,
-                const hipResourceDesc& resDesc_,
-                const hipTextureDesc& texDesc_,
-                const hipResourceViewDesc& resViewDesc_) :
-    image(image_),
-    sampler(sampler_),
-    resDesc(resDesc_),
-    texDesc(texDesc_),
-    resViewDesc(resViewDesc_) {
+  __hip_texture(amd::Image* image_, amd::Sampler* sampler_, const hipResourceDesc& resDesc_,
+                const hipTextureDesc& texDesc_, const hipResourceViewDesc& resViewDesc_)
+      : image(image_),
+        sampler(sampler_),
+        resDesc(resDesc_),
+        texDesc(texDesc_),
+        resViewDesc(resViewDesc_) {
     amd::Context& context = *hip::getCurrentDevice()->asContext();
     amd::Device& device = *context.devices()[0];
 
@@ -58,22 +55,14 @@ struct __hip_texture {
 namespace hip {
 
 hipError_t ihipFree(void* ptr);
-amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
-                            const cl_channel_type channelType,
-                            const cl_mem_object_type imageType,
-                            const size_t imageWidth,
-                            const size_t imageHeight,
-                            const size_t imageDepth,
-                            const size_t imageArraySize,
-                            const size_t imageRowPitch,
-                            const size_t imageSlicePitch,
-                            const uint32_t numMipLevels,
-                            const size_t offset,
-                            amd::Memory* buffer,
-                            hipError_t& status);
+amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channel_type channelType,
+                            const cl_mem_object_type imageType, const size_t imageWidth,
+                            const size_t imageHeight, const size_t imageDepth,
+                            const size_t imageArraySize, const size_t imageRowPitch,
+                            const size_t imageSlicePitch, const uint32_t numMipLevels,
+                            const size_t offset, amd::Memory* buffer, hipError_t& status);
 
-hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
-                                   const hipResourceDesc* pResDesc,
+hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
                                    const hipTextureDesc* pTexDesc,
                                    const hipResourceViewDesc* pResViewDesc) {
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
@@ -88,20 +77,21 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
     return hipErrorInvalidChannelDescriptor;
   }
 
-  // pResViewDesc can only be specified if the type of resource is a HIP array or a HIP mipmapped array.
-  if ((pResViewDesc != nullptr) &&
-      ((pResDesc->resType != hipResourceTypeArray) && (pResDesc->resType != hipResourceTypeMipmappedArray))) {
+  // pResViewDesc can only be specified if the type of resource is a HIP array or a HIP mipmapped
+  // array.
+  if ((pResViewDesc != nullptr) && ((pResDesc->resType != hipResourceTypeArray) &&
+                                    (pResDesc->resType != hipResourceTypeMipmappedArray))) {
     return hipErrorUnknown;
   }
 
   // If hipResourceDesc::resType is set to hipResourceTypeArray,
   if (pResDesc->resType == hipResourceTypeArray) {
-      // hipResourceDesc::res::array::array must be set to a valid HIP array handle.
+    // hipResourceDesc::res::array::array must be set to a valid HIP array handle.
     if (pResDesc->res.array.array == nullptr) {
       return hipErrorInvalidValue;
     } else if (pResDesc->res.array.array->depth > 0 &&
-      pTexDesc->filterMode == hipFilterModeLinear &&
-      !strncmp(info.name_, "gfx90a", strlen("gfx90a"))) {
+               pTexDesc->filterMode == hipFilterModeLinear &&
+               !strncmp(info.name_, "gfx90a", strlen("gfx90a"))) {
       LogPrintfInfo("%s doesn't support 3D linear filter!", info.name_);
       return hipErrorNotSupported;
     }
@@ -116,34 +106,41 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
     const std::vector<amd::Device*>& devices = context.devices();
     for (auto& dev : devices) {
       if (!dev->settings().checkExtension(ClKhrMipMapImage)) {
-        mipMapSupport = false; // Now PAL-backend can support mipmap, Rocm-backend cannot.
+        mipMapSupport = false;  // Now PAL-backend can support mipmap, Rocm-backend cannot.
       }
     }
     if (mipMapSupport == false) {
       LogInfo("Mipmap not supported on the device");
       return hipErrorNotSupported;
     }
-    if (pResDesc->res.mipmap.mipmap == nullptr || pTexDesc->normalizedCoords == 0) {
+    if (pResDesc->res.mipmap.mipmap == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    if (pTexDesc->normalizedCoords == 0) {
       return hipErrorInvalidChannelDescriptor;
     }
   }
 
   // If hipResourceDesc::resType is set to hipResourceTypeLinear,
-  // hipResourceDesc::res::linear::devPtr must be set to a valid device pointer, that is aligned to hipDeviceProp::textureAlignment.
-  // The total number of elements in the linear address range cannot exceed hipDeviceProp::maxTexture1DLinear.
+  // hipResourceDesc::res::linear::devPtr must be set to a valid device pointer, that is aligned to
+  // hipDeviceProp::textureAlignment. The total number of elements in the linear address range
+  // cannot exceed hipDeviceProp::maxTexture1DLinear.
   if ((pResDesc->resType == hipResourceTypeLinear) &&
       ((pResDesc->res.linear.devPtr == nullptr) ||
        (!amd::isMultipleOf(pResDesc->res.linear.devPtr, info.imageBaseAddressAlignment_)) ||
-       (pResDesc->res.linear.sizeInBytes >= info.imageMaxBufferSize_ * hip::getElementSize(pResDesc->res.linear.desc)))) {
+       (pResDesc->res.linear.sizeInBytes >=
+        info.imageMaxBufferSize_ * hip::getElementSize(pResDesc->res.linear.desc)))) {
     return hipErrorInvalidChannelDescriptor;
   }
 
   // If hipResourceDesc::resType is set to hipResourceTypePitch2D,
-  // hipResourceDesc::res::pitch2D::devPtr must be set to a valid device pointer, that is aligned to hipDeviceProp::textureAlignment.
-  // hipResourceDesc::res::pitch2D::width and hipResourceDesc::res::pitch2D::height specify the width and height of the array in elements,
-  // and cannot exceed hipDeviceProp::maxTexture2DLinear[0] and hipDeviceProp::maxTexture2DLinear[1] respectively.
-  // hipResourceDesc::res::pitch2D::pitchInBytes specifies the pitch between two rows in bytes and has to be aligned to hipDeviceProp::texturePitchAlignment.
-  // Pitch cannot exceed hipDeviceProp::maxTexture2DLinear[2].
+  // hipResourceDesc::res::pitch2D::devPtr must be set to a valid device pointer, that is aligned to
+  // hipDeviceProp::textureAlignment. hipResourceDesc::res::pitch2D::width and
+  // hipResourceDesc::res::pitch2D::height specify the width and height of the array in elements,
+  // and cannot exceed hipDeviceProp::maxTexture2DLinear[0] and hipDeviceProp::maxTexture2DLinear[1]
+  // respectively. hipResourceDesc::res::pitch2D::pitchInBytes specifies the pitch between two rows
+  // in bytes and has to be aligned to hipDeviceProp::texturePitchAlignment. Pitch cannot exceed
+  // hipDeviceProp::maxTexture2DLinear[2].
   if ((pResDesc->resType == hipResourceTypePitch2D) &&
       ((pResDesc->res.pitch2D.devPtr == nullptr) ||
        (!amd::isMultipleOf(pResDesc->res.pitch2D.devPtr, info.imageBaseAddressAlignment_)) ||
@@ -173,14 +170,13 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
   }
 
   // TODO ROCclr assumes all dimensions have the same addressing mode.
-  cl_addressing_mode addressMode[3] = { CL_ADDRESS_NONE, CL_ADDRESS_NONE, CL_ADDRESS_NONE};
+  cl_addressing_mode addressMode[3] = {CL_ADDRESS_NONE, CL_ADDRESS_NONE, CL_ADDRESS_NONE};
   // If hipTextureDesc::normalizedCoords is set to zero,
   // hipAddressModeWrap and hipAddressModeMirror won't be supported
   // and will be switched to hipAddressModeClamp.
   for (int i = 0; i < 3; i++) {
-    if ((pTexDesc->normalizedCoords == 0) &&
-        ((pTexDesc->addressMode[i] == hipAddressModeWrap) ||
-            (pTexDesc->addressMode[i] == hipAddressModeMirror))) {
+    if ((pTexDesc->normalizedCoords == 0) && ((pTexDesc->addressMode[i] == hipAddressModeWrap) ||
+                                              (pTexDesc->addressMode[i] == hipAddressModeMirror))) {
       addressMode[i] = hip::getCLAddressingMode(hipAddressModeClamp);
     }
     // hipTextureDesc::addressMode is ignored if hipResourceDesc::resType is hipResourceTypeLinear
@@ -204,13 +200,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
     mipFilterMode = hip::getCLFilterMode(pTexDesc->mipmapFilterMode);
   }
 
-  amd::Sampler* sampler = new amd::Sampler(*hip::getCurrentDevice()->asContext(),
-                                           pTexDesc->normalizedCoords,
-                                           addressMode,
-                                           filterMode,
-                                           mipFilterMode,
-                                           pTexDesc->minMipmapLevelClamp,
-                                           pTexDesc->maxMipmapLevelClamp);
+  amd::Sampler* sampler = new amd::Sampler(
+      *hip::getCurrentDevice()->asContext(), pTexDesc->normalizedCoords, addressMode, filterMode,
+      mipFilterMode, pTexDesc->minMipmapLevelClamp, pTexDesc->maxMipmapLevelClamp);
 
   if (sampler == nullptr) {
     return hipErrorOutOfMemory;
@@ -223,160 +215,168 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
 
   amd::Image* image = nullptr;
   switch (pResDesc->resType) {
-  case hipResourceTypeArray: {
-    cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
-    if (!is_valid(memObj)) {
-      return hipErrorInvalidValue;
-    }
-    image = as_amd(memObj)->asImage();
-
-    hipTextureReadMode readMode = pTexDesc->readMode;
-    // 32-bit integer format will not be promoted, regardless of whether or not
-    // this hipTextureDesc::readMode is set hipReadModeNormalizedFloat is specified.
-    if ((pResDesc->res.array.array->Format == HIP_AD_FORMAT_SIGNED_INT32) ||
-        (pResDesc->res.array.array->Format == HIP_AD_FORMAT_UNSIGNED_INT32)) {
-      readMode = hipReadModeElementType;
-    }
-
-    // We need to create an image view if the user requested to use normalized pixel values,
-    // due to already having the image created with a different format.
-    if ((pResViewDesc != nullptr) ||
-        (readMode == hipReadModeNormalizedFloat) ||
-        (pTexDesc->sRGB == 1)) {
-      // TODO ROCclr currently right now can only change the format of the image.
-      const cl_channel_order channelOrder = (pResViewDesc != nullptr) ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB) :
-                                                                        hip::getCLChannelOrder(pResDesc->res.array.array->NumChannels, pTexDesc->sRGB);
-      const cl_channel_type channelType = (pResViewDesc != nullptr) ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode) :
-                                                                      hip::getCLChannelType(pResDesc->res.array.array->Format, readMode);
-      const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
-      if (!imageFormat.isValid()) {
+    case hipResourceTypeArray: {
+      cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
+      if (!is_valid(memObj)) {
         return hipErrorInvalidValue;
       }
+      image = as_amd(memObj)->asImage();
 
-      image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr);
+      hipTextureReadMode readMode = pTexDesc->readMode;
+      // 32-bit integer format will not be promoted, regardless of whether or not
+      // this hipTextureDesc::readMode is set hipReadModeNormalizedFloat is specified.
+      if ((pResDesc->res.array.array->Format == HIP_AD_FORMAT_SIGNED_INT32) ||
+          (pResDesc->res.array.array->Format == HIP_AD_FORMAT_UNSIGNED_INT32)) {
+        readMode = hipReadModeElementType;
+      }
+
+      // We need to create an image view if the user requested to use normalized pixel values,
+      // due to already having the image created with a different format.
+      if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
+          (pTexDesc->sRGB == 1)) {
+        // TODO ROCclr currently right now can only change the format of the image.
+        const cl_channel_order channelOrder =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
+                : hip::getCLChannelOrder(pResDesc->res.array.array->NumChannels, pTexDesc->sRGB);
+        const cl_channel_type channelType =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
+                : hip::getCLChannelType(pResDesc->res.array.array->Format, readMode);
+        const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
+        if (!imageFormat.isValid()) {
+          return hipErrorInvalidValue;
+        }
+
+        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr);
+        if (image == nullptr) {
+          return hipErrorInvalidValue;
+        }
+      } else {
+        image->retain();  // will be released in ihipDestroyTextureObject()
+      }
+      break;
+    }
+    case hipResourceTypeMipmappedArray: {
+      cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
+      if (!is_valid(memObj)) {
+        return hipErrorInvalidValue;
+      }
+      image = as_amd(memObj)->asImage();
+
+      hipTextureReadMode readMode = pTexDesc->readMode;
+      // 32-bit integer format will not be promoted, regardless of whether or not
+      // this hipTextureDesc::readMode is set hipReadModeNormalizedFloat is specified.
+      if ((pResDesc->res.array.array->Format == HIP_AD_FORMAT_SIGNED_INT32) ||
+          (pResDesc->res.array.array->Format == HIP_AD_FORMAT_UNSIGNED_INT32)) {
+        readMode = hipReadModeElementType;
+      }
+
+      // We need to create an image view if the user requested to use normalized pixel values,
+      // due to already having the image created with a different format.
+      if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
+          (pTexDesc->sRGB == 1)) {
+        // TODO ROCclr currently right now can only change the format of the image.
+        const cl_channel_order channelOrder =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
+                : hip::getCLChannelOrder(pResDesc->res.mipmap.mipmap->num_channels, pTexDesc->sRGB);
+        const cl_channel_type channelType =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
+                : hip::getCLChannelType(pResDesc->res.mipmap.mipmap->format, readMode);
+        const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
+        if (!imageFormat.isValid()) {
+          return hipErrorInvalidValue;
+        }
+
+        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0, 0,
+                                  true);
+        if (image == nullptr) {
+          return hipErrorInvalidValue;
+        }
+      } else {
+        image->retain();  // will be released in ihipDestroyTextureObject()
+      }
+      break;
+    }
+    case hipResourceTypeLinear: {
+      const cl_channel_order channelOrder =
+          hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.linear.desc), pTexDesc->sRGB);
+      const cl_channel_type channelType =
+          hip::getCLChannelType(hip::getArrayFormat(pResDesc->res.linear.desc), pTexDesc->readMode);
+      const amd::Image::Format imageFormat({channelOrder, channelType});
+      const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
+      const size_t imageSizeInBytes = pResDesc->res.linear.sizeInBytes;
+      amd::Memory* buffer =
+          getMemoryObjectWithOffset(pResDesc->res.linear.devPtr, imageSizeInBytes);
+      hipError_t status = hipSuccess;
+      image = ihipImageCreate(channelOrder, channelType, imageType,
+                              imageSizeInBytes / imageFormat.getElementSize(), /* imageWidth */
+                              0,                                               /* imageHeight */
+                              0,                                               /* imageDepth */
+                              0,                                               /* imageArraySize */
+                              0,                                               /* imageRowPitch */
+                              0,                                               /* imageSlicePitch */
+                              0,                                               /* numMipLevels */
+                              0,                                               /* offset */
+                              buffer, status);
+      if (buffer != nullptr) {
+        buffer->release();
+      }
+
       if (image == nullptr) {
-        return hipErrorInvalidValue;
+        return status;
       }
-    } else {
-      image->retain();  // will be released in ihipDestroyTextureObject()
+      break;
     }
-    break;
-  }
-  case hipResourceTypeMipmappedArray: {
-    cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
-    if (!is_valid(memObj)) {
-      return hipErrorInvalidValue;
-    }
-    image = as_amd(memObj)->asImage();
-
-    hipTextureReadMode readMode = pTexDesc->readMode;
-    // 32-bit integer format will not be promoted, regardless of whether or not
-    // this hipTextureDesc::readMode is set hipReadModeNormalizedFloat is specified.
-    if ((pResDesc->res.array.array->Format == HIP_AD_FORMAT_SIGNED_INT32) ||
-        (pResDesc->res.array.array->Format == HIP_AD_FORMAT_UNSIGNED_INT32)) {
-      readMode = hipReadModeElementType;
-    }
-
-    // We need to create an image view if the user requested to use normalized pixel values,
-    // due to already having the image created with a different format.
-    if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
-        (pTexDesc->sRGB == 1)) {
-      // TODO ROCclr currently right now can only change the format of the image.
-      const cl_channel_order channelOrder = (pResViewDesc != nullptr)
-          ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
-          : hip::getCLChannelOrder(pResDesc->res.mipmap.mipmap->num_channels, pTexDesc->sRGB);
-      const cl_channel_type channelType = (pResViewDesc != nullptr)
-          ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
-          : hip::getCLChannelType(pResDesc->res.mipmap.mipmap->format, readMode);
-      const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
-      if (!imageFormat.isValid()) {
-        return hipErrorInvalidValue;
+    case hipResourceTypePitch2D: {
+      const cl_channel_order channelOrder =
+          hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.pitch2D.desc), pTexDesc->sRGB);
+      const cl_channel_type channelType = hip::getCLChannelType(
+          hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
+      const amd::Image::Format imageFormat({channelOrder, channelType});
+      const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
+      const size_t imageSizeInBytes =
+          pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
+          pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1);
+      amd::Memory* buffer =
+          getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
+      hipError_t status = hipSuccess;
+      image = ihipImageCreate(channelOrder, channelType, imageType,
+                              pResDesc->res.pitch2D.width,        /* imageWidth */
+                              pResDesc->res.pitch2D.height,       /* imageHeight */
+                              0,                                  /* imageDepth */
+                              0,                                  /* imageArraySize */
+                              pResDesc->res.pitch2D.pitchInBytes, /* imageRowPitch */
+                              0,                                  /* imageSlicePitch */
+                              0,                                  /* numMipLevels */
+                              0,                                  /* offset */
+                              buffer, status);
+      if (buffer != nullptr) {
+        buffer->release();
       }
-
-      image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0, 0,
-                                true);
       if (image == nullptr) {
-        return hipErrorInvalidValue;
+        return status;
       }
-    } else {
-      image->retain();  // will be released in ihipDestroyTextureObject()
+      break;
     }
-    break;
-  }
-  case hipResourceTypeLinear: {
-    const cl_channel_order channelOrder = hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.linear.desc), pTexDesc->sRGB);
-    const cl_channel_type channelType = hip::getCLChannelType(hip::getArrayFormat(pResDesc->res.linear.desc), pTexDesc->readMode);
-    const amd::Image::Format imageFormat({channelOrder, channelType});
-    const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
-    const size_t imageSizeInBytes = pResDesc->res.linear.sizeInBytes;
-    amd::Memory* buffer = getMemoryObjectWithOffset(pResDesc->res.linear.devPtr, imageSizeInBytes);
-    hipError_t status = hipSuccess;
-    image = ihipImageCreate(channelOrder,
-                            channelType,
-                            imageType,
-                            imageSizeInBytes / imageFormat.getElementSize(), /* imageWidth */
-                            0, /* imageHeight */
-                            0, /* imageDepth */
-                            0, /* imageArraySize */
-                            0, /* imageRowPitch */
-                            0, /* imageSlicePitch */
-                            0, /* numMipLevels */
-                            0, /* offset */
-                            buffer,
-                            status);
-    if (buffer != nullptr) {
-      buffer->release();
-    }
-
-    if (image == nullptr) {
-      return status;
-    }
-    break;
-  }
-  case hipResourceTypePitch2D: {
-    const cl_channel_order channelOrder = hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.pitch2D.desc), pTexDesc->sRGB);
-    const cl_channel_type channelType = hip::getCLChannelType(hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
-    const amd::Image::Format imageFormat({channelOrder, channelType});
-    const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
-    const size_t imageSizeInBytes = pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
-                                    pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1);
-    amd::Memory* buffer = getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
-    hipError_t status = hipSuccess;
-    image = ihipImageCreate(channelOrder,
-                            channelType,
-                            imageType,
-                            pResDesc->res.pitch2D.width, /* imageWidth */
-                            pResDesc->res.pitch2D.height, /* imageHeight */
-                            0, /* imageDepth */
-                            0, /* imageArraySize */
-                            pResDesc->res.pitch2D.pitchInBytes, /* imageRowPitch */
-                            0, /* imageSlicePitch */
-                            0, /* numMipLevels */
-                            0, /* offset */
-                            buffer,
-                            status);
-    if (buffer != nullptr) {
-      buffer->release();
-    }
-    if (image == nullptr) {
-      return status;
-    }
-    break;
-  }
   }
 
-  void *texObjectBuffer = nullptr;
-  hipError_t err = ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), CL_MEM_SVM_FINE_GRAIN_BUFFER);
+  void* texObjectBuffer = nullptr;
+  hipError_t err =
+      ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), CL_MEM_SVM_FINE_GRAIN_BUFFER);
   if (texObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }
-  *pTexObject = new (texObjectBuffer) __hip_texture{image, sampler, *pResDesc, *pTexDesc, (pResViewDesc != nullptr) ? *pResViewDesc : hipResourceViewDesc{}};
+  *pTexObject = new (texObjectBuffer)
+      __hip_texture{image, sampler, *pResDesc, *pTexDesc,
+                    (pResViewDesc != nullptr) ? *pResViewDesc : hipResourceViewDesc{}};
 
   return hipSuccess;
 }
 
-hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject,
-                                  const hipResourceDesc* pResDesc,
+hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
                                   const hipTextureDesc* pTexDesc,
                                   const hipResourceViewDesc* pResViewDesc) {
   HIP_INIT_API(hipCreateTextureObject, pTexObject, pResDesc, pTexDesc, pResViewDesc);
@@ -407,7 +407,6 @@ hipError_t ihipDestroyTextureObject(hipTextureObject_t texObject) {
 }
 
 hipError_t ihipUnbindTexture(textureReference* texRef) {
-
   hipError_t hip_error = hipSuccess;
 
   do {
@@ -484,8 +483,7 @@ hipError_t hipGetTextureObjectResourceViewDesc(hipResourceViewDesc* pResViewDesc
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
-                                          hipTextureObject_t texObject) {
+hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc, hipTextureObject_t texObject) {
   HIP_INIT_API(hipGetTextureObjectTextureDesc, pTexDesc, texObject);
 
   if ((pTexDesc == nullptr) || (texObject == nullptr)) {
@@ -503,8 +501,7 @@ hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
   HIP_RETURN(hipSuccess);
 }
 
-inline hipError_t ihipGetTextureAlignmentOffset(size_t* offset,
-                                          const void* devPtr) {
+inline hipError_t ihipGetTextureAlignmentOffset(size_t* offset, const void* devPtr) {
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
@@ -512,7 +509,8 @@ inline hipError_t ihipGetTextureAlignmentOffset(size_t* offset,
     return hipErrorNotSupported;
   }
 
-  const char* alignedDevPtr = amd::alignUp(static_cast<const char*>(devPtr), info.imageBaseAddressAlignment_);
+  const char* alignedDevPtr =
+      amd::alignUp(static_cast<const char*>(devPtr), info.imageBaseAddressAlignment_);
   const size_t alignedOffset = alignedDevPtr - static_cast<const char*>(devPtr);
 
   // If the device memory pointer was returned from hipMalloc(),
@@ -529,11 +527,8 @@ inline hipError_t ihipGetTextureAlignmentOffset(size_t* offset,
   return hipSuccess;
 }
 
-hipError_t ihipBindTexture(size_t* offset,
-                           const textureReference* texref,
-                           const void* devPtr,
-                           const hipChannelFormatDesc* desc,
-                           size_t size) {
+hipError_t ihipBindTexture(size_t* offset, const textureReference* texref, const void* devPtr,
+                           const hipChannelFormatDesc* desc, size_t size) {
   if (texref == nullptr) {
     return hipErrorUnknown;
   }
@@ -546,9 +541,8 @@ hipError_t ihipBindTexture(size_t* offset,
     return hipErrorInvalidValue;
   }
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texref->textureObject);
   if (err != hipSuccess) {
     return err;
@@ -569,26 +563,19 @@ hipError_t ihipBindTexture(size_t* offset,
       static_cast<char*>(const_cast<void*>(devPtr)) - (offset != nullptr ? *offset : 0);
   hipTextureDesc texDesc = hip::getTextureDesc(texref);
 
-  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc, &texDesc, nullptr);
+  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc,
+                                 &texDesc, nullptr);
 }
 
-hipError_t ihipBindTexture2D(size_t* offset,
-                             const textureReference* texref,
-                             const void* devPtr,
-                             const hipChannelFormatDesc* desc,
-                             size_t width,
-                             size_t height,
+hipError_t ihipBindTexture2D(size_t* offset, const textureReference* texref, const void* devPtr,
+                             const hipChannelFormatDesc* desc, size_t width, size_t height,
                              size_t pitch) {
-  if ((texref == nullptr) ||
-      (devPtr == nullptr) ||
-      (desc == nullptr) ||
-      (pitch == 0)) {
+  if ((texref == nullptr) || (devPtr == nullptr) || (desc == nullptr) || (pitch == 0)) {
     return hipErrorInvalidValue;
   }
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texref->textureObject);
   if (err != hipSuccess) {
     return err;
@@ -611,15 +598,12 @@ hipError_t ihipBindTexture2D(size_t* offset,
       static_cast<char*>(const_cast<void*>(devPtr)) - (offset != nullptr ? *offset : 0);
   hipTextureDesc texDesc = hip::getTextureDesc(texref);
 
-  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc, &texDesc, nullptr);
+  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc,
+                                 &texDesc, nullptr);
 }
 
-hipError_t hipBindTexture2D(size_t* offset,
-                            const textureReference* texref,
-                            const void* devPtr,
-                            const hipChannelFormatDesc* desc,
-                            size_t width,
-                            size_t height,
+hipError_t hipBindTexture2D(size_t* offset, const textureReference* texref, const void* devPtr,
+                            const hipChannelFormatDesc* desc, size_t width, size_t height,
                             size_t pitch) {
   HIP_INIT_API(hipBindTexture2D, offset, texref, devPtr, desc, width, height, pitch);
 
@@ -633,8 +617,8 @@ hipError_t hipBindTexture2D(size_t* offset,
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
 
-  HIP_RETURN_ONFAIL(PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr,
-                                                               &refDevSize));
+  HIP_RETURN_ONFAIL(
+      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTexture2D(offset, texref, devPtr, desc, width, height, pitch);
@@ -646,12 +630,10 @@ hipError_t hipBindTexture2D(size_t* offset,
   HIP_RETURN(ihipMemcpy(refDevPtr, texref, refDevSize, hipMemcpyHostToDevice, *stream));
 }
 
-hipError_t ihipBindTextureToArray(const textureReference* texref,
-                                  hipArray_const_t array,
+hipError_t ihipBindTextureToArray(const textureReference* texref, hipArray_const_t array,
                                   const hipChannelFormatDesc* desc) {
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texref->textureObject);
   if (err != hipSuccess) {
     return err;
@@ -666,11 +648,11 @@ hipError_t ihipBindTextureToArray(const textureReference* texref,
   hipResourceViewFormat format = hip::getResourceViewFormat(*desc);
   hipResourceViewDesc resViewDesc = hip::getResourceViewDesc(array, format);
 
-  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc, &texDesc, &resViewDesc);
+  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc,
+                                 &texDesc, &resViewDesc);
 }
 
-hipError_t hipBindTextureToArray(const textureReference* texref,
-                                 hipArray_const_t array,
+hipError_t hipBindTextureToArray(const textureReference* texref, hipArray_const_t array,
                                  const hipChannelFormatDesc* desc) {
   HIP_INIT_API(hipBindTextureToArray, texref, array, desc);
 
@@ -680,8 +662,8 @@ hipError_t hipBindTextureToArray(const textureReference* texref,
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr,
-                                                               &refDevSize));
+  HIP_RETURN_ONFAIL(
+      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTextureToArray(texref, array, desc);
@@ -696,15 +678,12 @@ hipError_t hipBindTextureToArray(const textureReference* texref,
 hipError_t ihipBindTextureToMipmappedArray(const textureReference* texref,
                                            hipMipmappedArray_const_t mipmappedArray,
                                            const hipChannelFormatDesc* desc) {
-  if ((texref == nullptr) ||
-      (mipmappedArray == nullptr) ||
-      (desc == nullptr)) {
+  if ((texref == nullptr) || (mipmappedArray == nullptr) || (desc == nullptr)) {
     return hipErrorInvalidValue;
   }
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texref->textureObject);
   if (err != hipSuccess) {
     return err;
@@ -719,7 +698,8 @@ hipError_t ihipBindTextureToMipmappedArray(const textureReference* texref,
   hipResourceViewFormat format = hip::getResourceViewFormat(*desc);
   hipResourceViewDesc resViewDesc = hip::getResourceViewDesc(mipmappedArray, format);
 
-  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc, &texDesc, &resViewDesc);
+  return ihipCreateTextureObject(const_cast<hipTextureObject_t*>(&texref->textureObject), &resDesc,
+                                 &texDesc, &resViewDesc);
 }
 
 hipError_t hipBindTextureToMipmappedArray(const textureReference* texref,
@@ -730,8 +710,8 @@ hipError_t hipBindTextureToMipmappedArray(const textureReference* texref,
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
 
-  HIP_RETURN_ONFAIL(PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr,
-                                                               &refDevSize));
+  HIP_RETURN_ONFAIL(
+      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTextureToMipmappedArray(texref, mipmappedArray, desc);
@@ -749,17 +729,14 @@ hipError_t hipUnbindTexture(const textureReference* texref) {
   HIP_RETURN(ihipUnbindTexture(const_cast<textureReference*>(texref)));
 }
 
-hipError_t hipBindTexture(size_t* offset,
-                          const textureReference* texref,
-                          const void* devPtr,
-                          const hipChannelFormatDesc* desc,
-                          size_t size) {
+hipError_t hipBindTexture(size_t* offset, const textureReference* texref, const void* devPtr,
+                          const hipChannelFormatDesc* desc, size_t size) {
   HIP_INIT_API(hipBindTexture, offset, texref, devPtr, desc, size);
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr,
-                                                               &refDevSize));
+  HIP_RETURN_ONFAIL(
+      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTexture(offset, texref, devPtr, desc, size);
   if (err != hipSuccess) {
@@ -770,8 +747,7 @@ hipError_t hipBindTexture(size_t* offset,
   HIP_RETURN(ihipMemcpy(refDevPtr, texref, refDevSize, hipMemcpyHostToDevice, *stream));
 }
 
-hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
-                             hipArray_const_t array) {
+hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array) {
   HIP_INIT_API(hipGetChannelDesc, desc, array);
 
   if (desc == nullptr) {
@@ -787,15 +763,15 @@ hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
     HIP_RETURN(hipErrorNotSupported);
   }
 
-  // It is UB to call hipGetChannelDesc() on an array created via hipArrayCreate()/hipArray3DCreate().
-  // This is due to hip not differentiating between runtime and driver types.
+  // It is UB to call hipGetChannelDesc() on an array created via
+  // hipArrayCreate()/hipArray3DCreate(). This is due to hip not differentiating between runtime and
+  // driver types.
   *desc = array->desc;
 
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGetTextureAlignmentOffset(size_t* offset,
-                                        const textureReference* texref) {
+hipError_t hipGetTextureAlignmentOffset(size_t* offset, const textureReference* texref) {
   HIP_INIT_API(hipGetTextureAlignmentOffset, offset, texref);
 
   if (texref == nullptr) {
@@ -831,13 +807,12 @@ hipError_t hipGetTextureReference(const textureReference** texref, const void* s
     HIP_RETURN(hipErrorNotSupported);
   }
 
-  *texref = reinterpret_cast<const textureReference *>(symbol);
+  *texref = reinterpret_cast<const textureReference*>(symbol);
 
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetFormat(textureReference* texRef,
-                              hipArray_Format fmt,
+hipError_t hipTexRefSetFormat(textureReference* texRef, hipArray_Format fmt,
                               int NumPackedComponents) {
   HIP_INIT_API(hipTexRefSetFormat, texRef, fmt, NumPackedComponents);
 
@@ -857,8 +832,7 @@ hipError_t hipTexRefSetFormat(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetFlags(textureReference* texRef,
-                             unsigned int Flags) {
+hipError_t hipTexRefSetFlags(textureReference* texRef, unsigned int Flags) {
   HIP_INIT_API(hipTexRefSetFlags, texRef, Flags);
 
   if (texRef == nullptr) {
@@ -890,8 +864,7 @@ hipError_t hipTexRefSetFlags(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetFilterMode(textureReference* texRef,
-                                  hipTextureFilterMode fm) {
+hipError_t hipTexRefSetFilterMode(textureReference* texRef, hipTextureFilterMode fm) {
   HIP_INIT_API(hipTexRefSetFilterMode, texRef, fm);
 
   if (texRef == nullptr) {
@@ -909,8 +882,7 @@ hipError_t hipTexRefSetFilterMode(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetAddressMode(hipTextureAddressMode* pam,
-                                   const textureReference* texRef,
+hipError_t hipTexRefGetAddressMode(hipTextureAddressMode* pam, const textureReference* texRef,
                                    int dim) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetAddressMode, pam, texRef, dim);
@@ -939,9 +911,7 @@ hipError_t hipTexRefGetAddressMode(hipTextureAddressMode* pam,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetAddressMode(textureReference* texRef,
-                                   int dim,
-                                   hipTextureAddressMode am) {
+hipError_t hipTexRefSetAddressMode(textureReference* texRef, int dim, hipTextureAddressMode am) {
   HIP_INIT_API(hipTexRefSetAddressMode, texRef, dim, am);
 
   if (texRef == nullptr) {
@@ -967,8 +937,7 @@ hipError_t hipTexRefSetAddressMode(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetArray(hipArray_t* pArray,
-                             const textureReference* texRef) {
+hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetArray, pArray, texRef);
 
@@ -984,22 +953,20 @@ hipError_t hipTexRefGetArray(hipArray_t* pArray,
   }
 
   switch (resDesc.resType) {
-  case hipResourceTypeLinear:
-  case hipResourceTypePitch2D:
-  case hipResourceTypeMipmappedArray: {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  case hipResourceTypeArray:
-    *pArray = resDesc.res.array.array;
-    break;
+    case hipResourceTypeLinear:
+    case hipResourceTypePitch2D:
+    case hipResourceTypeMipmappedArray: {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    case hipResourceTypeArray:
+      *pArray = resDesc.res.array.array;
+      break;
   }
 
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetArray(textureReference* texRef,
-                             hipArray_const_t array,
-                             unsigned int flags) {
+hipError_t hipTexRefSetArray(textureReference* texRef, hipArray_const_t array, unsigned int flags) {
   HIP_INIT_API(hipTexRefSetArray, texRef, array, flags);
 
   if ((texRef == nullptr) || (array == nullptr)) {
@@ -1016,9 +983,8 @@ hipError_t hipTexRefSetArray(textureReference* texRef,
   HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texRef->textureObject);
   if (err != hipSuccess) {
     HIP_RETURN(err);
@@ -1035,7 +1001,8 @@ hipError_t hipTexRefSetArray(textureReference* texRef,
 
   hipTextureDesc texDesc = hip::getTextureDesc(texRef);
 
-  hipResourceViewFormat format = hip::getResourceViewFormat(hip::getChannelFormatDesc(texRef->numChannels, texRef->format));
+  hipResourceViewFormat format =
+      hip::getResourceViewFormat(hip::getChannelFormatDesc(texRef->numChannels, texRef->format));
   hipResourceViewDesc resViewDesc = hip::getResourceViewDesc(array, format);
 
   err = ihipCreateTextureObject(&texRef->textureObject, &resDesc, &texDesc, &resViewDesc);
@@ -1047,8 +1014,7 @@ hipError_t hipTexRefSetArray(textureReference* texRef,
   HIP_RETURN(ihipMemcpy(refDevPtr, texRef, refDevSize, hipMemcpyHostToDevice, *stream));
 }
 
-hipError_t hipTexRefGetAddress(hipDeviceptr_t* dptr,
-                               const textureReference* texRef) {
+hipError_t hipTexRefGetAddress(hipDeviceptr_t* dptr, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetAddress, dptr, texRef);
 
@@ -1066,27 +1032,25 @@ hipError_t hipTexRefGetAddress(hipDeviceptr_t* dptr,
   }
 
   switch (resDesc.resType) {
-  // Need to verify.
-  // If the texture reference is not bound to any device memory range,
-  // return hipErroInvalidValue.
-  case hipResourceTypeArray:
-  case hipResourceTypeMipmappedArray: {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  case hipResourceTypeLinear:
-    *dptr = resDesc.res.linear.devPtr;
-    break;
-  case hipResourceTypePitch2D:
-    *dptr = resDesc.res.pitch2D.devPtr;
-    break;
+    // Need to verify.
+    // If the texture reference is not bound to any device memory range,
+    // return hipErroInvalidValue.
+    case hipResourceTypeArray:
+    case hipResourceTypeMipmappedArray: {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    case hipResourceTypeLinear:
+      *dptr = resDesc.res.linear.devPtr;
+      break;
+    case hipResourceTypePitch2D:
+      *dptr = resDesc.res.pitch2D.devPtr;
+      break;
   }
 
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetAddress(size_t* ByteOffset,
-                               textureReference* texRef,
-                               hipDeviceptr_t dptr,
+hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hipDeviceptr_t dptr,
                                size_t bytes) {
   HIP_INIT_API(hipTexRefSetAddress, ByteOffset, texRef, dptr, bytes);
 
@@ -1099,9 +1063,8 @@ hipError_t hipTexRefSetAddress(size_t* ByteOffset,
   HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texRef->textureObject);
   if (err != hipSuccess) {
     HIP_RETURN(err);
@@ -1130,10 +1093,8 @@ hipError_t hipTexRefSetAddress(size_t* ByteOffset,
   HIP_RETURN(ihipMemcpy(refDevPtr, texRef, refDevSize, hipMemcpyHostToDevice, *stream));
 }
 
-hipError_t hipTexRefSetAddress2D(textureReference* texRef,
-                                 const HIP_ARRAY_DESCRIPTOR* desc,
-                                 hipDeviceptr_t dptr,
-                                 size_t Pitch) {
+hipError_t hipTexRefSetAddress2D(textureReference* texRef, const HIP_ARRAY_DESCRIPTOR* desc,
+                                 hipDeviceptr_t dptr, size_t Pitch) {
   HIP_INIT_API(hipTexRefSetAddress2D, texRef, desc, dptr, Pitch);
 
   if ((texRef == nullptr) || (desc == nullptr)) {
@@ -1145,9 +1106,8 @@ hipError_t hipTexRefSetAddress2D(textureReference* texRef,
   HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texRef->textureObject);
   if (err != hipSuccess) {
     HIP_RETURN(err);
@@ -1156,7 +1116,8 @@ hipError_t hipTexRefSetAddress2D(textureReference* texRef,
   hipResourceDesc resDesc = {};
   resDesc.resType = hipResourceTypePitch2D;
   resDesc.res.linear.devPtr = dptr;
-  resDesc.res.linear.desc = hip::getChannelFormatDesc(desc->NumChannels, desc->Format); // Need to verify.
+  resDesc.res.linear.desc =
+      hip::getChannelFormatDesc(desc->NumChannels, desc->Format);  // Need to verify.
   resDesc.res.pitch2D.width = desc->Width;
   resDesc.res.pitch2D.height = desc->Height;
   resDesc.res.pitch2D.pitchInBytes = Pitch;
@@ -1176,8 +1137,7 @@ hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w, hipChannel
   return {x, y, z, w, f};
 }
 
-hipError_t hipTexRefGetBorderColor(float* pBorderColor,
-                                   const textureReference* texRef) {
+hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetBorderColor, pBorderColor, texRef);
 
@@ -1198,8 +1158,7 @@ hipError_t hipTexRefGetBorderColor(float* pBorderColor,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetFilterMode(hipTextureFilterMode* pfm,
-                                  const textureReference* texRef) {
+hipError_t hipTexRefGetFilterMode(hipTextureFilterMode* pfm, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetFilterMode, pfm, texRef);
 
@@ -1218,8 +1177,7 @@ hipError_t hipTexRefGetFilterMode(hipTextureFilterMode* pfm,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetFlags(unsigned int* pFlags,
-                             const textureReference* texRef) {
+hipError_t hipTexRefGetFlags(unsigned int* pFlags, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetFlags, pFlags, texRef);
 
@@ -1250,14 +1208,12 @@ hipError_t hipTexRefGetFlags(unsigned int* pFlags,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetFormat(hipArray_Format* pFormat,
-                              int* pNumChannels,
+hipError_t hipTexRefGetFormat(hipArray_Format* pFormat, int* pNumChannels,
                               const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetFormat, pFormat, pNumChannels, texRef);
 
-  if ((pFormat == nullptr) || (pNumChannels == nullptr) ||
-      (texRef == nullptr)) {
+  if ((pFormat == nullptr) || (pNumChannels == nullptr) || (texRef == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
@@ -1273,8 +1229,7 @@ hipError_t hipTexRefGetFormat(hipArray_Format* pFormat,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio,
-                                     const textureReference* texRef) {
+hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetMaxAnisotropy, pmaxAnsio, texRef);
 
@@ -1293,8 +1248,7 @@ hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefGetMipmapFilterMode(hipTextureFilterMode* pfm,
-                                        const textureReference* texRef) {
+hipError_t hipTexRefGetMipmapFilterMode(hipTextureFilterMode* pfm, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetMipmapFilterMode, pfm, texRef);
 
@@ -1313,8 +1267,7 @@ hipError_t hipTexRefGetMipmapFilterMode(hipTextureFilterMode* pfm,
   HIP_RETURN(hipErrorInvalidValue);
 }
 
-hipError_t hipTexRefGetMipmapLevelBias(float* pbias,
-                                       const textureReference* texRef) {
+hipError_t hipTexRefGetMipmapLevelBias(float* pbias, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetMipmapLevelBias, pbias, texRef);
 
@@ -1333,14 +1286,13 @@ hipError_t hipTexRefGetMipmapLevelBias(float* pbias,
   HIP_RETURN(hipErrorInvalidValue);
 }
 
-hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp,
-                                        float* pmaxMipmapLevelClamp,
+hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp, float* pmaxMipmapLevelClamp,
                                         const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetMipmapLevelClamp, pminMipmapLevelClamp, pmaxMipmapLevelClamp, texRef);
 
   if ((pminMipmapLevelClamp == nullptr) || (pmaxMipmapLevelClamp == nullptr) ||
-      (texRef == nullptr)){
+      (texRef == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
@@ -1356,8 +1308,7 @@ hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp,
   HIP_RETURN(hipErrorInvalidValue);
 }
 
-hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray,
-                                      const textureReference* texRef) {
+hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray, const textureReference* texRef) {
   // TODO overload operator<<(ostream&, textureReference&).
   HIP_INIT_API(hipTexRefGetMipMappedArray, pArray, &texRef);
 
@@ -1379,21 +1330,20 @@ hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray,
   }
 
   switch (resDesc.resType) {
-  case hipResourceTypeLinear:
-  case hipResourceTypePitch2D:
-  case hipResourceTypeArray: {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  case hipResourceTypeMipmappedArray:
-    *pArray = resDesc.res.mipmap.mipmap;
-    break;
+    case hipResourceTypeLinear:
+    case hipResourceTypePitch2D:
+    case hipResourceTypeArray: {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    case hipResourceTypeMipmappedArray:
+      *pArray = resDesc.res.mipmap.mipmap;
+      break;
   }
 
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetBorderColor(textureReference* texRef,
-                                   float* pBorderColor) {
+hipError_t hipTexRefSetBorderColor(textureReference* texRef, float* pBorderColor) {
   HIP_INIT_API(hipTexRefSetBorderColor, texRef, pBorderColor);
 
   if ((texRef == nullptr) || (pBorderColor == nullptr)) {
@@ -1413,8 +1363,7 @@ hipError_t hipTexRefSetBorderColor(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef,
-                                     unsigned int maxAniso) {
+hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef, unsigned int maxAniso) {
   HIP_INIT_API(hipTexRefSetMaxAnisotropy, texRef, maxAniso);
 
   if (texRef == nullptr) {
@@ -1432,8 +1381,7 @@ hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef,
-                                        hipTextureFilterMode fm) {
+hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef, hipTextureFilterMode fm) {
   HIP_INIT_API(hipTexRefSetMipmapFilterMode, texRef, fm);
 
   if (texRef == nullptr) {
@@ -1451,8 +1399,7 @@ hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef,
-                                       float bias) {
+hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef, float bias) {
   HIP_INIT_API(hipTexRefSetMipmapLevelBias, texRef, bias);
 
   if (texRef == nullptr) {
@@ -1470,8 +1417,7 @@ hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef,
-                                        float minMipMapLevelClamp,
+hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef, float minMipMapLevelClamp,
                                         float maxMipMapLevelClamp) {
   HIP_INIT_API(hipTexRefSetMipmapLevelClamp, minMipMapLevelClamp, maxMipMapLevelClamp);
 
@@ -1491,8 +1437,7 @@ hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
-                                      hipMipmappedArray* mipmappedArray,
+hipError_t hipTexRefSetMipmappedArray(textureReference* texRef, hipMipmappedArray* mipmappedArray,
                                       unsigned int Flags) {
   HIP_INIT_API(hipTexRefSetMipmappedArray, texRef, mipmappedArray, Flags);
 
@@ -1509,9 +1454,8 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
   HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
-  // Any previous address or HIP array state associated with the texture reference is superseded by this function.
-  // Any memory previously bound to hTexRef is unbound.
-  // No need to check for errors.
+  // Any previous address or HIP array state associated with the texture reference is superseded by
+  // this function. Any memory previously bound to hTexRef is unbound. No need to check for errors.
   hipError_t err = ihipDestroyTextureObject(texRef->textureObject);
   if (err != hipSuccess) {
     HIP_RETURN(err);
@@ -1523,7 +1467,8 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
 
   hipTextureDesc texDesc = hip::getTextureDesc(texRef);
 
-  hipResourceViewFormat format = hip::getResourceViewFormat(hip::getChannelFormatDesc(texRef->numChannels, texRef->format));
+  hipResourceViewFormat format =
+      hip::getResourceViewFormat(hip::getChannelFormatDesc(texRef->numChannels, texRef->format));
   hipResourceViewDesc resViewDesc = hip::getResourceViewDesc(mipmappedArray, format);
 
   err = ihipCreateTextureObject(&texRef->textureObject, &resDesc, &texDesc, &resViewDesc);
@@ -1535,8 +1480,7 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
   HIP_RETURN(ihipMemcpy(refDevPtr, texRef, refDevSize, hipMemcpyHostToDevice, *stream));
 }
 
-hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject,
-                              const HIP_RESOURCE_DESC* pResDesc,
+hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE_DESC* pResDesc,
                               const HIP_TEXTURE_DESC* pTexDesc,
                               const HIP_RESOURCE_VIEW_DESC* pResViewDesc) {
   HIP_INIT_API(hipTexObjectCreate, pTexObject, pResDesc, pTexDesc, pResViewDesc);
@@ -1562,8 +1506,7 @@ hipError_t hipTexObjectDestroy(hipTextureObject_t texObject) {
   HIP_RETURN(ihipDestroyTextureObject(texObject));
 }
 
-hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc,
-                                       hipTextureObject_t texObject) {
+hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc, hipTextureObject_t texObject) {
   HIP_INIT_API(hipTexObjectGetResourceDesc, pResDesc, texObject);
 
   if ((pResDesc == nullptr) || (texObject == nullptr)) {
@@ -1600,8 +1543,7 @@ hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc,
-                                      hipTextureObject_t texObject) {
+hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc, hipTextureObject_t texObject) {
   HIP_INIT_API(hipTexObjectGetTextureDesc, pTexDesc, texObject);
 
   if ((pTexDesc == nullptr) || (texObject == nullptr)) {
