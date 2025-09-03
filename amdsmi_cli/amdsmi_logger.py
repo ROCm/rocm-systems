@@ -1018,11 +1018,11 @@ class AMDSMILogger():
                 # Extract version using regex to find pattern like "6.8.0-60"
                 match = re.search(r'(\d+\.\d+\.\d+-\d+)', driver_version['driver_version'])
                 if match:
-                    amdgpu_version = match.group(1).ljust(8)
+                    amdgpu_version = match.group(1)[:80]
                 else:
-                    amdgpu_version = "N/A".ljust(8)
+                    amdgpu_version = "N/A"
             else:
-                amdgpu_version = str(driver_version['driver_version'])[:8].ljust(8)
+                amdgpu_version = str(driver_version['driver_version'])[:80]
         fw_pldm_version = str(output['version_info']['fw pldm version'])
         vbios_version = str(output['version_info']['vbios version'])
 
