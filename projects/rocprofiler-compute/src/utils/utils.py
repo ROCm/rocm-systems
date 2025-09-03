@@ -1353,9 +1353,7 @@ def get_submodules(package_name: str) -> list[str]:
 
 def is_workload_empty(path: str) -> None:
     """Peek workload directory to verify valid profiling output"""
-    pmc_perf_path = Path(path) / "pmc_perf.csv"
-    if pmc_perf_path.is_file():
-        temp_df = pd.read_csv(pmc_perf_path)
+        temp_df = pd.read_csv(str(pmc_perf_path))
         if temp_df.dropna().empty:
             console_error(
                 "profiling",
