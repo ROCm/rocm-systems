@@ -85,6 +85,7 @@ class Roofline:
                 "include_kernel_names": False,
                 "is_standalone": False,
                 "roofline_data_type": ["FP32"],  # default to FP32
+                "kernel_filter": False,
             }
         )
         self.__ai_data = None
@@ -102,13 +103,19 @@ class Roofline:
         if hasattr(self.__args, "sort") and self.__args.sort != "ALL":
             self.__run_parameters["sort_type"] = self.__args.sort
         self.__run_parameters["roofline_data_type"] = self.__args.roofline_data_type
+        if (hasattr(self.__args, "kernel") and self.__args.kernel) or (
+            hasattr(self.__args, "gpu_kernel") and self.__args.gpu_kernel
+        ):
+            self.__run_parameters["kernel_filter"] = True
         self.validate_parameters()
 
     def validate_parameters(self):
         if self.__run_parameters["include_kernel_names"] and (
             not self.__run_parameters["is_standalone"]
         ):
-            console_error("--kernel-names cannot be used with --no-roof option")
+            console_warning(
+                "--kernel-names is nonactionable when used with --no-roof option"
+            )
 
     def roof_setup(self):
         # Setup the workload directory for roofline profiling.
@@ -165,6 +172,48 @@ class Roofline:
         # Create the directory
         Path(final_dir).mkdir(parents=True, exist_ok=True)
 
+    def validate_apply_kernel_filter(self, df, path=None):
+        if self.__run_parameters["kernel_filter"] is True:
+            if self.__args.mode == "profile":
+                df_pmc = df["pmc_perf"]
+                df_filtered = df_pmc.copy()
+                df_list = (df_pmc.loc[:, "Kernel_Name"]).to_list()
+                for idx in range(0, len(df_list)):
+                    if df_list[idx].split("(")[0] not in self.__args.kernel:
+                        # Drop row from dataframe if kernel has not been requested
+                        df_filtered.drop(index=idx, inplace=True)
+                # Verify that final filtered kernel df matches the kernel list requested
+                if len(df_filtered.drop_duplicates(subset=["Kernel_Name"])) != len(
+                    self.__args.kernel
+                ):
+                    console_debug(
+                        "Profiled kernels: {}\n`--kernel`: {}".format(
+                            df_list, self.__args.kernel
+                        )
+                    )
+                    console_error(
+                        "Roofline cannot profile - kernels requested with `--kernel` missing from profiling data!"  # noqa: E501
+                        "\n\tRe-profile workload in full or specify subset of available kernels using `--kernel` option."  # noqa: E501
+                        "\n\tComplete profiled kernels list can be found in pmc_perf file.",  # noqa: E501
+                        exit=True,
+                    )
+                # Fix df structure to resemble same df arg passed in
+                df["pmc_perf"] = df_filtered
+            elif self.__args.mode == "analyze":
+                top_kernels_csv = Path(path).joinpath("pmc_kernel_top.csv")
+                if not top_kernels_csv.is_file():
+                    console_error(
+                        "roofline", "{} does not exist".format(top_kernels_csv)
+                    )
+                k_df = pd.read_csv(top_kernels_csv)
+                k_df = k_df.loc[self.__args.gpu_kernel[0], "Kernel_Name"]
+
+                df["pmc_perf"] = df["pmc_perf"][
+                    df["pmc_perf"]["Kernel_Name"].isin(k_df)
+                ]
+
+        return df
+
     @demarcate
     def empirical_roofline(
         self,
@@ -183,6 +232,10 @@ class Roofline:
         console_debug(
             "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
         )
+        # Verify kernels have been profiled and filter the df
+        ret_df = self.validate_apply_kernel_filter(
+            df=ret_df, path=self.__run_parameters.get("workload_dir")
+        )
         self.__ai_data = calc_ai_profile(
             self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
@@ -192,7 +245,7 @@ class Roofline:
         console_debug(msg)
 
         ops_figure = flops_figure = None
-        ops_dt_list = flops_dt_list = ""
+        ops_dt_list = flops_dt_list = kernel_list = ""
 
         for dt in self.__run_parameters.get("roofline_data_type", []):
             gpu_arch = getattr(self.__mspec, "gpu_arch", "unknown_arch")
@@ -245,6 +298,9 @@ class Roofline:
                 original_kernel_names = []
             else:
                 original_kernel_names = self.__ai_data.get("kernelNames", [])
+                if self.__run_parameters.get("kernel_filter", False):
+                    for name in sorted(self.__args.kernel):
+                        kernel_list += "_" + name
 
             num_kernels = len(original_kernel_names)
 
@@ -376,18 +432,23 @@ class Roofline:
                 if ops_figure:
                     ops_figure.write_image(
                         self.__run_parameters["workload_dir"]
-                        + "/empirRoof_gpu-{}{}.pdf".format(dev_id, ops_dt_list)
+                        + "/empirRoof_gpu-{}{}{}.pdf".format(
+                            dev_id, ops_dt_list, kernel_list
+                        )
                     )
                 if flops_figure:
                     flops_figure.write_image(
                         self.__run_parameters["workload_dir"]
-                        + "/empirRoof_gpu-{}{}.pdf".format(dev_id, flops_dt_list)
+                        + "/empirRoof_gpu-{}{}{}.pdf".format(
+                            dev_id, flops_dt_list, kernel_list
+                        )
                     )
 
                 # only save a legend if kernel_names option is toggled
                 if self.__run_parameters["include_kernel_names"]:
                     self.__figure.write_image(
-                        self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
+                        self.__run_parameters["workload_dir"]
+                        + "/kernelName_legend{}.pdf".format(kernel_list)
                     )
                 time.sleep(1)
             console_log("roofline", "Empirical Roofline PDFs saved!")
@@ -697,6 +758,7 @@ class Roofline:
             if profiling_config.get("format_rocprof_output") == "rocpd":
                 t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
+            t_df = self.validate_apply_kernel_filter(df=t_df, path=base_path)
             self.__ai_data = calc_ai_profile(
                 self.__mspec, self.__run_parameters["sort_type"], t_df
             )
