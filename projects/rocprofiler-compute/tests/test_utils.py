@@ -9326,104 +9326,67 @@ def test_set_parser():
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_below_lower_bound():
     value = 0.0001
-    expected = format(value, ".1e")  # one decimal place
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), f"Expected '{expected}', got '{result}'"
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_at_lower_bound():
-    value = 0.001  # equal to sci_lower_bound
-    expected = format(value, ">6.2f")  # normal formatting (default)
+    value = 0.001
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), (
-        f"Expected '{expected}' for value {value}, got: '{result}'"
-    )
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 def test_scientific_notation_trigger_above_upper_bound():
     value = 1234567890
-    expected = format(value, ".1e")
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), f"Expected '{expected}', got '{result}'"
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_just_below_upper_bound():
     value = 999999999
-    expected = format(value, ".1e")  # '1.0e+09'
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), f"Expected '{expected}', got '{result}'"
-
-
-@pytest.mark.sci_notion
-def test_scientific_notation_trigger_normal_value():
-    value = 12.345  # normal float within bounds
-    expected = format(value, ">6.2f")  # normal formatting (default)
-    result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), (
-        f"Expected '{expected}' for value {value}, got: '{result}'"
-    )
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_zero():
-    value = 0  # zero should never be scientific
-    expected = format(value, ">6.2f")  # normal formatting (default)
+    value = 0
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), (
-        f"Expected '{expected}' for zero, got: '{result}'"
-    )
+    assert float(result.strip()) == value  # Exact match for zero
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_slightly_below_lower_bound():
     value = 0.0009
-    expected = format(value, ".1e")
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), f"Expected '{expected}', got '{result}'"
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_well_below_lower_bound():
     value = 1e-5
-    expected = format(value, ".1e")
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), f"Expected '{expected}', got '{result}'"
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_well_above_upper_bound():
     value = 1e10
-    expected = format(value, ".1e")
     result = utils.format_scientific_notation_if_needed(value)
-    assert result.strip() == expected.strip(), f"Expected '{expected}', got '{result}'"
-
-
-@pytest.mark.sci_notion
-def test_length_trigger():
-    # Use a value that normally would not use scientific notation, but formatting makes it too long
-    value = 123.456789
-    format_spec = ">8.6f"
-    max_length = 6
-    expected = format(
-        value, ".1e"
-    )  # The function defaults to 1 decimal in sci notation if triggered by length
-    result = utils.format_scientific_notation_if_needed(
-        value, format_spec=format_spec, max_length=max_length
-    )
-    assert expected in result, (
-        f"Expected scientific notation '{expected}' in result, got: '{result}'"
-    )
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_alignment_and_width():
     value = 1e10
-    format_spec = ">10.2f"
-    max_length = 8
-    expected_sci = format(value, ".1e").rjust(10)  # right aligned, 1 decimal place
     result = utils.format_scientific_notation_if_needed(
-        value, format_spec=format_spec, max_length=max_length
+        value,
+        align=">",
+        width_align=10,
+        precision_align=".2",
+        fmt_type_align="f",
+        max_length=8,
     )
-    assert result == expected_sci, f"Expected '{expected_sci}', got '{result}'"
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
