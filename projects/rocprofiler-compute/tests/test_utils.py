@@ -5778,6 +5778,8 @@ mock_submodules = [
     (None, "module_request", False),
     (None, "module_error", False),
 ]
+
+
 @mock.patch("importlib.import_module", return_value=mock_package)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules)
 def test_get_submodules_basic_functionality(mock_walk, mock_import):
@@ -5789,6 +5791,7 @@ def test_get_submodules_basic_functionality(mock_walk, mock_import):
     """
 
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
 
     assert isinstance(result, list)
@@ -5840,6 +5843,7 @@ mock_submodules_single = [
     (None, "module_error", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_single)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_single)
 def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import):
@@ -5850,6 +5854,7 @@ def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import
         None: Asserts correct name processing for submodules with single underscore.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     expected = ["parser", "request", "error"]
     assert result == expected
@@ -5863,6 +5868,7 @@ mock_submodules_multiple = [
     (None, "module_simple", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_multiple)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_multiple)
 def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_import):
@@ -5873,6 +5879,7 @@ def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_imp
         None: Asserts correct name processing for complex underscore patterns.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     expected = ["somecomplexname", "anothertestcase", "simple"]
     assert result == expected
@@ -5886,6 +5893,7 @@ mock_submodules_base = [
     (None, "module_handler", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_base)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_base)
 def test_get_submodules_base_module_filtered(mock_walk, mock_import):
@@ -5896,6 +5904,7 @@ def test_get_submodules_base_module_filtered(mock_walk, mock_import):
         None: Asserts 'base' submodules are excluded from results.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     expected = ["parser", "handler"]
     assert result == expected
@@ -5909,6 +5918,7 @@ mock_submodules_no_underscore = [
     (None, "anothermodule", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_no_underscore)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_no_underscore)
 def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
@@ -5919,6 +5929,7 @@ def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
         None: Asserts function handles names without underscores by raising IndexError.
     """
     import utils.utils as utils_mod
+
     with pytest.raises(IndexError):
         utils_mod.get_submodules("test_package")
 
@@ -5931,6 +5942,7 @@ mock_submodules_empty_parts = [
     (None, "module__double", False),  # double underscore
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_empty_parts)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_empty_parts)
 def test_get_submodules_empty_name_parts(mock_walk, mock_import):
@@ -5941,6 +5953,7 @@ def test_get_submodules_empty_name_parts(mock_walk, mock_import):
         None: Asserts function handles edge cases in name processing.
     """
     import utils.utils as utils_mod
+
     try:
         result = utils_mod.get_submodules("test_package")
         expected = ["", "", "double"]  # noqa - Empty strings for edge cases
@@ -5971,6 +5984,7 @@ def test_get_submodules_package_without_path_attribute():
 mock_package_exception = mock.MagicMock()
 mock_package_exception.__path__ = ["/fake/path"]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_exception)
 @mock.patch("pkgutil.walk_packages", side_effect=ImportError("Mock error"))
 def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
@@ -5981,6 +5995,7 @@ def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
         None: Asserts exceptions from pkgutil.walk_packages are properly handled.
     """
     import utils.utils as utils_mod
+
     with pytest.raises(ImportError):
         utils_mod.get_submodules("test_package")
 
@@ -5995,6 +6010,7 @@ mock_submodules_mixed = [
     (None, "module_another_base", False),  # Contains 'base' but not exactly 'base'
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_mixed)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_mixed)
 def test_get_submodules_mixed_module_types(mock_walk, mock_import):
@@ -6005,6 +6021,7 @@ def test_get_submodules_mixed_module_types(mock_walk, mock_import):
         None: Asserts function correctly processes various submodule patterns.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     expected = ["parser", "testcase", "simple", "anotherbase"]
     assert result == expected
@@ -6020,6 +6037,7 @@ for i in range(100):
     mock_submodules_large.append((None, module_name, False))
     expected_results_large.append(f"test{i}")
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_large)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_large)
 def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
@@ -6030,6 +6048,7 @@ def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
         None: Asserts function handles large numbers of submodules correctly.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     assert len(result) == 100
     assert result == expected_results_large
@@ -6091,6 +6110,7 @@ mock_submodules_special = [
     (None, "module_test123", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_special)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_special)
 def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
@@ -6101,6 +6121,7 @@ def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
         None: Asserts function processes special characters in names correctly.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     expected = ["test-case", "test.case", "test123"]
     assert result == expected
@@ -6109,6 +6130,7 @@ def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
 mock_package_isolation = mock.MagicMock()
 mock_package_isolation.__path__ = ["/fake/path"]
 mock_submodules_isolation = [(None, "module_test", False)]
+
 
 @mock.patch("importlib.import_module", return_value=mock_package_isolation)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_isolation)
@@ -6120,13 +6142,14 @@ def test_get_submodules_imports_isolation(mock_walk, mock_import):
         None: Asserts function imports don't pollute global namespace.
     """
     import sys
+
     import utils.utils as utils_mod
-    
+
     original_importlib = sys.modules.get("importlib")
     original_pkgutil = sys.modules.get("pkgutil")
-    
+
     result = utils_mod.get_submodules("test_package")
-    
+
     assert sys.modules.get("importlib") == original_importlib
     assert sys.modules.get("pkgutil") == original_pkgutil
     assert isinstance(result, list)
@@ -6141,6 +6164,7 @@ mock_submodules_unicode = [
     (None, "module_тест", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_unicode)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_unicode)
 def test_get_submodules_unicode_names(mock_walk, mock_import):
@@ -6151,6 +6175,7 @@ def test_get_submodules_unicode_names(mock_walk, mock_import):
         None: Asserts function handles Unicode characters appropriately.
     """
     import utils.utils as utils_mod
+
     result = utils_mod.get_submodules("test_package")
     expected = ["tëst", "测试", "тест"]
     assert result == expected
@@ -6163,6 +6188,7 @@ mock_submodules_docstring = [
     (None, "module_submodule2", False),
 ]
 
+
 @mock.patch("importlib.import_module", return_value=mock_package_docstring)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_docstring)
 def test_get_submodules_docstring_verification(mock_walk, mock_import):
@@ -6173,12 +6199,14 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
         None: Asserts function behavior aligns with documented purpose.
     """
     import utils.utils as utils_mod
-    
+
     assert utils_mod.get_submodules.__doc__ is not None
-    assert "List all submodules for a target package" in utils_mod.get_submodules.__doc__
-    
+    assert (
+        "List all submodules for a target package" in utils_mod.get_submodules.__doc__
+    )  # noqa
+
     result = utils_mod.get_submodules("test_package")
-    
+
     assert isinstance(result, list)
     assert "submodule1" in result
     assert "submodule2" in result
