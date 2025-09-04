@@ -534,6 +534,7 @@ typedef enum {
   RSMI_TEMP_TYPE_HBM_2,                        //!< HBM temperature instance 2
   RSMI_TEMP_TYPE_HBM_3,                        //!< HBM temperature instance 3
   RSMI_TEMP_TYPE_PLX,                          //!< PLX temperature
+  RSMI_TEMP_TYPE_GENERAL_LAST = RSMI_TEMP_TYPE_PLX,
 
 
   // GPU Board Node temperature
@@ -544,6 +545,7 @@ typedef enum {
   RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR,    //!< OAM X VDD 1.8V voltage regulator temperature
   RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR, //!< OAM X 0.4V HBM B voltage regulator temperature
   RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR, //!< OAM X 0.4V HBM D voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_LAST = RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR,
 
   // GPU Board VR (Voltage Regulator) temperature
   RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST = 150,
@@ -560,7 +562,7 @@ typedef enum {
   RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_D,    //!< VDDCR 1.1V HBM D voltage regulator temperature
   RSMI_TEMP_TYPE_GPUBOARD_VDD_USR,           //!< VDD USR voltage regulator temperature
   RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,      //!< VDDIO 1.1V E32 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_LAST = 199,
+  RSMI_TEMP_TYPE_GPUBOARD_LAST = RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,
 
   // Baseboard System temperature
   RSMI_TEMP_TYPE_BASEBOARD_FIRST = 200,
@@ -587,7 +589,7 @@ typedef enum {
   RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR, //!< OAM 4-5-6-7 3.3V voltage regulator temperature
   RSMI_TEMP_TYPE_BASEBOARD_IBC_HSC,           //!< IBC HSC temperature
   RSMI_TEMP_TYPE_BASEBOARD_IBC,               //!< IBC temperature
-  RSMI_TEMP_TYPE_BASEBOARD_LAST = 249,
+  RSMI_TEMP_TYPE_BASEBOARD_LAST = RSMI_TEMP_TYPE_BASEBOARD_IBC,
 
   RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_BASEBOARD_LAST,    //!< Last of per GPU temperature types
 

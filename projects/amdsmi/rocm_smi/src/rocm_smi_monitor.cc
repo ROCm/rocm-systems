@@ -336,14 +336,18 @@ Monitor::setTempSensorLabelMap(void) {
     return 0;
   };
 
-  for (uint32_t t = RSMI_TEMP_TYPE_FIRST; t <= RSMI_TEMP_TYPE_LAST; ++t) {
-    temp_type_index_map_.insert(
-       {static_cast<rsmi_temperature_type_t>(t), RSMI_TEMP_TYPE_INVALID});
-  }
-  for (uint32_t i = 1; i <= RSMI_TEMP_TYPE_LAST + 1; ++i) {
-    ret = add_temp_sensor_entry(i);
-    if (ret) {
-      return ret;
+  for (uint32_t i = RSMI_TEMP_TYPE_FIRST; i <= RSMI_TEMP_TYPE_LAST; ++i) {
+    if ((i <= RSMI_TEMP_TYPE_GENERAL_LAST) ||
+        (i >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST && i <= RSMI_TEMP_TYPE_GPUBOARD_NODE_LAST) ||
+        (i >= RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST && i <= RSMI_TEMP_TYPE_GPUBOARD_LAST) ||
+        (i >= RSMI_TEMP_TYPE_BASEBOARD_FIRST && i <= RSMI_TEMP_TYPE_BASEBOARD_LAST)) {
+          ret = add_temp_sensor_entry(i);
+          if (ret) {
+            return ret;
+          }
+    } else {
+      temp_type_index_map_.insert(
+        {static_cast<rsmi_temperature_type_t>(i), RSMI_TEMP_TYPE_INVALID});
     }
   }
   return 0;
