@@ -441,7 +441,7 @@ of the application (note zero-based indexing).
 
 .. _profiling-metric-sets:
 
-Metric Sets
+Metric sets filtering
 ^^^^^^^^^^^^^^^^^^
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
