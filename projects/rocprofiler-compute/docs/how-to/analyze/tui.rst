@@ -69,7 +69,7 @@ hierarchical categories to provide a more organized, top-down analysis approach:
 #. Detailed Block Analysis
 
    Displays analysis results grouped by metric blocks, similar to the CLI output.
-   When applicable, performance metrics are shown as charts (instead of tables only),
+   When applicable, performance metrics are shown as charts instead of only tables,
    providing a more visual representation.
 
 #. Source Level analysis
