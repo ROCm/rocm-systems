@@ -748,9 +748,11 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     firstTx = false;
   }
 
-  // @note: HIP requires a blocking wait on D2H with the pageable system memory
-  if (amd::IS_HIP && !hostToDev) {
+  // @note: HIP requires to unpin all memory after operation, due to an optimization with
+  // direct HSA signal check HIP avoids the command completion wait
+  if (amd::IS_HIP && (gpu().command() != nullptr) && gpu().command()->IsMemoryPinned()) {
     gpu().Barriers().WaitCurrent();
+    gpu().command()->ReleasePinnedMemory();
   }
 
   if (!status) {
