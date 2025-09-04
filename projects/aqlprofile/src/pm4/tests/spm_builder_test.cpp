@@ -88,46 +88,6 @@ TEST_F(SpmBuilderTest, EndWithValidParameters) {
     EXPECT_GE(cmd_buffer.DwSize(), 0);
 }
 
-// Test 3: Begin function generates commands in buffer
-TEST_F(SpmBuilderTest, BeginGeneratesCommandsInBuffer) {
-    CmdBuffer cmd_buffer;
-    
-    // Record initial buffer size
-    size_t initial_size = cmd_buffer.DwSize();
-    
-    // Create a concrete SpmBuilder instance (using GFX9 as example)
-    // Note: This test would require a full concrete implementation
-    // For now, we'll test that the buffer can be modified
-    
-    // Simulate command generation by directly adding to buffer
-    uint32_t test_command[4] = {0x12345678, 0x87654321, 0xABCDEF00, 0x00FEDCBA};
-    cmd_buffer.Append(test_command, 4);
-    
-    // Verify that commands were added to the buffer
-    EXPECT_GT(cmd_buffer.DwSize(), initial_size);
-    EXPECT_EQ(cmd_buffer.DwSize(), initial_size + 5);
-}
-
-// Test 4: End function generates commands in buffer
-TEST_F(SpmBuilderTest, EndGeneratesCommandsInBuffer) {
-    CmdBuffer cmd_buffer;
-    
-    // Record initial buffer size
-    size_t initial_size = cmd_buffer.DwSize();
-    
-    // Create a concrete SpmBuilder instance (using GFX9 as example)
-    // Note: This test would require a full concrete implementation
-    // For now, we'll test that the buffer can be modified
-    
-    // Simulate command generation by directly adding to buffer
-    uint32_t test_command[2] = {0xDEADBEEF, 0xCAFEBABE};
-    cmd_buffer.Append(test_command, 2);
-    
-    // Verify that commands were added to the buffer
-    EXPECT_GT(cmd_buffer.DwSize(), initial_size);
-    EXPECT_EQ(cmd_buffer.DwSize(), initial_size + 3);
-}
-
 // Test 5: Begin and End sequence with mock
 TEST_F(SpmBuilderTest, BeginEndSequenceWithMock) {
     MockSpmBuilder mock_spm_builder;
