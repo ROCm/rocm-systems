@@ -59,9 +59,11 @@ def write_sql_query_to_csv(
     export_path = os.path.join(
         config.output_path, f"{file_prefix}{filename}{file_postfix}.csv"
     )
-    
+
     kwargs = {"title_columns": True}
-    export_sqlite_query(connection, query, export_format="csv", export_path=export_path, **kwargs)
+    export_sqlite_query(
+        connection, query, export_format="csv", export_path=export_path, **kwargs
+    )
 
 
 def write_agent_info_csv(importData, config) -> None:
@@ -123,7 +125,9 @@ def write_agent_info_csv(importData, config) -> None:
     select_json = []
     for column in json_keys:
         match = re.match(r"(.+?)\s+AS\s+(.+)", column, re.IGNORECASE)
-        column_name, column_alias = (match.group(1), match.group(2)) if match else (column, column)
+        column_name, column_alias = (
+            (match.group(1), match.group(2)) if match else (column, column)
+        )
         select_json.append(f"json_extract(extdata, '$.{column_name}') AS {column_alias}")
 
     capabilities = [

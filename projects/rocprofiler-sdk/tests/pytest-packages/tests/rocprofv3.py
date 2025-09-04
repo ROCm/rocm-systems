@@ -355,22 +355,11 @@ def test_csv_data(
         },
     }
 
-    region_views = [
-        "hip_api",
-        "hsa_api",
-        "rccl_api",
-        "rocdecode_api",
-        "rocjpeg_api",
-    ]
-
     for data in csv_data:
         filename, _csv_data = data
-
         file_category = [category for category in categories if category in filename]
         assert len(file_category) > 0, f"{filename} is not a valid csv filename"
-
         category = file_category[0]
-
         if category == "counter_collection":
             _js_data = json_data["rocprofiler-sdk-tool"]["callback_records"][category]
         elif category == "agent":
@@ -379,8 +368,27 @@ def test_csv_data(
             buffer_records = json_data["rocprofiler-sdk-tool"]["buffer_records"]
             _js_data = []
             for key, value in buffer_records.items():
-                if key in region_views:
-                    _js_data.extend(value)
+                if key == "marker_api":
+                    string_records = []
+                    marker_records = json_data["rocprofiler-sdk-tool"]["buffer_records"][
+                        "marker_api"
+                    ]
+                    for item in json_data["rocprofiler-sdk-tool"]["strings"][
+                        "buffer_records"
+                    ]:
+                        if item["kind"] == "MARKER_CORE_RANGE_API":
+                            string_records = item["operations"]
+                    exlude_ops = {"roctxMarkA", "roctxGetThreadId"}
+                    for entry in marker_records:
+                        # excludes roctxMarkA and roctxGetThreadId operations
+                        if (
+                            string_records
+                            and string_records[entry["operation"]] not in exlude_ops
+                        ):
+                            _js_data.append(entry)
+                else:
+                    if key.endswith("_api"):
+                        _js_data.extend(value)
         else:
             json_records_key = mapping[category]
             _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][
