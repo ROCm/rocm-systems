@@ -1651,7 +1651,7 @@ def format_scientific_notation_if_needed(
     value: Union[int, float],
     align: str = ">",
     width_align: int = 6,
-    precision_align: str = ".2",
+    precision: int = 2,
     fmt_type_align: str = "f",
     max_length: int = 6,
     sci_lower_bound: float = 1e-2,
@@ -1669,20 +1669,25 @@ def format_scientific_notation_if_needed(
     - value: numeric value to format
     - align: alignment character ('<', '>', '^', '=')
     - width_align: total width of formatted output
-    - precision_align: precision string including dot, e.g., '.2'
+    - precision: number of digits after decimal point
     - fmt_type_align: format type, e.g., 'f', 'e', 'g'
-    - max_length: max allowed length for normal format string
+    - max_length: max allowed length for normal format string (excluding padding)
     - sci_lower_bound: lower bound for scientific notation usage
     - sci_upper_bound: upper bound for scientific notation usage
 
     Returns:
     - formatted string according to the criteria, respecting alignment
     """
+
     abs_val = abs(value)
     use_sci = False
 
-    # Build normal format specifier string from parts
-    normal_format_spec = f"{align}{width_align}{precision_align}{fmt_type_align}"
+    # Build format specifiers
+    normal_format_spec = f"{align}{width_align}.{precision}{fmt_type_align}"
+    sci_format_spec = f"{align}{width_align}.{precision}e"
+
+    normal_str = None  # will hold formatted normal string (with padding)
+    sci_str = None  # will hold formatted scientific string (with padding)
 
     if abs_val != 0:
         if abs_val < sci_lower_bound or abs_val >= sci_upper_bound:
@@ -1690,19 +1695,28 @@ def format_scientific_notation_if_needed(
         else:
             try:
                 normal_str = format(value, normal_format_spec)
-                sci_str = format(value, ".1e")
+                normal_str_strip = normal_str.strip()
+
+                sci_str = format(value, sci_format_spec)
+                sci_str_strip = sci_str.strip()
+
+                # Decide based on length of stripped strings (ignore padding)
                 if (
-                    len(normal_str) > len(sci_str)
-                    or len(normal_str.strip()) > max_length
+                    len(normal_str_strip) > len(sci_str_strip)
+                    or len(normal_str_strip) > max_length
                 ):
                     use_sci = True
             except Exception:
+                # Fallback to scientific if formatting fails
                 use_sci = True
 
     if use_sci:
-        sci_str = format(value, ".1e")
-        formatted = f"{sci_str:{align}{width_align}}"
+        if sci_str is None:
+            sci_str = format(value, sci_format_spec)
+        formatted = sci_str
     else:
-        formatted = format(value, normal_format_spec)
+        if normal_str is None:
+            normal_str = format(value, normal_format_spec)
+        formatted = normal_str
 
     return formatted

@@ -2096,7 +2096,7 @@ def format_value_for_display(value, max_length=6):
             abs_val,
             align=">",
             width_align=8,
-            precision_align=".1",
+            precision=1,
             fmt_type_align="e",
             max_length=max_length,
         ).strip()

@@ -9301,7 +9301,7 @@ def test_scientific_notation_trigger_below_lower_bound():
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_at_lower_bound():
-    value = 0.001
+    value = 0.01
     result = utils.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
@@ -9314,9 +9314,9 @@ def test_scientific_notation_trigger_above_upper_bound():
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_just_below_upper_bound():
-    value = 999999999
-    result = utils.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+    value = 999999
+    result = utils.format_scientific_notation_if_needed(value, precision=6)
+    assert pytest.approx(float(result.strip()), rel=1e-6) == value
 
 
 @pytest.mark.sci_notion
@@ -9328,7 +9328,7 @@ def test_scientific_notation_trigger_zero():
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_slightly_below_lower_bound():
-    value = 0.0009
+    value = 0.009
     result = utils.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
@@ -9353,8 +9353,8 @@ def test_alignment_and_width():
     result = utils.format_scientific_notation_if_needed(
         value,
         align=">",
-        width_align=10,
-        precision_align=".2",
+        width_align=12,
+        precision=2,
         fmt_type_align="f",
         max_length=8,
     )

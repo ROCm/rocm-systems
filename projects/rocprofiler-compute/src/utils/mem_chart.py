@@ -94,19 +94,19 @@ def format_text(
     # Step 1: Build format spec using make_format_spec
     value_format = make_format_spec(value_step_prec_rightalign, value_align)
 
-    # Step 2: Extract width and precision
+    # Step 2: Extract width and precision as integer
     match = re.match(r"([<>=^])(\d+)(?:\.(\d+))?([a-zA-Z])?", value_format)
     if match:
         align_char = match.group(1)
         width_align = int(match.group(2))
         precision_digits = match.group(3)
         fmt_type_align = match.group(4) or "f"
-        precision_align = f".{precision_digits}" if precision_digits else ""
+        precision = int(precision_digits) if precision_digits else 0
     else:
-        # Fallback to default value if parsing fails
+        # Fallback to default values
         align_char = value_align
         width_align = 6
-        precision_align = ".2"
+        precision = 2
         fmt_type_align = "f"
 
     # Step 3: Format the key using make_format_spec
@@ -129,7 +129,7 @@ def format_text(
             value,
             align=align_char,
             width_align=width_align,
-            precision_align=precision_align,
+            precision=precision,
             fmt_type_align=fmt_type_align,
             max_length=width_align,
             sci_lower_bound=1e-3,
