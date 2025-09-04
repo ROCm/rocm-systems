@@ -989,6 +989,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
     case RDC_FI_GPU_CLOCK: {
       const uint16_t* clock_array = gpu_metrics.current_gfxclks;
       std::vector<uint16_t> valid_clocks;
+      // TODO: extract mapping to separate function
       valid_clocks.reserve(AMDSMI_MAX_NUM_GFX_CLKS);
       for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; i++) {
         uint16_t clk = clock_array[i];
