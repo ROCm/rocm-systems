@@ -1500,6 +1500,11 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_INST_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)
+    - architectures:
+      - gfx12
+      - gfx1200
+      - gfx1201
+      expression: reduce(accumulate(SQ_INSTS_VEC32_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)
   - name: LdsPipeIssueUtil
     description: 'Unit: percent'
     properties: []
@@ -1522,7 +1527,7 @@ rocprofiler-sdk:
       - gfx12
       - gfx1200
       - gfx1201
-      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)
   - name: MAX_WAVE_SIZE
     description: Max wave size constant
     properties: []
@@ -1556,6 +1561,9 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_BUSY_CYCLES,sum)
     - architectures:
       - gfx90a
@@ -2773,6 +2781,15 @@ rocprofiler-sdk:
       - gfx1201
       block: SQ
       event: 302
+  - name: SQC_ICACHE_MISSES 
+    description: Number of cache misses, includes uncached requests. {per-Bank, nondeterministic, C2}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1200
+      - gfx1201
+      block: SQ
+      event: 303
   - name: SQC_ICACHE_INPUT_VALID_READYB
     description: ' Input stalled by SQC (per-SQ, nondeterministic, unwindowed)'
     properties: []
@@ -5488,6 +5505,35 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 16
+  - name: SQ_PERF_SEL_INST_CYCLES_VALU 
+    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 and V_OP32_T instruction, count them seperately. 
+    properties: []
+    definitions:
+    - architectures:
+      - gfx12
+      - gfx1201
+      - gfx1200
+      block: SQ
+      event: 99
+  - name: SQ_INSTS_VEC32_LEVEL_LDS 
+    description: Number of in-flight wave32 LDS (indexed, flat) instructions issued.{level, nondeterministic}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx12
+      - gfx1201
+      - gfx1200
+      block: SQ
+      event: 250
+  - name: SQ_INST_CYCLES_VALU
+    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 and V_OP32_T instruction, count them seperately. {emulated, C1}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1200
+      - gfx1201
+      block: SQ
+      event: 99
   - name: ScaPipeIssueUtil
     description: 'Unit: percent'
     properties: []
@@ -9904,6 +9950,24 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       expression: reduce(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS,sum)
+  - name: TCP_REQ
+    description: Total cache line accesses
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1200
+      - gfx1201
+      block: TCP
+      event: 9
+  - name: TCP_REQ_MISS
+    description: Total cache requests that missed
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1200
+      - gfx1201
+      block: TCP
+      event: 17
   - name: TD_ATOMIC_WAVEFRONT
     description: Count the wavefronts with opcode = atomic.
     properties: []
@@ -10213,6 +10277,10 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
+    - architectures:
+      - gfx1200
+      - gfx1201
+      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,max)
   - name: VALUInsts
     description: The average number of vector ALU instructions executed per work-item (affected by flow control).
     properties: []
@@ -10312,6 +10380,10 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+    - architectures:
+      - gfx1200
+      - gfx1201
+      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)
   - name: VmemLatency
     description: 'Unit: cycles'
     properties: []
@@ -10423,11 +10495,6 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
-    - architectures:
-      - gfx12
-      - gfx1200
-      - gfx1201
-      expression: (GL2C_EA_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32+GL2C_EA_WRREQ_64B_sum*64)/1024
   - name: WaveDepWait
     description: 'Unit: percent'
     properties: []
@@ -10493,9 +10560,6 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      - gfx12
-      - gfx1200
-      - gfx1201
       expression: WRITE_SIZE
   - name: WriteUnitStalled
     description: 'The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).'
@@ -10626,3 +10690,12 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN1_sum
+  - name: L0CacheHit
+    description: The percentage of read requests that hit the data in the L0 cache. The L0 cache contains vector data, which
+     is data that may vary in each thread across the wavefront. Value range: 0% (no hit) to 100% (optimal).
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1200
+      - gfx1201
+      expression: (1-(reduce(TCP_REQ_MISS,sum)/(reduce(TCP_REQ,sum)))*100
