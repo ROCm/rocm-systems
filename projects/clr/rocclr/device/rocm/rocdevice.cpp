@@ -19,8 +19,6 @@
  THE SOFTWARE. */
 
 #include "cl.h"
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
@@ -62,7 +60,6 @@
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
 #include <sstream>
 #include <vector>
-#endif  // WITHOUT_HSA_BACKEND
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
 #define OPENCL_C_VERSION_STR XSTR(OPENCL_C_MAJOR) "." XSTR(OPENCL_C_MINOR)
@@ -78,7 +75,6 @@ static_assert(static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite) ==
                   static_cast<uint32_t>(HSA_ACCESS_PERMISSION_RW),
               "Vmm Access Flag Read Write mismatch with ROC-runtime!");
 
-#ifndef WITHOUT_HSA_BACKEND
 
 namespace amd::device {
 extern const char* HipExtraSourceCode;
@@ -238,12 +234,13 @@ Device::~Device() {
       hsa_queue_t* queue = qIter->first;
       auto& qInfo = qIter->second;
       if (qInfo.hostcallBuffer_) {
-        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hostcall buffer %p for hardware queue %p",
-                qInfo.hostcallBuffer_, qIter->first->base_address);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
+                "Deleting hostcall buffer %p for hardware queue %p", qInfo.hostcallBuffer_,
+                qIter->first->base_address);
         amd::disableHostcalls(qInfo.hostcallBuffer_);
         context().svmFree(qInfo.hostcallBuffer_);
       }
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
       hsa_queue_destroy(queue);
@@ -1991,11 +1988,11 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
       break;
     case kUncachedAtomics:
       if (agentInfo->ext_fine_grain_pool.handle != 0) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Using extended fine grained access system memory pool");
         segment = agentInfo->ext_fine_grain_pool;
       } else {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Falling through on fine grained access system memory pool");
         segment = agentInfo->fine_grain_pool;
       }
@@ -2069,7 +2066,7 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
     LogPrintfError("get_mempolicy failed with error %ld", res);
     return ptr;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
           "get_mempolicy() succeed with mode %d, nodeMask 0x%lx, cpuCount %zu", mode,
           *nodeMask->maskp, cpuCount);
 
@@ -2809,7 +2806,7 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   void* hw_event =
       (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
   if (hw_event == nullptr) {
-    ClPrint(amd::LOG_INFO, amd::LOG_SIG, "No HW event");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_SIG, "No HW event");
     return false;
   } else if (wait) {
     // hipEventBlockingSync
@@ -3622,4 +3619,3 @@ device::UriLocator* Device::createUriLocator() const { return new roc::UriLocato
 #endif
 #endif
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND
