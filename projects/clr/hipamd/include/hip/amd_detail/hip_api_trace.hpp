@@ -1087,7 +1087,7 @@ typedef hipError_t (*t_hipGetDriverEntryPoint)(const char* symbol, void** funcPt
 typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** funcPtr,
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
-typedef hipError_t (*t_hipKernelGetAttribute)(int* pi, hipFuncAttribute attrib, hipKernel_t kernel,
+typedef hipError_t (*t_hipKernelGetAttribute)(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                               hipDevice_t dev);
 
 // HIP Compiler dispatch table

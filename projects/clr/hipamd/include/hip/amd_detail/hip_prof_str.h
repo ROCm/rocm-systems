@@ -3733,9 +3733,9 @@ typedef struct hip_api_data_s {
     } hipStreamGetId;
     struct {
       int* pi;
-      hipFuncAttribute attrib;
+      hipFunction_attribute attrib;
       hipKernel_t kernel;
-      hipDevice_t dev
+      hipDevice_t dev;
     } hipKernelGetAttribute;
     struct {
       hipStream_t stream;
@@ -6349,10 +6349,10 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamGetId.stream = (hipStream_t)stream; \
   cb_data.args.hipStreamGetId.streamId = (unsigned long long*)streamId; \
 };
-// hipKernelGetAttribute[('int*', 'pi'), ('hipFuncAttribute', 'attrib'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+// hipKernelGetAttribute[('int*', 'pi'), ('hipFunction_attribute', 'attrib'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
 #define INIT_hipKernelGetAttribute_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipKernelGetAttribute.pi = (int*)pi; \
-  cb_data.args.hipKernelGetAttribute.attrib = (hipFuncAttribute)attrib; \
+  cb_data.args.hipKernelGetAttribute.attrib = (hipFunction_attribute)attrib; \
   cb_data.args.hipKernelGetAttribute.kernel = (hipKernel_t)kernel; \
   cb_data.args.hipKernelGetAttribute.dev = (hipDevice_t)dev; \
 };
@@ -8154,7 +8154,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipStreamGetId:
       if (data->args.hipStreamGetId.streamId) data->args.hipStreamGetId.streamId__val = *(data->args.hipStreamGetId.streamId);
       break;
-// hipKernelGetAttribute[('int*', 'pi'), ('hipFuncAttribute', 'attrib'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+// hipKernelGetAttribute[('int*', 'pi'), ('hipFunction_attribute', 'attrib'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
     case HIP_API_ID_hipKernelGetAttribute:
       if (data->args.hipKernelGetAttribute.pi) data->args.hipKernelGetAttribute.pi__val = *(data->args.hipKernelGetAttribute.pi);
       break;

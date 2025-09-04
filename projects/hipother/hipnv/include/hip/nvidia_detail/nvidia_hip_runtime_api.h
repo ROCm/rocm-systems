@@ -495,6 +495,7 @@ typedef CUlinkState hipLinkState_t;
 typedef CUmodule hipModule_t;
 typedef CUfunction hipFunction_t;
 typedef CUdeviceptr hipDeviceptr_t;
+typedef cudaLibrary_t hipLibrary_t;
 typedef struct cudaArray* hipArray_t;
 typedef struct cudaArray* hipArray_const_t;
 typedef struct cudaFuncAttributes hipFuncAttributes;
@@ -2064,8 +2065,8 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
 #if CUDA_VERSION >= 13000
-  return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count,
-      hipMemoryAdviseTocudaMemoryAdvise(advice), location));
+  return hipCUDAErrorTohipError(
+      cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
 #else
   return hipCUDAErrorTohipError(
       cudaMemAdvise_v2(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
@@ -3294,7 +3295,7 @@ inline static hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* fla
   return hipCUDAErrorTohipError(cudaStreamGetFlags(stream, flags));
 }
 
-inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long *streamId) {
+inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
   return hipCUDAErrorTohipError(cudaStreamGetId(stream, streamId));
 }
 
@@ -3622,6 +3623,11 @@ inline static hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* im
                                              void** optionValues) {
   return hipCUResultTohipError(
       cuModuleLoadDataEx(module, image, numOptions, options, optionValues));
+}
+
+inline static hipError_t hipKernelGetAttribute(int* pi, hipFuncAttribute attrib, hipKernel_t kernel,
+                                               hipDevice_t dev) {
+  return hipCUResultTohipError(cuKernelGetAttribute(pi, attrib, kernel, dev));
 }
 
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,

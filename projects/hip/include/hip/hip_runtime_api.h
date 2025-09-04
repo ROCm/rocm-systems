@@ -693,7 +693,7 @@ typedef struct ihipModule_t* hipModule_t;
 typedef struct ihipModuleSymbol_t* hipFunction_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
 typedef struct ihipLibrary_t* hipLibrary_t;
-typedef struct ihipKernel_t* hipKernel_t;
+typedef struct ihipModuleSymbol_t* hipKernel_t;
 /**
  * HIP memory pool
  */
@@ -6366,7 +6366,7 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
  hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
  hipModuleGetFunction, hipFuncGetAttribute
  */
-hipError_t hipKernelGetAttribute(int* pi, hipFuncAttribute attrib, hipKernel_t kernel,
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev);
 
 
