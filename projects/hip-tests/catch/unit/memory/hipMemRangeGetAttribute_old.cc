@@ -153,10 +153,12 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_NegativeTests") {
     int NumDevs;
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
     int data = RND_NUM;
-    int* OutData = new int[NumDevs];
-    for (int m = 0; m < NumDevs; ++m) {
-      OutData[m] = RND_NUM;
+
+    auto out_data = std::make_unique<int[]>(NumDevs);
+    for (int i = 0; i < NumDevs; ++i) {
+      out_data[i] = RND_NUM;
     }
+
     HIP_CHECK(hipMallocManaged(&devPtr, MEM_SIZE, hipMemAttachGlobal));
     HIP_CHECK(hipMemAdvise(devPtr, MEM_SIZE, hipMemAdviseSetReadMostly, 0));
 
@@ -168,21 +170,21 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_NegativeTests") {
     }
     // checking the behavior with dataSize > 4 and even
     SECTION("checking the behavior with dataSize > 4 and even") {
-      REQUIRE(CheckError(
-          hipMemRangeGetAttribute(OutData, 6, hipMemRangeAttributeReadMostly, devPtr, MEM_SIZE),
-          __LINE__));
+      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 6, hipMemRangeAttributeReadMostly,
+                                                 devPtr, MEM_SIZE),
+                         __LINE__));
     }
     // checking the behavior with dataSize > 4 and odd
     SECTION("checking the behavior with dataSize > 4 and odd") {
-      REQUIRE(CheckError(
-          hipMemRangeGetAttribute(OutData, 7, hipMemRangeAttributeReadMostly, devPtr, MEM_SIZE),
-          __LINE__));
+      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 7, hipMemRangeAttributeReadMostly,
+                                                 devPtr, MEM_SIZE),
+                         __LINE__));
     }
     // checking the behavior with dataSize which is not multiple of 4
     SECTION("checking the behavior with dataSize which is not multiple of 4") {
-      REQUIRE(CheckError(
-          hipMemRangeGetAttribute(OutData, 27, hipMemRangeAttributeReadMostly, devPtr, MEM_SIZE),
-          __LINE__));
+      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 27, hipMemRangeAttributeReadMostly,
+                                                 devPtr, MEM_SIZE),
+                         __LINE__));
     }
     // checking the behaviour with devPtr(4th param) as NULL
     SECTION("checking the behaviour with devPtr(4th param) as NULL") {

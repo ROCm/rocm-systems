@@ -96,7 +96,7 @@ static bool hipPerfDevMemReadSpeed_test() {
 
   if (hDst[0] != (nBytes / sizeof(uint))) {
     DEBUG_PRINT(
-        "hipPerfDevMemReadSpeed - Data validation failed for warm up run! expected %u got %u\n",
+        "hipPerfDevMemReadSpeed - Data validation failed for warm up run! expected %lu got %u\n",
         nBytes / sizeof(uint), hDst[0]);
     return false;
   }

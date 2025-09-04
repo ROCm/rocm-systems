@@ -60,9 +60,7 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_Synchronization_Behavior") {
 
   SECTION("Device to Pinned Host") { Memcpy3DDtoHPinnedSyncBehavior(Memcpy3DWrapper<>, true); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<>, true); }
-#endif
 }
 
 TEST_CASE("Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior") {
