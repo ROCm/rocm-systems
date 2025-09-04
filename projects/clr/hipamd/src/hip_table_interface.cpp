@@ -1962,3 +1962,5 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
 hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   return hip::GetHipDispatchTable()->hipMemcpy3DPeerAsync_fn(p, stream);
 }
+
+//end_of_table_interface
