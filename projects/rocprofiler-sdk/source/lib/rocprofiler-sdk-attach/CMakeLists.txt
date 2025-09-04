@@ -12,7 +12,8 @@ add_library(rocprofiler-sdk-attach::rocprofiler-sdk-attach-shared-library ALIAS
 target_sources(rocprofiler-sdk-attach-shared-library
     PRIVATE queue_registration.cpp
             code_object_registration.cpp
-            attach.cpp)
+            attach.cpp
+            table.cpp)
 
 target_include_directories(
     rocprofiler-sdk-attach-shared-library

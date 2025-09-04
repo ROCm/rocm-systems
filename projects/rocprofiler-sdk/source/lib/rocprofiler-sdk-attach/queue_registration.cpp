@@ -100,14 +100,14 @@ create_queue(hsa_agent_t        agent,
 
     // Create new queue in HSA
     hsa_queue_t* new_queue = nullptr;
-    ROCP_FATAL_IF(registration->hsa_amd_queue_intercept_create_fn) << "Queue registration was not initialized before create queue was called!";
+    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn) << "Queue registration was not initialized before create queue was called!";
     ROCP_HSA_TABLE_CALL(
         FATAL,
         registration->hsa_amd_queue_intercept_create_fn(
             agent, size, type, callback, data, private_segment_size, group_segment_size, &new_queue))
         << "Could not create intercept queue";
 
-    ROCP_FATAL_IF(registration->hsa_amd_profiling_set_profiler_enabled_fn) << "Queue registration was not initialized before create queue was called!";
+    ROCP_FATAL_IF(!registration->hsa_amd_profiling_set_profiler_enabled_fn) << "Queue registration was not initialized before create queue was called!";
     ROCP_HSA_TABLE_CALL(FATAL, registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
         << "Could not setup intercept profiler";
 
@@ -123,7 +123,7 @@ create_queue(hsa_agent_t        agent,
     auto* write_interceptor_data = &(registration->queues.at(new_queue));
 
     // Pass queue_entry_t* as user data, used to directly call the user's write interceptor
-    ROCP_FATAL_IF(registration->hsa_amd_queue_intercept_register_fn) << "Queue registration was not initialized before create queue was called!";
+    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_register_fn) << "Queue registration was not initialized before create queue was called!";
     ROCP_HSA_TABLE_CALL(
         FATAL, registration->hsa_amd_queue_intercept_register_fn(new_queue, write_interceptor, write_interceptor_data))
         << "Could not register interceptor";

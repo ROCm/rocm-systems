@@ -86,7 +86,7 @@ extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 extern int
-rocprofiler_attach_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t, void*);
+rocprofiler_attach_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t, void(*)(uint64_t, void**, uint64_t));
 
 extern void
 rocprofv3_attach(void);
@@ -158,7 +158,7 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_RCCL,
     ROCP_REG_ROCDECODE,
     ROCP_REG_ROCJPEG,
-    ROCP_REG_ATTACH,
+    ROCP_REG_ROCATTACH,
     ROCP_REG_LAST,
 };
 
@@ -228,8 +228,8 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCJPEG,
                                "rocprofiler_register_import_rocjpeg",
                                "librocjpeg.so.[0-9]($|\\.[0-9\\.]+)")
 
-ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ATTACH,
-                               "attach",
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCATTACH,
+                               "rocattach",
                                "rocprofiler_register_import_attach",
                                "librocprofiler-sdk-attach.so.[0-9]($|\\.[0-9\\.]+)")
 
@@ -681,11 +681,11 @@ rocprofiler_register_library_api_table(
         // Pass a functor to the attach library that it can use to pass back its own API table to us.
         // This approach simplifies the interface and avoids having to modify the deadlock protection of this function.
         auto register_functor = [](uint64_t lib_version, void** api_tables, uint64_t api_table_length){
-            rocp_add_registered_library_api_table("attach", nullptr, lib_version, api_tables, api_table_length, 0);
+            rocp_add_registered_library_api_table("rocattach", nullptr, lib_version, api_tables, api_table_length, 0);
         };
 
         auto _ret = rocprofiler_attach_set_api_table_fn(
-            common_name, lib_version, _instance_val, api_tables, api_table_length, (void*)(&register_functor));
+            common_name, lib_version, _instance_val, api_tables, api_table_length, register_functor);
         if(_ret != 0)
         {
             LOG(ERROR) << "Proxy queues for attachment are enabled, but attach library "
