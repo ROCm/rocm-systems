@@ -291,9 +291,11 @@ def calc_ceilings(
         x0_mfma = min(x2_mfma, XMAX) if x2_mfma < XMAX else XMAX
 
         console_debug(f"MFMA ROOF [{x0_mfma}, {XMAX}], [{peak_mfma},{peak_mfma}]")
-        graph_points["mfma"].extend(
-            [[x0_mfma, XMAX], [peak_mfma, peak_mfma], peak_mfma]
-        )
+        graph_points["mfma"].extend([
+            [x0_mfma, XMAX],
+            [peak_mfma, peak_mfma],
+            peak_mfma,
+        ])
 
     return graph_points
 

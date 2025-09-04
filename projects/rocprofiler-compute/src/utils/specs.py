@@ -23,6 +23,7 @@
 
 ##############################################################################
 """Get host/gpu specs."""
+
 from __future__ import annotations
 
 import importlib

@@ -1561,6 +1561,7 @@ def convert_metric_id_to_panel_info(
     tokens = metric_id.split(".")
     if not (0 < len(tokens) < 4):
         raise ValueError(f"Invalid metric id: {metric_id}")
+
     # File id
     file_id = str(int(tokens[0]))
     # 4 -> 04
