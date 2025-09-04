@@ -62,8 +62,6 @@ def detect_repo_structure():
 def create_ctest_script(args):
     """Generate a CTest script for uploading coverage data"""
 
-    coverage_basename = os.path.basename(args.coverage_file)
-
     script_content = f"""
 cmake_minimum_required(VERSION 3.19)
 
@@ -89,47 +87,25 @@ file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
 
 ctest_start({args.mode})
 
-# Copy coverage XML file to the binary directory with the expected name
-set(COVERAGE_SRC_FILE "{args.coverage_file}")
-set(COVERAGE_DEST_FILE "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
+set(COVERAGE_FILE "{args.coverage_file}")
 
-if(NOT EXISTS "${{COVERAGE_SRC_FILE}}")
-    message(FATAL_ERROR "Coverage file not found: ${{COVERAGE_SRC_FILE}}")
+if(NOT EXISTS "${{COVERAGE_FILE}}")
+    message(FATAL_ERROR "Coverage file not found: ${{COVERAGE_FILE}}")
 endif()
 
-# copy file to the binary directory
-file(COPY "${{COVERAGE_SRC_FILE}}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
+message(STATUS "Submitting coverage file: ${{COVERAGE_FILE}}")
 
-# rename it to coverage.xml if necessary
-if(NOT "{coverage_basename}" STREQUAL "coverage.xml")
-    file(RENAME "${{CTEST_BINARY_DIRECTORY}}/{coverage_basename}" "${{COVERAGE_DEST_FILE}}")
-endif()
-
-# verify coverage file was copied correctly
-if(NOT EXISTS "${{COVERAGE_DEST_FILE}}")
-    message(FATAL_ERROR "Failed to copy coverage file to: ${{COVERAGE_DEST_FILE}}")
-endif()
-
-# read first few lines to verify it's a valid XML file
-file(READ "${{COVERAGE_DEST_FILE}}" COVERAGE_CONTENT LIMIT 200)
-if(NOT COVERAGE_CONTENT MATCHES "^<\\?xml.*<coverage")
-    message(FATAL_ERROR "Coverage file does not appear to be valid XML coverage format")
-endif()
-
-message(STATUS "Successfully copied coverage file to: ${{COVERAGE_DEST_FILE}}")
-
-# submit coverage directly as a file
-ctest_submit(FILES "${{COVERAGE_DEST_FILE}}" 
+ctest_submit(FILES "${{COVERAGE_FILE}}"
              PARTS Coverage
              RETRY_COUNT 3
              RETRY_DELAY 5
              CAPTURE_CMAKE_ERROR submit_error)
 
-if(NOT submit_error EQUAL 0)
-    message(FATAL_ERROR "Failed to submit coverage to CDash: ${{submit_error}}")
-else()
-    message(STATUS "Successfully submitted coverage to CDash")
+if(submit_error)
+    message(FATAL_ERROR "Failed to submit coverage to CDash. Error code: ${{submit_error}}")
 endif()
+
+message(STATUS "Successfully submitted coverage to CDash")
 """
     return script_content
 
