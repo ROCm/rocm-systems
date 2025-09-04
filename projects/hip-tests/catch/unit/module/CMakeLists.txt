@@ -32,6 +32,7 @@ set(TEST_SRC
     hipModuleLaunchCooperativeKernel.cc
     hipModuleLaunchCooperativeKernelMultiDevice.cc
     hipFuncGetAttribute.cc
+    hipKernelGetAttribute.cc
     hipGetFuncBySymbol.cc
     hipDrvLaunchKernelEx.cc
 )

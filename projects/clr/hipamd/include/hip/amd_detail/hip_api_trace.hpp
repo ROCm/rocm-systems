@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 14
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 15
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1656,11 +1656,12 @@ struct HipDispatchTable {
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
   t_hipStreamGetId hipStreamGetId_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
   t_hipKernelGetAttribute hipKernelGetAttribute_fn;
 
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
-
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 16
   // ******************************************************************************************* //
   //
   //                                            READ BELOW

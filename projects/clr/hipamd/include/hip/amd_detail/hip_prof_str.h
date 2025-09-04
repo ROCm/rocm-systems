@@ -3733,6 +3733,7 @@ typedef struct hip_api_data_s {
     } hipStreamGetId;
     struct {
       int* pi;
+      int pi__val;
       hipFunction_attribute attrib;
       hipKernel_t kernel;
       hipDevice_t dev;

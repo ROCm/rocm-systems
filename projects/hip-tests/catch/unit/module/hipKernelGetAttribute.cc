@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -32,61 +32,64 @@ static hipModule_t GetModule() {
   return mg.module();
 }
 
-TEST_CASE("Unit_hipFuncGetAttribute_Positive_Basic") {
-  hipFunction_t kernel = GetKernel(GetModule(), "GlobalKernel");
+TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
+  hipKernel_t kernel = GetKernel(GetModule(), "GlobalKernel");
 
-  int value;
+  int pi;
+  int device_id = 0;
 
   SECTION("binaryVersion") {
-    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, kernel));
+    HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, kernel, device_id));
     const auto major = GetDeviceAttribute(hipDeviceAttributeComputeCapabilityMajor, 0);
     const auto minor = GetDeviceAttribute(hipDeviceAttributeComputeCapabilityMinor, 0);
-    REQUIRE(value == major * 10 + minor);
+    REQUIRE(pi == major * 10 + minor);
   }
 
   SECTION("cacheModeCA") {
-    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA, kernel));
-    REQUIRE((value == 0 || value == 1));
+    HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA, kernel, device_id));
+    REQUIRE((pi == 0 || pi == 1));
   }
 
   SECTION("maxThreadsPerBlock") {
-    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kernel));
-    REQUIRE(value == GetDeviceAttribute(hipDeviceAttributeMaxThreadsPerBlock, 0));
+    HIP_CHECK(
+        hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kernel, device_id));
+    REQUIRE(pi == GetDeviceAttribute(hipDeviceAttributeMaxThreadsPerBlock, 0));
   }
 
   SECTION("numRegs") {
-    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_NUM_REGS, kernel));
-    REQUIRE(value >= 0);
+    HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_NUM_REGS, kernel, device_id));
+    REQUIRE(pi >= 0);
   }
 
   SECTION("ptxVersion") {
-    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_PTX_VERSION, kernel));
-    REQUIRE(value > 0);
+    HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_PTX_VERSION, kernel, device_id));
+    REQUIRE(pi > 0);
   }
 
   SECTION("sharedSizeBytes") {
-    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel));
-    REQUIRE(value <= GetDeviceAttribute(hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+    HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel, device_id));
+    REQUIRE(pi <= GetDeviceAttribute(hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
   }
 }
 
-TEST_CASE("Unit_hipFuncGetAttribute_Negative_Parameters") {
-  hipFunction_t kernel = GetKernel(GetModule(), "GlobalKernel");
+TEST_CASE("Unit_hipKernelGetAttribute_Negative_Parameters") {
+  hipKernel_t kernel = GetKernel(GetModule(), "GlobalKernel");
 
-  int value;
+  int pi;
+  int device_id = 0;
 
-  SECTION("value == nullptr") {
-    HIP_CHECK_ERROR(hipFuncGetAttribute(nullptr, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, kernel),
+  SECTION("pi == nullptr") {
+    HIP_CHECK_ERROR(hipKernelGetAttribute(nullptr, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, kernel, device_id),
                     hipErrorInvalidValue);
   }
 
   SECTION("invalid attribute") {
-    HIP_CHECK_ERROR(hipFuncGetAttribute(&value, static_cast<hipFunction_attribute>(-1), kernel),
+    HIP_CHECK_ERROR(hipKernelGetAttribute(&pi, static_cast<hipFunction_attribute>(-1), kernel, device_id),
                     hipErrorInvalidValue);
   }
 
-  SECTION("hfunc == nullptr") {
-    HIP_CHECK_ERROR(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, nullptr),
+  SECTION("kernel == nullptr") {
+    HIP_CHECK_ERROR(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, nullptr, device_id),
                     hipErrorInvalidResourceHandle);
   }
 }

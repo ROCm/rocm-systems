@@ -30,7 +30,7 @@ namespace hip {
 hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
   HIP_INIT_API(hipKernelGetAttribute, pi, attrib, kernel, dev);
-  if (pi == nullptr || kernel == nullptr) {
+  if (pi == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
