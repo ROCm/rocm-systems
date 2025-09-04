@@ -291,6 +291,16 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     hwLDSSize_ = (IS_LINUX || amd::IS_HIP) ? 64 * Ki : 32 * Ki;
   }
 
+  if (!ValidateComgr()) {
+    LogPrintfError("Code object manager initialization failed for device %s", isa.targetId());
+    return false;
+  }
+
+  if (!ValidateHsail()) {
+    LogPrintfError("HSAIL initialization failed for device %s", isa.targetId());
+    return false;
+  }
+
   imageSupport_ = true;
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isa.isaName(), "ImageSupport", imageSupport)) {

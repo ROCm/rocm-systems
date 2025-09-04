@@ -268,17 +268,6 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
     }
   }
 
-  if (!ValidateComgr()) {
-    LogPrintfError("Code object manager initialization failed for offline PAL device %s",
-                   isa.targetId());
-    return false;
-  }
-
-  if (!ValidateHsail()) {
-    LogPrintfError("HSAIL initialization failed for offline PAL device %s", isa.targetId());
-    return false;
-  }
-
   if (!amd::Device::create(isa)) {
     LogPrintfError("Unable to setup device for PAL offline device %s", isa.targetId());
     return false;
@@ -1029,16 +1018,6 @@ bool Device::create(Pal::IDevice* device) {
     maxFrameBufferAllocation_ = maxInvisibleAllocation;
   } else {
     maxFrameBufferAllocation_ = std::max(maxInvisibleAllocation, maxVisibleAllocation);
-  }
-
-  if (!ValidateComgr()) {
-    LogError("Code object manager initialization failed!");
-    return false;
-  }
-
-  if (!ValidateHsail()) {
-    LogError("Hsail initialization failed!");
-    return false;
   }
 
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));

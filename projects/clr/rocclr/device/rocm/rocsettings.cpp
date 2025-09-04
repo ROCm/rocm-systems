@@ -191,6 +191,12 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   // Override current device settings
   override();
 
+  if (!ValidateComgr()) {
+    LogPrintfError("Code object manager initialization failed for offline HSA device %s",
+                   isa.targetId());
+    return false;
+  }
+
   return true;
 }
 
