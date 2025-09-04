@@ -25,7 +25,6 @@
 
 import os
 import re
-from typing import Tuple
 
 from .importer import RocpdImportData
 from .query import export_sqlite_query
