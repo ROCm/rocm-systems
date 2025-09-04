@@ -53,16 +53,6 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
-      - name: LS TEST
-        run: |
-          ls -l
-          echo "-------------------------"
-          cd monorepo
-          ls -l
-          echo "-------------------------"
-          cd projects
-          ls -l
-
       - name: Patch rocm-libraries
         run: |
           python ./TheRock/build_tools/patch_rocm_libraries.py --repo ${{ github.workspace }} --apply-to-monorepo --projects rocm-systems
@@ -86,16 +76,6 @@ jobs:
         run: |
           git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-rocm-libraries
-
-      - name: LS TEST
-        run: |
-          ls -l
-          echo "-------------------------"
-          cd monorepo
-          ls -l
-          echo "-------------------------"
-          cd projects
-          ls -l
 
       - name: Configure Projects
         env:
