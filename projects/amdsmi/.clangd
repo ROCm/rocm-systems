@@ -1,6 +1,6 @@
 CompileFlags:
     Remove: -W*
-    Add: [-Wall, -Wno-c++20-designator, -pedantic]
+    Add: [-Wall, -Wno-c++20-designator, -pedantic, -Wno-sign-conversion]
     Compiler: clang++
 
 # list here: https://clang.llvm.org/extra/clang-tidy/checks/list.html

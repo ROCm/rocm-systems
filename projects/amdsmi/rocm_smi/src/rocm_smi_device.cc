@@ -1797,7 +1797,7 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   if ((success == true) && (!out.empty())) {
     isSystemAMDGPUModuleLive = containsString(out, "live");
   }
-  if (isAMDGPUModuleLive) {
+  if (*isAMDGPUModuleLive) {
     deviceRestartInProgress = false;
   }
   *isRestartInProgress = deviceRestartInProgress;
@@ -1866,7 +1866,7 @@ rsmi_status_t storeParameter<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
 template <>
 rsmi_status_t storeParameter<rsmi_memory_partition_type_t>(uint32_t dv_ind) {
   rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
-  uint32_t kDatalength = 128;
+  const uint32_t kDatalength = 128;
   char data[kDatalength];
   bool doesFileExist;
   std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",

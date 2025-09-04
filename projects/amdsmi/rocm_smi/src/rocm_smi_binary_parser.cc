@@ -21,13 +21,7 @@
  */
 
 #include "rocm_smi/rocm_smi_binary_parser.h"
-#include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_logger.h"
 
 #include <dirent.h>
 #include <cinttypes>

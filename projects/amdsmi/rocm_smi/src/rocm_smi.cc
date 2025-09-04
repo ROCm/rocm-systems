@@ -59,7 +59,6 @@
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
 using amd::smi::AMDGpuMetricTypeId_t;
-auto &devInfoTypesStrings = amd::smi::Device::devInfoTypesStrings;
 
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3F;
@@ -918,7 +917,6 @@ rsmi_status_t rsmi_ras_feature_info_get(
   TRY
   rsmi_status_t ret;
   std::string feature_line;
-  std::string tmp_str;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
@@ -1137,7 +1135,7 @@ rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   }
   CHK_SUPPORT_NAME_ONLY(id)
   int ret_kfd = 0;
-  uint32_t node_id;
+  uint32_t node_id = 0;
   rsmi_status_t ret = get_id(dv_ind, amd::smi::kDevVendorID, id);
   bool need_fallback = false;
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1585,7 +1583,6 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   const std::string KTAG_MCLK{"MCLK:"};
   const std::string KTAG_SCLK{"SCLK:"};
   const std::string KTAG_OD_RANGE{"OD_RANGE:"};
-  const std::string KTAG_OD_VDDGFX_OFFSET{"OD_VDDGFX_OFFSET:"};
   const std::string KTAG_FIRST_FREQ_IDX{"0:"};
 
   amd::smi::TextFileTagContents_t txt_power_dev_od_voltage(val_vec);
@@ -2070,7 +2067,6 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
   LOG_TRACE(ss);
   CHK_SUPPORT_VAR(fw_version, block)
 
-  std::string val_str;
   amd::smi::DevInfoTypes dev_type;
 
   static const std::map<rsmi_fw_block_t, amd::smi::DevInfoTypes> kFWBlockTypeMap = {
@@ -2719,7 +2715,6 @@ static std::string get_vendor_name_from_id(uint16_t vendor_id) {
 static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
                                                size_t len, eNameStrType typ) {
   std::string ln;
-  std::string token1;
   rsmi_status_t ret;
   uint16_t device_id;
   uint16_t vendor_id;
@@ -5917,11 +5912,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
 
   ss <<  __PRETTY_FUNCTION__ << " | about to try writing |"
      << newComputePartitionStr
-     << "| size of string = " << newComputePartitionStr.size()
-     << "| size of c-string = "<< std::dec
-     << sizeof(newComputePartitionStr.c_str())/sizeof(newComputePartitionStr[0])
-     << "| sizeof string = " << std::dec
-     << sizeof(newComputePartitionStr);
+     << "| size of string = " << newComputePartitionStr.size();
   LOG_DEBUG(ss);
   GET_DEV_FROM_INDX
   DEVICE_MUTEX
@@ -6174,7 +6165,6 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
   if (!amd::smi::is_sudo_user()) {
     return RSMI_STATUS_PERMISSION;
   }
-  std::string currentXcpConfig = "";
   std::string newXcpConfigStr = "";
   std::string availableXcpConfigsStr = "";
   const int kLen30 = 30;
@@ -6248,11 +6238,7 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
 
   ss <<  __PRETTY_FUNCTION__ << " | about to try writing |"
      << newXcpConfigStr
-     << "| size of string = " << newXcpConfigStr.size()
-     << "| size of c-string = "<< std::dec
-     << sizeof(newXcpConfigStr.c_str())/sizeof(newXcpConfigStr[0])
-     << "| sizeof string = " << std::dec
-     << sizeof(newXcpConfigStr);
+     << "| size of string = " << newXcpConfigStr.size();
   LOG_DEBUG(ss);
   GET_DEV_FROM_INDX
   DEVICE_MUTEX

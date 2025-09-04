@@ -20,8 +20,6 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
-
 #include <iostream>
 
 #include <gtest/gtest.h>
@@ -57,8 +55,6 @@ void TestVersionRead::Close() {
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
-static const uint32_t kVerMaxStrLen = 80;
 
 void TestVersionRead::Run(void) {
   amdsmi_status_t err;
