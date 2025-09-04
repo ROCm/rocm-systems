@@ -310,7 +310,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
       hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
       // Copy memory line by line
-      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Async Copy Rect dst=0x%zx, src=0x%zx, wait_event=0x%zx, "
               "completion_signal=0x%zx",
               dstMem.base, srcMem.base, (wait_events.size() != 0) ? wait_events[0].handle : 0,
@@ -335,7 +335,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
           size_t dstOffset = dstRect.offset(0, y, z);
 
           // Copy memory line by line
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA Async Copy wait_event=0x%zx, completion_signal=0x%zx",
                   (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
           hsa_status_t status = hsa_amd_memory_async_copy(
@@ -509,7 +509,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
   if (!kUseRegularCopyApi && engine != HwQueueEngine::Unknown) {
     copyMask = gpu().getLastUsedSdmaEngine();
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
     copyMask &= (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
     if (copyMask == 0) {
       // Check SDMA engine status
@@ -539,7 +539,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
 
-      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
               "size=%ld, forceSDMA=%d, engineType=%d, wait_event=0x%zx, completion_signal=0x%zx",
               copyEngine, dst, src, size, forceSDMA, engine,
@@ -554,7 +554,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   }
 
   if (engine == HwQueueEngine::Unknown || kUseRegularCopyApi) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
             "HSA Copy dst=0x%zx, src=0x%zx, size=%ld, wait_event=0x%zx, "
             "completion_signal=0x%zx, engineType=%d",
             dst, src, size, (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle,
@@ -656,7 +656,8 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
     if (pinnedMem != nullptr) {
       Memory* pinnedMemory = dev().getRocMemory(pinnedMem);
       address pinBuffer = pinnedMemory->getDeviceMemory();
-      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d", xferSize);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d",
+              xferSize);
       buffState.copySize_ = xferSize;
       buffState.buffer_ = pinBuffer + partial1 + partial2;
       buffState.pinnedMem_ = pinnedMem;
@@ -666,7 +667,8 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
   }
   // If Memory Pinning fails, failback to staging buffer
   xferSize = std::min(xferSize, StagingXferSize);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %d", xferSize);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %d",
+          xferSize);
   buffState.copySize_ = xferSize;
   buffState.buffer_ = gpu().Staging().Acquire(std::min(xferSize, StagingXferSize));
 }
@@ -711,7 +713,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     }
     if (hostToDev) {                          // H2D Path
       if (outBuffer.pinnedMem_ == nullptr) {  // Copy to Staging Buffer
-        ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                 stagingBuffer, hostSrc + copyOffset, copysize);
         memcpy(stagingBuffer, hostSrc + copyOffset, copysize);
       }
@@ -731,7 +733,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
         if (outBuffer.pinnedMem_ == nullptr) {
           // Wait for current signal of previous rocr copy if its not pinned mem
           gpu().Barriers().WaitCurrent();
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
                   hostDst + copyOffset, stagingBuffer, copysize);
           memcpy(hostDst + copyOffset, stagingBuffer, copysize);
         }
@@ -1754,7 +1756,7 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
         // Wait for current signal of previous blit copy if its not pinned mem
         if (outBuffer.pinnedMem_ == nullptr) {
           gpu().Barriers().WaitCurrent();
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
                   (void*)(dstAddr + stagedCopyOffset), stagingBuffer, copySize);
           memcpy(dstAddr + stagedCopyOffset, stagingBuffer, copySize);
         }
@@ -1875,7 +1877,7 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
         copySize = outBuffer.copySize_;
         address currentDstAddr = dstAddr + stagedCopyOffset;
         if (outBuffer.pinnedMem_ == nullptr) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                   stagingBuffer, (void*)(srcAddr + stagedCopyOffset), copySize);
           memcpy(stagingBuffer, srcAddr + stagedCopyOffset, copySize);
         }

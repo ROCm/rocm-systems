@@ -97,10 +97,10 @@ ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)
 def main():
     if not os.getenv("CI"):
         print("WARNING: CDash upload should normally only be done from CI/CD")
-    response = input("Continue anyway? (y/N): ")
-    if response.lower() != "y":
-        print("Aborted.")
-        return 1
+        response = input("Continue anyway? (y/N): ")
+        if response.lower() != "y":
+            print("Aborted.")
+            return 1
 
     parser = argparse.ArgumentParser(
         description="Upload coverage XML to CDash for rocprofiler-compute"
@@ -232,11 +232,10 @@ def main():
             return result.returncode
 
         print("\n✅ Coverage successfully uploaded to CDash!")
-        print(
-            f"View results at: {
-                args.submit_url.replace('/submit.php?project=', '/index.php?project=')
-            }"
+        cdash_url = args.submit_url.replace(
+            "/submit.php?project=", "/index.php?project="
         )
+        print(f"View results at: {cdash_url}")
         return 0
 
     except Exception as e:
