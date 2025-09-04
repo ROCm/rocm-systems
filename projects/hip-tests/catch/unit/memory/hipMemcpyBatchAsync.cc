@@ -18,6 +18,7 @@
  */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <array>
 /**
  * @addtogroup hipMemcpyBatchAsync hipMemcpyBatchAsync
  * @{
@@ -45,7 +46,7 @@
 TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   const size_t count = 2;
   size_t numAttrs = 0;
-  size_t size = 4096 * sizeof(char);
+  const size_t size = 4096 * sizeof(char);
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -59,7 +60,8 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
     HIP_CHECK(hipMalloc(&dstPtr[i], size));
     HIP_CHECK(hipMemset(srcPtr[i], 'b', size));  // Fill with value
     sizes[i] = size;
-    hostPtr[i] = new char[size];
+    std::array<char, size>arr;
+    hostPtr[i] = arr.data();
   }
 
   attrsIdxs[0] = 0;
@@ -72,7 +74,10 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipMemcpy(hostPtr[i], dstPtr[i], size, hipMemcpyDeviceToHost));
     for (int j = 0; j < size; j++) {
-      REQUIRE(hostPtr[i][j] == 'b');
+      if(hostPtr[i][j] != 'b') {
+        INFO("Array FAILURE at Index: "<< i << " "<< j << "\nval : " << hostPtr[i][j]);
+        REQUIRE(false);
+      }
     }
   }
 

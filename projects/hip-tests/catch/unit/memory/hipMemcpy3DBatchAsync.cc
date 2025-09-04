@@ -18,7 +18,6 @@
  */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
-
 /**
  * @addtogroup hipMemcpy3DBatchAsync hipMemcpy3DBatchAsync
  * @{
@@ -38,7 +37,7 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height, size_t dep
   HIP_CHECK(hipMemcpy3D(&copyParms));
   for (size_t i = 0; i < width * height * depth; ++i) {
     if (hostBuf[i] != expected) {
-      printf("Array FAILURE : i %zu, val : %x\n", i, hostBuf[i]);
+      INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
       REQUIRE(false);
     }
   }
@@ -65,18 +64,19 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height, size_t dep
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
-  const int numOps = 2;
+  CHECK_IMAGE_SUPPORT
+  constexpr int numOps = 2;
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(16, 16, 4);
-  size_t elements_2d = extent.width * extent.height * extent.depth * sizeof(char);
+  size_t elements_3d = extent.width * extent.height * extent.depth * sizeof(char);
   size_t volume = extent.width * extent.height * extent.depth * sizeof(char);
 
   // Allocate buffers for pointer-ptr copy
   void *srcPtr0, *dstPtr0;
-  HIP_CHECK(hipMalloc(&srcPtr0, elements_2d));
-  HIP_CHECK(hipMalloc(&dstPtr0, elements_2d));
-  HIP_CHECK(hipMemset(srcPtr0, 'a', elements_2d));  // Fill with value
+  HIP_CHECK(hipMalloc(&srcPtr0, elements_3d));
+  HIP_CHECK(hipMalloc(&dstPtr0, elements_3d));
+  HIP_CHECK(hipMemset(srcPtr0, 'a', elements_3d));  // Fill with value
 
   // Allocate and fill hip array for array-to-ptr copy
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<char>();
@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
   HIP_CHECK(hipMemcpy(hostBuf, dstPtr0, volume, hipMemcpyDeviceToHost));
   for (size_t i = 0; i < volume; ++i) {
     if (hostBuf[i] != 'a') {
-      printf("PTR FAILURE : i %zu, val : %x\n", i, hostBuf[i]);
+      INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
       REQUIRE(false);
     }
   }
@@ -168,6 +168,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemcpy3DBatchAsync_NegativeTests") {
+  CHECK_IMAGE_SUPPORT
   const int numOps = 2;
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));

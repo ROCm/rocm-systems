@@ -39,15 +39,23 @@
  */
 TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-  int numW = 16;
-  int numH = 16;
-  int depth = 4;
+  constexpr int numW = 16;
+  constexpr int numH = 16;
+  constexpr int depth = 4;
   size_t volume = numW * numH * depth * sizeof(char);
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
+  if (device_count <= 1) {
+    std::string msg = "Invalid Device Count. Hence Skipping the test.. ";
+    HipTest::HIP_SKIP_TEST(msg.c_str());
+  }
   const auto src_device = GENERATE_COPY(range(0, device_count));
   const auto dst_device = GENERATE_COPY(range(0, device_count));
-  INFO("Src device: " << src_device << ", Dst device: " << dst_device);
+  if (src_device == dst_device) {
+    std::string msg = "Both Source and Destination device ids are same.";
+    INFO("Src device: " << src_device << ", Dst device: " << dst_device);
+    HipTest::HIP_SKIP_TEST(msg.c_str());
+  }
   HIP_CHECK(hipSetDevice(src_device));
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
@@ -108,7 +116,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   // Validation
   for (size_t i = 0; i < volume; ++i) {
     if (hostBuf[i] != 0xb) {
-      printf("Array FAILURE : i %zu, val : %x\n", i, hostBuf[i]);
+      INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
       REQUIRE(false);
     }
   }
