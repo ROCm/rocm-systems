@@ -14,7 +14,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the
   ROCm Compute Profiler CLI output.
 * `--set` filtering option in profile mode to enable single-pass counter collection for predefined subsets of metrics.
-* Add `--list-sets` in profile mode to list the sets available for single pass counter collection
+* `--list-sets` filtering option in profile mode to list the sets available for single pass counter collection
 
 * Add missing counters based on register specification which enables missing metrics
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
