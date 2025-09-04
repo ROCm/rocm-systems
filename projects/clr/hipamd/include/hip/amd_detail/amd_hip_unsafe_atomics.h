@@ -511,7 +511,7 @@ __device__ inline double safeAtomicAdd(double* addr, double value) {
  * @return Original value contained at \p addr.
  */
 __device__ inline double safeAtomicMax(double* addr, double val) {
-#if __has_builtin(__builtin_amdgcn_is_private)
+#if __has_builtin(__builtin_amdgcn_is_private) && !__SPIRV__
   if (__builtin_amdgcn_is_private((const __attribute__((address_space(0))) void*)addr)) {
     double old = *addr;
     *addr = __builtin_fmax(old, val);
@@ -538,7 +538,7 @@ __device__ inline double safeAtomicMax(double* addr, double val) {
   }
   return __longlong_as_double(value);
 #endif
-#if __has_builtin(__builtin_amdgcn_is_private)
+#if __has_builtin(__builtin_amdgcn_is_private) && !__SPIRV__
   }
 #endif
 }
@@ -558,7 +558,7 @@ __device__ inline double safeAtomicMax(double* addr, double val) {
  * @return Original value contained at \p addr.
  */
 __device__ inline double safeAtomicMin(double* addr, double val) {
-#if __has_builtin(__builtin_amdgcn_is_private)
+#if __has_builtin(__builtin_amdgcn_is_private) && !__SPIRV__
   if (__builtin_amdgcn_is_private((const __attribute__((address_space(0))) void*)addr)) {
     double old = *addr;
     *addr = __builtin_fmin(old, val);
@@ -585,7 +585,7 @@ __device__ inline double safeAtomicMin(double* addr, double val) {
   }
   return __longlong_as_double(value);
 #endif
-#if __has_builtin(__builtin_amdgcn_is_private)
+#if __has_builtin(__builtin_amdgcn_is_private) && !__SPIRV__
   }
 #endif
 }
