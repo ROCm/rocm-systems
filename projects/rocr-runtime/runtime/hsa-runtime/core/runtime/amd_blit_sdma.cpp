@@ -171,7 +171,7 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
   if (queue_start_addr_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-  MAKE_NAMED_SCOPE_GUARD(cleanupOnException, [&]() { Destroy(agent); };);
+  MAKE_NAMED_SCOPE_GUARD(cleanupOnException, [&]() { Destroy(); };);
   std::memset(queue_start_addr_, 0, kQueueSize);
 
   bytes_written_.resize(kQueueSize);
@@ -208,7 +208,7 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR> hsa_status_t BlitSdma<useGCR>::Destroy(const core::Agent& agent) {
+template <bool useGCR> hsa_status_t BlitSdma<useGCR>::Destroy() {
   // Release all allocated resources and reset them to zero.
 
   if (queue_resource_.QueueId != 0) {
