@@ -30,7 +30,7 @@ For example:
 
    $ rocprof-compute analyze --tui
 
-2. To start the individual kernel analysis, use the dropdown menu at the top left of the screen to select
+2. To start the individual kernel analysis, use the drop-down menu at the top left of the screen to select
 a single workload from ``rocprof-compute profile`` generated output directories.
 
 .. image:: ../../data/analyze/tui_home.png
