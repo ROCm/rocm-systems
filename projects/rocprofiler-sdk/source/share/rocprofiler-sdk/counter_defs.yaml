@@ -5505,7 +5505,7 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 16
-  - name: SQ_PERF_SEL_INST_CYCLES_VALU
+  - name: SQ_INST_CYCLES_VALU
     description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 
      and V_OP32_T instruction, count them separately. 
     properties: []
@@ -5526,16 +5526,6 @@ rocprofiler-sdk:
       - gfx1200
       block: SQ
       event: 250
-  - name: SQ_INST_CYCLES_VALU
-    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1
-     and V_OP32_T instruction, count them separately. {emulated, C1}
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1200
-      - gfx1201
-      block: SQ
-      event: 99
   - name: ScaPipeIssueUtil
     description: 'Unit: percent'
     properties: []
