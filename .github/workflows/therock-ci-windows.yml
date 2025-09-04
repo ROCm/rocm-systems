@@ -75,7 +75,7 @@ jobs:
       - name: Fetch sources
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-rocm-libraries
+          python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-rocm-systems
 
       - name: Configure Projects
         env:
