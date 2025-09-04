@@ -661,7 +661,6 @@ def build_metric_table_df(
             # the whole IP block in filter
             (str(panel_id // 100) in filter_metrics)
         ):
-
             values = build_metric_row_values(
                 metric_idx, key, entries, data_config, panel
             )
@@ -825,7 +824,6 @@ def build_metric_value_string(
 
 
 def eval_builtin_vars(config: dict[str, Any]) -> dict[str, Any]:
-
     build_in: dict[str, Any] = {}
 
     # First pass: per-XCD values
@@ -1060,7 +1058,6 @@ def eval_metric(
     debug: bool,
     config: dict[str, Any],
 ) -> None:
-
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
     if (

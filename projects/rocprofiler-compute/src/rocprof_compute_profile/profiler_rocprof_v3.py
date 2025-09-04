@@ -89,9 +89,10 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                     # 4 -> 5
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
-            profiling_options.extend(
-                ["--kernel-iteration-range", f"[{','.join(dispatch)}]"]
-            )
+            profiling_options.extend([
+                "--kernel-iteration-range",
+                f"[{','.join(dispatch)}]",
+            ])
 
         profiling_options.append("--")
         profiling_options.extend(app_cmd)

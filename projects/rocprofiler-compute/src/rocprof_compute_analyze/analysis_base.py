@@ -46,30 +46,28 @@ from utils.logger import (
 from utils.utils import get_uuid, is_workload_empty, merge_counters_spatial_multiplex
 
 # the build-in config to list kernel names purpose only
-TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict(
-    [
-        (
-            0,
-            {
-                "id": 0,
-                "title": "Top Kernels",
-                "data source": [
-                    {"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}
-                ],
-            },
-        ),
-        (
-            1,
-            {
-                "id": 1,
-                "title": "Dispatch List",
-                "data source": [
-                    {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
-                ],
-            },
-        ),
-    ]
-)
+TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
+    (
+        0,
+        {
+            "id": 0,
+            "title": "Top Kernels",
+            "data source": [
+                {"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}
+            ],
+        },
+    ),
+    (
+        1,
+        {
+            "id": 1,
+            "title": "Dispatch List",
+            "data source": [
+                {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
+            ],
+        },
+    ),
+])
 
 
 class OmniAnalyze_Base:
@@ -294,13 +292,11 @@ class OmniAnalyze_Base:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
 
-            if not any(
-                [
-                    args.nodes,
-                    args.list_nodes,
-                    args.spatial_multiplexing,
-                ]
-            ):
+            if not any([
+                args.nodes,
+                args.list_nodes,
+                args.spatial_multiplexing,
+            ]):
                 is_workload_empty(dir_info[0])
 
         # FIXME:

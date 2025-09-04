@@ -1275,7 +1275,6 @@ class MemChart:
 
 
 def plot_mem_chart(arch: str, normal_unit: str, metric_dict: dict[str, Any]) -> str:
-
     # TODO: verify metrics dict for given arch first
 
     canvas = Canvas(width=234, height=42, xmax=234, ymax=42)

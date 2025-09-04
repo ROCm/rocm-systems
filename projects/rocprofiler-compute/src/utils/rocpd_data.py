@@ -43,9 +43,9 @@ def convert_db_to_csv(
             with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
                 with open(csv_file_path, "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow(
-                        [description[0] for description in cursor.description]
-                    )
+                    writer.writerow([
+                        description[0] for description in cursor.description
+                    ])
                     for row in cursor:
                         writer.writerow(row)
     except (sqlite3.DatabaseError, IOError) as e:
@@ -65,15 +65,13 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     data: list[dict[str, Any]] = []
 
     # Group by unique kernel and merge into a single row
-    for _, group_df in df.groupby(
-        [
-            "Dispatch_ID",
-            "Kernel_Name",
-            "Grid_Size",
-            "Workgroup_Size",
-            "LDS_Per_Workgroup",
-        ]
-    ):
+    for _, group_df in df.groupby([
+        "Dispatch_ID",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+    ]):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],

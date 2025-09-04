@@ -228,9 +228,9 @@ class RocProfCompute:
             console_error("Unsupported arch")
 
         ac = schema.ArchConfig()
-        ac.panel_configs = file_io.load_panel_configs(
-            [str(self.__args.config_dir / arch)]
-        )
+        ac.panel_configs = file_io.load_panel_configs([
+            str(self.__args.config_dir / arch)
+        ])
         sys_info = self.__mspec.get_class_members().iloc[0]
         parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 

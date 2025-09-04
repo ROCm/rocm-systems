@@ -681,8 +681,9 @@ class Roofline:
                         (
                             None
                             if self.__run_parameters["is_standalone"]
-                            else
-                            (f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s")
+                            else (
+                                f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s"
+                            )
                         ),
                         f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s",
                     ],
@@ -939,12 +940,16 @@ class Roofline:
                 console_debug(
                     "roofline",
                     f"AI_{kernel_names[i]}: "
-                    f"{self.__ai_data[key][0][i]
-                    if i < len(self.__ai_data[key][0])
-                    else 'N/A'}, "
-                    f"{self.__ai_data[key][1][i]
-                    if i < len(self.__ai_data[key][1])
-                    else 'N/A'}",
+                    f"{
+                        self.__ai_data[key][0][i]
+                        if i < len(self.__ai_data[key][0])
+                        else 'N/A'
+                    }, "
+                    f"{
+                        self.__ai_data[key][1][i]
+                        if i < len(self.__ai_data[key][1])
+                        else 'N/A'
+                    }",
                 )
         plt.xlabel(f"Arithmetic Intensity ({ops_flops}s/Byte)")
         plt.ylabel("Performance (GFLOP/sec)")
