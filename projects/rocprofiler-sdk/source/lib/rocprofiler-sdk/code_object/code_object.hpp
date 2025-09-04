@@ -33,13 +33,6 @@
 #include <functional>
 #include <vector>
 
-ROCPROFILER_EXTERN_C_INIT
-// Hidden function used to load all previously captured code objects after an attachment.
-// Takes a dispatch table of attach functions usually provided by rocprofiler_register.
-int
-rocprofiler_load_attach_code_objects(void* incoming_table) ROCPROFILER_PUBLIC_API;
-ROCPROFILER_EXTERN_C_FINI
-
 namespace rocprofiler
 {
 namespace code_object
@@ -73,5 +66,9 @@ initialize(HipCompilerDispatchTable* table);
 
 void
 finalize();
+
+void
+load_attach_code_objects(RocAttachDispatchTable* table);
+
 }  // namespace code_object
 }  // namespace rocprofiler

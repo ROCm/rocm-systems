@@ -482,7 +482,7 @@ queue_controller_fini()
 }
 
 void
-queue_controller_load_attach_queues(rocprofiler_attach_dispatch_table_t& attach_table)
+queue_controller_load_attach_queues(RocAttachDispatchTable* attach_table)
 {
     auto iter_func = [](hsa_queue_t* queue, hsa_agent_t agent, void* data){
         auto qc = CHECK_NOTNULL(get_queue_controller());
@@ -520,7 +520,7 @@ queue_controller_load_attach_queues(rocprofiler_attach_dispatch_table_t& attach_
 
     };
 
-    attach_table.rocprofiler_attach_iterate_all_queues(iter_func, (void*)attach_table.rocprofiler_attach_set_write_interceptor);
+    CHECK_NOTNULL(attach_table)->rocprofiler_attach_iterate_all_queues(iter_func, (void*)attach_table->rocprofiler_attach_set_write_interceptor);
     // TODO: add entry to attach API table for callbacks
 }
 

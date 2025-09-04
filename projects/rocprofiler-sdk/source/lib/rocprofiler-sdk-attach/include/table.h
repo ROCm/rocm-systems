@@ -26,7 +26,7 @@
 #include "queue_registration.h"
 #include "code_object_registration.h"
 
-#define ROCTX_API_TABLE_VERSION_MAJOR 0
+#define ROCATTACH_API_TABLE_VERSION_MAJOR 0
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -37,7 +37,7 @@ typedef int  (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_cod
 typedef void (*rocprofiler_attach_notify_new_queue_t)(hsa_queue_t*, hsa_agent_t, void*);
 typedef void (*rocprofiler_attach_notify_new_code_object_t)(hsa_executable_t);
 
-struct rocprofiler_attach_dispatch_table_t
+struct RocAttachDispatchTable
 {
     uint64_t                                      size;
     rocprofiler_attach_get_version_t              rocprofiler_attach_get_version;

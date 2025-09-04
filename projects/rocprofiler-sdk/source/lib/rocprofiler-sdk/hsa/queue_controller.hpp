@@ -137,7 +137,7 @@ void
 queue_controller_sync();
 
 void
-queue_controller_load_attach_queues(rocprofiler_attach_dispatch_table_t&);
+queue_controller_load_attach_queues(RocAttachDispatchTable* table);
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);

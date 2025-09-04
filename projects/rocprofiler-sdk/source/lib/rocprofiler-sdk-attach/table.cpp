@@ -22,14 +22,17 @@
 
 #include "table.hpp"
 
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::rocprofiler_attach_dispatch_table_t, ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH);
+#include "lib/common/abi.hpp"
+#include "lib/common/static_object.hpp"
 
 namespace rocprofiler {
 namespace attach {
 
-rocprofiler_attach_dispatch_table_t* get_dispatch_table()
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocAttachDispatchTable, ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH);
+
+RocAttachDispatchTable* get_dispatch_table()
 {
-    static auto*& dispatch_table = rocprofiler::common::static_object<rocprofiler_attach_dispatch_table_t>::construct();
+    static auto*& dispatch_table = rocprofiler::common::static_object<RocAttachDispatchTable>::construct();
     return dispatch_table;
 }
 
@@ -37,7 +40,7 @@ void dispatch_table_init()
 {
     auto table = get_dispatch_table();
 
-    table->size = sizeof(rocprofiler_attach_dispatch_table_t);
+    table->size = sizeof(RocAttachDispatchTable);
     table->rocprofiler_attach_get_version = &rocprofiler_attach_get_version;
     table->rocprofiler_attach_iterate_all_queues = &rocprofiler_attach_iterate_all_queues;
     table->rocprofiler_attach_set_write_interceptor = &rocprofiler_attach_set_write_interceptor;
