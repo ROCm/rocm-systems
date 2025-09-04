@@ -122,7 +122,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   if (indirectMapCount_ == 1) {
     if (!allocateMapMemory(owner()->getSize())) {
       decIndMapCount();
-      DevLogPrintfError("Cannot allocate Map memory for size: %u \n", owner()->getSize());
+      DevLogPrintfError("Cannot allocate Map memory for size: %u", owner()->getSize());
       return nullptr;
     }
   } else {
@@ -180,7 +180,7 @@ void* Memory::cpuMap(device::VirtualDevice& vDev, uint flags, uint startLayer, u
   if (!isHostMemDirectAccess() && !IsPersistentDirectMap()) {
     if (!vDev.blitMgr().readBuffer(*this, mapTarget, amd::Coord3D(0), amd::Coord3D(size()), true)) {
       decIndMapCount();
-      DevLogError("Cannot read buffer \n");
+      DevLogError("Cannot read buffer");
       return nullptr;
     }
   }
@@ -192,7 +192,7 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
   if (!isHostMemDirectAccess() && !IsPersistentDirectMap()) {
     if (!vDev.blitMgr().writeBuffer(mapMemory_->getHostMem(), *this, amd::Coord3D(0),
                                     amd::Coord3D(size()), true)) {
-      LogError("[OCL] Fail sync the device memory on cpuUnmap");
+      LogError("Fail sync the device memory on cpuUnmap");
     }
     // Wait on CPU for the transfer
     static_cast<roc::VirtualGPU&>(vDev).releaseGpuMemoryFence();
@@ -624,7 +624,7 @@ Buffer::~Buffer() {
       // Detach the memory from HSA
       auto hsa_status = hsa_amd_ipc_memory_detach(owner()->getSvmPtr());
       if (hsa_status != HSA_STATUS_SUCCESS) {
-        LogPrintfError("HSA failed to detach memory with status: %d \n", hsa_status);
+        LogPrintfError("HSA failed to detach memory with status: %d", hsa_status);
       }
     }
   }
@@ -666,8 +666,8 @@ void Buffer::destroy() {
           }
         } else if (memFlags & ROCCLR_MEM_HSA_SIGNAL_MEMORY) {
           if (HSA_STATUS_SUCCESS != hsa_signal_destroy(signal_)) {
-            ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
-                    "[ROCClr] ROCCLR_MEM_HSA_SIGNAL_MEMORY signal destroy failed \n");
+            ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
+                    "hsa_signal_destroy failed");
           }
           deviceMemory_ = nullptr;
         } else {
@@ -684,7 +684,7 @@ void Buffer::destroy() {
         }
         // destroy system memory
         if (!(amd::Os::releaseMemory(deviceMemory_, size()))) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "[ROCClr] munmap failed \n");
+          ClPrint(amd::LOG_ERROR, amd::LOG_MEM, "munmap failed");
         }
       }
     }
@@ -764,7 +764,7 @@ bool Buffer::create(bool alloc_local) {
             reinterpret_cast<const amd::IpcBuffer*>(owner())->Handle()),
         owner()->getSize(), ipc_agents_num, dev().IpcAgents(), &orig_dev_ptr);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("HSA failed to attach IPC memory with status: %d \n", hsa_status);
+      LogPrintfError("HSA failed to attach IPC memory with status: %d", hsa_status);
       return false;
     }
     owner()->setSvmPtr(orig_dev_ptr);
@@ -779,7 +779,7 @@ bool Buffer::create(bool alloc_local) {
       // if interprocess flag is set, then the memory is importable.
       if (!dev().ImportShareableHSAHandle(owner()->getSvmPtr(),
                                           &owner()->getUserData().hsa_handle)) {
-        LogPrintfError("Importing Shareable Memory failed with os_handle: 0x%x \n",
+        LogPrintfError("Importing Shareable Memory failed with os_handle: 0x%x",
                        owner()->getSvmPtr());
         return false;
       }
@@ -835,13 +835,13 @@ bool Buffer::create(bool alloc_local) {
           if (HSA_STATUS_SUCCESS != hsa_amd_signal_create(kInitSignalValueOne, 0, nullptr,
                                                           HSA_AMD_SIGNAL_AMD_GPU_ONLY, &signal_)) {
             ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
-                    "[ROCclr] ROCCLR_MEM_HSA_SIGNAL_MEMORY signal creation failed");
+                    "hsa_amd_signal_create signal failed");
             return false;
           }
           volatile hsa_signal_value_t* signalValuePtr = nullptr;
           if (HSA_STATUS_SUCCESS != hsa_amd_signal_value_pointer(signal_, &signalValuePtr)) {
             ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
-                    "[ROCclr] ROCCLR_MEM_HSA_SIGNAL_MEMORY pointer query failed");
+                    "hsa_amd_signal_value_pointer failed");
             return false;
           }
 
@@ -1043,7 +1043,7 @@ bool Buffer::ExportHandle(void* handle) const {
   auto hsa_status = hsa_amd_ipc_memory_create(orig_dev_ptr, owner()->getSize(),
                                               reinterpret_cast<hsa_amd_ipc_memory_t*>(handle));
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed to create memory for IPC, failed with hsa_status: %d \n", hsa_status);
+    LogPrintfError("Failed to create memory for IPC, failed with hsa_status: %d", hsa_status);
     return false;
   }
   return true;
@@ -1304,7 +1304,7 @@ bool Image::create(bool alloc_local) {
                                                     permission_, &deviceImageInfo_);
 
   if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", status);
+    LogPrintfError("Fail to allocate image memory, failed with hsa_status: %d", status);
     return false;
   }
 
