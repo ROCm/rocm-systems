@@ -104,3 +104,15 @@ TEST_CASE("Unit_hipHostFree_Multithreading") {
   }
   HIP_CHECK_THREAD_FINALIZE();
 }
+
+TEST_CASE("Unit_hipHostFree_Capture") {
+  void* host_ptr = nullptr;
+  constexpr size_t kAllocSize = 1024;
+  HIP_CHECK(hipHostMalloc(&host_ptr, kAllocSize));
+
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostFree(host_ptr), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+}

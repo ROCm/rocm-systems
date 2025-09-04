@@ -52,17 +52,48 @@ static constexpr clk_value_type_t ClkValueMapType[6][6] = {
 };
 
 #if defined(USE_COMGR_LIBRARY)
+
 // ================================================================================================
-amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str) {
+amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
+                   std::string* str) {
   size_t size = 0;
   amd_comgr_status_t status = amd::Comgr::get_metadata_string(meta, &size, NULL);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    str->resize(size - 1);  // minus one to discount the null character
+    str->resize(size-1);    // minus one to discount the null character
     status = amd::Comgr::get_metadata_string(meta, &size, &((*str)[0]));
   }
 
   return status;
+}
+
+// ================================================================================================
+bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue) {
+  amd_comgr_metadata_node_t isaMeta;
+
+  amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isa.c_str(), &isaMeta);
+
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", isa.c_str());
+    return false;
+  }
+
+  amd_comgr_metadata_node_t valMeta;
+  size_t size = 0;
+  status = amd::Comgr::metadata_lookup(isaMeta, key, &valMeta);
+  if (status == AMD_COMGR_STATUS_SUCCESS) {
+    status = amd::Comgr::get_metadata_string(valMeta, &size, NULL);
+  }
+  if (status == AMD_COMGR_STATUS_SUCCESS) {
+    retValue.resize(size - 1);
+    status = amd::Comgr::get_metadata_string(valMeta, &size, &(retValue[0]));
+  }
+
+  if (status == AMD_COMGR_STATUS_SUCCESS) {
+    status = amd::Comgr::destroy_metadata(valMeta);
+  }
+  amd::Comgr::destroy_metadata(isaMeta);
+  return (status == AMD_COMGR_STATUS_SUCCESS) ? true : false;
 }
 
 // ================================================================================================
