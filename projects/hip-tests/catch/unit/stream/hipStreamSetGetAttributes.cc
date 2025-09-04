@@ -19,19 +19,12 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
-#define N 1024
-#define NBYTES N * sizeof(int)
-
 /**
  * Kernel to double each element in the given array
  */
-__global__ void doubleKernel(int* arr, int arrSize) {
-  int offset = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-
-  for (int i = offset; i < arrSize; i += stride) {
-    arr[i] += arr[i];
-  }
+static __global__ void doubleKernel(int *arr) {
+  size_t i = threadIdx.x;
+  arr[i] += arr[i];
 }
 
 /**
@@ -51,23 +44,26 @@ __global__ void doubleKernel(int* arr, int arrSize) {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic") {
+  constexpr int N = 1024;
   int hostMem[N];
   for (int i = 0; i < N; i++) {
     hostMem[i] = 5;
   }
 
-  int* devMem = nullptr;
+  int *devMem = nullptr;
   HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+  REQUIRE(devMem != nullptr);
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
   hipStreamAttrID attr = hipStreamAttributeSynchronizationPolicy;
   hipStreamAttrValue valueToSet;
-  hipSynchronizationPolicy syncPolicy = GENERATE(
-      hipSynchronizationPolicy::hipSyncPolicyAuto, hipSynchronizationPolicy::hipSyncPolicySpin,
-      hipSynchronizationPolicy::hipSyncPolicyYield,
-      hipSynchronizationPolicy::hipSyncPolicyBlockingSync);
+  hipSynchronizationPolicy syncPolicy =
+      GENERATE(hipSynchronizationPolicy::hipSyncPolicyAuto,
+               hipSynchronizationPolicy::hipSyncPolicySpin,
+               hipSynchronizationPolicy::hipSyncPolicyYield,
+               hipSynchronizationPolicy::hipSyncPolicyBlockingSync);
   valueToSet.syncPolicy = syncPolicy;
   HIP_CHECK(hipStreamSetAttribute(stream, attr, &valueToSet));
 
@@ -75,12 +71,16 @@ TEST_CASE("Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic") {
   HIP_CHECK(hipStreamGetAttribute(stream, attr, &valueOut));
   REQUIRE(valueOut.syncPolicy == syncPolicy);
 
-  HIP_CHECK(hipMemcpyAsync(devMem, hostMem, N * sizeof(int), hipMemcpyHostToDevice, stream));
-  doubleKernel<<<1, N, 0, stream>>>(devMem, N);
-  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, N * sizeof(int), hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(devMem, hostMem, N * sizeof(int),
+                           hipMemcpyHostToDevice, stream));
+  doubleKernel<<<1, N, 0, stream>>>(devMem);
+  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, N * sizeof(int),
+                           hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   for (int i = 0; i < N; i++) {
+    INFO("At index " << i << " Expected value = 10 "
+                     << " Got value = " << hostMem[i]);
     REQUIRE(hostMem[i] == 10);
   }
 
@@ -118,12 +118,14 @@ TEST_CASE("Unit_hipStreamGetAttribute_Negative") {
 
   SECTION("With invalid attribute") {
     attr = static_cast<hipStreamAttrID>(-1);
-    HIP_CHECK_ERROR(hipStreamGetAttribute(stream, attr, &valueOut), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamGetAttribute(stream, attr, &valueOut),
+                    hipErrorInvalidValue);
   }
 #if HT_AMD
   // Facing segmentation fault issue in CUDA
   SECTION("With invalid attribute value") {
-    HIP_CHECK_ERROR(hipStreamGetAttribute(stream, attr, nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamGetAttribute(stream, attr, nullptr),
+                    hipErrorInvalidValue);
   }
 #endif
   HIP_CHECK(hipStreamDestroy(stream));
@@ -161,17 +163,20 @@ TEST_CASE("Unit_hipStreamSetAttribute_Negative") {
 
   SECTION("With invalid attribute") {
     attr = static_cast<hipStreamAttrID>(-1);
-    HIP_CHECK_ERROR(hipStreamSetAttribute(stream, attr, &valueToSet), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamSetAttribute(stream, attr, &valueToSet),
+                    hipErrorInvalidValue);
   }
 #if HT_AMD
   // Facing segmentation fault issue in CUDA
   SECTION("With invalid attribute value") {
-    HIP_CHECK_ERROR(hipStreamSetAttribute(stream, attr, nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamSetAttribute(stream, attr, nullptr),
+                    hipErrorInvalidValue);
   }
 #endif
   SECTION("With Invalid hipSynchronizationPolicy") {
     valueToSet.syncPolicy = static_cast<hipSynchronizationPolicy>(-1);
-    HIP_CHECK_ERROR(hipStreamSetAttribute(stream, attr, &valueToSet), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamSetAttribute(stream, attr, &valueToSet),
+                    hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
