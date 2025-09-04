@@ -1070,7 +1070,7 @@ def eval_metric(
         console_error("Halting  execution for warning above.")
 
     # Build ammolite variables from sys_info
-    ammolite_vars = build_ammolite_vars(sys_info, empirical_peaks_df, config)
+    ammolite_vars = build_ammolite_vars(sys_info, config)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
 
     # Collect expressions to evaluate
