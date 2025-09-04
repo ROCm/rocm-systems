@@ -112,7 +112,7 @@ endif()
 message(STATUS "Successfully copied coverage file to: ${{COVERAGE_DEST_FILE}}")
 
 # submit coverage directly as a file
-ctest_submit(FILES "${{COVERAGE_DEST_FILE}}"
+ctest_submit(FILES "${{COVERAGE_DEST_FILE}}" 
              PARTS Coverage
              RETRY_COUNT 3
              RETRY_DELAY 5
