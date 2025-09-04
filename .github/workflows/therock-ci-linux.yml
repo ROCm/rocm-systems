@@ -73,6 +73,10 @@ jobs:
           pip install -r TheRock/requirements.txt
           pip freeze
 
+      - name: Patch rocm-libraries
+        run: |
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects rocm-systems
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
@@ -80,7 +84,7 @@ jobs:
           extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_SYSTEMS=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
-          python3 TheRock/build_tools/github_actions/build_configure.py
+          python TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-dist
         run: cmake --build TheRock/build --target therock-dist
@@ -114,7 +118,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+          python TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \

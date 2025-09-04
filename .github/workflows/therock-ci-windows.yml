@@ -55,7 +55,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --apply-to-monorepo --projects rocm-systems
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects rocm-systems
 
       - name: Install requirements
         run: |
@@ -85,7 +85,7 @@ jobs:
         run: |
           # clear cache before build and after download
           ccache -z
-          python3 TheRock/build_tools/github_actions/build_configure.py
+          python TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-dist
         run: cmake --build "${{ env.BUILD_DIR }}" --target therock-dist
@@ -128,7 +128,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+          python TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }} \
