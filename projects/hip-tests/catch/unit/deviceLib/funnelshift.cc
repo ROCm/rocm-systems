@@ -204,5 +204,10 @@ TEST_CASE("Unit_funnelshift") {
   free(host_r_output);
   free(host_rc_output);
 
+  free(golden_l);
+  free(golden_lc);
+  free(golden_r);
+  free(golden_rc);
+
   REQUIRE(errors == 0);
 }
