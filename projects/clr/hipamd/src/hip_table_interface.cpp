@@ -2011,3 +2011,8 @@ hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
   return hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn(
       hGraphExec, hNode, nodeParams);
 }
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device) {
+  return hip::GetHipDispatchTable()->hipMipmappedArrayGetMemoryRequirements_fn(memoryRequirements,
+                                                                               mipmap, device);
+}

@@ -69,7 +69,7 @@ set(TEST_SRC
     hipTexRefSetGetMipmapLevelBias.cc
     hipTexRefSetGetMipmapLevelClamp.cc
     hipTexRefSetGetMipmappedArray.cc
-
+    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 # tests not for gfx90a+

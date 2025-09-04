@@ -997,8 +997,6 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DPeerParms& desc) {
 
 inline hipArrayMemoryRequirements getArrayMemoryRequirements(
     const hipArrayMemoryRequirements& desc) {
-  hipArrayMemoryRequirements requirements;
-  requirements.alignment = desc.alignment;
-  requirements.size = desc.size;
+  return hipArrayMemoryRequirements { desc.alignment, desc.size };
 }
 };  // namespace hip
