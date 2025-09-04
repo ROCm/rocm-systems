@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   #if HT_AMD
-  SECTION("Allocation Type as hipMemAllocationTypeUncached") {
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
@@ -114,7 +114,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   #if HT_AMD
-  SECTION("Allocation Type as hipMemAllocationTypeUncached") {
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
@@ -178,7 +178,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   #if HT_AMD
-  SECTION("Allocation Type as hipMemAllocationTypeUncached") {
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
@@ -242,7 +242,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   #if HT_AMD
-  SECTION("Allocation Type as hipMemAllocationTypeUncached") {
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
@@ -311,7 +311,7 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   #if HT_AMD
-  SECTION("Allocation Type as hipMemAllocationTypeUncached") {
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
@@ -389,7 +389,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   #if HT_AMD
-  SECTION("Allocation Type as hipMemAllocationTypeUncached") {
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif

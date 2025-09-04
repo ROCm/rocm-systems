@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
   constexpr int iterations = 20;
@@ -72,6 +72,11 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -126,7 +131,7 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   size_t granularity = 0;
@@ -138,6 +143,11 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -197,7 +207,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   size_t granularity = 0;
@@ -209,6 +219,11 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -273,7 +288,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
   CHECK_P2P_SUPPORT
@@ -291,6 +306,11 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
     checkVMMSupported(device);
     hipMemAllocationProp prop{};
     prop.type = hipMemAllocationTypePinned;
+    #if HT_AMD
+    SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+      prop.type = hipMemAllocationTypeUncached;
+    }
+    #endif
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;  // Current Devices
     HIP_CHECK(
@@ -347,7 +367,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
   size_t granularity = 0;
@@ -359,6 +379,11 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -421,7 +446,7 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
   CHECK_P2P_SUPPORT
@@ -439,6 +464,11 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -513,7 +543,7 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
  *    - unit/virtualMemoryManagement/hipMemMap.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   int deviceId = 0;
@@ -525,6 +555,11 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
