@@ -2,7 +2,7 @@ name: rocprofiler-compute CDash Coverage Upload
 
 on:
   push:
-    branches: [ develop, users/jamessiddeley-amd/test-cdash ]
+    branches: [ develop ]
     paths:
       - 'projects/rocprofiler-compute/coverage/Coverage.xml'
   workflow_dispatch:
