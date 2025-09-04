@@ -82,20 +82,28 @@ set(CTEST_BUILD_NAME "{args.build_name}")
 set(CTEST_SOURCE_DIRECTORY "{args.source_dir}")
 set(CTEST_BINARY_DIRECTORY "{args.binary_dir}")
 
-# Ensure binary directory exists
 file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
 
 ctest_start({args.mode})
 
 set(COVERAGE_FILE "{args.coverage_file}")
+get_filename_component(COVERAGE_FILENAME "${{COVERAGE_FILE}}" NAME)
 
 if(NOT EXISTS "${{COVERAGE_FILE}}")
     message(FATAL_ERROR "Coverage file not found: ${{COVERAGE_FILE}}")
 endif()
 
-message(STATUS "Submitting coverage file: ${{COVERAGE_FILE}}")
+if(COVERAGE_FILENAME STREQUAL "Coverage.xml")
+    message(STATUS "Submitting coverage file directly: ${{COVERAGE_FILE}}")
+    set(SUBMIT_FILE "${{COVERAGE_FILE}}")
+else()
+    set(COVERAGE_DEST_FILE "${{CTEST_BINARY_DIRECTORY}}/Coverage.xml")
+    configure_file("${{COVERAGE_FILE}}" "${{COVERAGE_DEST_FILE}}" COPYONLY)
+    message(STATUS "Copied to CDash-compatible name: ${{COVERAGE_DEST_FILE}}")
+    set(SUBMIT_FILE "${{COVERAGE_DEST_FILE}}")
+endif()
 
-ctest_submit(FILES "${{COVERAGE_FILE}}"
+ctest_submit(FILES "${{SUBMIT_FILE}}"
              PARTS Coverage
              RETRY_COUNT 3
              RETRY_DELAY 5
