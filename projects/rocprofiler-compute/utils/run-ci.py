@@ -87,27 +87,17 @@ file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
 
 ctest_start({args.mode})
 
-# copy coverage XML file to the binary directory with the correct name
-file(COPY "{args.coverage_file}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
-get_filename_component(coverage_filename "{args.coverage_file}" NAME)
-set(dest_coverage_file "${{CTEST_BINARY_DIRECTORY}}/${{coverage_filename}}")
+# copy coverage file to expected location
+file(COPY "{args.coverage_file}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
 
-# submit coverage file directly
-message(STATUS "Submitting coverage file: ${{dest_coverage_file}}")
-ctest_submit(FILES "${{dest_coverage_file}}"
-             PARTS Coverage
-             RETRY_COUNT 3
-             RETRY_DELAY 5
-             CAPTURE_CMAKE_ERROR submit_error)
+# set coverage command to point to XML file
+set(CTEST_COVERAGE_COMMAND "${{CMAKE_COMMAND}}")
+set(CTEST_COVERAGE_EXTRA_FLAGS "-E" "echo" "Using pre-generated coverage")
 
-if(NOT submit_error EQUAL 0)
-    message(FATAL_ERROR "Failed to submit coverage to CDash: ${{submit_error}}")
-else()
-    message(STATUS "Successfully submitted coverage to CDash")
-endif()
+ctest_coverage()
+ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)
 """
     return script_content
-
 
 def main():
     if not os.getenv("CI"):
