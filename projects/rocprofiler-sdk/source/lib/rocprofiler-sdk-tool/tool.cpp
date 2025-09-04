@@ -1426,6 +1426,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                                          rocprofiler_user_data_t* /*user_data*/,
                                          void* /*userdata*/)
 {
+    using capture_ids_set_t = common::Synchronized<std::unordered_set<rocprofiler_dispatch_id_t>>;
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE) return;
 
@@ -1443,8 +1444,23 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
     static std::atomic<bool> isprofiling{false};
     static std::atomic<bool> stop_profiling{false};
 
-    static std::mutex                                                          mut{};
-    static common::Synchronized<std::unordered_set<rocprofiler_dispatch_id_t>> captured_ids{};
+    static std::mutex        mut{};
+    static capture_ids_set_t captured_ids{};
+    auto                     add_capture_id =
+        [](capture_ids_set_t&                      _captured_ids,
+           std::atomic<rocprofiler_dispatch_id_t>& _att_consecutive_kernel_dispatch_id,
+           const rocprofiler_dispatch_id_t         _dispatch_id) {
+            // Keep track of launched dispatch ids
+            _captured_ids.wlock([](std::unordered_set<rocprofiler_dispatch_id_t>& _data,
+                                   rocprofiler_dispatch_id_t _did) { return _data.emplace(_did); },
+                                _dispatch_id);
+            // Store lowest dispatch id for shader callback function
+            rocprofiler_dispatch_id_t _exp{};
+            while((_exp = _att_consecutive_kernel_dispatch_id.load()) > _dispatch_id &&
+                  !_att_consecutive_kernel_dispatch_id.compare_exchange_strong(
+                      _exp, _dispatch_id, std::memory_order_relaxed))
+                ;
+        };
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         // Reset counter if kernel ID and iteration range matches
@@ -1457,29 +1473,22 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
             {
                 ROCPROFILER_CALL(rocprofiler_start_context(agent_ctx), "context start");
             }
+            add_capture_id(captured_ids, att_consecutive_kernel_dispatch_id, dispatch_id);
         }
-
-        std::unique_lock<std::mutex> lk(mut);
-        // Increment counter if we are profiling
-        if(isprofiling)
+        else
         {
-            local_count = num_consecutive_kernels.fetch_add(1);
+            std::unique_lock<std::mutex> lk(mut);
+            // Increment counter if we are profiling
+            if(isprofiling)
+            {
+                local_count = num_consecutive_kernels.fetch_add(1);
+            }
+            if(isprofiling && local_count < consecutive_kernels)
+            {
+                add_capture_id(captured_ids, att_consecutive_kernel_dispatch_id, dispatch_id);
+            }
+            if(local_count >= consecutive_kernels) stop_profiling.store(true);
         }
-        if(isprofiling && local_count < consecutive_kernels)
-        {
-            // Keep track of launched dispatch ids
-            captured_ids.wlock(
-                [](std::unordered_set<rocprofiler_dispatch_id_t>& _data,
-                   rocprofiler_dispatch_id_t _dispatch_id) { return _data.emplace(_dispatch_id); },
-                dispatch_id);
-            // Store lowest dispatch id for shader callback function
-            rocprofiler_dispatch_id_t _exp{};
-            while((_exp = att_consecutive_kernel_dispatch_id.load()) > dispatch_id &&
-                  !att_consecutive_kernel_dispatch_id.compare_exchange_strong(
-                      _exp, dispatch_id, std::memory_order_relaxed))
-                ;
-        }
-        if(local_count >= consecutive_kernels) stop_profiling.store(true);
         return;
     }
 
