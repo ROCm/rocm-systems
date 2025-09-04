@@ -82,14 +82,29 @@ set(CTEST_BUILD_NAME "{args.build_name}")
 set(CTEST_SOURCE_DIRECTORY "{args.source_dir}")
 set(CTEST_BINARY_DIRECTORY "{args.binary_dir}")
 
+# make sure binary directory exists
+file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
+
 ctest_start({args.mode})
 
-set(CTEST_COVERAGE_COMMAND "python3")
-set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml")
-
+# copy coverage XML file to the binary directory with the correct name
 file(COPY "{args.coverage_file}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
-ctest_coverage()
-ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)
+get_filename_component(coverage_filename "{args.coverage_file}" NAME)
+set(dest_coverage_file "${{CTEST_BINARY_DIRECTORY}}/${{coverage_filename}}")
+
+# submit coverage file directly
+message(STATUS "Submitting coverage file: ${{dest_coverage_file}}")
+ctest_submit(FILES "${{dest_coverage_file}}"
+             PARTS Coverage
+             RETRY_COUNT 3
+             RETRY_DELAY 5
+             CAPTURE_CMAKE_ERROR submit_error)
+
+if(NOT submit_error EQUAL 0)
+    message(FATAL_ERROR "Failed to submit coverage to CDash: ${{submit_error}}")
+else()
+    message(STATUS "Successfully submitted coverage to CDash")
+endif()
 """
     return script_content
 
@@ -177,6 +192,24 @@ def main():
         print(f"  And in: {project_root / args.coverage_file}")
         return 1
 
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(coverage_path)
+        root = tree.getroot()
+        if root.tag != "coverage":
+            print(
+                f"ERROR: File does not appear to be a coverage XML file "
+                f"(root tag: {root.tag})",
+                file=sys.stderr,
+            )
+            return 1
+        line_rate = float(root.get("line-rate", 0)) * 100
+        print(f"Line Coverage: {line_rate:.1f}%")
+    except Exception as e:
+        print(f"ERROR: Could not parse coverage XML file: {e}", file=sys.stderr)
+        return 1
+
     args.coverage_file = str(coverage_path.absolute())
     args.source_dir = str(Path(args.source_dir).absolute())
     args.binary_dir = str(Path(args.binary_dir).absolute())
@@ -188,16 +221,6 @@ def main():
     print(f"Project: {args.project_name}")
     print(f"Site: {args.site}")
     print(f"Submit URL: {args.submit_url}")
-
-    try:
-        import xml.etree.ElementTree as ET
-
-        tree = ET.parse(args.coverage_file)
-        root = tree.getroot()
-        line_rate = float(root.get("line-rate", 0)) * 100
-        print(f"Line Coverage: {line_rate:.1f}%")
-    except Exception as e:
-        print(f"Warning: Could not parse coverage percentage: {e}")
 
     script_content = create_ctest_script(args)
 
