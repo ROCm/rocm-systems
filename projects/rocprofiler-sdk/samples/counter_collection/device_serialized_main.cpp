@@ -51,6 +51,13 @@ kernelA(int devid, volatile int* wait_on, int value, int* no_opt)
     printf("[device=%i][return] Wait on %i: %i (%i)\n", devid, value, *wait_on, *no_opt);
 }
 
+// Force assert to work even in Release builds for this test
+#ifdef NDEBUG
+#    undef NDEBUG
+#    include <cassert>
+#    define NDEBUG
+#endif
+
 __global__ void
 check_order_kernel(int expected, int* actual)
 {
@@ -60,6 +67,7 @@ check_order_kernel(int expected, int* actual)
     {
         printf("[error]  Expected %i but got %i\n", expected, *actual);
     }
+    // Assert will now work in both Debug and Release builds
     assert(*actual == expected);
     (*actual)++;
 }
@@ -161,7 +169,8 @@ main(int, char**)
     HIP_CALL(hipSetDevice(0));
     DualStreamExecutor executor(0);
     *no_opt_0 = 0;
-    srand((unsigned int) time(NULL));
+    // Use reproducible seed for deterministic testing and easier debugging
+    srand(12345);
 
     for(int i = 0; i < 10000; i++)
     {

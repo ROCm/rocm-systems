@@ -363,15 +363,10 @@ profiler_serializer::kernel_dispatch(const Queue& queue)
             // Register ready signal handler if not already done
             register_queue_ready_handler(queue);
 
-            ret.push_back(CreateBarrierPacket(nullptr, &ready_signal));
-
+            ret.push_back(CreateBarrierPacket(&ready_signal, &ready_signal));
             // Create barrier packet that depends on the queue's block_signal
             // This packet will block until block_signal == 0 (RELEASE_BARRIER)
             ret.push_back(CreateBarrierPacket(&block_signal, &block_signal));
-
-            // Add a second barrier packet for memory synchronization so that the
-            // block_signal completion update is visible to CP
-            ret.push_back(CreateBarrierPacket(nullptr, nullptr));
 
             ROCP_INFO << "[kernel_dispatch] Queue " << queue.get_id().handle
                       << " adding to _enqueued_kernels";
@@ -500,12 +495,6 @@ profiler_serializer::queue_ready(hsa_queue_t* /* hsa_queue */, const Queue& queu
         ROCP_INFO << "[queue_ready] Queue " << _dispatch_queue->get_id().handle
                   << " is currently executing - this queue will wait";
     }
-
-    // Notify any waiters on the ready condition variable
-    {
-        std::lock_guard<std::mutex> lock(queue.cv_mutex);
-        queue.cv_ready_signal.notify_all();
-    }
 }
 
 void
@@ -556,7 +545,7 @@ profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
     // Finalize queue destruction
     auto* controller = CHECK_NOTNULL(get_queue_controller());
     controller->set_queue_state(queue_state::to_destroy, id);
-    controller->get_core_table().hsa_signal_store_screlease_fn(queue.block_signal, 0);
+    controller->get_core_table().hsa_signal_store_screlease_fn(queue.block_signal, RELEASE_BARRIER);
 
     ROCP_INFO << "queue destroyed";
 }

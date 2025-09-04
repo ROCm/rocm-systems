@@ -77,6 +77,16 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
         hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0, 1, 2);
         hipLaunchKernelGGL(kernelB, dim3(1), dim3(1), 0, 0, 1, 2);
         if(i % SYNC_INTERVAL == (SYNC_INTERVAL - 1)) HIP_CALL(hipDeviceSynchronize());
+
+        // Progress indicator every 1000 iterations
+        if(i % 1000 == 999)
+        {
+            printf("[PROGRESS] Device %d: Completed %ld / %ld iterations\n",
+                   DEV_ID,
+                   i + 1,
+                   NUM_LAUNCH);
+            fflush(stdout);
+        }
     }
 
     const int NElems = 512 * 512;
@@ -101,6 +111,16 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
     {
         hipLaunchKernelGGL(kernelC, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, NElems);
         if(i % SYNC_INTERVAL == (SYNC_INTERVAL - 1)) HIP_CALL(hipDeviceSynchronize());
+
+        // Progress indicator every 1000 iterations
+        if(i % 1000 == 999)
+        {
+            printf("[PROGRESS] Device %d: KernelC completed %ld / %ld iterations\n",
+                   DEV_ID,
+                   i + 1,
+                   NUM_LAUNCH);
+            fflush(stdout);
+        }
     }
     HIP_CALL(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CALL(hipDeviceSynchronize());
