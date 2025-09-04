@@ -114,7 +114,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed an issue of not detecting the memory clock when using `amd-smi`.
 * Fixed standalone GUI crashing.
-* Fixed L2 read/write/atomic bandwidths on MI350
+* Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series accelerators.
 * Updated metric names for better alignment between analysis configuration and documentation.
 * Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100
 
