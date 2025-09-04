@@ -61,14 +61,14 @@ rocprofiler_attach_set_api_table(const char* name,
     ROCP_ERROR_IF(num_tables > 1) << "rocprofiler expected HSA library to pass 1 API table, not "
                                   << num_tables;
 
-    auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
+    auto* hsa_api_table = static_cast<HsaApiTable*>(tables[0]);
 
     rocprofiler::attach::dispatch_table_init();
 
     if (register_functor)
     {
         auto callable = reinterpret_cast<rocprofiler_register_functor_t>(register_functor);
-        callable(rocprofiler_attach_get_version(), (void*)(rocprofiler::attach::get_dispatch_table()), rocprofiler::attach::ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH);
+        callable(rocprofiler_attach_get_version(), (void*)(rocprofiler::attach::get_dispatch_table()), 1);
     }    
 
     // Initialize all registration services in attach

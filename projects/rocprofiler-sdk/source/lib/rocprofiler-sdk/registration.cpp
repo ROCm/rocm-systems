@@ -1082,6 +1082,18 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_ROCJPEG_TABLE, lib_version, lib_instance, std::make_tuple(rocjpeg_api));
     }
+    else if(std::string_view{name} == "rocattach")
+    {
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected rocprofiler attach library to pass 1 API table, not " << num_tables;
+
+        auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
+
+        // unlike other APIs, we do not offer tracing for our own attach library
+        // forward the table to the relevant code sections, then move on
+        rocprofiler::code_object::load_attach_code_objects(rocattach_api);
+        rocprofiler::hsa::queue_controller_load_attach_queues(rocattach_api);
+    }
     else
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
