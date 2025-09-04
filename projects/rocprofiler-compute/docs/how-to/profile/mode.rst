@@ -444,7 +444,7 @@ of the application (note zero-based indexing).
 Metric Sets
 ^^^^^^^^^^^^^^^^^^
 
-A Set contains a subset of metrics that can be collected in a single pass. This filtering option allows minimized profiling overhead by only collecting counters of interest.
+A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 Sets provide a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
 This option cannot be used with ``--roof-only`` and ``--block``.
 
