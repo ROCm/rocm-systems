@@ -27,7 +27,7 @@
 #include "util/soc15_common.h"
 #include "util/reg_offsets.h"
 #include "linux/packets/soc15d.h"
-#include "linux/registers/gc/gc_9_2_1_offset.h"
+#include "linux/registers/gc/gc_9_4_2_offset.h"
 #include "linux/registers/gc/gc_9_2_1_sh_mask.h"
 #include "linux/registers/athub/athub_1_0_offset.h"
 #include "linux/registers/athub/athub_1_0_sh_mask.h"
