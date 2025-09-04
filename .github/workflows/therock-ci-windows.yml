@@ -55,7 +55,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ${{ github.workspace }} --apply-to-monorepo --projects rocm-systems
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --apply-to-monorepo --projects rocm-systems
 
       - name: Install requirements
         run: |
