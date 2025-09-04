@@ -33,18 +33,19 @@ constexpr auto CODE_OBJ_MULTIARCH = "vcpy_kernel_multarch.code";
 #endif
 
 /**
-* @addtogroup hipModuleLoad
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipModuleLoad(hipModule_t* module, const char* fname)` -
-* Loads code object from file into a module
-*/
+ * @addtogroup hipModuleLoad
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipModuleLoad(hipModule_t* module, const char* fname)` -
+ * Loads code object from file into a module
+ */
 
 /**
  * Test Description
  * ------------------------
  * - Test case to load and execute a code object file for the current GPU architecture.
- * - Test case to load and execute a code object file for the multiple GPU architectures including the current
+ * - Test case to load and execute a code object file for the multiple GPU architectures including
+ the current
 
  * Test source
  * ------------------------
@@ -54,7 +55,7 @@ constexpr auto CODE_OBJ_MULTIARCH = "vcpy_kernel_multarch.code";
  * - HIP_VERSION >= 5.6
 */
 
-bool testCodeObjFile(const char *codeObjFile) {
+bool testCodeObjFile(const char* codeObjFile) {
   float *A, *B, *Ad, *Bd;
   A = new float[LEN];
   B = new float[LEN];
@@ -85,12 +86,10 @@ bool testCodeObjFile(const char *codeObjFile) {
   args._Bd = reinterpret_cast<void*>(Bd);
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0,
-                                 stream, NULL,
-                                 reinterpret_cast<void**>(&config)));
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
+                                  reinterpret_cast<void**>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream));
 
@@ -114,8 +113,8 @@ bool testCodeObjFile(const char *codeObjFile) {
 #ifdef __linux__
 // Check if environment variable $ROCM_PATH is defined
 bool isRocmPathSet() {
-  FILE *fpipe;
-  char const *command = "echo $ROCM_PATH";
+  FILE* fpipe;
+  char const* command = "echo $ROCM_PATH";
   fpipe = popen(command, "r");
 
   if (fpipe == nullptr) {
@@ -143,14 +142,12 @@ bool testMultiTargArchCodeObj() {
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
   // Hardcoding the codeobject lines in multiple string to avoid cpplint warning
   std::string CodeObjL1 = "#include \"hip/hip_runtime.h\"\n";
-  std::string CodeObjL2 =
-       "extern \"C\" __global__ void hello_world(float* a, float* b) {\n";
+  std::string CodeObjL2 = "extern \"C\" __global__ void hello_world(float* a, float* b) {\n";
   std::string CodeObjL3 = "  int tx = threadIdx.x;\n";
   std::string CodeObjL4 = "  b[tx] = a[tx];\n";
   std::string CodeObjL5 = "}";
   // Creating the full code object string
-  static std::string CodeObj = CodeObjL1 + CodeObjL2 + CodeObjL3 +
-                               CodeObjL4 + CodeObjL5;
+  static std::string CodeObj = CodeObjL1 + CodeObjL2 + CodeObjL3 + CodeObjL4 + CodeObjL5;
   std::ofstream ofs("/tmp/vcpy_kernel.cpp", std::ofstream::out);
   ofs << CodeObj;
   ofs.close();
@@ -172,15 +169,12 @@ bool testMultiTargArchCodeObj() {
   const char* genco_option = "--offload-arch";
   const char* input_codeobj = "/tmp/vcpy_kernel.cpp";
   const char* rocm_enumerator = "${ROCM_PATH}/bin/rocm_agent_enumerator";
-  snprintf(command, COMMAND_LEN,
-  rocm_enumerator,
-  hipcc_path, genco_option, props.gcnArchName, input_codeobj,
-  CODE_OBJ_MULTIARCH);
+  snprintf(command, COMMAND_LEN, rocm_enumerator, hipcc_path, genco_option, props.gcnArchName,
+           input_codeobj, CODE_OBJ_MULTIARCH);
 
   system((const char*)command);
   // Check if the code object file is created
-  snprintf(command, COMMAND_LEN, "./%s",
-           CODE_OBJ_MULTIARCH);
+  snprintf(command, COMMAND_LEN, "./%s", CODE_OBJ_MULTIARCH);
 
   if (access(command, F_OK) == -1) {
     INFO("Code Object File not found \n");

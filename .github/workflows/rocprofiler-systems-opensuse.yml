@@ -3,30 +3,26 @@ run-name: opensuse-15
 
 on:
   push:
+    branches:
+      - develop
     paths:
+      - '.github/workflows/rocprofiler-systems-opensuse.yml'
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-opensuse.yml'
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/rocprofiler-systems-weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
@@ -86,6 +82,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build

@@ -336,8 +336,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueThreadTraceCommandAMD,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -403,7 +403,7 @@ RUNTIME_EXIT
 
 //
 ///*! \brief Enqueues the binding command to bind cl_threadtrace_amd to cl_mem object for trace
-///recording..
+/// recording..
 // *
 // *  \param command_queue must be a valid OpenCL command queue.
 // *
@@ -498,8 +498,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueBindThreadTraceBufferAMD,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }

@@ -224,6 +224,7 @@ Panel Config:
         IL1 Lat:
           value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
             != 0) else None)) * 100), 0)
+          coll_level: SQC_ICACHE_INFLIGHT_LEVEL
         IL1_L2 Rd:
           value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
         L2 Rd:
@@ -235,10 +236,6 @@ Panel Config:
         L2 Hit:
           value: ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if
             ((TCC_HIT_sum + TCC_MISS_sum) != 0) else 0)), 0)
-        L2 Rd Lat:
-          value: null
-        L2 Wr Lat:
-          value: null
         Fabric_L2 Rd:
           value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
         Fabric_L2 Wr:

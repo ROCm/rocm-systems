@@ -34,7 +34,8 @@ class MallocAsyncBenchmark : public Benchmark<MallocAsyncBenchmark> {
     float* dev_ptr{nullptr};
 
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
-      HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dev_ptr), array_size * sizeof(float), stream));
+      HIP_CHECK(
+          hipMallocAsync(reinterpret_cast<void**>(&dev_ptr), array_size * sizeof(float), stream));
     }
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipFree(dev_ptr));
@@ -68,6 +69,6 @@ TEST_CASE("Performance_hipMallocAsync") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

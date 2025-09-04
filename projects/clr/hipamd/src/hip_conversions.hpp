@@ -25,11 +25,9 @@ THE SOFTWARE.
 #include <hip/driver_types.h>
 #include <hip/texture_types.h>
 
-namespace hip
-{
-inline
-cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
-                                 const hipTextureReadMode hipReadMode) {
+namespace hip {
+inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
+                                        const hipTextureReadMode hipReadMode) {
   if (hipReadMode == hipReadModeElementType) {
     switch (hipFormat) {
       case HIP_AD_FORMAT_UNSIGNED_INT8:
@@ -70,13 +68,11 @@ cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
     }
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-cl_channel_order getCLChannelOrder(const unsigned int hipNumChannels,
-                                   const int sRGB) {
+inline cl_channel_order getCLChannelOrder(const unsigned int hipNumChannels, const int sRGB) {
   switch (hipNumChannels) {
     case 1:
       return CL_R;
@@ -88,15 +84,14 @@ cl_channel_order getCLChannelOrder(const unsigned int hipNumChannels,
       break;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-cl_mem_object_type getCLMemObjectType(const unsigned int hipWidth,
-                                      const unsigned int hipHeight,
-                                      const unsigned int hipDepth,
-                                      const unsigned int flags) {
+inline cl_mem_object_type getCLMemObjectType(const unsigned int hipWidth,
+                                             const unsigned int hipHeight,
+                                             const unsigned int hipDepth,
+                                             const unsigned int flags) {
   if ((flags & hipArrayLayered) == hipArrayLayered) {
     if ((hipWidth != 0) && (hipHeight == 0) && (hipDepth != 0)) {
       return CL_MEM_OBJECT_IMAGE1D_ARRAY;
@@ -126,8 +121,7 @@ inline bool isLayered1D(const hipArray* arr) {
   return CL_MEM_OBJECT_IMAGE1D_ARRAY == getCLMemObjectType(arr);
 }
 
-inline
-cl_addressing_mode getCLAddressingMode(const hipTextureAddressMode hipAddressMode) {
+inline cl_addressing_mode getCLAddressingMode(const hipTextureAddressMode hipAddressMode) {
   switch (hipAddressMode) {
     case hipAddressModeWrap:
       return CL_ADDRESS_REPEAT;
@@ -139,12 +133,11 @@ cl_addressing_mode getCLAddressingMode(const hipTextureAddressMode hipAddressMod
       return CL_ADDRESS_CLAMP;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-cl_filter_mode getCLFilterMode(const hipTextureFilterMode hipFilterMode) {
+inline cl_filter_mode getCLFilterMode(const hipTextureFilterMode hipFilterMode) {
   switch (hipFilterMode) {
     case hipFilterModePoint:
       return CL_FILTER_NEAREST;
@@ -152,12 +145,11 @@ cl_filter_mode getCLFilterMode(const hipTextureFilterMode hipFilterMode) {
       return CL_FILTER_LINEAR;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-cl_mem_object_type getCLMemObjectType(const hipResourceType hipResType) {
+inline cl_mem_object_type getCLMemObjectType(const hipResourceType hipResType) {
   switch (hipResType) {
     case hipResourceTypeLinear:
       return CL_MEM_OBJECT_IMAGE1D_BUFFER;
@@ -167,12 +159,11 @@ cl_mem_object_type getCLMemObjectType(const hipResourceType hipResType) {
       break;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-hipArray_Format getCL2hipArrayFormat(const cl_channel_type type) {
+inline hipArray_Format getCL2hipArrayFormat(const cl_channel_type type) {
   switch (type) {
     case CL_SNORM_INT8:
     case CL_SIGNED_INT8:
@@ -200,8 +191,7 @@ hipArray_Format getCL2hipArrayFormat(const cl_channel_type type) {
       return HIP_AD_FORMAT_UNSIGNED_INT8;
   }
 }
-inline
-size_t getElementSize(const hipArray_const_t array) {
+inline size_t getElementSize(const hipArray_const_t array) {
   switch (array->Format) {
     case HIP_AD_FORMAT_UNSIGNED_INT8:
     case HIP_AD_FORMAT_SIGNED_INT8:
@@ -216,13 +206,11 @@ size_t getElementSize(const hipArray_const_t array) {
       return 4 * array->NumChannels;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-hipChannelFormatDesc getChannelFormatDesc(int numChannels,
-                                          hipArray_Format arrayFormat) {
+inline hipChannelFormatDesc getChannelFormatDesc(int numChannels, hipArray_Format arrayFormat) {
   switch (arrayFormat) {
     case HIP_AD_FORMAT_UNSIGNED_INT8:
       switch (numChannels) {
@@ -298,43 +286,39 @@ hipChannelFormatDesc getChannelFormatDesc(int numChannels,
       }
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-unsigned int getNumChannels(const hipChannelFormatDesc& desc) {
+inline unsigned int getNumChannels(const hipChannelFormatDesc& desc) {
   return ((desc.x != 0) + (desc.y != 0) + (desc.z != 0) + (desc.w != 0));
 }
 
-inline
-bool CheckArrayFormat(const hipChannelFormatDesc& desc) {
-  if(desc.x == 0) {
+inline bool CheckArrayFormat(const hipChannelFormatDesc& desc) {
+  if (desc.x == 0) {
     return false;
   } else {
-    if(desc.y != 0 && desc.y != desc.x) {
+    if (desc.y != 0 && desc.y != desc.x) {
       return false;
     }
-    if(desc.z !=0 && desc.z != desc.x) {
+    if (desc.z != 0 && desc.z != desc.x) {
       return false;
     }
-    if(desc.w !=0 && desc.w != desc.x) {
+    if (desc.w != 0 && desc.w != desc.x) {
       return false;
     }
   }
   // The bit channel description should not allow any channels after a zero channel
   if (desc.y == 0) {
     return !(desc.z > 0 || desc.w > 0);
-  }
-  else if (desc.z == 0) {
+  } else if (desc.z == 0) {
     return !(desc.w > 0);
   }
 
   return true;
 }
 
-inline
-hipArray_Format getArrayFormat(const hipChannelFormatDesc& desc) {
+inline hipArray_Format getArrayFormat(const hipChannelFormatDesc& desc) {
   switch (desc.f) {
     case hipChannelFormatKindUnsigned:
       switch (desc.x) {
@@ -365,12 +349,11 @@ hipArray_Format getArrayFormat(const hipChannelFormatDesc& desc) {
       break;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-int getNumChannels(const hipResourceViewFormat hipFormat) {
+inline int getNumChannels(const hipResourceViewFormat hipFormat) {
   switch (hipFormat) {
     case hipResViewFormatUnsignedChar1:
     case hipResViewFormatSignedChar1:
@@ -403,12 +386,11 @@ int getNumChannels(const hipResourceViewFormat hipFormat) {
       break;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-hipArray_Format getArrayFormat(const hipResourceViewFormat hipFormat) {
+inline hipArray_Format getArrayFormat(const hipResourceViewFormat hipFormat) {
   switch (hipFormat) {
     case hipResViewFormatUnsignedChar1:
     case hipResViewFormatUnsignedChar2:
@@ -446,12 +428,11 @@ hipArray_Format getArrayFormat(const hipResourceViewFormat hipFormat) {
       break;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-hipResourceViewFormat getResourceViewFormat(const hipChannelFormatDesc& desc) {
+inline hipResourceViewFormat getResourceViewFormat(const hipChannelFormatDesc& desc) {
   switch (desc.f) {
     case hipChannelFormatKindUnsigned:
       switch (getNumChannels(desc)) {
@@ -541,12 +522,11 @@ hipResourceViewFormat getResourceViewFormat(const hipChannelFormatDesc& desc) {
       break;
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-hipTextureDesc getTextureDesc(const textureReference* texRef) {
+inline hipTextureDesc getTextureDesc(const textureReference* texRef) {
   hipTextureDesc texDesc = {};
   std::memcpy(texDesc.addressMode, texRef->addressMode, sizeof(texDesc.addressMode));
   texDesc.filterMode = texRef->filterMode;
@@ -562,9 +542,8 @@ hipTextureDesc getTextureDesc(const textureReference* texRef) {
   return texDesc;
 }
 
-inline
-hipResourceViewDesc getResourceViewDesc(hipArray_const_t array,
-                                        const hipResourceViewFormat format) {
+inline hipResourceViewDesc getResourceViewDesc(hipArray_const_t array,
+                                               const hipResourceViewFormat format) {
   hipResourceViewDesc resViewDesc = {};
   resViewDesc.format = format;
   resViewDesc.width = array->width;
@@ -578,9 +557,8 @@ hipResourceViewDesc getResourceViewDesc(hipArray_const_t array,
   return resViewDesc;
 }
 
-inline
-hipResourceViewDesc getResourceViewDesc(hipMipmappedArray_const_t array,
-                                        const hipResourceViewFormat format) {
+inline hipResourceViewDesc getResourceViewDesc(hipMipmappedArray_const_t array,
+                                               const hipResourceViewFormat format) {
   hipResourceViewDesc resViewDesc = {};
   resViewDesc.format = format;
   resViewDesc.width = array->width;
@@ -594,8 +572,7 @@ hipResourceViewDesc getResourceViewDesc(hipMipmappedArray_const_t array,
   return resViewDesc;
 }
 
-inline
-std::pair<hipMemoryType, hipMemoryType> getMemoryType(const hipMemcpyKind kind) {
+inline std::pair<hipMemoryType, hipMemoryType> getMemoryType(const hipMemcpyKind kind) {
   switch (kind) {
     case hipMemcpyHostToHost:
       return {hipMemoryTypeHost, hipMemoryTypeHost};
@@ -610,12 +587,11 @@ std::pair<hipMemoryType, hipMemoryType> getMemoryType(const hipMemcpyKind kind) 
       return {hipMemoryTypeUnified, hipMemoryTypeUnified};
   }
 
-  //error scenario
+  // error scenario
   return {};
 }
 
-inline
-HIP_MEMCPY3D getDrvMemcpy3DDesc(const hip_Memcpy2D& desc2D) {
+inline HIP_MEMCPY3D getDrvMemcpy3DDesc(const hip_Memcpy2D& desc2D) {
   HIP_MEMCPY3D desc3D = {};
 
   desc3D.srcXInBytes = desc2D.srcXInBytes;
@@ -626,8 +602,7 @@ HIP_MEMCPY3D getDrvMemcpy3DDesc(const hip_Memcpy2D& desc2D) {
   desc3D.srcHost = desc2D.srcHost;
   desc3D.srcDevice = desc2D.srcDevice;
   desc3D.srcArray = desc2D.srcArray;
-  desc3D.srcPitch = desc2D.srcPitch ? desc2D.srcPitch
-                                    : (desc2D.srcXInBytes + desc2D.WidthInBytes);
+  desc3D.srcPitch = desc2D.srcPitch ? desc2D.srcPitch : (desc2D.srcXInBytes + desc2D.WidthInBytes);
   desc3D.srcHeight = 0;
 
   desc3D.dstXInBytes = desc2D.dstXInBytes;
@@ -638,8 +613,7 @@ HIP_MEMCPY3D getDrvMemcpy3DDesc(const hip_Memcpy2D& desc2D) {
   desc3D.dstHost = desc2D.dstHost;
   desc3D.dstDevice = desc2D.dstDevice;
   desc3D.dstArray = desc2D.dstArray;
-  desc3D.dstPitch = desc2D.dstPitch ? desc2D.dstPitch
-                                    : (desc2D.dstXInBytes + desc2D.WidthInBytes);
+  desc3D.dstPitch = desc2D.dstPitch ? desc2D.dstPitch : (desc2D.dstXInBytes + desc2D.WidthInBytes);
   desc3D.dstHeight = 0;
 
   desc3D.WidthInBytes = desc2D.WidthInBytes;
@@ -649,8 +623,7 @@ HIP_MEMCPY3D getDrvMemcpy3DDesc(const hip_Memcpy2D& desc2D) {
   return desc3D;
 }
 
-inline
-HIP_MEMCPY3D getDrvMemcpy3DDesc(const hipMemcpy3DParms& desc) {
+inline HIP_MEMCPY3D getDrvMemcpy3DDesc(const hipMemcpy3DParms& desc) {
   HIP_MEMCPY3D descDrv = {};
 
   descDrv.WidthInBytes = desc.extent.width;
@@ -702,7 +675,8 @@ HIP_MEMCPY3D getDrvMemcpy3DDesc(const hipMemcpy3DParms& desc) {
     descDrv.dstHeight = desc.dstPtr.ysize;
   }
 
-  // If a HIP array is participating in the copy, the extent is defined in terms of that array's elements.
+  // If a HIP array is participating in the copy, the extent is defined in terms of that array's
+  // elements.
   if ((desc.srcArray != nullptr) && (desc.dstArray == nullptr)) {
     descDrv.WidthInBytes *= getElementSize(desc.srcArray);
   } else if ((desc.srcArray == nullptr) && (desc.dstArray != nullptr)) {
@@ -733,108 +707,101 @@ HIP_MEMCPY3D getDrvMemcpy3DDesc(const hipMemcpy3DParms& desc) {
   return descDrv;
 }
 
-inline
-hipResourceType getResourceType(const HIPresourcetype resType) {
+inline hipResourceType getResourceType(const HIPresourcetype resType) {
   // These two enums should be isomorphic.
   return static_cast<hipResourceType>(resType);
 }
 
-inline
-HIPresourcetype getResourceType(const hipResourceType resType) {
+inline HIPresourcetype getResourceType(const hipResourceType resType) {
   // These two enums should be isomorphic.
   return static_cast<HIPresourcetype>(resType);
 }
 
-inline
-hipResourceDesc getResourceDesc(const HIP_RESOURCE_DESC& resDesc) {
+inline hipResourceDesc getResourceDesc(const HIP_RESOURCE_DESC& resDesc) {
   hipResourceDesc desc;
 
   desc.resType = getResourceType(resDesc.resType);
   switch (desc.resType) {
-  case hipResourceTypeArray:
-    desc.res.array.array = resDesc.res.array.hArray;
-    break;
-  case hipResourceTypeMipmappedArray:
-    desc.res.mipmap.mipmap = resDesc.res.mipmap.hMipmappedArray;
-    break;
-  case hipResourceTypeLinear:
-    desc.res.linear.devPtr = resDesc.res.linear.devPtr;
-    desc.res.linear.desc = getChannelFormatDesc(resDesc.res.linear.numChannels, resDesc.res.linear.format);
-    desc.res.linear.sizeInBytes = resDesc.res.linear.sizeInBytes;
-    break;
-  case hipResourceTypePitch2D:
-    desc.res.pitch2D.devPtr = resDesc.res.pitch2D.devPtr;
-    desc.res.pitch2D.desc = getChannelFormatDesc(resDesc.res.pitch2D.numChannels, resDesc.res.pitch2D.format);
-    desc.res.pitch2D.width = resDesc.res.pitch2D.width;
-    desc.res.pitch2D.height = resDesc.res.pitch2D.height;
-    desc.res.pitch2D.pitchInBytes = resDesc.res.pitch2D.pitchInBytes;
-    break;
-  default:
-    break;
+    case hipResourceTypeArray:
+      desc.res.array.array = resDesc.res.array.hArray;
+      break;
+    case hipResourceTypeMipmappedArray:
+      desc.res.mipmap.mipmap = resDesc.res.mipmap.hMipmappedArray;
+      break;
+    case hipResourceTypeLinear:
+      desc.res.linear.devPtr = resDesc.res.linear.devPtr;
+      desc.res.linear.desc =
+          getChannelFormatDesc(resDesc.res.linear.numChannels, resDesc.res.linear.format);
+      desc.res.linear.sizeInBytes = resDesc.res.linear.sizeInBytes;
+      break;
+    case hipResourceTypePitch2D:
+      desc.res.pitch2D.devPtr = resDesc.res.pitch2D.devPtr;
+      desc.res.pitch2D.desc =
+          getChannelFormatDesc(resDesc.res.pitch2D.numChannels, resDesc.res.pitch2D.format);
+      desc.res.pitch2D.width = resDesc.res.pitch2D.width;
+      desc.res.pitch2D.height = resDesc.res.pitch2D.height;
+      desc.res.pitch2D.pitchInBytes = resDesc.res.pitch2D.pitchInBytes;
+      break;
+    default:
+      break;
   }
 
   return desc;
 }
 
-inline
-HIP_RESOURCE_DESC getResourceDesc(const hipResourceDesc& resDesc) {
+inline HIP_RESOURCE_DESC getResourceDesc(const hipResourceDesc& resDesc) {
   HIP_RESOURCE_DESC desc;
 
   desc.resType = getResourceType(resDesc.resType);
   switch (desc.resType) {
-  case HIP_RESOURCE_TYPE_ARRAY:
-    desc.res.array.hArray = resDesc.res.array.array;
-    break;
-  case HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY:
-    desc.res.mipmap.hMipmappedArray = resDesc.res.mipmap.mipmap;
-    break;
-  case HIP_RESOURCE_TYPE_LINEAR:
-    desc.res.linear.devPtr = resDesc.res.linear.devPtr;
-    desc.res.linear.numChannels = getNumChannels(resDesc.res.linear.desc);
-    desc.res.linear.format = getArrayFormat(resDesc.res.linear.desc);
-    desc.res.linear.sizeInBytes = resDesc.res.linear.sizeInBytes;
-    break;
-  case HIP_RESOURCE_TYPE_PITCH2D:
-    desc.res.pitch2D.devPtr = resDesc.res.pitch2D.devPtr;
-    desc.res.pitch2D.numChannels = getNumChannels(resDesc.res.pitch2D.desc);
-    desc.res.pitch2D.format = getArrayFormat(resDesc.res.pitch2D.desc);
-    desc.res.pitch2D.width = resDesc.res.pitch2D.width;
-    desc.res.pitch2D.height = resDesc.res.pitch2D.height;
-    desc.res.pitch2D.pitchInBytes = resDesc.res.pitch2D.pitchInBytes;
-    break;
-  default:
-    break;
+    case HIP_RESOURCE_TYPE_ARRAY:
+      desc.res.array.hArray = resDesc.res.array.array;
+      break;
+    case HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY:
+      desc.res.mipmap.hMipmappedArray = resDesc.res.mipmap.mipmap;
+      break;
+    case HIP_RESOURCE_TYPE_LINEAR:
+      desc.res.linear.devPtr = resDesc.res.linear.devPtr;
+      desc.res.linear.numChannels = getNumChannels(resDesc.res.linear.desc);
+      desc.res.linear.format = getArrayFormat(resDesc.res.linear.desc);
+      desc.res.linear.sizeInBytes = resDesc.res.linear.sizeInBytes;
+      break;
+    case HIP_RESOURCE_TYPE_PITCH2D:
+      desc.res.pitch2D.devPtr = resDesc.res.pitch2D.devPtr;
+      desc.res.pitch2D.numChannels = getNumChannels(resDesc.res.pitch2D.desc);
+      desc.res.pitch2D.format = getArrayFormat(resDesc.res.pitch2D.desc);
+      desc.res.pitch2D.width = resDesc.res.pitch2D.width;
+      desc.res.pitch2D.height = resDesc.res.pitch2D.height;
+      desc.res.pitch2D.pitchInBytes = resDesc.res.pitch2D.pitchInBytes;
+      break;
+    default:
+      break;
   }
 
   return desc;
 }
 
-inline
-hipTextureAddressMode getAddressMode(const HIPaddress_mode mode) {
+inline hipTextureAddressMode getAddressMode(const HIPaddress_mode mode) {
   // These two enums should be isomorphic.
   return static_cast<hipTextureAddressMode>(mode);
 }
 
-inline
-HIPaddress_mode getAddressMode(const hipTextureAddressMode mode) {
+inline HIPaddress_mode getAddressMode(const hipTextureAddressMode mode) {
   // These two enums should be isomorphic.
   return static_cast<HIPaddress_mode>(mode);
 }
 
-inline
-hipTextureFilterMode getFilterMode(const HIPfilter_mode mode) {
+inline hipTextureFilterMode getFilterMode(const HIPfilter_mode mode) {
   // These two enums should be isomorphic.
   return static_cast<hipTextureFilterMode>(mode);
 }
 
-inline
-HIPfilter_mode getFilterMode(const hipTextureFilterMode mode) {
+inline HIPfilter_mode getFilterMode(const hipTextureFilterMode mode) {
   // These two enums should be isomorphic.
   return static_cast<HIPfilter_mode>(mode);
 }
 
-inline
-hipTextureReadMode getReadMode(const unsigned int flags) {
+inline hipTextureReadMode getReadMode(const unsigned int flags) {
   if (flags & HIP_TRSF_READ_AS_INTEGER) {
     return hipReadModeElementType;
   } else {
@@ -842,17 +809,15 @@ hipTextureReadMode getReadMode(const unsigned int flags) {
   }
 }
 
-inline
-unsigned int getReadMode(const hipTextureReadMode mode) {
-  if (mode ==  hipReadModeElementType) {
+inline unsigned int getReadMode(const hipTextureReadMode mode) {
+  if (mode == hipReadModeElementType) {
     return HIP_TRSF_READ_AS_INTEGER;
   } else {
     return 0;
   }
 }
 
-inline
-int getsRGB(const unsigned int flags) {
+inline int getsRGB(const unsigned int flags) {
   if (flags & HIP_TRSF_SRGB) {
     return 1;
   } else {
@@ -860,8 +825,7 @@ int getsRGB(const unsigned int flags) {
   }
 }
 
-inline
-unsigned int getsRGB(const int sRGB) {
+inline unsigned int getsRGB(const int sRGB) {
   if (sRGB == 1) {
     return HIP_TRSF_SRGB;
   } else {
@@ -869,8 +833,7 @@ unsigned int getsRGB(const int sRGB) {
   }
 }
 
-inline
-int getNormalizedCoords(const unsigned int flags) {
+inline int getNormalizedCoords(const unsigned int flags) {
   if (flags & HIP_TRSF_NORMALIZED_COORDINATES) {
     return 1;
   } else {
@@ -878,8 +841,7 @@ int getNormalizedCoords(const unsigned int flags) {
   }
 }
 
-inline
-unsigned int getNormalizedCoords(const int normalizedCoords) {
+inline unsigned int getNormalizedCoords(const int normalizedCoords) {
   if (normalizedCoords == 1) {
     return HIP_TRSF_NORMALIZED_COORDINATES;
   } else {
@@ -887,8 +849,7 @@ unsigned int getNormalizedCoords(const int normalizedCoords) {
   }
 }
 
-inline
-hipTextureDesc getTextureDesc(const HIP_TEXTURE_DESC& texDesc) {
+inline hipTextureDesc getTextureDesc(const HIP_TEXTURE_DESC& texDesc) {
   hipTextureDesc desc;
 
   desc.addressMode[0] = getAddressMode(texDesc.addressMode[0]);
@@ -908,8 +869,7 @@ hipTextureDesc getTextureDesc(const HIP_TEXTURE_DESC& texDesc) {
   return desc;
 }
 
-inline
-HIP_TEXTURE_DESC getTextureDesc(const hipTextureDesc& texDesc) {
+inline HIP_TEXTURE_DESC getTextureDesc(const hipTextureDesc& texDesc) {
   HIP_TEXTURE_DESC desc;
 
   desc.addressMode[0] = getAddressMode(texDesc.addressMode[0]);
@@ -930,20 +890,17 @@ HIP_TEXTURE_DESC getTextureDesc(const hipTextureDesc& texDesc) {
   return desc;
 }
 
-inline
-hipResourceViewFormat getResourceViewFormat(const HIPresourceViewFormat format) {
+inline hipResourceViewFormat getResourceViewFormat(const HIPresourceViewFormat format) {
   // These two enums should be isomorphic.
   return static_cast<hipResourceViewFormat>(format);
 }
 
-inline
-HIPresourceViewFormat getResourceViewFormat(const hipResourceViewFormat format) {
+inline HIPresourceViewFormat getResourceViewFormat(const hipResourceViewFormat format) {
   // These two enums should be isomorphic.
   return static_cast<HIPresourceViewFormat>(format);
 }
 
-inline
-hipResourceViewDesc getResourceViewDesc(const HIP_RESOURCE_VIEW_DESC& resViewDesc) {
+inline hipResourceViewDesc getResourceViewDesc(const HIP_RESOURCE_VIEW_DESC& resViewDesc) {
   hipResourceViewDesc desc;
 
   desc.format = getResourceViewFormat(resViewDesc.format);
@@ -958,8 +915,7 @@ hipResourceViewDesc getResourceViewDesc(const HIP_RESOURCE_VIEW_DESC& resViewDes
   return desc;
 }
 
-inline
-HIP_RESOURCE_VIEW_DESC getResourceViewDesc(const hipResourceViewDesc& resViewDesc) {
+inline HIP_RESOURCE_VIEW_DESC getResourceViewDesc(const hipResourceViewDesc& resViewDesc) {
   HIP_RESOURCE_VIEW_DESC desc;
 
   desc.format = getResourceViewFormat(resViewDesc.format);
@@ -974,8 +930,68 @@ HIP_RESOURCE_VIEW_DESC getResourceViewDesc(const hipResourceViewDesc& resViewDes
   return desc;
 }
 
-inline
-size_t getElementSize(const hipChannelFormatDesc &desc) {
+inline size_t getElementSize(const hipChannelFormatDesc& desc) {
   return (desc.x / 8) * getNumChannels(desc);
 }
-};
+
+inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
+  hipMemcpy3DParms params;
+  params.extent = desc.extent;
+  params.kind = hipMemcpyDefault;
+
+  // infer elementSize
+  size_t elementSize = 1;
+  if (desc.src.type == hipMemcpyOperandTypeArray) {
+    elementSize = getElementSize(desc.src.op.array.array);
+  } else if (desc.dst.type == hipMemcpyOperandTypeArray) {
+    elementSize = getElementSize(desc.dst.op.array.array);
+  }
+
+  // source
+  if (desc.src.type == hipMemcpyOperandTypePointer) {
+    size_t row = desc.src.op.ptr.rowLength;
+    size_t height = desc.src.op.ptr.layerHeight;
+    size_t spitch = (row ? row : desc.extent.width) * elementSize;
+    size_t swidth = (row ? row : desc.extent.width);
+    size_t sheight = (height ? height : desc.extent.height);
+    params.srcPtr = make_hipPitchedPtr(desc.src.op.ptr.ptr, spitch, swidth, sheight);
+    params.srcPos = make_hipPos(0, 0, 0);
+    params.srcArray = nullptr;
+  } else if (desc.src.type == hipMemcpyOperandTypeArray) {
+    params.srcArray = desc.src.op.array.array;
+    params.srcPos = make_hipPos(desc.src.op.array.offset.x, desc.src.op.array.offset.y,
+                                desc.src.op.array.offset.z);
+    params.srcPtr.ptr = nullptr;
+  }
+  // dest
+  if (desc.dst.type == hipMemcpyOperandTypePointer) {
+    size_t row = desc.dst.op.ptr.rowLength;
+    size_t height = desc.dst.op.ptr.layerHeight;
+    size_t spitch = (row ? row : desc.extent.width) * elementSize;
+    size_t swidth = (row ? row : desc.extent.width);
+    size_t sheight = (height ? height : desc.extent.height);
+    params.dstPtr = make_hipPitchedPtr(desc.dst.op.ptr.ptr, spitch, swidth, sheight);
+    params.dstPos = make_hipPos(0, 0, 0);
+    params.dstArray = nullptr;
+  } else if (desc.dst.type == hipMemcpyOperandTypeArray) {
+    params.dstArray = desc.dst.op.array.array;
+    params.dstPos = make_hipPos(desc.dst.op.array.offset.x, desc.dst.op.array.offset.y,
+                                desc.dst.op.array.offset.z);
+    params.dstPtr.ptr = nullptr;
+  }
+  return params;
+}
+
+inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DPeerParms& desc) {
+  hipMemcpy3DParms params;
+  params.srcArray = desc.srcArray;
+  params.srcPos = desc.srcPos;
+  params.srcPtr = desc.srcPtr;
+  params.dstArray = desc.dstArray;
+  params.dstPos = desc.dstPos;
+  params.dstPtr = desc.dstPtr;
+  params.extent = desc.extent;
+  params.kind = hipMemcpyDeviceToDevice;
+  return params;
+}
+};  // namespace hip

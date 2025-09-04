@@ -20,9 +20,8 @@ THE SOFTWARE.
 #include <hip/device_functions.h>
 #define LEN 512
 #define SIZE (LEN << 2)
-__global__ static void kernel_trig(float* In, float* sin_d,
-                            float* cos_d, float* tan_d,
-                            float* sin_pd, float* cos_pd) {
+__global__ static void kernel_trig(float* In, float* sin_d, float* cos_d, float* tan_d,
+                                   float* sin_pd, float* cos_pd) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   sin_d[tid] = sinf(In[tid]);
   cos_d[tid] = cosf(In[tid]);
@@ -55,9 +54,8 @@ TEST_CASE("Unit_kernel_trigger") {
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&cos_pd), SIZE));
 
   HIP_CHECK(hipMemcpy(In_d, In, SIZE, hipMemcpyHostToDevice));
-  hipLaunchKernelGGL(kernel_trig, dim3(LEN, 1, 1), dim3(1, 1, 1), 0, 0,
-                    In_d, sin_d, cos_d, tan_d,
-                    sin_pd, cos_pd);
+  hipLaunchKernelGGL(kernel_trig, dim3(LEN, 1, 1), dim3(1, 1, 1), 0, 0, In_d, sin_d, cos_d, tan_d,
+                     sin_pd, cos_pd);
   HIP_CHECK(hipMemcpy(sin_h, sin_d, SIZE, hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(cos_h, cos_d, SIZE, hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(tan_h, tan_d, SIZE, hipMemcpyDeviceToHost));
@@ -65,8 +63,7 @@ TEST_CASE("Unit_kernel_trigger") {
   HIP_CHECK(hipMemcpy(cos_ph, cos_pd, SIZE, hipMemcpyDeviceToHost));
   // Validation
   for (int i = 0; i < LEN; i++) {
-    if (sin_h[i] != sin_ph[i] || cos_h[i] != cos_ph[i] || tan_h[i] *
-      cos_h[i] != sin_h[i]) {
+    if (sin_h[i] != sin_ph[i] || cos_h[i] != cos_ph[i] || tan_h[i] * cos_h[i] != sin_h[i]) {
       errors++;
     }
   }

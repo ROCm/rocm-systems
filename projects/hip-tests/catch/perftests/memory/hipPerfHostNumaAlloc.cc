@@ -18,28 +18,27 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hipMemcpyKernel hipMemcpyKernel
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyKernel hipMemcpyKernel
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
+ * Copies data between host and device.
+ */
 
 #include <numaif.h>
 #include <hip_test_common.hh>
-
+// #define ENABLE_DEBUG 1
 // To run it correctly, we must not export HIP_VISIBLE_DEVICES.
 // And we must explicitly link libnuma because of numa api move_pages().
 #define NUM_PAGES 4
-char *h = nullptr;
-char *d_h = nullptr;
-char *m = nullptr;
-char *d_m = nullptr;
+char* h = nullptr;
+char* d_h = nullptr;
+char* m = nullptr;
+char* d_m = nullptr;
 int page_size = 1024;
 
-const int mode[] = { MPOL_DEFAULT, MPOL_BIND, MPOL_PREFERRED, MPOL_INTERLEAVE };
-const char* modeStr[] = { "MPOL_DEFAULT", "MPOL_BIND",
-                          "MPOL_PREFERRED", "MPOL_INTERLEAVE" };
+const int mode[] = {MPOL_DEFAULT, MPOL_BIND, MPOL_PREFERRED, MPOL_INTERLEAVE};
+const char* modeStr[] = {"MPOL_DEFAULT", "MPOL_BIND", "MPOL_PREFERRED", "MPOL_INTERLEAVE"};
 
 std::string exeCommand(const char* cmd) {
   std::array<char, 128> buff;
@@ -55,23 +54,22 @@ std::string exeCommand(const char* cmd) {
 }
 
 int getCpuAgentCount() {
-  const char* cmd =
-              "cat /proc/cpuinfo | grep \"physical id\" | sort | uniq | wc -l";
+  const char* cmd = "cat /proc/cpuinfo | grep \"physical id\" | sort | uniq | wc -l";
   int cpuAgentCount = std::atoi(exeCommand(cmd).c_str());
   return cpuAgentCount;
 }
 
 bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
-  void *pages[NUM_PAGES];
+  void* pages[NUM_PAGES];
   int status[NUM_PAGES];
   int ret_code;
 
-  INFO("set cpu " << cpuId << ", gpu " << gpuId << ", numaMode "
-        << numaMode << ", hostMallocflags " << hostMallocflags << "\n");
+  CONSOLE_PRINT("set cpu %d, gpu %d, numaMode %d, hostMallocflags %u\n", cpuId, gpuId, numaMode,
+                hostMallocflags);
 
   if (cpuId >= 0) {
-    unsigned long nodeMask = 1 << cpuId;            //NOLINT
-    unsigned long maxNode = sizeof(nodeMask) * 8;   //NOLINT
+    unsigned long nodeMask = 1 << cpuId;           // NOLINT
+    unsigned long maxNode = sizeof(nodeMask) * 8;  // NOLINT
     if (set_mempolicy(numaMode, numaMode == MPOL_DEFAULT ? NULL : &nodeMask,
                       numaMode == MPOL_DEFAULT ? 0 : maxNode) == -1) {
       WARN("set_mempolicy() failed with err " << errno << "\n");
@@ -83,7 +81,7 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
     HIP_CHECK(hipSetDevice(gpuId));
   }
 
-  posix_memalign(reinterpret_cast<void**>(&m), page_size, page_size*NUM_PAGES);
+  posix_memalign(reinterpret_cast<void**>(&m), page_size, page_size * NUM_PAGES);
   HIP_CHECK(hipHostRegister(m, page_size * NUM_PAGES, hipHostRegisterMapped));
   HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_m), m, 0));
 
@@ -94,15 +92,13 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   }
 
   ret_code = move_pages(0, NUM_PAGES, pages, NULL, status, 0);
-  INFO("Memory (malloc) ret " << ret_code << " at " << m <<
-                            " (dev " << d_m << "%p) is at node: ");
+  CONSOLE_PRINT("Memory (malloc) ret %d at %p (dev %p) is at node: ", ret_code, m, d_m);
   for (int i = 0; i < NUM_PAGES; i++) {
-    INFO(status[i]);  // Don't verify as it's out of our control
+    CONSOLE_PRINT("%d ", status[i]);  // Don't verify as it's out of our control
   }
-  INFO("\n");
+  CONSOLE_PRINT("\n");
 
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h),
-                          page_size*NUM_PAGES, hostMallocflags));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), page_size * NUM_PAGES, hostMallocflags));
   pages[0] = h;
   for (int i = 1; i < NUM_PAGES; i++) {
     pages[i] = reinterpret_cast<char*>(pages[0]) + page_size;
@@ -111,16 +107,14 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   d_h = nullptr;
   if (hostMallocflags & hipHostMallocMapped) {
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_h), h, 0));
-    INFO("Memory (hipHostMalloc) ret " << ret_code << " at " << h
-                                  << " (dev " << d_h << ") is at node: ");
+    CONSOLE_PRINT("Memory (hipHostMalloc) ret %d at %p (dev %p) is at node: ", ret_code, h, d_h);
   } else {
-    INFO("Memory (hipHostMalloc) ret " << ret_code << " at "
-                                       << h << " is at node: ");
+    CONSOLE_PRINT("Memory (hipHostMalloc) ret %d at %p is at node: ", ret_code, h);
   }
   for (int i = 0; i < NUM_PAGES; i++) {
-    INFO(status[i]);  // Always print it even if it's wrong. Verify later
+    CONSOLE_PRINT("%d ", status[i]);  // Always print it even if it's wrong. Verify later
   }
-  INFO("\n");
+  CONSOLE_PRINT("\n");
 
   HIP_CHECK(hipHostFree(reinterpret_cast<void*>(h)));
   HIP_CHECK(hipHostUnregister(m));
@@ -129,8 +123,7 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   if (cpuId >= 0 && (numaMode == MPOL_BIND || numaMode == MPOL_PREFERRED)) {
     for (int i = 0; i < NUM_PAGES; i++) {
       if (status[i] != cpuId) {  // Now verify
-        WARN("Failed at " << i << " status[i] = " << status[i]
-                          << " cpuId " << cpuId << "\n");
+        WARN("Failed at " << i << " status[i] = " << status[i] << " cpuId " << cpuId << "\n");
         return false;
       }
     }
@@ -138,12 +131,12 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   return true;
 }
 
-bool runTest(const int &cpuCount, const int &gpuCount,
-             unsigned int hostMallocflags, const std::string &str) {
-  INFO("Test- " << str.c_str() << "\n");
+bool runTest(const int& cpuCount, const int& gpuCount, unsigned int hostMallocflags,
+             const std::string& str) {
+  CONSOLE_PRINT("Test- %s\n", str.c_str());
 
   for (int m = 0; m < sizeof(mode) / sizeof(mode[0]); m++) {
-    INFO("Testing " << modeStr[m] << "\n");
+    CONSOLE_PRINT("Testing %s\n", modeStr[m]);
 
     for (int i = 0; i < cpuCount; i++) {
       for (int j = 0; j < gpuCount; j++) {
@@ -157,39 +150,38 @@ bool runTest(const int &cpuCount, const int &gpuCount,
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfHostNumaAlloc status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfHostNumaAlloc.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfHostNumaAlloc status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfHostNumaAlloc.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfHostNumaAlloc_test") {
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   int cpuCount = getCpuAgentCount();
-  INFO("Cpu count " << cpuCount << ", Gpu count " << gpuCount << "\n");
+  CONSOLE_PRINT("Cpu count %d, Gpu count %d\n", cpuCount, gpuCount);
 
   if (cpuCount < 0 || gpuCount < 0) {
-    SUCCEED("Skipped testcase hipPerfHostNumaAlloc as "
-            "there is no device to test.\n");
+    SUCCEED(
+        "Skipped testcase hipPerfHostNumaAlloc as "
+        "there is no device to test.\n");
     return;
   }
 
-  REQUIRE(true == runTest(cpuCount, gpuCount,
-                          hipHostMallocDefault | hipHostMallocNumaUser,
-               "Testing hipHostMallocDefault | hipHostMallocNumaUser......"));
+  REQUIRE(true == runTest(cpuCount, gpuCount, hipHostMallocDefault | hipHostMallocNumaUser,
+                          "Testing hipHostMallocDefault | hipHostMallocNumaUser......"));
 
-  REQUIRE(true == runTest(cpuCount, gpuCount,
-                          hipHostMallocMapped | hipHostMallocNumaUser,
-               "Testing hipHostMallocMapped | hipHostMallocNumaUser......."));
+  REQUIRE(true == runTest(cpuCount, gpuCount, hipHostMallocMapped | hipHostMallocNumaUser,
+                          "Testing hipHostMallocMapped | hipHostMallocNumaUser......."));
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

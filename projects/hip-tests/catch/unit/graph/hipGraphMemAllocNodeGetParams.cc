@@ -430,6 +430,6 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

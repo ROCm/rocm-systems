@@ -25,20 +25,17 @@
 #include <hip_test_checkers.hh>
 
 #define N 1048576
-__managed__ float A[N];   // Accessible by ALL CPU and GPU functions !!!
+__managed__ float A[N];  // Accessible by ALL CPU and GPU functions !!!
 __managed__ float B[N];
-__managed__  int  x = 0;
+__managed__ int x = 0;
 
-__global__ void add(const float *A, float *B) {
+__global__ void add(const float* A, float* B) {
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < N; i += stride)
-    B[i] = A[i] + B[i];
+  for (int i = index; i < N; i += stride) B[i] = A[i] + B[i];
 }
 
-__global__ void GPU_func() {
-  x++;
-}
+__global__ void GPU_func() { x++; }
 
 TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   for (int i = 0; i < N; i++) {
@@ -57,8 +54,7 @@ TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   HIP_CHECK(hipDeviceSynchronize());
 
   float maxError = 0.0f;
-  for (int i = 0; i < N; i++)
-    maxError = fmax(maxError, fabs(B[i]-3.0f));
+  for (int i = 0; i < N; i++) maxError = fmax(maxError, fabs(B[i] - 3.0f));
 
   REQUIRE(maxError == 0.0f);
 }
@@ -67,11 +63,9 @@ TEST_CASE("Unit_hipManagedKeyword_MultiGpu") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
-  for (int i = 0; i < numDevices; i++){
+  for (int i = 0; i < numDevices; i++) {
     int managed_memory = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed_memory,
-                                hipDeviceAttributeManagedMemory,
-                                i));
+    HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
       HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
       return;
@@ -80,7 +74,7 @@ TEST_CASE("Unit_hipManagedKeyword_MultiGpu") {
 
   for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));
-    GPU_func<<< 1, 1 >>>();
+    GPU_func<<<1, 1>>>();
     HIP_CHECK(hipDeviceSynchronize());
   }
   REQUIRE(x == numDevices);

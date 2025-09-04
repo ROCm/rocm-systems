@@ -45,7 +45,11 @@ void init(bool* status) {
 #if DISABLE_DIRECT_DISPATCH
   constexpr bool kDirectDispatch = false;
 #else
-  constexpr bool kDirectDispatch = IS_LINUX;
+#ifndef WITHOUT_HSA_BACKEND
+  constexpr bool kDirectDispatch = true;
+#else
+  constexpr bool kDirectDispatch = false;
+#endif
 #endif
   AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? kDirectDispatch : AMD_DIRECT_DISPATCH;
   if (!amd::Runtime::init()) {
@@ -120,7 +124,7 @@ void setCurrentDevice(unsigned int index) {
 }
 
 hip::Stream* getStream(hipStream_t stream, bool wait) {
- if (stream == nullptr || stream == hipStreamLegacy) {
+  if (stream == nullptr || stream == hipStreamLegacy) {
     return getNullStream(wait);
   } else {
     hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(stream);
@@ -159,7 +163,7 @@ int getDeviceID(amd::Context& ctx) {
 }
 
 // ================================================================================================
-hip::Stream* getNullStream(bool wait ) {
+hip::Stream* getNullStream(bool wait) {
   Device* device = getCurrentDevice();
   if (device == nullptr) {
     LogError("Invalid device");

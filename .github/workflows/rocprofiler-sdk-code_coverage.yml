@@ -15,6 +15,7 @@ on:
       - '!projects/rocprofiler-sdk/source/docs/**'
       - '!projects/rocprofiler-sdk/*.md'
       - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
@@ -22,6 +23,7 @@ on:
       - '!projects/rocprofiler-sdk/source/docs/**'
       - '!projects/rocprofiler-sdk/*.md'
       - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -58,11 +60,11 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi300']
+        runner: ['mi300a']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    runs-on: rocprofiler-mi3xx
+    runs-on: rocprofiler-mi300a
 
     # define this for container
     env:
@@ -105,6 +107,7 @@ jobs:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev
+        apt-get install -y rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
         python3 -m pip install -U --user -r requirements.txt
         rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
 

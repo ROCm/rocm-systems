@@ -36,14 +36,14 @@
 #include <unordered_map>
 #include <memory>
 #include <limits>
-#define CL_MEM_FOLLOW_USER_NUMA_POLICY  (1u << 31)
-#define ROCCLR_MEM_HSA_SIGNAL_MEMORY    (1u << 30)
-#define ROCCLR_MEM_INTERNAL_MEMORY      (1u << 29)
-#define CL_MEM_VA_RANGE_AMD             (1u << 28)
-#define ROCCLR_MEM_HSA_UNCACHED         (1u << 27)
-#define ROCCLR_MEM_INTERPROCESS         (1u << 26)
-#define ROCCLR_MEM_PHYMEM               (1u << 25)
-#define ROCCLR_MEM_HSA_CONTIGUOUS       (1u << 24)
+#define CL_MEM_FOLLOW_USER_NUMA_POLICY (1u << 31)
+#define ROCCLR_MEM_HSA_SIGNAL_MEMORY (1u << 30)
+#define ROCCLR_MEM_INTERNAL_MEMORY (1u << 29)
+#define CL_MEM_VA_RANGE_AMD (1u << 28)
+#define ROCCLR_MEM_HSA_UNCACHED (1u << 27)
+#define ROCCLR_MEM_INTERPROCESS (1u << 26)
+#define ROCCLR_MEM_PHYMEM (1u << 25)
+#define ROCCLR_MEM_HSA_CONTIGUOUS (1u << 24)
 
 namespace amd::device {
 class Memory;
@@ -72,7 +72,7 @@ struct BufferRect : public amd::EmbeddedObject {
   size_t offset(size_t x,  //!< Coordinate in X dimension
                 size_t y,  //!< Coordinate in Y dimension
                 size_t z   //!< Coordinate in Z dimension
-                ) const {
+  ) const {
     return start_ + x + y * rowPitch_ + z * slicePitch_;
   }
 
@@ -145,25 +145,24 @@ class Memory : public amd::RuntimeObject {
     kArenaMemoryPtr = 0x100,
   };
 
-  struct UserData
-  {
-     int deviceId = 0;     //!< Device ID memory is allocated on
-     void* data = nullptr; //!< Opaque user data from CL or HIP or etc.
-     amd::Memory* phys_mem_obj = nullptr; //<! Physical mem obj, only set on virtual mem
-     amd::Memory* vaddr_mem_obj = nullptr; //<! Virtual address mem obj, only set on virtual mem
-     uint64_t hsa_handle = 0; //!<Opaque hsa handle saved for Virtual memories
-     unsigned int flags = 0; //!< HIP memory flags
-     //! hipMallocPitch allocates buffer using width & height and returns pitch & device pointer.
-     //! Since device pointer is void*, It looses the values of width & height used for allocation.
-     //! Memory object has total size however it's pitch * height * depth and its not straight forward to
-     //! deduce these numbers from size and thus, below metadata are added to memory class so that
-     //! can be used to validate in hipMemset2D's inputs.
-     size_t pitch_ = 0;               //!< Pitch value in bytes
-     size_t width_ = 0;               //!< Width value in bytes
-     size_t height_ = 0;              //!< Height value
-     size_t depth_ = 0;               //!< Depth value
+  struct UserData {
+    int deviceId = 0;                      //!< Device ID memory is allocated on
+    void* data = nullptr;                  //!< Opaque user data from CL or HIP or etc.
+    amd::Memory* phys_mem_obj = nullptr;   //<! Physical mem obj, only set on virtual mem
+    amd::Memory* vaddr_mem_obj = nullptr;  //<! Virtual address mem obj, only set on virtual mem
+    uint64_t hsa_handle = 0;               //!< Opaque hsa handle saved for Virtual memories
+    unsigned int flags = 0;                //!< HIP memory flags
+    //! hipMallocPitch allocates buffer using width & height and returns pitch & device pointer.
+    //! Since device pointer is void*, It looses the values of width & height used for allocation.
+    //! Memory object has total size however it's pitch * height * depth and its not straight
+    //! forward to deduce these numbers from size and thus, below metadata are added to memory class
+    //! so that can be used to validate in hipMemset2D's inputs.
+    size_t pitch_ = 0;   //!< Pitch value in bytes
+    size_t width_ = 0;   //!< Width value in bytes
+    size_t height_ = 0;  //!< Height value
+    size_t depth_ = 0;   //!< Depth value
 
-     bool sync_mem_ops_ = false;   //!< Memops sync, when set synchronize all mem operations.
+    bool sync_mem_ops_ = false;  //!< Memops sync, when set synchronize all mem operations.
   };
 
  protected:
@@ -208,7 +207,7 @@ class Memory : public amd::RuntimeObject {
       uint32_t p2pAccess_ : 1;         //!< Memory object allows P2P access
       uint32_t ipcShared_ : 1;         //!< Memory shared between processes
       uint32_t largeBarSystem_ : 1;    //!< VRAM is visiable for host
-      uint32_t image_view_: 1;         //!< Memory object is an image view
+      uint32_t image_view_ : 1;        //!< Memory object is an image view
     };
     uint32_t flagsEx_;
   };
@@ -216,6 +215,7 @@ class Memory : public amd::RuntimeObject {
   uint32_t uniqueId_ = 0;
   //! used to save the user data during memory allocation.
   UserData userData_;
+
  private:
   //! Disable default assignment operator
   Memory& operator=(const Memory&);
@@ -223,20 +223,20 @@ class Memory : public amd::RuntimeObject {
   //! Disable default copy operator
   Memory(const Memory&);
 
-  Monitor lockMemoryOps_;          //!< Lock to serialize memory operations
-  std::set<Memory*> subBuffers_;   //!< List of all subbuffers for this memory object
-  device::Memory* svmBase_;        //!< svmBase allocation for MGPU case
-  size_t alignment_ = 0;           //!< alignment for allocation address
+  Monitor lockMemoryOps_;         //!< Lock to serialize memory operations
+  std::set<Memory*> subBuffers_;  //!< List of all subbuffers for this memory object
+  device::Memory* svmBase_;       //!< svmBase allocation for MGPU case
+  size_t alignment_ = 0;          //!< alignment for allocation address
 
  protected:
   //! The constructor creates a memory object but does not allocate either host memory
   //! or device memory. Default parameters are appropriate for Buffer creation.
-  Memory(Context& context,    //!< Context object
-         Type type,           //!< Memory type
-         Flags flags,         //!< Object's flags
-         size_t size,         //!< Memory size
-         void* svmPtr = NULL, //!< svm host memory address, NULL if no SVM mem object
-         size_t alignment = 0 //!< allocation addr alignment
+  Memory(Context& context,     //!< Context object
+         Type type,            //!< Memory type
+         Flags flags,          //!< Object's flags
+         size_t size,          //!< Memory size
+         void* svmPtr = NULL,  //!< svm host memory address, NULL if no SVM mem object
+         size_t alignment = 0  //!< allocation addr alignment
   );
   Memory(Memory& parent,             //!< Parent Mem obj
          Flags flags,                //!< Object's flags
@@ -369,12 +369,12 @@ class Memory : public amd::RuntimeObject {
   //! Returns true if the specified area covers memory intirely
   virtual bool isEntirelyCovered(const Coord3D& origin,  //!< Origin location of the covered region
                                  const Coord3D& region   //!< Covered region dimensions
-                                 ) const = 0;
+  ) const = 0;
 
   //! Returns true if the specified area is not degenerate and is inside of allocated memory
   virtual bool validateRegion(const Coord3D& origin,  //!< Origin location of the covered region
                               const Coord3D& region   //!< Covered region dimensions
-                              ) const = 0;
+  ) const = 0;
 
   void setVirtualDevice(device::VirtualDevice* vDev) { vDev_ = vDev; }
   device::VirtualDevice* getVirtualDevice() const { return vDev_; }
@@ -394,21 +394,19 @@ class Memory : public amd::RuntimeObject {
 
   bool isSvmPtrCommited() const {
     return svmPtrCommited_;
-  }                        //!< svm host address committed accessor;
+  }  //!< svm host address committed accessor;
   void commitSvmMemory();  //!< svm host address committed accessor;
   void uncommitSvmMemory();
   void setCacheStatus(bool canBeCached) {
     canBeCached_ = canBeCached;
-  }                                                  //!< set the memobject cached status
+  }  //!< set the memobject cached status
   bool canBeCached() const { return canBeCached_; }  //!< get the memobject cached status
 
   //! Check if this objects allows P2P access
   bool P2PAccess() const { return p2pAccess_; }
 
   // Set ipcShared status
-  void setIpcShared(bool ipcShared) {
-    ipcShared_ = ipcShared;
-  }
+  void setIpcShared(bool ipcShared) { ipcShared_ = ipcShared; }
   //! Check if this object allows IPC
   bool ipcShared() const { return ipcShared_; }
 
@@ -417,10 +415,10 @@ class Memory : public amd::RuntimeObject {
   device::Memory* svmBase() const { return svmBase_; }  //!< Returns SVM base for MGPU case
 
   uint32_t getUniqueId() { return uniqueId_; }
-  //!save the user data during memory allocation
+  //! save the user data during memory allocation
   UserData& getUserData() { return userData_; }
 
-  //!find if memory object is Arena memory
+  //! find if memory object is Arena memory
   virtual bool isArena() { return false; }
 
   //! get device by id when glb ctx is used.
@@ -465,12 +463,12 @@ class Buffer : public Memory {
   //! Returns true if the specified area covers buffer entirely
   bool isEntirelyCovered(const Coord3D& origin,  //!< Origin location of the covered region
                          const Coord3D& region   //!< Covered region dimensions
-                         ) const;
+  ) const;
 
   //! Returns true if the specified area is not degenerate and is inside of allocated memory
   bool validateRegion(const Coord3D& origin,  //!< Origin location of the covered region
                       const Coord3D& region   //!< Covered region dimensions
-                      ) const;
+  ) const;
 
   cl_bus_address_amd busAddress() const { return busAddress_; }
 };
@@ -509,10 +507,10 @@ class Image : public Memory {
   static const cl_image_format supportedFormatsRA[];
   static const cl_image_format supportedDepthStencilFormats[];
   static uint32_t numSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                     cl_mem_flags flags = 0);
+                                      cl_mem_flags flags = 0);
   static uint32_t getSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                     const uint32_t num_entries, cl_image_format* image_formats,
-                                     cl_mem_flags flags = 0);
+                                      const uint32_t num_entries, cl_image_format* image_formats,
+                                      cl_mem_flags flags = 0);
 
   //! Helper struct to manipulate image formats.
   struct Format : public cl_image_format {
@@ -532,7 +530,7 @@ class Image : public Memory {
     //! Compare 2 image formats.
     bool operator==(const Format& rhs) const {
       return image_channel_order == rhs.image_channel_order &&
-          image_channel_data_type == rhs.image_channel_data_type;
+             image_channel_data_type == rhs.image_channel_data_type;
     }
     bool operator!=(const Format& rhs) const { return !(*this == rhs); }
 
@@ -571,7 +569,7 @@ class Image : public Memory {
 
  protected:
   Image(const Format& format, Image& parent, uint baseMipLevel = 0, cl_mem_flags flags = 0,
-      bool isMipmapView = false);
+        bool isMipmapView = false);
 
   ///! Initializes the device memory array which is nested
   // after'Image' object in memory layout.
@@ -608,28 +606,29 @@ class Image : public Memory {
   //! Returns true if specified area covers image entirely
   bool isEntirelyCovered(const Coord3D& origin,  //!< Origin location of the covered region
                          const Coord3D& region   //!< Covered region dimensions
-                         ) const;
+  ) const;
 
   //! Returns true if the specified area is not degenerate and is inside of allocated memory
   bool validateRegion(const Coord3D& origin,  //!< Origin location of the covered region
                       const Coord3D& region   //!< Covered region dimensions
-                      ) const;
+  ) const;
 
   //! Returns true if the slice value for the image is valid
   bool isRowSliceValid(size_t rowPitch,    //!< The row pitch value
                        size_t slicePitch,  //!< The slice pitch value
                        size_t width,       //!< The width of the copy region
                        size_t height       //!< The height of the copy region
-                       ) const;
+  ) const;
 
   //! Creates a view memory object
-  virtual Image* createView(const Context& context,         //!< Context for a view creation
-                            const Format& format,           //!< The new format for a view
-                            device::VirtualDevice* vDev,    //!< Virtual device object
-                            uint baseMipLevel = 0,          //!< Base mip level for a view
-                            cl_mem_flags flags = 0,         //!< Memory allocation flags
-                            bool createMipmapView = false,  //!< To create mipmap view based on this image
-                            bool forceAlloc = false         //!< To bypass deffered alloc
+  virtual Image* createView(
+      const Context& context,         //!< Context for a view creation
+      const Format& format,           //!< The new format for a view
+      device::VirtualDevice* vDev,    //!< Virtual device object
+      uint baseMipLevel = 0,          //!< Base mip level for a view
+      cl_mem_flags flags = 0,         //!< Memory allocation flags
+      bool createMipmapView = false,  //!< To create mipmap view based on this image
+      bool forceAlloc = false         //!< To bypass deffered alloc
   );
 
   //! Returns the impl for this image.
@@ -697,18 +696,18 @@ class SvmBuffer : AllStatic {
   static Monitor AllocatedLock_;
 };
 
-class ArenaMemory: public Buffer {
-public:
+class ArenaMemory : public Buffer {
+ public:
   ArenaMemory(Context& context)
-    : Buffer(context, 0, std::numeric_limits<size_t>::max(),
-             reinterpret_cast<void*>(kArenaMemoryPtr)) {}
+      : Buffer(context, 0, std::numeric_limits<size_t>::max(),
+               reinterpret_cast<void*>(kArenaMemoryPtr)) {}
   bool isArena() { return true; }
 };
 
 class IpcBuffer : public Buffer {
  public:
   IpcBuffer(Context& context, Flags flags, size_t offset, size_t size, const void* handle)
-    : Buffer(context, flags, size), handle_(handle) {
+      : Buffer(context, flags, size), handle_(handle) {
     setIpcShared(true);
     setOffset(offset);
   }

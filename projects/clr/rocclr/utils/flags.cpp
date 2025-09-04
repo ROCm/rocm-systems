@@ -43,8 +43,7 @@ const char* removeQuotes(const char* Value) {
   }
 
   // skip the leading blank
-  for (p = Value; *p == ' '; ++p)
-    ;
+  for (p = Value; *p == ' '; ++p);
   if (*p != '"') {
     return Value;
   }
@@ -74,7 +73,7 @@ const char* removeQuotes(const char* Value) {
 #endif
   return p;
 }
-}
+}  // namespace
 
 namespace amd {
 
@@ -151,8 +150,12 @@ bool Flag::init() {
   if (!flagIsDefault(AMD_LOG_LEVEL)) {
     if (!flagIsDefault(AMD_LOG_LEVEL_FILE)) {
       std::string fileName = AMD_LOG_LEVEL_FILE;
-      fileName = fileName + "_" + std::to_string(Os::getProcessId());
+      std::string pid = std::to_string(Os::getProcessId());
+      fileName = fileName + "_" + pid;
       outFile = fopen(fileName.c_str(), "a");
+      if (outFile == NULL) {
+        outFile = fopen(("clr_logs_" + pid + ".txt").c_str(), "a");
+      }
     }
   }
 
@@ -195,9 +198,8 @@ bool Flag::setValue(const char* value) {
 #define DEFINE_DEBUG_FLAG_STRUCT(type, name, value, help)                                          \
   {#name, RELEASE_ONLY(NULL) DEBUG_ONLY(&name), T##type, true},
 
-Flag Flag::flags_[] = {
-    RUNTIME_FLAGS(DEFINE_DEBUG_FLAG_STRUCT, DEFINE_RELEASE_FLAG_STRUCT, DEFINE_DEBUG_FLAG_STRUCT)
-        {NULL, NULL, Tinvalid, true}};
+Flag Flag::flags_[] = {RUNTIME_FLAGS(DEFINE_DEBUG_FLAG_STRUCT, DEFINE_RELEASE_FLAG_STRUCT,
+                                     DEFINE_DEBUG_FLAG_STRUCT){NULL, NULL, Tinvalid, true}};
 
 #undef DEFINE_DEBUG_FLAG_STRUCT
 #undef DEFINE_RELEASE_FLAG_STRUCT

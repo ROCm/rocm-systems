@@ -32,37 +32,37 @@ class HSAILKernel;
 // ================================================================================================
 // RgpSqttMarkerIdentifier - Identifiers for RGP SQ thread-tracing markers (Table 1)
 enum RgpSqttMarkerIdentifier : uint32_t {
-  RgpSqttMarkerIdentifierEvent               = 0x0,
-  RgpSqttMarkerIdentifierCbStart             = 0x1,
-  RgpSqttMarkerIdentifierCbEnd               = 0x2,
-  RgpSqttMarkerIdentifierBarrierStart        = 0x3,
-  RgpSqttMarkerIdentifierBarrierEnd          = 0x4,
-  RgpSqttMarkerIdentifierUserEvent           = 0x5,
-  RgpSqttMarkerIdentifierGeneralApi          = 0x6,
-  RgpSqttMarkerIdentifierSync                = 0x7,
-  RgpSqttMarkerIdentifierPresent             = 0x8,
-  RgpSqttMarkerIdentifierLayoutTransition    = 0x9,
-  RgpSqttMarkerIdentifierRenderPass          = 0xA,
-  RgpSqttMarkerIdentifierReserved2           = 0xB,
-  RgpSqttMarkerIdentifierBindPipeline        = 0xC,
-  RgpSqttMarkerIdentifierReserved4           = 0xD,
-  RgpSqttMarkerIdentifierReserved5           = 0xE,
-  RgpSqttMarkerIdentifierReserved6           = 0xF
+  RgpSqttMarkerIdentifierEvent = 0x0,
+  RgpSqttMarkerIdentifierCbStart = 0x1,
+  RgpSqttMarkerIdentifierCbEnd = 0x2,
+  RgpSqttMarkerIdentifierBarrierStart = 0x3,
+  RgpSqttMarkerIdentifierBarrierEnd = 0x4,
+  RgpSqttMarkerIdentifierUserEvent = 0x5,
+  RgpSqttMarkerIdentifierGeneralApi = 0x6,
+  RgpSqttMarkerIdentifierSync = 0x7,
+  RgpSqttMarkerIdentifierPresent = 0x8,
+  RgpSqttMarkerIdentifierLayoutTransition = 0x9,
+  RgpSqttMarkerIdentifierRenderPass = 0xA,
+  RgpSqttMarkerIdentifierReserved2 = 0xB,
+  RgpSqttMarkerIdentifierBindPipeline = 0xC,
+  RgpSqttMarkerIdentifierReserved4 = 0xD,
+  RgpSqttMarkerIdentifierReserved5 = 0xE,
+  RgpSqttMarkerIdentifierReserved6 = 0xF
 };
 
 // ================================================================================================
 enum class RgpSqttMarkerEventType : uint32_t {
-  CmdNDRangeKernel     = 0,
-  CmdScheduler         = 1,
-  CmdCopyBuffer        = 2,
+  CmdNDRangeKernel = 0,
+  CmdScheduler = 1,
+  CmdCopyBuffer = 2,
   CmdCopyImageToBuffer = 3,
   CmdCopyBufferToImage = 4,
-  CmdFillBuffer        = 5,
-  CmdCopyImage         = 6,
-  CmdFillImage         = 7,
-  CmdPipelineBarrier   = 8,
-  InternalUnknown      = 26,
-  Invalid              = 0xffffffff
+  CmdFillBuffer = 5,
+  CmdCopyImage = 6,
+  CmdFillImage = 7,
+  CmdPipelineBarrier = 8,
+  InternalUnknown = 26,
+  Invalid = 0xffffffff
 };
 
 // ================================================================================================
@@ -144,11 +144,11 @@ struct RgpSqttMarkerBarrierStart {
 struct RgpSqttMarkerBarrierEnd {
   union {
     struct {
-      uint32_t identifier : 4;   // Identifier for this marker
-      uint32_t extDwords : 3;    // Number of extra dwords following this marker
-      uint32_t cbId : 20;        // Command buffer ID within queue
-      uint32_t waitOnEopTs : 1;  // Issued EOP_TS VGT event followed by a WAIT_REG_MEM for that
-                                 // timestamp to be written.  Quintessential full pipeline stall.
+      uint32_t identifier : 4;      // Identifier for this marker
+      uint32_t extDwords : 3;       // Number of extra dwords following this marker
+      uint32_t cbId : 20;           // Command buffer ID within queue
+      uint32_t waitOnEopTs : 1;     // Issued EOP_TS VGT event followed by a WAIT_REG_MEM for that
+                                    // timestamp to be written.  Quintessential full pipeline stall.
       uint32_t vsPartialFlush : 1;  // Stall at ME waiting for all prior VS waves to complete.
       uint32_t psPartialFlush : 1;  // Stall at ME waiting for all prior PS waves to complete.
       uint32_t csPartialFlush : 1;  // Stall at ME waiting for all prior CS waves to complete.
@@ -180,27 +180,28 @@ struct RgpSqttMarkerBarrierEnd {
 };
 
 // ================================================================================================
-// RgpSqttMarkerPipelineBind - RGP SQ thread-tracing marker written whenever a pipeline is bound (Table 12).
+// RgpSqttMarkerPipelineBind - RGP SQ thread-tracing marker written whenever a pipeline is bound
+// (Table 12).
 struct RgpSqttMarkerPipelineBind {
-  union  {
+  union {
     struct {
       uint32_t identifier : 4;  // Identifier for this marker
-      uint32_t extDwords  : 3;  // Number of extra dwords following this marker
-      uint32_t bindPoint  : 1;  // The bind point of the pipeline within a queue
+      uint32_t extDwords : 3;   // Number of extra dwords following this marker
+      uint32_t bindPoint : 1;   // The bind point of the pipeline within a queue
                                 // 0 = graphics bind point
                                 // 1 = compute bind point
-      uint32_t cbID       : 20; // A command buffer ID encoded as per Table 13.
-      uint32_t reserved   : 4;  // Reserved
+      uint32_t cbID : 20;       // A command buffer ID encoded as per Table 13.
+      uint32_t reserved : 4;    // Reserved
     };
 
-    uint32_t     dword01;       // The first dword
+    uint32_t dword01;  // The first dword
   };
 
   union {
-    uint32_t apiPsoHash[2];     // The API PSO hash of the pipeline being bound
+    uint32_t apiPsoHash[2];  // The API PSO hash of the pipeline being bound
     struct {
-      uint32_t dword02;         // The second dword
-      uint32_t dword03;         // The third dword
+      uint32_t dword02;  // The second dword
+      uint32_t dword03;  // The third dword
     };
   };
 };
@@ -255,9 +256,8 @@ class ICaptureMgr {
  public:
   virtual bool Update(Pal::IPlatform* platform) = 0;
 
-  virtual void PreDispatch(VirtualGPU* gpu,
-                           const HSAILKernel& kernel,
-                           size_t x, size_t y, size_t z) = 0;
+  virtual void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+                           size_t z) = 0;
   virtual void PostDispatch(VirtualGPU* gpu) = 0;
 
   virtual void FinishRGPTrace(VirtualGPU* gpu, bool aborted) = 0;
@@ -267,8 +267,8 @@ class ICaptureMgr {
   virtual void WriteBarrierEndMarker(const VirtualGPU* gpu,
                                      const Pal::Developer::BarrierData& data) const = 0;
 
-  virtual bool RegisterTimedQueue(uint32_t queue_id,
-                                  Pal::IQueue* iQueue, bool* debug_vmid) const = 0;
+  virtual bool RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue,
+                                  bool* debug_vmid) const = 0;
 
   virtual Pal::Result TimedQueueSubmit(Pal::IQueue* queue, uint64_t cmdId,
                                        const Pal::SubmitInfo& submitInfo) const = 0;
@@ -278,4 +278,4 @@ class ICaptureMgr {
                                 Pal::IGpuMemory* pGpuMemory, size_t offset) = 0;
 };
 
-} // namespace amd::pal
+}  // namespace amd::pal

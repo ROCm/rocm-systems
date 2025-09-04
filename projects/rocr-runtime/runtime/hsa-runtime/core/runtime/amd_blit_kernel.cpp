@@ -553,6 +553,7 @@ BlitKernel::BlitKernel(core::Queue* queue)
 BlitKernel::~BlitKernel() {}
 
 hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
+  agent_ = &agent;
   queue_bitmask_ = queue_->public_handle()->size - 1;
 
   bytes_written_.resize(queue_->public_handle()->size);
@@ -563,15 +564,15 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
     return status;
   }
 
-  const AMD::GpuAgent& gpuAgent = static_cast<const AMD::GpuAgent&>(agent);
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
   kernarg_async_ = reinterpret_cast<KernelArgs*>(
-      gpuAgent.system_allocator()(queue_->public_handle()->size * AlignUp(sizeof(KernelArgs), 16),
+      gpuAgent->system_allocator()(queue_->public_handle()->size * AlignUp(sizeof(KernelArgs), 16),
                                   16, core::MemoryRegion::AllocateNoFlags));
 
   kernarg_async_mask_ = queue_->public_handle()->size - 1;
 
   // Obtain the number of compute units in the underlying agent.
-  num_cus_ = gpuAgent.properties().NumFComputeCores / 4;
+  num_cus_ = gpuAgent->properties().NumFComputeCores / 4;
 
   // Assemble shaders to AQL code objects.
   std::map<KernelType, const char*> kernel_names = {
@@ -581,29 +582,29 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
 
   for (auto kernel_name : kernel_names) {
     KernelCode& kernel = kernels_[kernel_name.first];
-    gpuAgent.AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
+    gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
                             kernel.code_buf_size_);
   }
 
-  if (agent.profiling_enabled()) {
+  if (agent_->profiling_enabled()) {
     return EnableProfiling(true);
   }
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::Destroy(const core::Agent& agent) {
+hsa_status_t BlitKernel::Destroy() {
   std::lock_guard<std::mutex> guard(lock_);
 
-  const AMD::GpuAgent& gpuAgent = static_cast<const AMD::GpuAgent&>(agent);
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
 
   for (auto kernel_pair : kernels_) {
-    gpuAgent.ReleaseShader(kernel_pair.second.code_buf_,
+    gpuAgent->ReleaseShader(kernel_pair.second.code_buf_,
                            kernel_pair.second.code_buf_size_);
   }
 
   if (kernarg_async_ != NULL) {
-    gpuAgent.system_deallocator()(kernarg_async_);
+    gpuAgent->system_deallocator()(kernarg_async_);
   }
 
   if (completion_signal_.handle != 0) {
@@ -635,6 +636,11 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
                                      HSA_WAIT_STATE_ACTIVE) != 0) {
     // Signal wait returned unexpected value.
     return HSA_STATUS_ERROR;
+  }
+
+  if(agent_->profiling_enabled()) {
+    LogSignalDuration(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, completion_signal_,
+                      "BlitKernel::SubmitLinearCopyCommand");
   }
 
   return HSA_STATUS_SUCCESS;
@@ -680,7 +686,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
       std::atomic_thread_fence(std::memory_order_release);
       queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
 
-      LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
+      LogPrint(HSA_AMD_LOG_FLAG_AQL,
       "HWq=%p, id=%lu, Barrier Header = "
       "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
       "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
@@ -695,12 +701,12 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
                     HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
       extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0].handle, 
+      barrier_packet.dep_signal[0].handle,
       barrier_packet.dep_signal[1].handle,
       barrier_packet.dep_signal[2].handle,
-      barrier_packet.dep_signal[3].handle, 
+      barrier_packet.dep_signal[3].handle,
       barrier_packet.dep_signal[4].handle,
-      barrier_packet.completion_signal.handle, 
+      barrier_packet.completion_signal.handle,
       queue_->LoadReadIndexRelaxed(), write_index);
 
       ++write_index;
@@ -903,7 +909,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
                     kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
 
-  LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
+  LogPrint(HSA_AMD_LOG_FLAG_AQL,
     "HWq=%p, id=%lu, Dispatch Header = "
     "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
     "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "

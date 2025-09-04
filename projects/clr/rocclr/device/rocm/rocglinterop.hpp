@@ -20,14 +20,18 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #ifndef _WIN32
 #include <GL/glx.h>
 #include <EGL/egl.h>
 #else
+#include <windows.h>
 #include <GL/gl.h>
+#include <GL/glext.h>
 #include <EGL/egl.h>
+#ifndef GLX_H
+struct _XDisplay;
+struct __GLXcontextRec;
+#endif
 typedef _XDisplay Display;
 typedef __GLXcontextRec* GLXContext;
 #endif
@@ -129,7 +133,6 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
 
 bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
             const DisplayHandle display, const ContextHandle context);
-}
-}
+}  // namespace MesaInterop
+}  // namespace amd::roc
 
-#endif /*WITHOUT_HSA_BACKEND*/

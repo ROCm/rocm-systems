@@ -21,23 +21,21 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 template <typename T>
-__global__ void matchAll_1(T *Input, unsigned long long *Output, int *Predicate) {
+__global__ void matchAll_1(T* Input, unsigned long long* Output, int* Predicate) {
   auto tid = threadIdx.x;
 
   Output[tid] = __match_all_sync(AllThreads, Input[tid], &Predicate[tid]);
 }
 
-template <typename T>
-static void runTestMatchAll_1() {
+template <typename T> static void runTestMatchAll_1() {
   const int size = 64;
-  T Input[size] = {(T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,};
+  T Input[size] = {
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+  };
   unsigned long long Output[size];
   unsigned long long Expected[size];
   std::fill_n(Expected, size, -1);
@@ -52,7 +50,7 @@ static void runTestMatchAll_1() {
 
   T* d_Input;
   unsigned long long* d_Output;
-  int *d_Predicate;
+  int* d_Predicate;
   HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
   HIP_CHECK(hipMalloc(&d_Output, 8 * size));
   HIP_CHECK(hipMalloc(&d_Predicate, 4 * size));
@@ -72,23 +70,21 @@ static void runTestMatchAll_1() {
 }
 
 template <typename T>
-__global__ void matchAll_2(T *Input, unsigned long long *Output, int *Predicate) {
+__global__ void matchAll_2(T* Input, unsigned long long* Output, int* Predicate) {
   auto tid = threadIdx.x;
 
   Output[tid] = __match_all_sync(AllThreads, Input[tid], &Predicate[tid]);
 }
 
-template <typename T>
-static void runTestMatchAll_2() {
+template <typename T> static void runTestMatchAll_2() {
   const int size = 64;
-  T Input[size] = {(T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-500, (T)-5, (T)-5, (T)-5, (T)-5,};
+  T Input[size] = {
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-500, (T)-5, (T)-5, (T)-5, (T)-5,
+  };
   unsigned long long Output[size];
   unsigned long long Expected[size];
 
@@ -110,7 +106,7 @@ static void runTestMatchAll_2() {
 
   T* d_Input;
   unsigned long long* d_Output;
-  int *d_Predicate;
+  int* d_Predicate;
   HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
   HIP_CHECK(hipMalloc(&d_Output, 8 * size));
   HIP_CHECK(hipMalloc(&d_Predicate, 4 * size));
@@ -130,7 +126,7 @@ static void runTestMatchAll_2() {
 }
 
 template <typename T>
-__global__ void matchAll_3(T *Input, unsigned long long *Output, int *Predicate) {
+__global__ void matchAll_3(T* Input, unsigned long long* Output, int* Predicate) {
   auto tid = threadIdx.x;
   // It's okay to use the non-sync__ match, because the purpose of the test is
   // to exercise the mask argument on the sync version.
@@ -139,56 +135,89 @@ __global__ void matchAll_3(T *Input, unsigned long long *Output, int *Predicate)
   Output[tid] = __match_all_sync(mask, Input[tid], &Predicate[tid]);
 }
 
-template <typename T>
-static void runTestMatchAll_3() {
+template <typename T> static void runTestMatchAll_3() {
   const int size = 64;
-  T Input[size] = {(T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-500, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-500, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
-                   (T)-5, (T)-5, (T)-5, (T)-500, (T)-5, (T)-5, (T)-5, (T)-5,};
-  unsigned long long Output[size];
-  unsigned long long Expected[size] = {
-    0xfff, 0xfff, 0xfff, 0xfff,
-    0xfff, 0xfff, 0xfff, 0xfff,
-    0xfff, 0xfff, 0xfff, 0xfff,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0xfff000000, 0xfff000000, 0xfff000000, 0xfff000000,
-    0xfff000000, 0xfff000000, 0xfff000000, 0xfff000000,
-    0xfff000000, 0xfff000000, 0xfff000000, 0xfff000000,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0xf000000000000000, 0xf000000000000000, 0xf000000000000000, 0xf000000000000000
+  T Input[size] = {
+      (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-500, (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5,   (T)-5, (T)-5, (T)-500, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5,   (T)-5, (T)-5, (T)-5, (T)-5, (T)-5, (T)-5,
+      (T)-5, (T)-5,   (T)-5, (T)-5, (T)-500, (T)-5, (T)-5, (T)-5, (T)-5,
   };
+  unsigned long long Output[size];
+  unsigned long long Expected[size] = {0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0xfff,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0xfff000000,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       0xf000000000000000,
+                                       0xf000000000000000,
+                                       0xf000000000000000,
+                                       0xf000000000000000};
 
   int Predicate[size];
-  int ExpPredicate[size] {
-    true, true, true, true,
-    true, true, true, true,
-    true, true, true, true,
-    false, false, false, false,
-    false, false, false, false,
-    false, false, false, false,
-    true, true, true, true,
-    true, true, true, true,
-    true, true, true, true,
-    false, false, false, false,
-    false, false, false, false,
-    false, false, false, false,
-    false, false, false, false,
-    false, false, false, false,
-    false, false, false, false,
-    true, true, true, true
-  };
+  int ExpPredicate[size]{
+      true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  false,
+      false, false, false, false, false, false, false, false, false, false, false, true,  true,
+      true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  false, false, false,
+      false, false, false, false, false, false, false, false, false, false, false, false, false,
+      false, false, false, false, false, false, false, false, true,  true,  true,  true};
 
   expandPrecision(Input, size);
 
@@ -196,7 +225,7 @@ static void runTestMatchAll_3() {
 
   T* d_Input;
   unsigned long long* d_Output;
-  int *d_Predicate;
+  int* d_Predicate;
   HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
   HIP_CHECK(hipMalloc(&d_Output, 8 * size));
   HIP_CHECK(hipMalloc(&d_Predicate, 4 * size));
@@ -215,9 +244,9 @@ static void runTestMatchAll_3() {
   }
 }
 
-__global__ void matchAll_4(int *Input, int *Output) {
+__global__ void matchAll_4(int* Input, int* Output) {
   int tid = threadIdx.x;
-  unsigned long long masks[2] = { Every5thBut9th, Every9thBit };
+  unsigned long long masks[2] = {Every5thBut9th, Every9thBit};
 
   Output[tid] = -1;
   if (tid % 5 == 0 || tid % 9 == 0) {
@@ -257,7 +286,8 @@ static void runTestMatchAll_4() {
   HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
   hipLaunchKernelGGL(matchAll_4, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
+  HIP_CHECK(
+      hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
@@ -328,7 +358,5 @@ TEST_CASE("Unit_hipMatchSync_All") {
     runTestMatchAll_2<double>();
     runTestMatchAll_3<double>();
   }
-  SECTION("run divergent execution tests") {
-    runTestMatchAll_4();
-  }
+  SECTION("run divergent execution tests") { runTestMatchAll_4(); }
 }

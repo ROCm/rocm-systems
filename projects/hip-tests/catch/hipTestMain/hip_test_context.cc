@@ -114,7 +114,7 @@ std::string TestContext::getMatchingConfigFile(std::string config_dir) {
     std::string cur_arch = getCurrentArch();
     LogPrintf("The arch present: %s", cur_arch.c_str());
     configFileToUse = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + "_" +
-        cur_arch + ".json";
+                      cur_arch + ".json";
   } else {
     configFileToUse =
         config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + ".json";
@@ -164,11 +164,10 @@ void TestContext::getConfigFiles() {
   }
 
   std::string env_config = TestContext::getEnvVar("HIP_CATCH_EXCLUDE_FILE");
-  LogPrintf("Env Config file: %s",
-            (!env_config.empty()) ? env_config.c_str() : "Not found");
+  LogPrintf("Env Config file: %s", (!env_config.empty()) ? env_config.c_str() : "Not found");
   // HIP_CATCH_EXCLUDE_FILE is set for custom file path
   if (!env_config.empty()) {
-    if(fs::exists(env_config)) {
+    if (fs::exists(env_config)) {
       config_.json_files.push_back(env_config);
     }
   } else {
@@ -236,7 +235,8 @@ bool TestContext::parseJsonFiles() {
     }
     // Open the file
     std::ifstream js_file(fl);
-    std::string json_str((std::istreambuf_iterator<char>(js_file)), std::istreambuf_iterator<char>());
+    std::string json_str((std::istreambuf_iterator<char>(js_file)),
+                         std::istreambuf_iterator<char>());
     LogPrintf("Json contents:: %s", json_str.data());
 
     picojson::value v;

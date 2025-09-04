@@ -36,8 +36,7 @@
 
 #define NUM_SIZES 4
 // 256KB, 1 MB, 4MB, 16 MB
-static const unsigned int Sizes[NUM_SIZES] = {262144, 1048576, 4194304,
-                                              16777216};
+static const unsigned int Sizes[NUM_SIZES] = {262144, 1048576, 4194304, 16777216};
 
 void OCLPerfGenericBandwidth::genShader(unsigned int idx) {
   shader_.clear();
@@ -123,48 +122,40 @@ void OCLPerfGenericBandwidth::genShader(unsigned int idx) {
   }
 }
 
-OCLPerfGenericBandwidth::OCLPerfGenericBandwidth() {
-  _numSubTests = NUM_SIZES * 4;
-}
+OCLPerfGenericBandwidth::OCLPerfGenericBandwidth() { _numSubTests = NUM_SIZES * 4; }
 
 OCLPerfGenericBandwidth::~OCLPerfGenericBandwidth() {}
 
 void OCLPerfGenericBandwidth::setData(cl_mem buffer, float val) {
-  float *data = (float *)_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[_deviceId], buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL,
-      NULL, &error_);
+  float* data = (float*)_wrapper->clEnqueueMapBuffer(
+      cmdQueues_[_deviceId], buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < (bufSize_ >> 2); i++) data[i] = val;
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffer,
-                                             data, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmdQueues_[_deviceId]);
 }
 
 void OCLPerfGenericBandwidth::checkData(cl_mem buffer) {
-  float *data = (float *)_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[_deviceId], buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL,
-      NULL, &error_);
+  float* data = (float*)_wrapper->clEnqueueMapBuffer(
+      cmdQueues_[_deviceId], buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < (bufSize_ >> 2); i++) {
     if (data[i] != (float)numReads_) {
       printf("Data validation failed at index %d!\n", i);
-      printf("Expected %d %d %d %d\nGot %d %d %d %d\n", numReads_, numReads_,
-             numReads_, numReads_, (unsigned int)data[i],
-             (unsigned int)data[i + 1], (unsigned int)data[i + 2],
+      printf("Expected %d %d %d %d\nGot %d %d %d %d\n", numReads_, numReads_, numReads_, numReads_,
+             (unsigned int)data[i], (unsigned int)data[i + 1], (unsigned int)data[i + 2],
              (unsigned int)data[i + 3]);
       CHECK_RESULT_NO_RETURN(0, "Data validation failed!\n");
       break;
     }
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffer,
-                                             data, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmdQueues_[_deviceId]);
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfGenericBandwidth::open(unsigned int test, char *units,
-                                   double &conversion, unsigned int deviceId) {
+void OCLPerfGenericBandwidth::open(unsigned int test, char* units, double& conversion,
+                                   unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
   _crcword = 0;
@@ -177,14 +168,13 @@ void OCLPerfGenericBandwidth::open(unsigned int test, char *units,
   useLDS_ = ((test / NUM_SIZES) % 2) == 0 ? 1 : 0;
 
   size_t param_size = 0;
-  char *strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, 0, 0, &param_size);
+  char* strVersion = 0;
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION,
-                                param_size, strVersion, 0);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, param_size,
+                                     strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[9] < '2') {
     failed = true;
@@ -205,19 +195,16 @@ void OCLPerfGenericBandwidth::open(unsigned int test, char *units,
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
   genShader(shaderIdx_);
-  char *tmp = (char *)shader_.c_str();
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&tmp, NULL, &error_);
+  char* tmp = (char*)shader_.c_str();
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
 
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError = _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                               CL_PROGRAM_BUILD_LOG,
+    intError = _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG,
                                                16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
@@ -227,15 +214,11 @@ void OCLPerfGenericBandwidth::open(unsigned int test, char *units,
   CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
 
   float foo = 0;
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void *)&outBuffer_);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void *)&inBuffer_);
-  error_ = _wrapper->clSetKernelArg(kernel_, 2, 1024 * sizeof(cl_float),
-                                    (void *)NULL);
-  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_float), (void *)&foo);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_char), (void *)&useLDS_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&inBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, 1024 * sizeof(cl_float), (void*)NULL);
+  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_float), (void*)&foo);
+  error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_char), (void*)&useLDS_);
 
   setData(outBuffer_, 1.2345678f);
 }
@@ -253,10 +236,9 @@ void OCLPerfGenericBandwidth::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < NUM_ITER; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmdQueues_[_deviceId], kernel_, 1, NULL,
-        (const size_t *)global_work_size, (const size_t *)local_work_size, 0,
-        NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   }
@@ -266,12 +248,12 @@ void OCLPerfGenericBandwidth::run(void) {
   double sec = timer.GetElapsedTime();
 
   char buf[256];
-  const char *buf2;
+  const char* buf2;
   if (useLDS_)
     buf2 = "LDS";
   else
     buf2 = "global";
-  const char *buf3;
+  const char* buf3;
   if (shaderIdx_ == 0) {
     buf3 = "reads";
     numReads_ *= 8;
@@ -281,14 +263,13 @@ void OCLPerfGenericBandwidth::run(void) {
   }
   // LDS bandwidth in GB/s
   // We have one extra write per LDS location to initialize LDS
-  double perf =
-      ((double)global * (numReads_ * sizeof(cl_float) + dataSizeBytes_ / 64) *
-       NUM_ITER * (double)(1e-09)) /
-      sec;
+  double perf = ((double)global * (numReads_ * sizeof(cl_float) + dataSizeBytes_ / 64) * NUM_ITER *
+                 (double)(1e-09)) /
+                sec;
 
   _perfInfo = (float)perf;
-  SNPRINTF(buf, sizeof(buf), " %6s %9s %8d threads, %3d reads (GB/s) ", buf2,
-           buf3, global, numReads_);
+  SNPRINTF(buf, sizeof(buf), " %6s %9s %8d threads, %3d reads (GB/s) ", buf2, buf3, global,
+           numReads_);
   testDescString = buf;
   // checkData(outBuffer_);
 }
@@ -296,13 +277,11 @@ void OCLPerfGenericBandwidth::run(void) {
 unsigned int OCLPerfGenericBandwidth::close(void) {
   if (inBuffer_) {
     error_ = _wrapper->clReleaseMemObject(inBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(inBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(inBuffer_) failed");
   }
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
 
   return OCLTestImp::close();

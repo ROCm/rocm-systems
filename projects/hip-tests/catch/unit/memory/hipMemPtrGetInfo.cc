@@ -24,10 +24,10 @@ THE SOFTWARE.
 This testfile verifies the basic scenario of hipMemPtrGetInfo API
 */
 #include <hip_test_common.hh>
-struct MemInfo{
-    float a;
-    int b;
-    void* c;
+struct MemInfo {
+  float a;
+  int b;
+  void* c;
 };
 
 /*
@@ -51,4 +51,8 @@ TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
   REQUIRE(sGetSize == sSetSize);
   HIP_CHECK(hipMemPtrGetInfo(sPtr, &sGetSize));
   REQUIRE(sGetSize == sSetSize);
+
+  HIP_CHECK(hipFree(iPtr));
+  HIP_CHECK(hipFree(fPtr));
+  HIP_CHECK(hipFree(sPtr));
 }

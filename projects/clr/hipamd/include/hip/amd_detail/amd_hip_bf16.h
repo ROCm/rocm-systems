@@ -112,12 +112,12 @@
 #include <hip/amd_detail/amd_hip_common.h>
 #include "amd_hip_vector_types.h"  // float2 etc
 #include "device_library_decls.h"  // ocml conversion functions
-#include "math_fwd.h"  // ocml device functions
+#include "math_fwd.h"              // ocml device functions
 #if defined(__clang__) and defined(__HIP__)
 #include <hip/amd_detail/amd_warp_functions.h>       // define warpSize
 #include <hip/amd_detail/amd_warp_sync_functions.h>  // Sync functions
 #endif
-#endif                // !defined(__HIPCC_RTC__)
+#endif  // !defined(__HIPCC_RTC__)
 
 #define __BF16_DEVICE__ __device__
 #if defined(__HIPCC_RTC__)
@@ -394,7 +394,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
   /*! \brief return a vector of bf16 */
   __BF16_HOST_DEVICE__ operator __bf16_2() const { return __xy_bf162; }
 
-/*! \brief return a vector of bf16 */
+  /*! \brief return a vector of bf16 */
   __BF16_HOST_DEVICE__ __hip_bfloat162& operator=(const __bf16_2 in) {
     __xy_bf162 = in;
     return *this;
@@ -623,9 +623,13 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __ushort_as_bfloat16(const unsigned s
  */
 __BF16_DEVICE_STATIC__
 __hip_bfloat16 __shfl(MAYBE_UNDEF __hip_bfloat16 var, int src_lane, int width = warpSize) {
-    union { int i; __hip_bfloat16 f; } tmp; tmp.f = var;
-    tmp.i = __shfl(tmp.i, src_lane, width);
-    return tmp.f;
+  union {
+    int i;
+    __hip_bfloat16 f;
+  } tmp;
+  tmp.f = var;
+  tmp.i = __shfl(tmp.i, src_lane, width);
+  return tmp.f;
 }
 
 /**
@@ -633,11 +637,15 @@ __hip_bfloat16 __shfl(MAYBE_UNDEF __hip_bfloat16 var, int src_lane, int width = 
  * \brief shfl up warp intrinsic for bfloat16
  */
 __BF16_DEVICE_STATIC__
-__hip_bfloat16 __shfl_up(MAYBE_UNDEF __hip_bfloat16 var,
-                         unsigned int lane_delta, int width = warpSize) {
-    union { int i; __hip_bfloat16 f; } tmp; tmp.f = var;
-    tmp.i = __shfl_up(tmp.i, lane_delta, width);
-    return tmp.f;
+__hip_bfloat16 __shfl_up(MAYBE_UNDEF __hip_bfloat16 var, unsigned int lane_delta,
+                         int width = warpSize) {
+  union {
+    int i;
+    __hip_bfloat16 f;
+  } tmp;
+  tmp.f = var;
+  tmp.i = __shfl_up(tmp.i, lane_delta, width);
+  return tmp.f;
 }
 
 /**
@@ -645,11 +653,15 @@ __hip_bfloat16 __shfl_up(MAYBE_UNDEF __hip_bfloat16 var,
  * \brief shfl down warp intrinsic for bfloat16
  */
 __BF16_DEVICE_STATIC__
-__hip_bfloat16 __shfl_down(MAYBE_UNDEF __hip_bfloat16 var,
-                           unsigned int lane_delta, int width = warpSize) {
-    union { int i; __hip_bfloat16 f; } tmp; tmp.f = var;
-    tmp.i = __shfl_down(tmp.i, lane_delta, width);
-    return tmp.f;
+__hip_bfloat16 __shfl_down(MAYBE_UNDEF __hip_bfloat16 var, unsigned int lane_delta,
+                           int width = warpSize) {
+  union {
+    int i;
+    __hip_bfloat16 f;
+  } tmp;
+  tmp.f = var;
+  tmp.i = __shfl_down(tmp.i, lane_delta, width);
+  return tmp.f;
 }
 
 /**
@@ -658,9 +670,13 @@ __hip_bfloat16 __shfl_down(MAYBE_UNDEF __hip_bfloat16 var,
  */
 __BF16_DEVICE_STATIC__
 __hip_bfloat16 __shfl_xor(MAYBE_UNDEF __hip_bfloat16 var, int lane_mask, int width = warpSize) {
-    union { int i; __hip_bfloat16 f; } tmp; tmp.f = var;
-    tmp.i = __shfl_xor(tmp.i, lane_mask, width);
-    return tmp.f;
+  union {
+    int i;
+    __hip_bfloat16 f;
+  } tmp;
+  tmp.f = var;
+  tmp.i = __shfl_xor(tmp.i, lane_mask, width);
+  return tmp.f;
 }
 
 #if !defined(HIP_DISABLE_WARP_SYNC_BUILTINS)
@@ -771,7 +787,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 __shfl_xor_sync(const unsigned long long 
   u.ui = __shfl_xor_sync<unsigned long long, unsigned int>(mask, u.ui, delta, width);
   return u.bf162;
 }
-#endif // HIP_DISABLE_WARP_SYNC_BUILTINS
+#endif  // HIP_DISABLE_WARP_SYNC_BUILTINS
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
@@ -783,9 +799,29 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd(const __hip_bfloat16 a, const 
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
+ * \brief Adds two bfloat16 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd_rn(const __hip_bfloat16 a,
+                                                     const __hip_bfloat16 b) {
+#pragma clang fp contract(off)
+  return (__bf16)a + (__bf16)b;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
  * \brief Subtracts two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+  return (__bf16)a - (__bf16)b;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
+ * \brief Subtracts two bfloat16 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub_rn(const __hip_bfloat16 a,
+                                                     const __hip_bfloat16 b) {
+#pragma clang fp contract(off)
   return (__bf16)a - (__bf16)b;
 }
 
@@ -812,6 +848,16 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 __hfma(const __hip_bfloat16 a, const __hip
  * \brief Multiplies two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+  return (__bf16)a * (__bf16)b;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
+ * \brief Multiplies two bfloat16 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul_rn(const __hip_bfloat16 a,
+                                                     const __hip_bfloat16 b) {
+#pragma clang fp contract(off)
   return (__bf16)a * (__bf16)b;
 }
 
@@ -863,6 +909,16 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2(const __hip_bfloat162 a,
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
+ * \brief Adds two bfloat162 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2_rn(const __hip_bfloat162 a,
+                                                       const __hip_bfloat162 b) {
+#pragma clang fp contract(off)
+  return __hip_bfloat162{__bf16_2(a) + __bf16_2(b)};
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
  * \brief Performs FMA of given bfloat162 values
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 __hfma2(const __hip_bfloat162 a, const __hip_bfloat162 b,
@@ -881,6 +937,16 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2(const __hip_bfloat162 a,
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
+ * \brief Multiplies two bfloat162 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2_rn(const __hip_bfloat162 a,
+                                                       const __hip_bfloat162 b) {
+#pragma clang fp contract(off)
+  return __hip_bfloat162{__bf16_2(a) * __bf16_2(b)};
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
  * \brief Converts a bfloat162 into negative
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hneg2(const __hip_bfloat162 a) {
@@ -893,6 +959,16 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hneg2(const __hip_bfloat162 a) {
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+  return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
+ * \brief Subtracts two bfloat162 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2_rn(const __hip_bfloat162 a,
+                                                       const __hip_bfloat162 b) {
+#pragma clang fp contract(off)
   return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
 }
 
@@ -1834,14 +1910,14 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
   return old_val.h2r;
 #endif
 }
-__BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16 *address,
+__BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
                                                       __hip_bfloat16 value) {
   static_assert(sizeof(unsigned short int) == sizeof(__hip_bfloat16_raw));
-  unsigned short int* address_as_short = reinterpret_cast<unsigned short int *>(address);
+  unsigned short int* address_as_short = reinterpret_cast<unsigned short int*>(address);
   // Align to 4 bytes
-  unsigned int* aligned_addr = __builtin_bit_cast(unsigned int*,
-                               __builtin_bit_cast(unsigned long long int, address_as_short) &
-                               (unsigned long long int)(~0x3));
+  unsigned int* aligned_addr = __builtin_bit_cast(
+      unsigned int*, __builtin_bit_cast(unsigned long long int, address_as_short) &
+                         (unsigned long long int)(~0x3));
 
   bool is_lower = __builtin_bit_cast(unsigned long long int, aligned_addr) ==
                   __builtin_bit_cast(unsigned long long int, address);
@@ -1852,10 +1928,9 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16 *address,
   else
     fval = __halves2bfloat162(__float2bfloat16(0.0f), value);
 
-  __hip_bfloat162 *in = (__hip_bfloat162 *)(aligned_addr);
-  __hip_bfloat162 out =  unsafeAtomicAdd(in , fval);
-  if (is_lower)
-    return __low2bfloat16(out);
+  __hip_bfloat162* in = (__hip_bfloat162*)(aligned_addr);
+  __hip_bfloat162 out = unsafeAtomicAdd(in, fval);
+  if (is_lower) return __low2bfloat16(out);
   return __high2bfloat16(out);
 }
 #endif  // defined(__clang__) && defined(__HIP__)

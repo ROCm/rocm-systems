@@ -212,7 +212,7 @@ rocprofiler-sdk:
       block: CPC
       event: 9
   - name: CPC_SYNC_FIFO_FULL_LEVEL
-    description: SYNC FIFO full last cycles.
+    description: Level count SYNC FIFO full last cycles.
     properties: []
     definitions:
     - architectures:
@@ -3239,7 +3239,7 @@ rocprofiler-sdk:
       block: SQ
       event: 136
   - name: SQ_IFETCH_LEVEL
-    description: Number of inflight instruction fetch requests from the cache. This is a value returned per-sharder engine.
+    description: Level count number of inflight instruction fetch requests from the cache. This is a value returned per-sharder engine.
       Best used with accumulate() functions as part of a derived counter.
     properties: []
     definitions:
@@ -4469,7 +4469,7 @@ rocprofiler-sdk:
       block: SQ
       event: 125
   - name: SQ_INST_LEVEL_GDS
-    description: Number of in-flight GDS (global) instructions. This value represents the number of instructions each wave
+    description: Level count number of in-flight GDS (global) instructions. This value represents the number of instructions each wave
       spends synchronizing workgroups across the device (global data sync). Set next counter to ACCUM_PREV and divide by INSTS_GDS
       for average latency. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
     properties: []
@@ -4490,7 +4490,7 @@ rocprofiler-sdk:
       block: SQ
       event: 87
   - name: SQ_INST_LEVEL_LDS
-    description: Number of in-flight LDS instructions. This value represents the number of instructions each wave spends executing
+    description: Level count number of in-flight LDS instructions. This value represents the number of instructions each wave spends executing
       instructions accessing the local data store (data shared between SIMDs on the same CU). Set next counter to ACCUM_PREV
       and divide by INSTS_LDS for average latency. Includes FLAT instructions. This value is returned on a per-SE (aggregate
       of values in SIMDs in the SE) basis.
@@ -4536,7 +4536,7 @@ rocprofiler-sdk:
       block: SQ
       event: 90
   - name: SQ_INST_LEVEL_SMEM
-    description: Number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). Set next counter
+    description: Level count number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). Set next counter
       to ACCUM_PREV and divide by INSTS_SMEM for average latency per smem request. Falls slightly short of total request latency
       because some fetches are divided into two requests that may finish at different times and this counter collects the
       average latency of the two. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -4561,7 +4561,7 @@ rocprofiler-sdk:
       block: SQ
       event: 89
   - name: SQ_INST_LEVEL_VMEM
-    description: Number of in-flight VMEM instructions. Set next counter to ACCUM_PREV and divide by INSTS_VMEM for average
+    description: Level count number of in-flight VMEM instructions. Set next counter to ACCUM_PREV and divide by INSTS_VMEM for average
       latency. Includes FLAT instructions. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
     properties: []
     definitions:
@@ -4742,7 +4742,7 @@ rocprofiler-sdk:
       block: SQ
       event: 144
   - name: SQ_LEVEL_WAVES
-    description: Track the number of waves. Set ACCUM_PREV for the next counter to use this. This value is returned on a per-SIMD
+    description: Level count number of waves. Set ACCUM_PREV for the next counter to use this. This value is returned on a per-SIMD
       basis.
     properties: []
     definitions:
@@ -6448,7 +6448,7 @@ rocprofiler-sdk:
       block: TCC
       event: 40
   - name: TCC_EA0_ATOMIC_LEVEL
-    description: The sum of the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency.
+    description: Level count the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency.
       Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
     properties: []
     definitions:
@@ -6639,7 +6639,7 @@ rocprofiler-sdk:
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA0_RDREQ_LEVEL
-    description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read
+    description: Level count the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read
       latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
     properties: []
     definitions:
@@ -6858,7 +6858,7 @@ rocprofiler-sdk:
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA0_WRREQ_LEVEL
-    description: The sum of the number of EA write requests in flight. This is primarily meant for measure average EA write
+    description: Level count the number of EA write requests in flight. This is primarily meant for measure average EA write
       latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
     properties: []
     definitions:
@@ -7047,7 +7047,7 @@ rocprofiler-sdk:
       block: TCC
       event: 36
   - name: TCC_EA_ATOMIC_LEVEL
-    description: The sum of the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency.
+    description: Level count the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency.
       Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
     properties: []
     definitions:
@@ -7179,7 +7179,7 @@ rocprofiler-sdk:
       - gfx90a
       expression: reduce(TCC_EA_RDREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA_RDREQ_LEVEL
-    description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read
+    description: Level count the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read
       latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
     properties: []
     definitions:
@@ -7329,7 +7329,7 @@ rocprofiler-sdk:
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA_WRREQ_LEVEL
-    description: The sum of the number of EA write requests in flight. This is primarily meant for measure average EA write
+    description: Level count the number of EA write requests in flight. This is primarily meant for measure average EA write
       latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
     properties: []
     definitions:
@@ -10589,7 +10589,7 @@ rocprofiler-sdk:
       - gfx950
       expression: TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN1_sum
   - name: SQC_DCACHE_INFLIGHT_LEVEL
-    description: Total outstanding transactions in data cache (per-SQ, nondeterministic)
+    description: Level count total outstanding transactions in data cache (per-SQ, nondeterministic)
     properties: []
     definitions:
     - architectures:
@@ -10601,6 +10601,19 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 337
+  - name: SQC_ICACHE_INFLIGHT_LEVEL
+    description: Level count total outstanding transactions in instruction cache (per-SQ, nondeterministic)
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      block: SQ
+      event: 336
   - name: SQ_IFETCH_LEVEL_ACCUM
     description: Accumulate SQ_IFETCH_LEVEL
     properties: []
@@ -10673,3 +10686,15 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: accumulate(SQC_DCACHE_INFLIGHT_LEVEL, HIGH_RES)
+  - name: SQC_ICACHE_INFLIGHT_LEVEL_ACCUM
+    description: Accumulate SQC_ICACHE_INFLIGHT_LEVEL
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumulate(SQC_ICACHE_INFLIGHT_LEVEL, HIGH_RES)

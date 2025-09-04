@@ -105,7 +105,7 @@ static inline vdi_agent_capabilities operator~(const vdi_agent_capabilities& src
 }
 
 static inline vdi_agent_capabilities operator|(const vdi_agent_capabilities& lhs,
-                                              const vdi_agent_capabilities& rhs) {
+                                               const vdi_agent_capabilities& rhs) {
   vdi_agent_capabilities result;
 
   const char* a = reinterpret_cast<const char*>(&lhs);
@@ -119,7 +119,7 @@ static inline vdi_agent_capabilities operator|(const vdi_agent_capabilities& lhs
 }
 
 static inline vdi_agent_capabilities operator&(const vdi_agent_capabilities& lhs,
-                                              const vdi_agent_capabilities& rhs) {
+                                               const vdi_agent_capabilities& rhs) {
   vdi_agent_capabilities result;
 
   const char* a = reinterpret_cast<const char*>(&lhs);
@@ -132,7 +132,8 @@ static inline vdi_agent_capabilities operator&(const vdi_agent_capabilities& lhs
   return result;
 }
 
-static inline bool operator==(const vdi_agent_capabilities& lhs, const vdi_agent_capabilities& rhs) {
+static inline bool operator==(const vdi_agent_capabilities& lhs,
+                              const vdi_agent_capabilities& rhs) {
   const char* a = reinterpret_cast<const char*>(&lhs);
   const char* b = reinterpret_cast<const char*>(&rhs);
   for (size_t i = 0; i < sizeof(vdi_agent_capabilities); ++i) {
@@ -144,7 +145,8 @@ static inline bool operator==(const vdi_agent_capabilities& lhs, const vdi_agent
   return true;
 }
 
-static inline bool operator!=(const vdi_agent_capabilities& lhs, const vdi_agent_capabilities& rhs) {
+static inline bool operator!=(const vdi_agent_capabilities& lhs,
+                              const vdi_agent_capabilities& rhs) {
   return !(lhs == rhs);
 }
 
@@ -236,12 +238,12 @@ static int32_t CL_API_CALL GetTime(vdi_agent* agent, int64_t* time_nanos) {
 }
 
 static int32_t CL_API_CALL SetCallbacks(vdi_agent* agent, const vdi_agent_callbacks* callbacks,
-                                       size_t size) {
+                                        size_t size) {
   return Agent::get(agent)->setCallbacks(callbacks, size);
 }
 
 static int32_t CL_API_CALL GetPotentialCapabilities(vdi_agent* agent,
-                                                   vdi_agent_capabilities* capabilities) {
+                                                    vdi_agent_capabilities* capabilities) {
   if (capabilities == NULL) {
     return CL_INVALID_VALUE;
   }
@@ -255,20 +257,20 @@ static int32_t CL_API_CALL GetCapabilities(vdi_agent* agent, vdi_agent_capabilit
 }
 
 static int32_t CL_API_CALL SetCapabilities(vdi_agent* agent,
-                                          const vdi_agent_capabilities* capabilities,
-                                          vdi_agent_capability_action action) {
+                                           const vdi_agent_capabilities* capabilities,
+                                           vdi_agent_capability_action action) {
   return Agent::get(agent)->setCapabilities(capabilities, action == VDI_AGENT_ADD_CAPABILITIES);
 }
 
 static int32_t CL_API_CALL GetICDDispatchTable(vdi_agent* agent, cl_icd_dispatch_table* table,
-                                              size_t size) {
+                                               size_t size) {
   // FIXME_lmoriche: check size
   memcpy(table, amd::ICDDispatchedObject::icdVendorDispatch_, size);
   return CL_SUCCESS;
 }
 
 static int32_t CL_API_CALL SetICDDispatchTable(vdi_agent* agent, const cl_icd_dispatch_table* table,
-                                              size_t size) {
+                                               size_t size) {
   // FIXME_lmoriche: check size
   memcpy(amd::ICDDispatchedObject::icdVendorDispatch_, table, size);
   return CL_SUCCESS;
@@ -277,14 +279,14 @@ static int32_t CL_API_CALL SetICDDispatchTable(vdi_agent* agent, const cl_icd_di
 }  // namespace agent
 
 const vdi_agent Agent::entryPoints_ = {agent::GetVersionNumber,
-                                agent::GetPlatform,
-                                agent::GetTime,
-                                agent::SetCallbacks,
-                                agent::GetPotentialCapabilities,
-                                agent::GetCapabilities,
-                                agent::SetCapabilities,
-                                agent::GetICDDispatchTable,
-                                agent::SetICDDispatchTable};
+                                       agent::GetPlatform,
+                                       agent::GetTime,
+                                       agent::SetCallbacks,
+                                       agent::GetPotentialCapabilities,
+                                       agent::GetCapabilities,
+                                       agent::SetCapabilities,
+                                       agent::GetICDDispatchTable,
+                                       agent::SetICDDispatchTable};
 
 void Agent::postContextCreate(cl_context context) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {

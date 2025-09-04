@@ -508,22 +508,6 @@ class Runtime {
     return **driver;
   }
 
-  /// @brief Check if the drivers of the agents are different.
-  /// @param [in] agents Array of agents to check.
-  /// @param [in] num_agents Number of agents in the array.
-  /// @return True if the drivers of the agents are different, false otherwise.
-  static bool IsDifferentDriver(Agent* agents, uint32_t num_agents) {
-    if (num_agents == 0 || agents == nullptr) return true;
-
-    auto first_driver_type = agents[0].driver().kernel_driver_type_;
-    for (uint32_t i = 1; i < num_agents; ++i) {
-      if (agents[i].driver().kernel_driver_type_ != first_driver_type) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   std::vector<std::unique_ptr<Driver>>& AgentDrivers() { return agent_drivers_; }
 
   static bool IsGPUDriver(DriverType driver_type) {
@@ -905,6 +889,10 @@ class Runtime {
     std::map<Agent*, MappedHandleAllowedAgent> allowed_agents;
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA
+
+  AddressHandle* VMemoryFindReservedAddressHandle(const void* va);
+  hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
+                              uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 
   hsa_status_t VMemoryMapAllowAccess(const void *va,
                                      hsa_access_permission_t perm,
