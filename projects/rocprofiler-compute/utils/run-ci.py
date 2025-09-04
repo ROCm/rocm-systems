@@ -82,22 +82,50 @@ set(CTEST_BUILD_NAME "{args.build_name}")
 set(CTEST_SOURCE_DIRECTORY "{args.source_dir}")
 set(CTEST_BINARY_DIRECTORY "{args.binary_dir}")
 
-# make sure binary directory exists
+# Ensure binary directory exists
 file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
 
 ctest_start({args.mode})
 
-# copy coverage file to expected location
-file(COPY "{args.coverage_file}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
+# copy coverage XML file to the binary directory with the expected name
+set(COVERAGE_SRC_FILE "{args.coverage_file}")
+set(COVERAGE_DEST_FILE "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
 
-# set coverage command to point to XML file
-set(CTEST_COVERAGE_COMMAND "${{CMAKE_COMMAND}}")
-set(CTEST_COVERAGE_EXTRA_FLAGS "-E" "echo" "Using pre-generated coverage")
+if(NOT EXISTS "${{COVERAGE_SRC_FILE}}")
+    message(FATAL_ERROR "Coverage file not found: ${{COVERAGE_SRC_FILE}}")
+endif()
 
-ctest_coverage()
-ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)
+file(COPY "${{COVERAGE_SRC_FILE}}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
+file(RENAME "${{CTEST_BINARY_DIRECTORY}}/$(basename {args.coverage_file})" "${{COVERAGE_DEST_FILE}}")
+
+# verify coverage file was copied correctly
+if(NOT EXISTS "${{COVERAGE_DEST_FILE}}")
+    message(FATAL_ERROR "Failed to copy coverage file to: ${{COVERAGE_DEST_FILE}}")
+endif()
+
+# read first few lines to verify it's a valid XML file
+file(READ "${{COVERAGE_DEST_FILE}}" COVERAGE_CONTENT LIMIT 200)
+if(NOT COVERAGE_CONTENT MATCHES "^<\\?xml.*<coverage")
+    message(FATAL_ERROR "Coverage file does not appear to be valid XML coverage format")
+endif()
+
+message(STATUS "Successfully copied coverage file to: ${{COVERAGE_DEST_FILE}}")
+
+# submit coverage directly as a file
+ctest_submit(FILES "${{COVERAGE_DEST_FILE}}"
+             PARTS Coverage
+             RETRY_COUNT 3
+             RETRY_DELAY 5
+             CAPTURE_CMAKE_ERROR submit_error)
+
+if(NOT submit_error EQUAL 0)
+    message(FATAL_ERROR "Failed to submit coverage to CDash: ${{submit_error}}")
+else()
+    message(STATUS "Successfully submitted coverage to CDash")
+endif()
 """
     return script_content
+
 
 def main():
     if not os.getenv("CI"):
@@ -155,6 +183,10 @@ def main():
         choices=["Experimental", "Nightly", "Continuous"],
         help="CTest dashboard mode",
     )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Generate script but don't execute"
+    )
+
     args = parser.parse_args()
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
@@ -213,6 +245,12 @@ def main():
     print(f"Submit URL: {args.submit_url}")
 
     script_content = create_ctest_script(args)
+
+    if args.dry_run:
+        print("\nGenerated CTest script:")
+        print("=" * 50)
+        print(script_content)
+        return 0
 
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".cmake", delete=False) as f:
