@@ -124,7 +124,7 @@ public:
 };
 
 std::unique_ptr<Signal>
-ThreadTracerQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const
+ThreadTracerQueue::Submit(hsa::rocprofiler_packet* packet, bool bWait) const
 {
     auto* core = hsa::get_core_table();
 

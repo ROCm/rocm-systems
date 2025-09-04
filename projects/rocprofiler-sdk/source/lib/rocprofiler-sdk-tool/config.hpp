@@ -125,6 +125,10 @@ struct config : output_config
     bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   spm_counter_collection      = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
+    size_t spm_buffer_size             = get_env("ROCPROF_SPM_BUFFER_SIZE", 32768);
+    size_t spm_timeout_ms              = get_env("ROCPROF_SPM_TIMEOUT_MS", 30);
+    size_t spm_frequency_sclk          = get_env("ROCPROF_SPM_FREQUENCY_SCLK", 500000);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);
@@ -156,6 +160,7 @@ struct config : output_config
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
+    std::set<std::string>              spm_counters           = {};
     std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
@@ -220,6 +225,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(mpi_size);
     CFG_SERIALIZE_MEMBER(collection_periods);
     CFG_SERIALIZE_MEMBER(counters);
+    CFG_SERIALIZE_MEMBER(spm_counters);
     CFG_SERIALIZE_MEMBER(extra_counters_contents);
     CFG_SERIALIZE_MEMBER(kernel_filter_include);
     CFG_SERIALIZE_MEMBER(kernel_filter_exclude);

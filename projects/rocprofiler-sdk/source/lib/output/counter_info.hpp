@@ -113,6 +113,44 @@ struct tool_counter_record_t
     container_type read() const;
     void           write(const container_type& data);
 };
+
+struct tool_spm_counter_value_t
+{
+    rocprofiler_counter_id_t id        = {};
+    uint64_t                 value     = 0;
+    rocprofiler_timestamp_t  timestamp = 0;
+    rocprofiler_agent_id_t   agent_id  = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("counter_id", id));
+        ar(cereal::make_nvp("value", value));
+        ar(cereal::make_nvp("timestamp", timestamp));
+        ar(cereal::make_nvp("agent_id", agent_id));
+    }
+};
+
+struct tool_spm_counter_record_t
+{
+    using container_type = std::vector<tool_spm_counter_value_t>;
+
+    rocprofiler_dispatch_id_t   dispatch_id = {};
+    serialized_counter_record_t record      = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        // should be removed when moving to buffered tracing
+        auto tmp = read();
+
+        ar(cereal::make_nvp("dispatch_id", dispatch_id));
+        ar(cereal::make_nvp("records", tmp));
+    }
+
+    container_type read() const;
+    void           write(const container_type& data);
+};
 }  // namespace tool
 }  // namespace rocprofiler
 

@@ -172,6 +172,11 @@ using rccl_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rccl_api_record_t, domain_type::RCCL>;
 using counter_collection_buffered_output_t =
     buffered_output<tool_counter_record_t, domain_type::COUNTER_COLLECTION>;
+using spm_counter_collection_buffered_output_t =
+    buffered_output<tool_spm_counter_record_t, domain_type::STREAMING_PERFORMANCE_MONITOR>;
+using spm_counter_records_buffered_output_t =
+    ::rocprofiler::tool::buffered_output<rocprofiler::tool::tool_spm_counter_value_t,
+                                         domain_type::SPM_COUNTER_VALUES>;
 using scratch_memory_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_scratch_memory_record_t,
                     domain_type::SCRATCH_MEMORY>;

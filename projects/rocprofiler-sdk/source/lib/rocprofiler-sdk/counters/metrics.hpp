@@ -24,12 +24,21 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <cstdint>
+#include <optional>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -127,6 +136,9 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
+
+const std::set<uint64_t>*
+getSupportedSPMCounters(rocprofiler_agent_id_t id);
 }  // namespace counters
 }  // namespace rocprofiler
 

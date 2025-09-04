@@ -129,7 +129,7 @@ queue_cb(const context::context*                                         ctx,
         ret_pkt->populate_before();
         ret_pkt->populate_after();
         for(auto& aql_pkt : ret_pkt->after_krn_pkt)
-            aql_pkt.completion_signal.handle = 0;
+            aql_pkt.kernel_dispatch.completion_signal.handle = 0;
     }
 
     return {std::move(ret_pkt), true};

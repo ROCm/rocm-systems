@@ -21,17 +21,14 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+
 #include <fmt/core.h>
 #include <cstdlib>
 #include <iostream>
-#include "lib/common/logging.hpp"
-
-#define CHECK_HSA(fn, message)                                                                     \
-    if((fn) != HSA_STATUS_SUCCESS)                                                                 \
-    {                                                                                              \
-        ROCP_ERROR << message;                                                                     \
-        exit(1);                                                                                   \
-    }
+#include <vector>
 
 namespace rocprofiler
 {
@@ -40,8 +37,42 @@ namespace hsa
 constexpr uint16_t VENDOR_BIT  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
 constexpr uint16_t BARRIER_BIT = 1 << HSA_PACKET_HEADER_BARRIER;
 
+AQLMemoryPool::AQLMemoryPool(const AgentCache& agent, const AmdExtTable& ext, copy_fn_t copy_fn)
+{
+    allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
+    allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
+    free_fn         = ext.hsa_amd_memory_pool_free_fn;
+    fill_fn         = ext.hsa_amd_memory_fill_fn;
+    api_copy_fn     = copy_fn;
+
+    gpu_agent     = agent.get_hsa_agent();
+    cpu_pool_     = agent.cpu_pool();
+    gpu_pool_     = agent.gpu_pool();
+    kernarg_pool_ = agent.kernarg_pool();
+}
+
+void
+AQLMemoryPool::Free(void* ptr, void* data)
+{
+    if(ptr == nullptr) return;
+    auto* pool = reinterpret_cast<AQLMemoryPool*>(data);
+
+    ROCP_FATAL_IF(!pool || !pool->free_fn) << "Unable to deallocate from HSA memory pool";
+    pool->free_fn(ptr);
+}
+
 hsa_status_t
-CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
+AQLMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
+{
+    if(size == 0) return HSA_STATUS_SUCCESS;
+    auto* pool = reinterpret_cast<AQLMemoryPool*>(data);
+    ROCP_FATAL_IF(!pool || !pool->api_copy_fn) << "Unable to copy HSA memory";
+
+    return pool->api_copy_fn(dst, src, size);
+}
+
+hsa_status_t
+AQLMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 {
     if(size == 0)
     {
@@ -49,61 +80,57 @@ CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags
         return HSA_STATUS_SUCCESS;
     }
     if(!data) return HSA_STATUS_ERROR;
-    auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
-
-    if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
-    if(!flags.host_access || pool.kernarg_pool_.handle == 0 || !pool.fill_fn)
-        return HSA_STATUS_ERROR;
-
-    hsa_status_t status;
-    if(!pool.bIgnoreKernArg && flags.memory_hint == AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED)
-        status =
-            pool.allocate_fn(pool.kernarg_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
-    else
-        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
-
-    if(status != HSA_STATUS_SUCCESS)
-    {
-        ROCP_FATAL << "Could not allocate memory";
-        return status;
-    }
-
-    status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
-    if(status != HSA_STATUS_SUCCESS) return status;
-
-    status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
-    return status;
-}
-
-void
-CounterAQLPacket::CounterMemoryPool::Free(void* ptr, void* data)
-{
-    if(ptr == nullptr) return;
-
-    assert(data);
-    auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
-    assert(pool.free_fn);
-    pool.free_fn(ptr);
+    return static_cast<AQLMemoryPool*>(data)->Alloc(ptr, size, flags);
 }
 
 hsa_status_t
-CounterAQLPacket::CounterMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
+CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
 {
-    if(size == 0) return HSA_STATUS_SUCCESS;
-    if(!data) return HSA_STATUS_ERROR;
-    auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
+    if(!allocate_fn || !free_fn || !allow_access_fn) return HSA_STATUS_ERROR;
+    if(!flags.host_access || kernarg_pool_.handle == 0 || !fill_fn) return HSA_STATUS_ERROR;
 
-    if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
+    hsa_status_t status;
+    if(!bIgnoreKernArg && flags.memory_hint == AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED)
+        status = allocate_fn(kernarg_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+    else
+        status = allocate_fn(cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 
-    return pool.api_copy_fn(dst, src, size);
+    if(status != HSA_STATUS_SUCCESS) return status;
+
+    status = fill_fn(*ptr, 0u, size / sizeof(uint32_t));
+    if(status != HSA_STATUS_SUCCESS) return status;
+
+    status = allow_access_fn(1, &gpu_agent, nullptr, *ptr);
+    return status;
+}
+
+hsa_status_t
+TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
+{
+    if(!allocate_fn || !free_fn || !allow_access_fn) return HSA_STATUS_ERROR;
+
+    hsa_status_t status = HSA_STATUS_ERROR;
+    if(flags.host_access)
+    {
+        status = allocate_fn(cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+
+        if(status == HSA_STATUS_SUCCESS) status = allow_access_fn(1, &gpu_agent, nullptr, *ptr);
+    }
+    else
+    {
+        // Return page aligned data to avoid cache flush overlap
+        status = allocate_fn(gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
+        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
+    }
+    return status;
 }
 
 CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  agent,
                                    CounterAQLPacket::CounterMemoryPool        _pool,
                                    const std::vector<aqlprofile_pmc_event_t>& events)
-: pool(_pool)
 {
     if(events.empty()) return;
+    this->pool = std::make_shared<CounterAQLPacket::CounterMemoryPool>(_pool);
 
     packets.start_packet = null_amd_aql_pm4_packet;
     packets.stop_packet  = null_amd_aql_pm4_packet;
@@ -119,10 +146,10 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
     hsa_status_t status = aqlprofile_pmc_create_packets(&this->handle,
                                                         &this->packets,
                                                         profile,
-                                                        &CounterMemoryPool::Alloc,
-                                                        &CounterMemoryPool::Free,
-                                                        &CounterMemoryPool::Copy,
-                                                        reinterpret_cast<void*>(&pool));
+                                                        &AQLMemoryPool::Alloc,
+                                                        &AQLMemoryPool::Free,
+                                                        &AQLMemoryPool::Copy,
+                                                        pool.get());
     if(status != HSA_STATUS_SUCCESS)
     {
         std::string event_list;
@@ -143,103 +170,153 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
     empty                       = false;
 }
 
-hsa_status_t
-TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
-{
-    if(!data) return HSA_STATUS_ERROR;
-    auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
-
-    if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
-
-    hsa_status_t status = HSA_STATUS_ERROR;
-    if(flags.host_access)
-    {
-        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
-
-        if(status == HSA_STATUS_SUCCESS)
-            status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
-    }
-    else
-    {
-        // Return page aligned data to avoid cache flush overlap
-        status = pool.allocate_fn(
-            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
-        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
-    }
-    return status;
-}
-
-void
-TraceMemoryPool::Free(void* ptr, void* data)
-{
-    assert(data);
-    auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
-
-    if(pool.free_fn) pool.free_fn(ptr);
-}
-
-hsa_status_t
-TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
-{
-    if(!data) return HSA_STATUS_ERROR;
-    auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
-
-    if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
-
-    return pool.api_copy_fn(dst, src, size);
-}
-
 TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tracepool,
                                              const aqlprofile_att_profile_t& p)
-: tracepool(std::make_shared<TraceMemoryPool>(_tracepool))
 {
-    auto status = aqlprofile_att_create_packets(&tracepool->handle,
+    this->tracepool = std::make_shared<TraceMemoryPool>(_tracepool);
+    this->pool      = tracepool;
+    auto status     = aqlprofile_att_create_packets(&tracepool->handle,
                                                 &packets,
                                                 p,
-                                                &TraceMemoryPool::Alloc,
-                                                &TraceMemoryPool::Free,
-                                                &TraceMemoryPool::Copy,
-                                                tracepool.get());
-    CHECK_HSA(status, "failed to create ATT packet");
+                                                &AQLMemoryPool::Alloc,
+                                                &AQLMemoryPool::Free,
+                                                &AQLMemoryPool::Copy,
+                                                pool.get());
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create ATT packet";
 
     packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
     packets.stop_packet.header             = VENDOR_BIT | BARRIER_BIT;
     packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
     packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
-    this->empty                            = false;
 
+    this->empty  = false;
+    this->handle = tracepool->handle;
     clear();
 };
 
-CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool,
+CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _pool,
                                                uint64_t               id,
                                                uint64_t               addr,
                                                uint64_t               size,
                                                bool                   bFromStart,
                                                bool                   bIsUnload)
-: tracepool(_tracepool)
 {
+    auto tracepool = std::make_shared<TraceMemoryPool>(_pool);
+    this->pool     = tracepool;
+
     aqlprofile_att_codeobj_data_t codeobj{};
     codeobj.id        = id;
     codeobj.addr      = addr;
     codeobj.size      = size;
-    codeobj.agent     = tracepool.gpu_agent;
+    codeobj.agent     = pool->gpu_agent;
     codeobj.isUnload  = bIsUnload;
     codeobj.fromStart = bFromStart;
 
-    auto status = aqlprofile_att_codeobj_marker(&packet,
-                                                &tracepool.handle,
+    auto status = aqlprofile_att_codeobj_marker(&packet.ext_amd_aql_pm4,
+                                                &tracepool->handle,
                                                 codeobj,
-                                                &TraceMemoryPool::Alloc,
-                                                &TraceMemoryPool::Free,
-                                                &tracepool);
-    CHECK_HSA(status, "failed to create ATT marker");
+                                                &AQLMemoryPool::Alloc,
+                                                &AQLMemoryPool::Free,
+                                                pool.get());
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create ATT packet";
 
-    packet.header            = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    packet.completion_signal = hsa_signal_t{.handle = 0};
-    this->empty              = false;
+    packet.ext_amd_aql_pm4.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packet.ext_amd_aql_pm4.completion_signal = hsa_signal_t{.handle = 0};
 
+    this->empty  = false;
+    this->handle = tracepool->handle;
     clear();
+}
+
+hsa_status_t
+SPMMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
+{
+    if(!allocate_fn || !free_fn || !allow_access_fn) return HSA_STATUS_ERROR;
+
+    hsa_status_t status = HSA_STATUS_ERROR;
+
+    if(flags.host_access)
+        status = allocate_fn(cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+    else
+        status = allocate_fn(kernarg_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+
+    if(status == HSA_STATUS_SUCCESS) status = allow_access_fn(1, &gpu_agent, nullptr, *ptr);
+    if(status == HSA_STATUS_SUCCESS) status = fill_fn(*ptr, 0u, size / sizeof(uint32_t));
+
+    return status;
+}
+
+SPMPacket::SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_id_t _agent_id)
+: agent_id(_agent_id)
+, sym()
+{
+    ROCP_FATAL_IF(!sym.valid()) << "Failed to load aqlprofile SPM library";
+
+    auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
+    if(status != HSA_STATUS_SUCCESS) return;
+
+    packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
+    packets.stop_packet.header             = VENDOR_BIT | BARRIER_BIT;
+    packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
+    packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
+
+    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE, &spm_desc.seg_size);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM seg_size";
+    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC, &spm_desc.buffer_num);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM buffer_num";
+
+    is_valid = true;
+}
+
+void
+SPMPacket::populate_before()
+{
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+    barrier.header |= BARRIER_BIT;
+
+    before_krn_pkt.push_back(barrier);
+    before_krn_pkt.push_back(barrier);
+    before_krn_pkt.push_back(packets.start_packet);
+};
+
+void
+SPMPacket::populate_after()
+{
+    after_krn_pkt.push_back(packets.stop_packet);
+};
+
+void
+SPMPacket::kfd_start()
+{
+    ROCP_FATAL_IF(!handle.handle) << "Attempt at starting SPM with unitialized packet!";
+
+    if(running.exchange(true))
+    {
+        ROCP_ERROR << "Double call to KFD start!";
+        return;
+    }
+
+    auto status = sym.spm_start_fn(this->handle, SPM::aql_data_callback, this);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Unable to acquire KFD thread";
+}
+
+void
+SPMPacket::kfd_stop()
+{
+    if(running.exchange(false))
+        sym.spm_stop_fn(this->handle);
+    else
+        ROCP_WARNING << "Double call to KFD stop!";
+
+    ROCP_FATAL_IF(!decode_data_fn) << " decode data_fn null";
+
+    this->decode_data_fn(nullptr, 0, 1 << ROCPROFILER_SPM_RECORD_FLAG_END, user_data);
+}
+
+SPMPacket::~SPMPacket()
+{
+    if(running.exchange(false) && sym.valid()) sym.spm_stop_fn(this->handle);
 }
 
 }  // namespace hsa

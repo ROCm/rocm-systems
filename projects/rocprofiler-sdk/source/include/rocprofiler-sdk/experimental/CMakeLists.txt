@@ -1,4 +1,4 @@
-set(ROCPROFILER_EXPERIMENTAL_HEADER_FILES counters.h thread_trace.h)
+set(ROCPROFILER_EXPERIMENTAL_HEADER_FILES counters.h thread_trace.h spm.h)
 
 install(
     FILES ${ROCPROFILER_EXPERIMENTAL_HEADER_FILES}
@@ -6,3 +6,4 @@ install(
     COMPONENT development)
 
 add_subdirectory(thread-trace)
+add_subdirectory(spm)

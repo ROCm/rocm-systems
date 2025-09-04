@@ -66,6 +66,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -85,6 +86,7 @@
 #include <cassert>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -94,6 +96,7 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -184,22 +187,23 @@ is_handled_signal(int signum)
 
 struct buffer_ids
 {
-    rocprofiler_buffer_id_t hsa_api_trace           = {};
-    rocprofiler_buffer_id_t hip_api_trace           = {};
-    rocprofiler_buffer_id_t kernel_trace            = {};
-    rocprofiler_buffer_id_t memory_copy_trace       = {};
-    rocprofiler_buffer_id_t memory_allocation_trace = {};
-    rocprofiler_buffer_id_t counter_collection      = {};
-    rocprofiler_buffer_id_t scratch_memory          = {};
-    rocprofiler_buffer_id_t rccl_api_trace          = {};
-    rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
-    rocprofiler_buffer_id_t rocdecode_api_trace     = {};
-    rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
-    rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
+    rocprofiler_buffer_id_t hsa_api_trace                 = {};
+    rocprofiler_buffer_id_t hip_api_trace                 = {};
+    rocprofiler_buffer_id_t kernel_trace                  = {};
+    rocprofiler_buffer_id_t memory_copy_trace             = {};
+    rocprofiler_buffer_id_t memory_allocation_trace       = {};
+    rocprofiler_buffer_id_t counter_collection            = {};
+    rocprofiler_buffer_id_t scratch_memory                = {};
+    rocprofiler_buffer_id_t rccl_api_trace                = {};
+    rocprofiler_buffer_id_t pc_sampling_host_trap         = {};
+    rocprofiler_buffer_id_t rocdecode_api_trace           = {};
+    rocprofiler_buffer_id_t rocjpeg_api_trace             = {};
+    rocprofiler_buffer_id_t pc_sampling_stochastic        = {};
+    rocprofiler_buffer_id_t streaming_performance_monitor = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 12>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 13>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -210,7 +214,8 @@ struct buffer_ids
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
-                                                       pc_sampling_stochastic};
+                                                       pc_sampling_stochastic,
+                                                       streaming_performance_monitor};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1270,6 +1275,10 @@ get_config_perf_counters()
     {
         tool_pmc_counters.emplace(att_counter.counter_name);
     }
+    for(const auto& spm_counter : rocprofiler::tool::get_config().spm_counters)
+    {
+        tool_pmc_counters.emplace(spm_counter);
+    }
     return tool_pmc_counters;
 }
 
@@ -1477,6 +1486,62 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     }
 }
 
+int
+spm_dispatch_callback(rocprofiler_agent_id_t /**/,
+                      rocprofiler_queue_id_t /* queue_id */,
+                      rocprofiler_kernel_id_t   kernel_id,
+                      rocprofiler_dispatch_id_t dispatch_id,
+                      void* /* config_userdata */,
+                      rocprofiler_user_data_t* userdata)
+{
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+
+    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    {
+        return 0;
+    }
+    userdata->value = dispatch_id;
+    return 1;
+}
+
+void
+spm_data_callback(rocprofiler_spm_counter_record_t* records,
+                  size_t                            record_count,
+                  uint8_t                           flags,
+                  rocprofiler_user_data_t           userdata)
+{
+    auto lk = std::shared_lock{tool_metadata->spm_mut};
+    if(record_count == 0) return;
+
+    if(flags >> ROCPROFILER_SPM_RECORD_FLAG_DATA)
+    {
+        auto counter_record        = tool::tool_spm_counter_record_t{};
+        counter_record.dispatch_id = userdata.value;
+        auto serialized_records    = std::vector<tool::tool_spm_counter_value_t>{};
+        for(size_t count = 0; count < record_count; count++)
+        {
+            auto _counter_id = rocprofiler_counter_id_t{};
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &_counter_id),
+                             "query record counter id");
+            serialized_records.emplace_back(
+                tool::tool_spm_counter_value_t{_counter_id,
+                                               records[count].value,
+                                               records[count].timestamp,
+                                               records[count].agent_id});
+        }
+
+        if(!serialized_records.empty())
+        {
+            counter_record.write(serialized_records);
+            tool::write_ring_buffer(counter_record, domain_type::STREAMING_PERFORMANCE_MONITOR);
+        }
+    }
+
+    if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST)
+    {
+        ROCP_CI_LOG(WARNING) << " Dispatch_id:" << userdata.value;
+    }
+}
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
 
@@ -2078,6 +2143,44 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(counter_collection_ctx, "counter collection");
     }
 
+    if(tool::get_config().spm_counter_collection)
+    {
+        static const auto gpu_agents_counter_info = get_agent_counter_info();
+
+        std::vector<rocprofiler_spm_parameter_t> params;
+        params.push_back({ROCPROFILER_SPM_PARAMETER_TIMEOUT_MS, tool::get_config().spm_timeout_ms});
+        params.push_back(
+            {ROCPROFILER_SPM_PARAMETER_BUFFER_SIZE, tool::get_config().spm_buffer_size * 1024});
+        params.push_back(
+            {ROCPROFILER_SPM_PARAMETER_SAMPLE_FREQUENCY, tool::get_config().spm_frequency_sclk});
+
+        for(auto agent : get_gpu_agents())
+        {
+            if(agent->gpu_index != 0) continue;
+
+            std::vector<rocprofiler_counter_id_t> expected_counters;
+
+            for(const auto& citr : gpu_agents_counter_info.at(agent->id))
+            {
+                for(auto desired_counter : rocprofiler::tool::get_config().spm_counters)
+                {
+                    if(std::string_view{desired_counter} == std::string_view{citr.name})
+                        expected_counters.emplace_back(citr.id);
+                }
+            }
+            ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(get_client_ctx(),
+                                                                        agent->id,
+                                                                        expected_counters.data(),
+                                                                        expected_counters.size(),
+                                                                        params.data(),
+                                                                        params.size(),
+                                                                        spm_dispatch_callback,
+                                                                        spm_data_callback,
+                                                                        nullptr),
+                             "Could not setup SPM counting service");
+        }
+    }
+
     if(tool::get_config().kernel_rename)
     {
         auto rename_ctx            = rocprofiler_context_id_t{0};
@@ -2444,6 +2547,8 @@ tool_fini(void* /*tool_data*/)
     auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
     auto counters_output =
         tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
+    auto spm_counters_output =
+        tool::spm_counter_collection_buffered_output_t{tool::get_config().spm_counter_collection};
     auto scratch_memory_output =
         tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
     auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
@@ -2496,6 +2601,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
+    generate_output(spm_counters_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
     {
@@ -2541,7 +2647,8 @@ tool_fini(void* /*tool_data*/)
                          rocdecode_output.get_generator(),
                          rocjpeg_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
-                         pc_sampling_stochastic_output.get_generator());
+                         pc_sampling_stochastic_output.get_generator(),
+                         spm_counters_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -2628,7 +2735,7 @@ tool_fini(void* /*tool_data*/)
         auto codeobj     = tool_metadata->get_code_object_load_info();
         auto output_path = tool::format_path(tool::get_config().output_path);
 
-        std::vector<std::string> perf{};
+        auto perf = std::vector<std::string>{};
         for(auto& counter : tool::get_config().att_param_perfcounters)
         {
             std::stringstream ss;
@@ -2638,6 +2745,9 @@ tool_fini(void* /*tool_data*/)
 
             perf.emplace_back(ss.str());
         }
+
+        for(auto desired_counter : rocprofiler::tool::get_config().spm_counters)
+            perf.emplace_back(desired_counter);
 
         for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
         {

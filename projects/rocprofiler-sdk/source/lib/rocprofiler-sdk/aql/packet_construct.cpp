@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 
 #include <fmt/core.h>
 #include <hsa/hsa_ext_amd.h>
@@ -106,49 +107,30 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
                                               HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
                                               static_cast<void*>(&_access));
 
-    hsa::CounterAQLPacket::CounterMemoryPool pool;
-
-    if(_access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) pool.bIgnoreKernArg = true;
-
-    pool.allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
-    pool.allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
-    pool.free_fn         = ext.hsa_amd_memory_pool_free_fn;
-    pool.api_copy_fn     = coreapi.hsa_memory_copy_fn;
-    pool.fill_fn         = ext.hsa_amd_memory_fill_fn;
-
-    pool.gpu_agent     = agent->get_hsa_agent();
-    pool.cpu_pool_     = agent->cpu_pool();
-    pool.kernarg_pool_ = agent->kernarg_pool();
+    auto pool = std::make_shared<hsa::CounterAQLPacket::CounterMemoryPool>(
+        *agent, ext, coreapi.hsa_memory_copy_fn);
+    if(_access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) pool->bIgnoreKernArg = true;
 
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
     if(aql_agent == nullptr) throw std::runtime_error("Could not get AQL agent!");
 
     if(_events.empty()) ROCP_TRACE << "No events for pkt";
 
-    return std::make_unique<hsa::CounterAQLPacket>(*aql_agent, pool, _events);
+    return std::make_unique<hsa::CounterAQLPacket>(*aql_agent, *pool, _events);
 }
 
 ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
                                                          const thread_trace_parameter_pack& params,
                                                          const CoreApiTable&                coreapi,
                                                          const AmdExtTable&                 ext)
+: tracepool(agent, ext, coreapi.hsa_memory_copy_fn)
 {
-    this->tracepool                 = hsa::TraceMemoryPool{};
-    this->tracepool.allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
-    this->tracepool.allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
-    this->tracepool.free_fn         = ext.hsa_amd_memory_pool_free_fn;
-    this->tracepool.api_copy_fn     = coreapi.hsa_memory_copy_fn;
-    this->tracepool.gpu_agent       = agent.get_hsa_agent();
-    this->tracepool.cpu_pool_       = agent.cpu_pool();
-    this->tracepool.gpu_pool_       = agent.gpu_pool();
-
     uint32_t cu                 = static_cast<uint32_t>(params.target_cu);
     uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);
     uint32_t simd               = static_cast<uint32_t>(params.simd_select);
     uint32_t buffer_size_lo     = static_cast<uint32_t>(params.buffer_size);
     uint32_t buffer_size_hi     = static_cast<uint32_t>(params.buffer_size >> 32);
     uint32_t perf_ctrl          = static_cast<uint32_t>(params.perfcounter_ctrl);
-    uint32_t perf_exclude_mask  = static_cast<uint32_t>(params.perf_exclude_mask);
 
     aql_params.clear();
 
@@ -158,21 +140,9 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, {buffer_size_lo}});
 
     if(buffer_size_hi != 0)
-    {
         aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
                                   AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH),
                               {buffer_size_hi}});
-    }
-
-    if(perf_exclude_mask != 0u)
-    {
-        // Bitwise NOT because aqlprofile receives the mask, not the exclude mask
-        aql_params.push_back(
-            {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK, {~perf_exclude_mask}});
-    }
-
-    if(params.no_detail_simd)
-        aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_OCCUPANCY_MODE, {1}});
 
     if(perf_ctrl != 0 && !params.perfcounters.empty())
     {
@@ -212,6 +182,86 @@ std::unique_ptr<hsa::CodeobjMarkerAQLPacket>
 ThreadTraceAQLPacketFactory::construct_unload_marker_packet(uint64_t id)
 {
     return std::make_unique<hsa::CodeobjMarkerAQLPacket>(tracepool, id, 0, 0, false, true);
+}
+
+SPMPacketFactory::SPMPacketFactory(const rocprofiler_agent_t& agent,
+                                   const parameter_pack&      pack,
+                                   const hsa::SPMMemoryPool&  pool)
+: agent_id(agent.id)
+, _pool(pool)
+{
+    const double sclk_freq   = agent.max_engine_clk_fcompute * 1E6;  // MHz
+    const size_t sclk_period = static_cast<size_t>(std::round(sclk_freq / pack.sample_freq));
+
+    params.clear();
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, pack.buffer_size});
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, sclk_period});
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, pack.timeout});
+
+    events.clear();
+    for(auto& metric : pack.metrics)
+    {
+        auto query_info = get_query_info(agent.id, metric);
+
+        aqlprofile_pmc_event_t event{};
+        event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+        event.event_id   = std::atoi(metric.event().c_str());
+        event.flags      = aqlprofile_pmc_event_flags_t{metric.flags()};
+
+        for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
+        {
+            event.block_index = block_index;
+            events.push_back(event);
+            id_map.push_back({rocprofiler_counter_id_t{.handle = metric.id()}, block_index});
+        }
+    }
+}
+
+std::unique_ptr<hsa::SPMPacket>
+SPMPacketFactory::construct()
+{
+    auto pool = std::make_shared<hsa::SPMMemoryPool>(this->_pool);
+
+    aqlprofile_spm_profile_t profile{};
+    profile.events          = events.data();
+    profile.event_count     = events.size();
+    profile.parameter_count = params.size();
+    profile.parameters      = params.data();
+
+    profile.aql_agent  = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent_id));
+    profile.hsa_agent  = pool->gpu_agent;
+    profile.alloc_cb   = &hsa::AQLMemoryPool::Alloc;
+    profile.dealloc_cb = &hsa::AQLMemoryPool::Free;
+    profile.memcpy_cb  = &hsa::AQLMemoryPool::Copy;
+    profile.userdata   = pool.get();
+
+    auto pkt = std::make_unique<hsa::SPMPacket>(profile, agent_id);
+    if(!pkt->Valid()) return nullptr;
+
+    pool->handle            = pkt->handle;
+    pool->delete_packets_fn = pkt->sym.delete_packets_fn;
+    pkt->pool               = std::move(pool);
+
+    pkt->spm_desc.size =
+        sizeof(SPM::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
+
+    pkt->container_desc_data = std::make_shared<std::vector<char>>(pkt->spm_desc.size);
+    pkt->spm_desc.data       = pkt->container_desc_data->data();
+
+    auto* desc = static_cast<SPM::spm_desc_v0_t*>(pkt->spm_desc.data);
+
+    *desc               = SPM::spm_desc_v0_t{};
+    desc->aql_desc_size = pkt->aql_desc.size;
+    desc->num_events    = id_map.size();
+
+    std::memcpy(desc->aqlprofile_desc(), pkt->aql_desc.data, pkt->aql_desc.size);
+    std::memcpy(desc->events(), id_map.data(), id_map.size() * sizeof(id_map[0]));
+
+    pkt->clear();
+    pkt->populate_before();
+    pkt->populate_after();
+
+    return pkt;
 }
 
 std::vector<aqlprofile_pmc_event_t>
