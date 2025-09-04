@@ -2781,7 +2781,7 @@ rocprofiler-sdk:
       - gfx1201
       block: SQ
       event: 302
-  - name: SQC_ICACHE_MISSES 
+  - name: SQC_ICACHE_MISSES
     description: Number of cache misses, includes uncached requests. {per-Bank, nondeterministic, C2}
     properties: []
     definitions:
@@ -5505,8 +5505,9 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 16
-  - name: SQ_PERF_SEL_INST_CYCLES_VALU 
-    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 and V_OP32_T instruction, count them seperately. 
+  - name: SQ_PERF_SEL_INST_CYCLES_VALU
+    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 
+     and V_OP32_T instruction, count them separately. 
     properties: []
     definitions:
     - architectures:
@@ -5515,7 +5516,7 @@ rocprofiler-sdk:
       - gfx1200
       block: SQ
       event: 99
-  - name: SQ_INSTS_VEC32_LEVEL_LDS 
+  - name: SQ_INSTS_VEC32_LEVEL_LDS
     description: Number of in-flight wave32 LDS (indexed, flat) instructions issued.{level, nondeterministic}
     properties: []
     definitions:
@@ -5526,7 +5527,8 @@ rocprofiler-sdk:
       block: SQ
       event: 250
   - name: SQ_INST_CYCLES_VALU
-    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 and V_OP32_T instruction, count them seperately. {emulated, C1}
+    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1
+     and V_OP32_T instruction, count them separately. {emulated, C1}
     properties: []
     definitions:
     - architectures:
@@ -10698,4 +10700,4 @@ rocprofiler-sdk:
     - architectures:
       - gfx1200
       - gfx1201
-      expression: (1-(reduce(TCP_REQ_MISS,sum)/(reduce(TCP_REQ,sum)))*100
+      expression: (1-(reduce(TCP_REQ_MISS,sum)/reduce(TCP_REQ,sum)))*100
