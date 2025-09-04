@@ -40,7 +40,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Branch Utilization
   * IPC
 
-* Add `Memory Throughput` panel to TUI's `High Level Analysis` category  with the following metrics:
+* `Memory Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
   * vL1D Cache BW
   * vL1D Cache Utilization
   * Theoretical LDS Bandwidth
