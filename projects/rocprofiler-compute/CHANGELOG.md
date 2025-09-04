@@ -23,7 +23,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
 
-* Add `Compute Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
+* `Compute Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
   * VALU FLOPs
   * VALU IOPs
   * MFMA FLOPs (F8)
