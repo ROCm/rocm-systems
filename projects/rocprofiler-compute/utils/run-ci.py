@@ -29,6 +29,7 @@ CI script to upload coverage XML files to CDash
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -82,14 +83,63 @@ set(CTEST_BUILD_NAME "{args.build_name}")
 set(CTEST_SOURCE_DIRECTORY "{args.source_dir}")
 set(CTEST_BINARY_DIRECTORY "{args.binary_dir}")
 
+file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
+
+if(NOT EXISTS "${{CTEST_BINARY_DIRECTORY}}/CMakeCache.txt")
+    file(WRITE "${{CTEST_BINARY_DIRECTORY}}/CMakeCache.txt"
+         "CMAKE_PROJECT_NAME:STATIC={args.project_name}\\n")
+endif()
+
+file(WRITE "${{CTEST_BINARY_DIRECTORY}}/CTestConfig.cmake" "
+set(CTEST_PROJECT_NAME \\"{args.project_name}\\")
+set(CTEST_NIGHTLY_START_TIME \\"01:00:00 UTC\\")
+if(CMAKE_VERSION VERSION_GREATER 3.14)
+    set(CTEST_SUBMIT_URL \\"{args.submit_url}\\")
+else()
+    set(CTEST_DROP_METHOD \\"https\\")
+    set(CTEST_DROP_SITE \\"{args.cdash_host}\\")
+    set(CTEST_DROP_LOCATION \\"{args.submit_path}\\")
+endif()
+set(CTEST_DROP_SITE_CDASH TRUE)
+")
+
 ctest_start({args.mode})
 
-set(CTEST_COVERAGE_COMMAND "python3")
-set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml")
+set(COVERAGE_SRC_FILE "{args.coverage_file}")
+set(COVERAGE_DEST_FILE "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
 
-file(COPY "{args.coverage_file}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
+if(NOT EXISTS "${{COVERAGE_SRC_FILE}}")
+    message(FATAL_ERROR "Coverage file not found: ${{COVERAGE_SRC_FILE}}")
+endif()
+
+file(COPY "${{COVERAGE_SRC_FILE}}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
+get_filename_component(SRC_FILENAME "${{COVERAGE_SRC_FILE}}" NAME)
+if(NOT SRC_FILENAME STREQUAL "coverage.xml")
+    file(RENAME "${{CTEST_BINARY_DIRECTORY}}/${{SRC_FILENAME}}"
+                "${{COVERAGE_DEST_FILE}}")
+endif()
+
+message(STATUS "Processing coverage file: ${{COVERAGE_DEST_FILE}}")
+
+file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}/Testing")
+file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo")
+
+file(COPY "${{COVERAGE_DEST_FILE}}"
+     DESTINATION "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo")
+
 ctest_coverage()
-ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)
+
+ctest_submit(PARTS Coverage
+             RETRY_COUNT 3
+             RETRY_DELAY 5
+             CAPTURE_CMAKE_ERROR submit_error)
+
+if(submit_error)
+    message(FATAL_ERROR "Failed to submit coverage to CDash. "
+                        "Error code: ${{submit_error}}")
+endif()
+
+message(STATUS "Successfully submitted coverage to CDash")
 """
     return script_content
 
@@ -150,6 +200,10 @@ def main():
         choices=["Experimental", "Nightly", "Continuous"],
         help="CTest dashboard mode",
     )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Generate script but don't execute"
+    )
+
     args = parser.parse_args()
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
@@ -177,6 +231,24 @@ def main():
         print(f"  And in: {project_root / args.coverage_file}")
         return 1
 
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(coverage_path)
+        root = tree.getroot()
+        if root.tag != "coverage":
+            print(
+                f"ERROR: File does not appear to be a coverage XML file "
+                f"(root tag: {root.tag})",
+                file=sys.stderr,
+            )
+            return 1
+        line_rate = float(root.get("line-rate", 0)) * 100
+        print(f"Line Coverage: {line_rate:.1f}%")
+    except Exception as e:
+        print(f"ERROR: Could not parse coverage XML file: {e}", file=sys.stderr)
+        return 1
+
     args.coverage_file = str(coverage_path.absolute())
     args.source_dir = str(Path(args.source_dir).absolute())
     args.binary_dir = str(Path(args.binary_dir).absolute())
@@ -189,17 +261,22 @@ def main():
     print(f"Site: {args.site}")
     print(f"Submit URL: {args.submit_url}")
 
-    try:
-        import xml.etree.ElementTree as ET
+    # Ensure build directory exists
+    os.makedirs(args.binary_dir, exist_ok=True)
 
-        tree = ET.parse(args.coverage_file)
-        root = tree.getroot()
-        line_rate = float(root.get("line-rate", 0)) * 100
-        print(f"Line Coverage: {line_rate:.1f}%")
-    except Exception as e:
-        print(f"Warning: Could not parse coverage percentage: {e}")
+    # Copy CTestConfig.cmake if it exists in source
+    source_ctest_config = Path(args.source_dir) / "CTestConfig.cmake"
+    if source_ctest_config.exists():
+        shutil.copy2(source_ctest_config, Path(args.binary_dir) / "CTestConfig.cmake")
+        print("Copied CTestConfig.cmake to build directory")
 
     script_content = create_ctest_script(args)
+
+    if args.dry_run:
+        print("\nGenerated CTest script:")
+        print("=" * 50)
+        print(script_content)
+        return 0
 
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".cmake", delete=False) as f:

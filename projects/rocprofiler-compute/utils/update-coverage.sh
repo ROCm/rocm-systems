@@ -23,29 +23,15 @@
 # THE SOFTWARE.
 ##############################################################################
 
-# generate coverage for develop branch - stores file in repo
+# generate_coverage.sh
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ "$SCRIPT_DIR" == */projects/rocprofiler-compute/* ]]; then
-    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-    MONOREPO_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
-    IS_MONOREPO=true
-else
-    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-    MONOREPO_ROOT=""
-    IS_MONOREPO=false
-fi
-
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
-COVERAGE_FILE="$PROJECT_ROOT/coverage/coverage-latest.xml"
+COVERAGE_FILE="$PROJECT_ROOT/coverage/Coverage.xml"
 
-echo "=== Generating Coverage for rocprofiler-compute ==="
-echo "Project root: $PROJECT_ROOT"
-if [ "$IS_MONOREPO" = true ]; then
-    echo "Monorepo root: $MONOREPO_ROOT"
-fi
+echo "=== Generating Coverage for Mainline Promotion ==="
 
 echo "Setting up clean build..."
 rm -rf "$BUILD_DIR"
@@ -64,15 +50,7 @@ ctest --verbose --output-on-failure --parallel 1 || {
 }
 
 echo "Generating coverage report..."
-if ctest -R generate_coverage_report --output-on-failure --parallel 2; then
-    echo "Coverage report generated via ctest"
-else
-    echo "Trying alternative coverage generation..."
-    cd "$PROJECT_ROOT"
-    python3 -m coverage combine || true
-    python3 -m coverage xml -o "$BUILD_DIR/coverage.xml"
-    cd "$BUILD_DIR"
-fi
+ctest -R generate_coverage_report --output-on-failure --parallel 2
 
 if [ ! -f "coverage.xml" ]; then
     echo "ERROR: coverage.xml not generated"
@@ -95,8 +73,9 @@ echo "=== Coverage Generated Successfully ==="
 echo "Line Coverage: $COVERAGE_INFO"
 echo "File: $COVERAGE_FILE"
 echo ""
-
-echo "Coverage file generated: coverage/coverage-latest.xml"
-echo "To update official coverage:"
-echo "  1. Commit this file to develop branch"
-echo "  2. GitHub Actions will automatically upload to CDash"
+echo "Next steps:"
+echo "1. git add $COVERAGE_FILE"
+echo "2. git commit -m 'Update coverage: $COVERAGE_INFO'"
+echo "3. Proceed with push to develop"
+echo "4. CDash upload will happen automatically on push"
+echo ""
