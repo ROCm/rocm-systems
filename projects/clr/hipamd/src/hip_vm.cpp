@@ -205,7 +205,8 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
                                           hipMemAllocationGranularity_flags option) {
   HIP_INIT_API(hipMemGetAllocationGranularity, granularity, prop, option);
 
-  if (granularity == nullptr || prop == nullptr || prop->type != hipMemAllocationTypePinned ||
+  if (granularity == nullptr || prop == nullptr || (prop->type != hipMemAllocationTypePinned &&
+      prop->type != hipMemAllocationTypeUncached) ||
       prop->location.type != hipMemLocationTypeDevice || prop->location.id >= g_devices.size() ||
       (option != hipMemAllocationGranularityMinimum &&
        option != hipMemAllocationGranularityRecommended)) {
