@@ -1851,14 +1851,11 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
     {
-        ROCPROFSYS_VERBOSE_F(
-            2, "Entered hip_streams_callback function for ROCPROFILER_HIP_STREAM_CREATE");
+        ROCPROFSYS_VERBOSE_F(3, " operation = ROCPROFILER_HIP_STREAM_CREATE\n");
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
     {
-        ROCPROFSYS_VERBOSE_F(
-            2,
-            "Entered hip_streams_callback function for ROCPROFILER_HIP_STREAM_DESTROY");
+        ROCPROFSYS_VERBOSE_F(3, " operation = ROCPROFILER_HIP_STREAM_DESTROY\n");
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
     {
@@ -1866,17 +1863,19 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
         // called
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
-            ROCPROFSYS_VERBOSE_F(
-                2, "Entered hip_streams_callback function for ROCPROFILER_HIP_STREAM_SET "
-                   "with ROCPROFILER_CALLBACK_PHASE_ENTER");
+            ROCPROFSYS_VERBOSE_F(3,
+                                 " operation = ROCPROFILER_HIP_STREAM_SET, phase = "
+                                 "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id=%lu\n",
+                                 (unsigned long) stream_id.handle);
             stream_id_push(stream_id);
         }
         // Pop stream ID off of stream stack after underlying HIP function is completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
-            ROCPROFSYS_VERBOSE_F(
-                2, "Entered hip_stream_callback function for ROCPROFILER_HIP_STREAM_SET "
-                   "with ROCPROFILER_CALLBACK_PHASE_EXIT");
+            ROCPROFSYS_VERBOSE_F(3,
+                                 "operation = ROCPROFILER_HIP_STREAM_SET, phase = "
+                                 "ROCPROFILER_CALLBACK_PHASE_EXIT, stream_id=%lu\n",
+                                 (unsigned long) stream_id.handle);
             stream_id_pop();
         }
     }

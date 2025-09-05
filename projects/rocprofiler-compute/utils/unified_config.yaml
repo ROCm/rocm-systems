@@ -3266,7 +3266,7 @@ panels:
               SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
               )
             unit: FLOPs/Byte
-          Performance GFLOPs:
+          Performance (GFLOPs):
             value: (
               SUM(
                 ($wave_size * (
@@ -3340,7 +3340,7 @@ panels:
               SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
               )
             unit: FLOPs/Byte
-          Performance GFLOPs:
+          Performance (GFLOPs):
             value: (
               SUM(
                 ($wave_size * (
@@ -3415,7 +3415,7 @@ panels:
               SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
               )
             unit: FLOPs/Byte
-          Performance GFLOPs:
+          Performance (GFLOPs):
             value: (
               SUM(
                 ($wave_size * (
@@ -3493,7 +3493,7 @@ panels:
               SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
               )
             unit: FLOPs/Byte
-          Performance GFLOPs:
+          Performance (GFLOPs):
             value: (
               SUM(
                 ($wave_size * (
@@ -3619,7 +3619,7 @@ panels:
               SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
               )
             unit: FLOPs/Byte
-          Performance GFLOPs:
+          Performance (GFLOPs):
             value: (
               SUM(
                 ($wave_size * (
