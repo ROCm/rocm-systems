@@ -18,6 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#ifndef WITHOUT_HSA_BACKEND
+
 #include "rocprogram.hpp"
 
 #include "utils/options.hpp"
@@ -338,3 +340,4 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
 
 }  // namespace amd::roc
 
+#endif  // WITHOUT_HSA_BACKEND

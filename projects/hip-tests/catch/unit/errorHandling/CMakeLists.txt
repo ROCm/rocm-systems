@@ -28,5 +28,4 @@ hip_add_exe_to_target(NAME ErrorHandlingTest
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++17)
 
-add_dependencies(ErrorHandlingTest hipGetLastErrorEnv_Exe hipPeekAtLastErrorEnv_Exe)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetLastErrorEnv_Exe hipPeekAtLastErrorEnv_Exe)
+add_dependencies(build_tests hipGetLastErrorEnv_Exe hipPeekAtLastErrorEnv_Exe)

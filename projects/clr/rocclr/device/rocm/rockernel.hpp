@@ -25,6 +25,8 @@
 #include "top.hpp"
 #include "rocprintf.hpp"
 
+#ifndef WITHOUT_HSA_BACKEND
+
 namespace amd::roc {
 
 class Kernel : public device::Kernel {
@@ -66,3 +68,4 @@ class Kernel : public device::Kernel {
 
 }  // namespace amd::roc
 
+#endif  // WITHOUT_HSA_BACKEND

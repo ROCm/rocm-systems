@@ -3,8 +3,12 @@ pr:
   branches:
     include:
       - develop
+  paths:  
+    include:  
+      - projects/*
+      - shared/*
   drafts: false
-
+  
 variables:
   - group: internal
   - name: REPOSITORY_NAME
@@ -21,106 +25,38 @@ variables:
     value: 'pull_request'
   - name: GH_PAT
     value: '$(svc_acc_org_secret)'  
-
 jobs:  
-- job: Determine_Changes
-  displayName: 'Sparse Checkout & Check Changed Files'
-  pool: rocm-ci-caller
-  steps:
-    - script: |
-        echo "## Detecting file changes in PR #$(PR_NUM)"
-
-        git init repo_name
-        cd repo_name
-        git config core.sparseCheckout true
-
-        echo "projects/" > .git/info/sparse-checkout
-        echo "shared/" >> .git/info/sparse-checkout
-
-        git remote add origin https://github.com/$(REPOSITORY_NAME).git
-        git fetch --depth=50 origin $(BASE_REF)
-
-        git fetch --depth=50 origin $(HEAD_SHA)
-
-        git checkout FETCH_HEAD
-        
-        git diff --name-only origin/$(BASE_REF)...HEAD > ../changed_files.txt
-
-        echo "Changed files:"
-        cat ../changed_files.txt
-
-        MATCH_FOUND=false
-        while read file; do
-          if [[ "$file" == projects/* ]]; then
-            MATCH_FOUND=true
-            break
-          fi
-        done < ../changed_files.txt
-
-        echo "Match found: $MATCH_FOUND"
-        echo "##vso[task.setvariable variable=match_found;isOutput=true]$MATCH_FOUND"
-      name: detectChanges
-      displayName: Detect path changes
-
 - job: Trigger_Pipeline 
-  displayName: 'Trigger Pipeline or Skip'
-  dependsOn: Determine_Changes
-  condition: succeeded()
+  displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
-  variables:
-    match_found: $[ dependencies.Determine_Changes.outputs['detectChanges.match_found'] ]
   steps:
-    - checkout: none
-    
-    - script: |
-        echo "DEBUG: match_found = '$(match_found)'"
-      displayName: 'Debug match_found variable'
-
-    - script: |
-        rm -rf $(repo_name)
-        git clone $(gh_repo)
-      displayName: Checkout Code
-      condition: eq(variables.match_found, 'true')
-
-    - script: |
-        set -e  
-        echo "Calling jenkins_api.py for PR #$(PR_NUM)"
-        cd $(repo_name)
-        docker run \
-          -v "$PWD:/src" \
-          -w /src \
-          -e GH_TOKEN="$(svc_acc_org_secret)" \
-          -e svc_acc_org_secret="$(svc_acc_org_secret)" \
-          $(base_image) \
-          bash -c "echo 'Fetching PR title from GitHub API...' && \
-          echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
-          export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
-          python3 jenkins_api.py \
-            -ghr '$(REPOSITORY_NAME)' \
-            -ghsha '$(HEAD_SHA)' \
-            -ghprn '$(PR_NUM)' \
-            -ghpru '$(PR_URL)' \
-            -ghprt \"\$TITLE\" \
-            -ghpat '$(GH_PAT)' \
-            -br   '$(BASE_REF)' \
-            -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
-      displayName: Invoke jenkins_api.py in Docker  
-      env:  
-        svc_acc_org_secret: $(svc_acc_org_secret)
-      condition: eq(variables.match_found, 'true')
-
-
-    - script: |
-        echo "Changes outside monitored paths. Skipping Jenkins trigger."
-        echo "Sending success status for PSDB..."
-        export GH_TOKEN=$(GH_PAT)
-        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
-          -f state=success \
-          -f context="PSDB" \
-          -f description="PSDB skipped"
-        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
-          -f state=success \
-          -f context="psdb-test" \
-          -f description="psdb-test skipped"
-      displayName: Send Skipped Status
-      condition: ne(variables.match_found, 'true')
+  - checkout: none
+  - script: |
+          rm -rf $(repo_name)
+          git clone $(gh_repo)
+    displayName: Checkout Code
+  - script: |
+          set -e  
+          echo "Calling jenkins_api.py for PR #$(PR_NUM)"
+          cd $(repo_name)
+          docker run \
+            -v "$PWD:/src" \
+            -w /src \
+            -e GH_TOKEN="$(svc_acc_org_secret)" \
+            -e svc_acc_org_secret="$(svc_acc_org_secret)" \
+            $(base_image) \
+            bash -c "echo 'Fetching PR title from GitHub API...' && \
+            echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
+            export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
+            python3 jenkins_api.py \
+              -ghr '$(REPOSITORY_NAME)' \
+              -ghsha '$(HEAD_SHA)' \
+              -ghprn '$(PR_NUM)' \
+              -ghpru '$(PR_URL)' \
+              -ghprt \"\$TITLE\" \
+              -ghpat '$(GH_PAT)' \
+              -br   '$(BASE_REF)' \
+              -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
+    displayName: Invoke jenkins_api.py in Docker  
+    env:  
+      svc_acc_org_secret: $(svc_acc_org_secret)

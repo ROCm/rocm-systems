@@ -28,22 +28,36 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef unaligned_memory_access_h_
-#define unaligned_memory_access_h_
+#include "src/RTthread.h"
 
-/*
- * C language - functions
- */
-
-/* CAST_WITHOUT_ALIGNMENT_WARNING(toType, addr)
+/**
+ * atomic_set will do the following atomically:
+ *    if (*val == 0) {
+ *       *val = 1;
+ *       return 1;
+ *    }
+ *    return 0;
  *
- * C language macro that casts the expression addr to type toType
- * without producing a warning that alignment of the new pointer type is
- * larger than the current pointer type.
- *
- * WARNING:  The caller is responsible to ensure that the alignment is
- * correct or use memcpy if the pointer is dereferenced.
- */
-#define CAST_WITHOUT_ALIGNMENT_WARNING(toType, addr) (toType)(void*)(addr)
+ **/
 
-#endif
+extern int
+atomic_set(volatile int* int_ptr);
+
+int
+tc_lock_lock(tc_lock_t* tc)
+{
+    dyntid_t me;
+
+    me = dyn_pthread_self();
+    if(me == tc->tid) return DYNINST_DEAD_LOCK;
+
+    while(1)
+    {
+        if(tc->mutex == 0 && atomic_set(&tc->mutex))
+        {
+            tc->tid = me;
+            break;
+        }
+    }
+    return 0;
+}

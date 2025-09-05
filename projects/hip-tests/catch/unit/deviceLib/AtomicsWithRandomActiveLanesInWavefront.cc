@@ -550,7 +550,6 @@ static void runFloatTest() {
 
   // Cleanup memory
   free(hOData);
-  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
 }
@@ -769,11 +768,8 @@ static void runDivFloatTest() {
 
   // Cleanup memory
   free(hOData);
-  free(hIDivValues);
-  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
-  HIP_CHECK(hipFree(dIDivValues));
 }
 
 /*

@@ -31,8 +31,6 @@
 /* $Id: RTheap.c,v 1.25 2006/05/03 00:31:25 jodom Exp $ */
 /* RTheap.c: platform-generic heap management */
 
-#define _GNU_SOURCE
-
 #include <stdio.h>
 #include <stdlib.h>
 #if !defined(os_windows) /* ccw 15 may 2000 : 29 mar 2001 */
@@ -50,7 +48,6 @@ getpagesize();
 #endif
 #include <assert.h>
 
-#include "h/unaligned_memory_access.h"
 #include "src/RTcommon.h"
 #include "src/RTheap.h"
 
@@ -151,7 +148,7 @@ DYNINSTos_malloc(size_t nbytes, void* lo_addr, void* hi_addr)
         }
 
         /* define new heap */
-        node = CAST_WITHOUT_ALIGNMENT_WARNING(heapList_t*, (ret_heap + size));
+        node                = (heapList_t*) (ret_heap + size);
         node->heap.ret_addr = (void*) ret_heap;
         node->heap.addr     = heap;
         node->heap.len      = size_heap;
@@ -163,7 +160,7 @@ DYNINSTos_malloc(size_t nbytes, void* lo_addr, void* hi_addr)
         Address hi = (Address) hi_addr;
         heap       = (char*) trymmap(size + sizeof(struct heapList_t), lo, hi, psize, -1);
         if(!heap) return NULL;
-        node = CAST_WITHOUT_ALIGNMENT_WARNING(heapList_t*, (heap + size));
+        node = (heapList_t*) (heap + size);
 
         /* define new heap */
         node->heap.addr     = heap;

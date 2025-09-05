@@ -18,6 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#ifndef WITHOUT_HSA_BACKEND
+
 #include "os/os.hpp"
 #include "utils/debug.hpp"
 #include "utils/flags.hpp"
@@ -193,3 +195,5 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 }
 }  // namespace MesaInterop
 }  // namespace amd::roc
+
+#endif  // WITHOUT_HSA_BACKEND

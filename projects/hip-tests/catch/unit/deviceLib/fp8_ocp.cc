@@ -142,8 +142,6 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_compare_host_device", "", float, double) {
                       << " - gpu_result: " << result[i]);
     CHECK(cpu_result[i] == result[i]);
   }
-
-  HIP_CHECK(hipFree(d_numbers));
 }
 
 __FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2* val) {
@@ -236,8 +234,6 @@ TEST_CASE("Unit_fp8x2_ocp_compare_host_device") {
   for (size_t i = 0; i < result.size(); i++) {
     CHECK(cpu_result[i] == result[i]);
   }
-
-  HIP_CHECK(hipFree(d_numbers));
 }
 
 TEST_CASE("Unit_fp8x2_ocp_split_compare") {
@@ -294,8 +290,6 @@ TEST_CASE("Unit_fp8x2_ocp_split_compare") {
                    << " y: " << result[i].y);
     CHECK(cpu_result[i] == result[i]);
   }
-
-  HIP_CHECK(hipFree(d_numbers));
 }
 
 __FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
@@ -394,8 +388,6 @@ TEST_CASE("Unit_fp8x4_ocp_split_compare") {
                    << " w: " << result[i].w);
     CHECK(cpu_result[i] == result[i]);
   }
-
-  HIP_CHECK(hipFree(d_numbers));
 }
 
 __FP8_DEVICE__ bool e4m3_bool_ocp_device(float val) {

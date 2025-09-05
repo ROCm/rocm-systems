@@ -35,26 +35,25 @@
 #include "h/compiler_annotations.h"
 #include "h/dyninstAPI_RT.h"
 #include <stdarg.h>
-#include <stddef.h>
 
 void
-DYNINSTtrapFunction(void);
+DYNINSTtrapFunction();
 void
-DYNINSTbreakPoint(void);
+DYNINSTbreakPoint();
 /* Use a signal that is safe if we're not attached. */
 void
-DYNINSTsafeBreakPoint(void);
+DYNINSTsafeBreakPoint();
 void
-DYNINSTinit(void);
+DYNINSTinit();
 int
-DYNINSTreturnZero(void);
+DYNINSTreturnZero();
 int
 DYNINSTwriteEvent(void* ev, size_t sz);
 int
 DYNINSTasyncConnect(int pid);
 
 int
-DYNINSTinitializeTrapHandler(void);
+DYNINSTinitializeTrapHandler();
 void*
 dyninstTrapTranslate(void* source, volatile unsigned long* table_used,
                      volatile unsigned long*  table_version,

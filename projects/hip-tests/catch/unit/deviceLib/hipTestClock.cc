@@ -48,7 +48,4 @@ TEST_CASE("Unit_hipTestClock") {
   for (unsigned i = 0; i < LEN; i++) {
     assert(0 != A[i]);
   }
-
-  HIP_CHECK(hipFree(Ad));
-  delete[] A;
 }

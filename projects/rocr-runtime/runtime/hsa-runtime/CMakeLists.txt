@@ -83,6 +83,7 @@ endif() # if (ROCM_CCACHE_BUILD)
 
 ## Find external dependencies.
 find_package(PkgConfig)
+find_package(LibElf REQUIRED)
 
 find_package(LibElf CONFIG)
 if(NOT LibElf_FOUND)

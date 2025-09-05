@@ -506,6 +506,7 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_EdgeCases") {
                     hipErrorInvalidValue);
   }
 
+  HIP_CHECK(hipTexObjectDestroy(tex_object));
   HIP_CHECK(hipFree(tex_buffer));
   CTX_DESTROY();
 }

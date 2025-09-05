@@ -71,8 +71,10 @@ class BlitKernel : public core::Blit {
   ///
   /// @note: The call will block until all AQL packets have been executed.
   ///
+  /// @param agent Agent passed to Initialize.
+  ///
   /// @return hsa_status_t
-  virtual hsa_status_t Destroy() override;
+  virtual hsa_status_t Destroy(const core::Agent& agent) override;
 
   /// @brief Submit an AQL packet to perform vector copy. The call is blocking
   /// until the command execution is finished.
@@ -186,8 +188,6 @@ class BlitKernel : public core::Blit {
   };
 
   std::map<KernelType, KernelCode> kernels_;
-
-  const core::Agent* agent_;
 
   /// AQL queue for submitting the vector copy kernel.
   core::Queue* queue_;

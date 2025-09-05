@@ -81,7 +81,6 @@ TEST_CASE("Unit_hipMemPoolImportPointer_Negative") {
   }
   HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
   HIP_CHECK(hipMemPoolDestroy(mempoolPfd));
-  HIP_CHECK(hipMemPoolDestroy(mempoolImp));
 }
 
 /**

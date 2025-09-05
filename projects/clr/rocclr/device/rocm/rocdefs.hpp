@@ -19,6 +19,9 @@
  THE SOFTWARE. */
 
 #pragma once
+
+#ifndef WITHOUT_HSA_BACKEND
+
 namespace amd::roc {
 
 //! Alignment restriction for the pinned memory
@@ -42,3 +45,5 @@ enum HwQueueEngine : uint32_t {
 };
 
 }  // namespace amd::roc
+
+#endif

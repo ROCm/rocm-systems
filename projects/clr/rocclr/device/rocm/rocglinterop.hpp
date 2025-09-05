@@ -20,6 +20,8 @@
 
 #pragma once
 
+#ifndef WITHOUT_HSA_BACKEND
+
 #ifndef _WIN32
 #include <GL/glx.h>
 #include <EGL/egl.h>
@@ -136,3 +138,4 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 }  // namespace MesaInterop
 }  // namespace amd::roc
 
+#endif /*WITHOUT_HSA_BACKEND*/

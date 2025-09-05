@@ -1121,7 +1121,6 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes") {
     REQUIRE(allAttributesDataWithPtr.hostPointer == allAttributesData.hostPointer);
     REQUIRE(allAttributesDataWithPtr.isManaged == allAttributesData.isManaged);
     REQUIRE(allAttributesDataWithPtr.allocationFlags == allAttributesData.allocationFlags);
-    HIP_CHECK(hipFree(devPtr2));
   }
 
   // Validating hipDrvPointerGetAttributes API
@@ -1156,8 +1155,6 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes") {
     REQUIRE(devicePointerWithPtr == devicePointer);
     REQUIRE(rangeSizeWithPtr == rangeSize);
     REQUIRE(startAddressWithPtr == startAddress);
-
-    HIP_CHECK(hipFree(devPtr3));
   }
 }
 
@@ -5781,10 +5778,8 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
     size_t size = -1;
     HIP_CHECK(hipMemPtrGetInfo(dPtr, &size));
     REQUIRE(size == 1024);
-    void* dPtr2 = nullptr;
-    REQUIRE(dyn_hipMallocFromPoolAsync_ptr(&dPtr2, 1, mem_pool, stream) == hipErrorOutOfMemory);
+    REQUIRE(dyn_hipMallocFromPoolAsync_ptr(&dPtr, 1, mem_pool, stream) == hipErrorOutOfMemory);
 
-    HIP_CHECK(dyn_hipFreeAsync_ptr(dPtr, stream));
     HIP_CHECK(hipMemPoolDestroy(mem_pool));
     HIP_CHECK(hipStreamDestroy(stream));
   }
