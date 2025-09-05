@@ -682,7 +682,8 @@ class Roofline:
                             None
                             if self.__run_parameters["is_standalone"]
                             else (
-                                f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s"
+                                f"{to_int(self.__ceiling_data['mfma'][2])} "
+                                f"G{ops_flops}/s"
                             )
                         ),
                         f"{to_int(self.__ceiling_data['mfma'][2])} G{ops_flops}/s",

@@ -69,9 +69,9 @@ class OmniSoC_Base:
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
         self.__soc_params: dict[str, Any] = {}  # SoC specifications
-        self.__compatible_profilers: list[str] = (
-            []
-        )  # Store profilers compatible with SoC
+        self.__compatible_profilers: list[
+            str
+        ] = []  # Store profilers compatible with SoC
         self.populate_mspec()
 
     def __hash__(self) -> int:
@@ -383,12 +383,10 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union(
-                    {
-                        f"{counter_name}[{i}]"
-                        for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
-                    }
-                )
+                counters = counters.union({
+                    f"{counter_name}[{i}]"
+                    for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
+                })
 
         return counters
 

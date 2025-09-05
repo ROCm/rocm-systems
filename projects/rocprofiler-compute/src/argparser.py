@@ -521,8 +521,7 @@ Examples:
         metavar="",
         dest="workload",
         help=(
-            "\t\tSpecify name of workload (to remove) or path to workload "
-            "(to import)"
+            "\t\tSpecify name of workload (to remove) or path to workload (to import)"
         ),
     )
     connection_group.add_argument(

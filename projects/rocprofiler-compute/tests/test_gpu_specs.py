@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-import os
 import re
 import subprocess
 import tempfile
@@ -177,18 +176,18 @@ def test_num_xcds_cli_output():
         stderr=subprocess.PIPE,
         text=True,
     )
-    assert (
-        proc.returncode == 0
-    ), f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    assert proc.returncode == 0, (
+        f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    )
 
     # 3. strip ANSI, parse table
     clean = strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected
-    assert (
-        "Compute Partition" in return_dict
-    ), "Spec 'Compute Partition' not found in table"
+    assert "Compute Partition" in return_dict, (
+        "Spec 'Compute Partition' not found in table"
+    )
     assert "Num XCDs" in return_dict, "Spec 'Num XCDs' not found in table"
 
     compute_partition_actual = return_dict["Compute Partition"]
@@ -324,9 +323,9 @@ def test_get_num_xcds_unknown_gpu_model():
     """Test get_num_xcds with unknown gpu model - covers lines 319-321"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(
+    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
         gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL"
-    )  # noqa: F841
+    )
 
 
 @pytest.mark.misc

@@ -334,7 +334,8 @@ class MetricEvaluator:
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
-            # Optimize dataframe access by replacing dict notation with dir_pathect variable access
+            # Optimize dataframe access by replacing dict notation with dir_path
+            # variable access
             opt_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", expr)
 
             # Create comprehensive local context
@@ -344,21 +345,19 @@ class MetricEvaluator:
             local_expr_context.update(self.empirical_peaks)
 
             # Add utility functions to local context
-            local_expr_context.update(
-                {
-                    "to_min": to_min,
-                    "to_max": to_max,
-                    "to_avg": to_avg,
-                    "to_median": to_median,
-                    "to_std": to_std,
-                    "to_int": to_int,
-                    "to_sum": to_sum,
-                    "to_round": to_round,
-                    "to_quantile": to_quantile,
-                    "to_mod": to_mod,
-                    "to_concat": to_concat,
-                }
-            )
+            local_expr_context.update({
+                "to_min": to_min,
+                "to_max": to_max,
+                "to_avg": to_avg,
+                "to_median": to_median,
+                "to_std": to_std,
+                "to_int": to_int,
+                "to_sum": to_sum,
+                "to_round": to_round,
+                "to_quantile": to_quantile,
+                "to_mod": to_mod,
+                "to_concat": to_concat,
+            })
 
             eval_result = eval(
                 compile(opt_expr, "<string>", "eval"),
@@ -892,8 +891,9 @@ def create_sys_vars(sys_info: Any) -> dict[str, Any]:
         variable_value = var_type(getattr(sys_info, attr_name))
         if np.isnan(variable_value) or variable_value == 0:
             console_warning(
-                f"{attr_name} is not available in sysinfo.csv, please provide the correct "
-                "value using --specs-correction"
+                f"{attr_name} is not available in sysinfo.csv, please provide the "
+                ""
+                "correct value using --specs-correction"
             )
         sys_vars_collection[f"ammolite__{var_name}"] = variable_value
 
@@ -1129,7 +1129,8 @@ def apply_kernel_filter(
             if kernel_id >= len(kernels_dataframe["Kernel_Name"]):
                 console_error(
                     f"{kernel_id} is an invalid kernel id. "
-                    f"Please enter an id between 0-{len(kernels_dataframe['Kernel_Name']) - 1}"
+                    "Please enter an id between 0-"
+                    f"{len(kernels_dataframe['Kernel_Name']) - 1}"
                 )
 
         # Extract kernel names and mark selected kernels with "*"
@@ -1575,7 +1576,6 @@ def load_pc_sampling_data(
 
 @demarcate
 def load_non_mertrics_table(workload: Any, dir_path: str, args: Any) -> None:
-
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
     #     kernel names.
