@@ -1765,9 +1765,8 @@ template <typename T> inline bool operator!=(const Wrapper<T>& lhs, const Wrappe
 
 
 using BuildLogType =
-    vector<std::pair<cl::Device,
-                     typename detail::param_traits<detail::cl_program_build_info,
-                                                   CL_PROGRAM_BUILD_LOG>::param_type>>;
+    vector<std::pair<cl::Device, typename detail::param_traits<detail::cl_program_build_info,
+                                                               CL_PROGRAM_BUILD_LOG>::param_type>>;
 #if defined(CL_HPP_ENABLE_EXCEPTIONS)
 /**
  * Exception class for build errors to carry build info
@@ -2961,12 +2960,10 @@ template <typename IteratorType>
 cl_int copy(IteratorType startIterator, IteratorType endIterator, cl::Buffer& buffer);
 template <typename IteratorType>
 cl_int copy(const cl::Buffer& buffer, IteratorType startIterator, IteratorType endIterator);
-template <typename IteratorType>
-cl_int copy(const CommandQueue& queue, IteratorType startIterator, IteratorType endIterator,
-            cl::Buffer& buffer);
-template <typename IteratorType>
-cl_int copy(const CommandQueue& queue, const cl::Buffer& buffer, IteratorType startIterator,
-            IteratorType endIterator);
+template <typename IteratorType> cl_int copy(const CommandQueue& queue, IteratorType startIterator,
+                                             IteratorType endIterator, cl::Buffer& buffer);
+template <typename IteratorType> cl_int copy(const CommandQueue& queue, const cl::Buffer& buffer,
+                                             IteratorType startIterator, IteratorType endIterator);
 
 
 #if CL_HPP_TARGET_OPENCL_VERSION >= 200
@@ -3053,8 +3050,8 @@ template <typename T, class SVMTrait> class SVMAllocator {
 
   SVMAllocator(const SVMAllocator& other) : context_(other.context_) {}
 
-  template <typename U>
-  SVMAllocator(const SVMAllocator<U, SVMTrait>& other) : context_(other.context_) {}
+  template <typename U> SVMAllocator(const SVMAllocator<U, SVMTrait>& other)
+      : context_(other.context_) {}
 
   ~SVMAllocator() {}
 
@@ -3272,9 +3269,9 @@ class Buffer : public Memory {
    * IteratorType must be random access.
    * If useHostPtr is specified iterators must represent contiguous data.
    */
-  template <typename IteratorType>
-  Buffer(IteratorType startIterator, IteratorType endIterator, bool readOnly,
-         bool useHostPtr = false, cl_int* err = NULL) {
+  template <typename IteratorType> Buffer(IteratorType startIterator, IteratorType endIterator,
+                                          bool readOnly, bool useHostPtr = false,
+                                          cl_int* err = NULL) {
     typedef typename std::iterator_traits<IteratorType>::value_type DataType;
     cl_int error;
 
@@ -3318,17 +3315,17 @@ class Buffer : public Memory {
    * IteratorType must be random access.
    * If useHostPtr is specified iterators must represent contiguous data.
    */
-  template <typename IteratorType>
-  Buffer(const Context& context, IteratorType startIterator, IteratorType endIterator,
-         bool readOnly, bool useHostPtr = false, cl_int* err = NULL);
+  template <typename IteratorType> Buffer(const Context& context, IteratorType startIterator,
+                                          IteratorType endIterator, bool readOnly,
+                                          bool useHostPtr = false, cl_int* err = NULL);
 
   /*!
    * \brief Construct a Buffer from a host container via iterators using a specified queue.
    * If useHostPtr is specified iterators must be random access.
    */
-  template <typename IteratorType>
-  Buffer(const CommandQueue& queue, IteratorType startIterator, IteratorType endIterator,
-         bool readOnly, bool useHostPtr = false, cl_int* err = NULL);
+  template <typename IteratorType> Buffer(const CommandQueue& queue, IteratorType startIterator,
+                                          IteratorType endIterator, bool readOnly,
+                                          bool useHostPtr = false, cl_int* err = NULL);
 
   //! \brief Default constructor - initializes to NULL.
   Buffer() : Memory() {}
@@ -4828,8 +4825,7 @@ template <typename T, class Enable = void> struct KernelArgumentHandler;
 
 // Enable for objects that are not subclasses of memory
 // Pointers, constants etc
-template <typename T>
-struct KernelArgumentHandler<
+template <typename T> struct KernelArgumentHandler<
     T, typename std::enable_if<!std::is_base_of<cl::Memory, T>::value>::type> {
   static size_type size(const T&) { return sizeof(T); }
   static const T* ptr(const T& value) { return &value; }
@@ -4992,9 +4988,8 @@ class Kernel : public detail::Wrapper<cl_kernel> {
         __GET_KERNEL_ARG_INFO_ERR);
   }
 
-  template <cl_int name>
-  size_type getSubGroupInfo(const cl::Device& dev, const cl::NDRange& range,
-                            cl_int* err = NULL) const {
+  template <cl_int name> size_type getSubGroupInfo(const cl::Device& dev, const cl::NDRange& range,
+                                                   cl_int* err = NULL) const {
     size_type param;
     cl_int result = getSubGroupInfo(dev, name, range, &param);
     if (err != NULL) {
@@ -5591,9 +5586,8 @@ inline Program linkProgram(vector<Program> inputPrograms, const char* options = 
 #endif  // CL_HPP_TARGET_OPENCL_VERSION >= 120
 
 // Template specialization for CL_PROGRAM_BINARIES
-template <>
-inline cl_int cl::Program::getInfo(cl_program_info name,
-                                   vector<vector<unsigned char>>* param) const {
+template <> inline cl_int cl::Program::getInfo(cl_program_info name,
+                                               vector<vector<unsigned char>>* param) const {
   if (name != CL_PROGRAM_BINARIES) {
     return CL_INVALID_VALUE;
   }
@@ -6367,9 +6361,9 @@ class CommandQueue : public detail::Wrapper<cl_command_queue> {
    * Enqueues a command that will allow the host to update a region of a coarse-grained SVM buffer.
    * This variant takes a raw SVM pointer.
    */
-  template <typename T>
-  cl_int enqueueMapSVM(T* ptr, cl_bool blocking, cl_map_flags flags, size_type size,
-                       const vector<Event>* events = NULL, Event* event = NULL) const {
+  template <typename T> cl_int enqueueMapSVM(T* ptr, cl_bool blocking, cl_map_flags flags,
+                                             size_type size, const vector<Event>* events = NULL,
+                                             Event* event = NULL) const {
     cl_event tmp;
     cl_int err = detail::errHandler(
         ::clEnqueueSVMMap(
@@ -6468,9 +6462,9 @@ class CommandQueue : public detail::Wrapper<cl_command_queue> {
    * Enqueues a command that will release a coarse-grained SVM buffer back to the OpenCL runtime.
    * This variant takes a cl::pointer instance.
    */
-  template <typename T, class D>
-  cl_int enqueueUnmapSVM(cl::pointer<T, D>& ptr, const vector<Event>* events = NULL,
-                         Event* event = NULL) const {
+  template <typename T, class D> cl_int enqueueUnmapSVM(cl::pointer<T, D>& ptr,
+                                                        const vector<Event>* events = NULL,
+                                                        Event* event = NULL) const {
     cl_event tmp;
     cl_int err = detail::errHandler(
         ::clEnqueueSVMUnmap(
@@ -6488,9 +6482,9 @@ class CommandQueue : public detail::Wrapper<cl_command_queue> {
    * Enqueues a command that will release a coarse-grained SVM buffer back to the OpenCL runtime.
    * This variant takes a cl::vector instance.
    */
-  template <typename T, class Alloc>
-  cl_int enqueueUnmapSVM(cl::vector<T, Alloc>& container, const vector<Event>* events = NULL,
-                         Event* event = NULL) const {
+  template <typename T, class Alloc> cl_int enqueueUnmapSVM(cl::vector<T, Alloc>& container,
+                                                            const vector<Event>* events = NULL,
+                                                            Event* event = NULL) const {
     cl_event tmp;
     cl_int err = detail::errHandler(
         ::clEnqueueSVMUnmap(
@@ -6827,8 +6821,9 @@ class DeviceCommandQueue : public detail::Wrapper<cl_command_queue> {
     cl::Context context = cl::Context::getDefault();
     cl::Device device = cl::Device::getDefault();
 
-    cl_command_queue_properties mergedProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-        CL_QUEUE_ON_DEVICE | static_cast<cl_command_queue_properties>(properties);
+    cl_command_queue_properties mergedProperties =
+        CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE |
+        static_cast<cl_command_queue_properties>(properties);
 
     cl_queue_properties queue_properties[] = {CL_QUEUE_PROPERTIES, mergedProperties, 0};
     object_ = ::clCreateCommandQueueWithProperties(context(), device(), queue_properties, &error);
@@ -6847,8 +6842,9 @@ class DeviceCommandQueue : public detail::Wrapper<cl_command_queue> {
                      cl_int* err = NULL) {
     cl_int error;
 
-    cl_command_queue_properties mergedProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-        CL_QUEUE_ON_DEVICE | static_cast<cl_command_queue_properties>(properties);
+    cl_command_queue_properties mergedProperties =
+        CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE |
+        static_cast<cl_command_queue_properties>(properties);
     cl_queue_properties queue_properties[] = {CL_QUEUE_PROPERTIES, mergedProperties, 0};
     object_ = ::clCreateCommandQueueWithProperties(context(), device(), queue_properties, &error);
 
@@ -6866,8 +6862,9 @@ class DeviceCommandQueue : public detail::Wrapper<cl_command_queue> {
                      cl_int* err = NULL) {
     cl_int error;
 
-    cl_command_queue_properties mergedProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-        CL_QUEUE_ON_DEVICE | static_cast<cl_command_queue_properties>(properties);
+    cl_command_queue_properties mergedProperties =
+        CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE |
+        static_cast<cl_command_queue_properties>(properties);
     cl_queue_properties queue_properties[] = {CL_QUEUE_PROPERTIES, mergedProperties, CL_QUEUE_SIZE,
                                               queueSize, 0};
     object_ = ::clCreateCommandQueueWithProperties(context(), device(), queue_properties, &error);
@@ -7021,9 +7018,9 @@ template <> struct KernelArgumentHandler<cl::DeviceCommandQueue, void> {
 #endif  // #if CL_HPP_TARGET_OPENCL_VERSION >= 200
 
 
-template <typename IteratorType>
-Buffer::Buffer(const Context& context, IteratorType startIterator, IteratorType endIterator,
-               bool readOnly, bool useHostPtr, cl_int* err) {
+template <typename IteratorType> Buffer::Buffer(const Context& context, IteratorType startIterator,
+                                                IteratorType endIterator, bool readOnly,
+                                                bool useHostPtr, cl_int* err) {
   typedef typename std::iterator_traits<IteratorType>::value_type DataType;
   cl_int error;
 
@@ -7163,9 +7160,9 @@ inline void* enqueueMapBuffer(const Buffer& buffer, cl_bool blocking, cl_map_fla
  * update a region of a coarse-grained SVM buffer.
  * This variant takes a raw SVM pointer.
  */
-template <typename T>
-inline cl_int enqueueMapSVM(T* ptr, cl_bool blocking, cl_map_flags flags, size_type size,
-                            const vector<Event>* events, Event* event) {
+template <typename T> inline cl_int enqueueMapSVM(T* ptr, cl_bool blocking, cl_map_flags flags,
+                                                  size_type size, const vector<Event>* events,
+                                                  Event* event) {
   cl_int error;
   CommandQueue queue = CommandQueue::getDefault(&error);
   if (error != CL_SUCCESS) {
@@ -7180,10 +7177,10 @@ inline cl_int enqueueMapSVM(T* ptr, cl_bool blocking, cl_map_flags flags, size_t
  * update a region of a coarse-grained SVM buffer.
  * This variant takes a cl::pointer instance.
  */
-template <typename T, class D>
-inline cl_int enqueueMapSVM(cl::pointer<T, D> ptr, cl_bool blocking, cl_map_flags flags,
-                            size_type size, const vector<Event>* events = NULL,
-                            Event* event = NULL) {
+template <typename T, class D> inline cl_int enqueueMapSVM(cl::pointer<T, D> ptr, cl_bool blocking,
+                                                           cl_map_flags flags, size_type size,
+                                                           const vector<Event>* events = NULL,
+                                                           Event* event = NULL) {
   cl_int error;
   CommandQueue queue = CommandQueue::getDefault(&error);
   if (error != CL_SUCCESS) {
@@ -7257,9 +7254,9 @@ inline cl_int enqueueUnmapSVM(T* ptr, const vector<Event>* events = NULL, Event*
  * SVM buffer back to the OpenCL runtime.
  * This variant takes a cl::pointer instance.
  */
-template <typename T, class D>
-inline cl_int enqueueUnmapSVM(cl::pointer<T, D>& ptr, const vector<Event>* events = NULL,
-                              Event* event = NULL) {
+template <typename T, class D> inline cl_int enqueueUnmapSVM(cl::pointer<T, D>& ptr,
+                                                             const vector<Event>* events = NULL,
+                                                             Event* event = NULL) {
   cl_int error;
   CommandQueue queue = CommandQueue::getDefault(&error);
   if (error != CL_SUCCESS) {
@@ -7275,9 +7272,9 @@ inline cl_int enqueueUnmapSVM(cl::pointer<T, D>& ptr, const vector<Event>* event
  * SVM buffer back to the OpenCL runtime.
  * This variant takes a cl::vector instance.
  */
-template <typename T, class Alloc>
-inline cl_int enqueueUnmapSVM(cl::vector<T, Alloc>& container, const vector<Event>* events = NULL,
-                              Event* event = NULL) {
+template <typename T, class Alloc> inline cl_int enqueueUnmapSVM(cl::vector<T, Alloc>& container,
+                                                                 const vector<Event>* events = NULL,
+                                                                 Event* event = NULL) {
   cl_int error;
   CommandQueue queue = CommandQueue::getDefault(&error);
   if (error != CL_SUCCESS) {
@@ -7336,9 +7333,9 @@ inline cl_int copy(const cl::Buffer& buffer, IteratorType startIterator, Iterato
  * Host to Device.
  * Uses specified queue.
  */
-template <typename IteratorType>
-inline cl_int copy(const CommandQueue& queue, IteratorType startIterator, IteratorType endIterator,
-                   cl::Buffer& buffer) {
+template <typename IteratorType> inline cl_int copy(const CommandQueue& queue,
+                                                    IteratorType startIterator,
+                                                    IteratorType endIterator, cl::Buffer& buffer) {
   typedef typename std::iterator_traits<IteratorType>::value_type DataType;
   cl_int error;
 

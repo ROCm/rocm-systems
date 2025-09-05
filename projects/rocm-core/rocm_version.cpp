@@ -48,9 +48,7 @@ static VerErrors getBuildInfo( char* InfoString, int len ) {
 
 	NULL_CHECK(InfoString);
 #if defined(ROCM_BUILD_INFO)
-
-	strcpy(InfoString,ROCM_BUILD_INFO);
-	InfoString[len]='\0';
+	snprintf(InfoString, len, "%s", ROCM_BUILD_INFO);
 #else
 	return VerValuesNotDefined;
 #endif //end defination checker

@@ -156,8 +156,8 @@ bool isCodeObjectCompatibleWithDevice(std::string co_triple_target_id,
 static inline unsigned int getGenericVersion(const void* image) {
   const Elf64_Ehdr* ehdr = reinterpret_cast<const Elf64_Ehdr*>(image);
   return ehdr->e_ident[EI_ABIVERSION] == ELFABIVERSION_AMDGPU_HSA_V6
-      ? ((ehdr->e_flags & EF_AMDGPU_GENERIC_VERSION) >> EF_AMDGPU_GENERIC_VERSION_OFFSET)
-      : 0;
+             ? ((ehdr->e_flags & EF_AMDGPU_GENERIC_VERSION) >> EF_AMDGPU_GENERIC_VERSION_OFFSET)
+             : 0;
 }
 
 static inline bool isGenericTarget(const void* image) {
@@ -178,10 +178,9 @@ bool UnbundleBitCode(const std::vector<char>& bundled_llvm_bitcode, const std::s
   const void* data = reinterpret_cast<const void*>(bundled_llvm_bitcode_s.c_str());
   const auto obheader = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
   const auto* desc = &obheader->desc[0];
-  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects; ++idx,
-                desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
-                    reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) +
-                    desc->bundleEntryIdSize)) {
+  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects;
+       ++idx, desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
+                  reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) + desc->bundleEntryIdSize)) {
     const void* image =
         reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) + desc->offset);
     const size_t image_size = desc->size;
@@ -736,9 +735,8 @@ bool demangleName(const std::string& mangledName, std::string& demangledName) {
 
   demangledName.resize(demangled_size);
 
-  if (AMD_COMGR_STATUS_SUCCESS !=
-      amd::Comgr::get_data(demangled_data, &demangled_size,
-                           const_cast<char*>(demangledName.data()))) {
+  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size,
+                                                       const_cast<char*>(demangledName.data()))) {
     amd::Comgr::release_data(mangled_data);
     amd::Comgr::release_data(demangled_data);
     return false;

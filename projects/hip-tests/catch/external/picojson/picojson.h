@@ -346,7 +346,7 @@ IS(object, object)
 template <> inline bool value::is<double>() const {
   return type_ == number_type
 #ifdef PICOJSON_USE_INT64
-      || type_ == int64_type
+         || type_ == int64_type
 #endif
       ;
 }
@@ -365,11 +365,9 @@ GET(std::string, *u_.string_)
 GET(array, *u_.array_)
 GET(object, *u_.object_)
 #ifdef PICOJSON_USE_INT64
-GET(double,
-    (type_ == int64_type &&
-         (const_cast<value*>(this)->type_ = number_type,
-          (const_cast<value*>(this)->u_.number_ = u_.int64_)),
-     u_.number_))
+GET(double, (type_ == int64_type && (const_cast<value*>(this)->type_ = number_type,
+                                     (const_cast<value*>(this)->u_.number_ = u_.int64_)),
+             u_.number_))
 GET(int64_t, u_.int64_)
 #else
 GET(double, u_.number_)

@@ -36,9 +36,9 @@ int checkContextProperties(const cl_context_properties* properties, bool* offlin
 
 namespace amd {
 
-template <typename T>
-static inline cl_int clGetInfo(T& field, size_t param_value_size, void* param_value,
-                               size_t* param_value_size_ret) {
+template <typename T> static inline cl_int clGetInfo(T& field, size_t param_value_size,
+                                                     void* param_value,
+                                                     size_t* param_value_size_ret) {
   const void* valuePtr;
   size_t valueSize;
 
