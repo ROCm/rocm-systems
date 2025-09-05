@@ -1,0 +1,76 @@
+name: rocprofiler-systems Continuous Integration
+run-name: rocprofiler-systems-ci
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+# OUTLINE
+# 1. Install TheRock nightly tarball (use Docker containers that already have tarballs saved for each arch, install the one needed)
+# 2. Setup any other dependencies needed
+# 3. run-ci.py
+# 4. Cleanup
+#
+jobs:
+  # Ubuntu 22.04, 24.04
+  ubuntu:
+    strategy:
+      matrix:
+        os-release: ['22.04', '24.04']
+        arch: ['gfx94X']
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    steps:
+      - name: Step 1
+        shell: bash
+        run: |
+          echo "Step 1"
+
+  # RHEL 8/9
+  rhel:
+    strategy:
+      matrix:
+        os-release: ['8.10', '9.4']
+        arch: ['gfx94X']
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    steps:
+      - name: Step 1
+        shell: bash
+        run: |
+          echo "Step 1"
+
+  # SLES 15
+  opensuse:
+    strategy:
+      matrix:
+        os-release: ['15.6']
+        arch: ['gfx94X']
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    steps:
+      - name: Step 1
+        shell: bash
+        run: |
+          echo "Step 1"
