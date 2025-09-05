@@ -88,7 +88,7 @@ def get_top_kernels_and_dispatch_ids(runs):
     return merged_df.to_dict("records")
 
 
-def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
+def process_panels_to_dataframes(args, kernel_df, arch_configs, roof_plot=None):
     """
     Process panel data into pandas DataFrames.
     Returns a nested dictionary structure with DataFrames and tui_style information.
@@ -114,7 +114,7 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
     result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
-    for panel_id, panel in archConfigs.panel_configs.items():
+    for panel_id, panel in arch_configs.panel_configs.items():
         if panel_id in config.HIDDEN_SECTIONS:
             continue
 

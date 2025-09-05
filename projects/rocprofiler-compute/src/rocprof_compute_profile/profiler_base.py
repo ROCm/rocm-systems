@@ -136,14 +136,14 @@ class RocProfCompute_Base:
         # Process files and create joined dataframe
         df = None
         for i, file in enumerate(files):
-            current_df = pd.read_csv(file) if isinstance(args.path, str) else file
+            current_df = pd.read_csv(str(file))
             if args.join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
                 current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
             elif args.join_type == "grid":
                 key = current_df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
                 current_df["key"] = (
-                    current_df["Kernel_Name"]
+                    current_df["Kernel_Name"].astype(str)
                     + " - "
                     + current_df["Grid_Size"].astype(str)
                     + " - "
@@ -287,7 +287,7 @@ class RocProfCompute_Base:
         # save to file and delete old file(s)
         # skip if we're being called outside of rocprof-compute
         if isinstance(args.path, str):
-            df.to_csv(out, index=False)
+            df.to_csv(output_file, index=False)
             if not args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
@@ -403,13 +403,15 @@ class RocProfCompute_Base:
 
             # Kernel filtering (in-place replacement)
             if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    fname,
-                ])
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -418,13 +420,15 @@ class RocProfCompute_Base:
 
             # Dispatch filtering (inplace replacement)
             if not args.dispatch == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    fname,
-                ])
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)

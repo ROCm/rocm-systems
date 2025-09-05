@@ -31,9 +31,9 @@ import sys
 import warnings
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
-import astunparse  # type: ignore
+import astunparse
 import numpy as np
 import pandas as pd
 
@@ -41,7 +41,7 @@ from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
 
 # ------------------------------------------------------------------------------
-# Constants and Configuration
+# Internal global definitions
 
 # NB:
 # Ammolite is unique gemstone from the Rocky Mountains.
@@ -51,7 +51,7 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 # editor. Whenever change it to a new one, replace all appearances in this file.
 
 # 001 is ID of pmc_kernel_top.csv table
-PMC_KERNEL_TOP_TABLE_ID = 1
+PMC_KERNEL_TOP_TABLE_ID: int = 1
 
 # Build-in $denom defined in mongodb query:
 #       "denom": {
@@ -72,7 +72,7 @@ PMC_KERNEL_TOP_TABLE_ID = 1
 #                                              1000000000]}
 #              }
 #       }
-SUPPORTED_DENOM = {
+SUPPORTED_DENOM: dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
@@ -80,7 +80,7 @@ SUPPORTED_DENOM = {
 }
 
 # Build-in defined in mongodb variables:
-BUILD_IN_VARS = {
+BUILD_IN_VARS: dict[str, str] = {
     "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
     "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
     "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
@@ -93,7 +93,7 @@ BUILD_IN_VARS = {
     "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
 }
 
-SUPPORTED_CALLS = {
+SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
     # in which case it turns into a pandas function.
     # If it has args like a list [], it turns into a Python function.
@@ -114,68 +114,12 @@ SUPPORTED_CALLS = {
     "CONCAT": "to_concat",
 }
 
-SIMPLE_BOX_STATS = {
-    "Min": ["MIN(", ")"],
-    "Q1": ["QUANTILE(", ", 0.25)"],
-    "Median": ["MEDIAN(", ")"],
-    "Q3": ["QUANTILE(", ", 0.75)"],
-    "Max": ["MAX(", ")"],
-}
-
-FUNCTION_FILTER = {
-    "MIN",
-    "MAX",
-    "AVG",
-    "ROUND",
-    "TO_INT",
-    "GB",
-    "STD",
-    "GFLOP",
-    "GOP",
-    "OP",
-    "CU",
-    "NC",
-    "UC",
-    "CC",
-    "RW",
-    "GIOP",
-    "GFLOPs",
-    "CONCAT",
-    "MOD",
-}
-
-BUILT_IN_COUNTERS = [
-    "LDS_Per_Workgroup",
-    "Grid_Size",
-    "Workgroup_Size",
-    "Arch_VGPR",
-    "Accum_VGPR",
-    "SGPR",
-    "Scratch_Per_Workitem",
-    "Start_Timestamp",
-    "End_Timestamp",
-]
-
-DEFAULT_PEAKS = [
-    "MFMAF64Flops",
-    "MFMAF32Flops",
-    "MFMAF16Flops",
-    "MFMABF16Flops",
-    "MFMAF8Flops",
-    "MFMAI8Ops",
-    "HBMBw",
-    "L2Bw",
-    "L1Bw",
-    "LDSBw",
-    "MFMA_FLOPs_F6F4",
-]
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 
 # ------------------------------------------------------------------------------
-# Utility Functions
 
 
-def to_min(*args: Any) -> float:
+def to_min(*args: Any) -> Union[float, None]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif min(args) is None:
@@ -184,44 +128,53 @@ def to_min(*args: Any) -> float:
         return min(args)
 
 
-def to_max(*args: Any) -> float:
+def to_max(*args: Any) -> Union[float, np.ndarray, None]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
         isinstance(args[0], pd.Series) or isinstance(args[1], pd.Series)
     ):
-        result = np.maximum(args[0], args[1])
-        # Handle case where np.maximum returns an array
-        if isinstance(result, np.ndarray):
-            return float(result.item()) if result.size == 1 else float(result.max())
-        return float(result)
-    elif any(arg is None for arg in args):
+        return np.maximum(args[0], args[1])
+    elif max(args) == None:
         return np.nan
     else:
-        return float(max(args))
+        return max(args)
 
 
-def to_avg(a: Any) -> Optional[float]:
+def to_avg(
+    a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
+) -> Union[float, np.floating, None]:
     if a is None:
         return np.nan
     elif isinstance(a, pd.Series):
-        if a.empty or np.isnan(a).all():
+        if a.empty:
+            return np.nan
+        elif np.isnan(a).all():
             return np.nan
         else:
             return a.mean()
     elif isinstance(a, (np.ndarray, list)):
         arr = np.array(a)
-        if arr.size == 0 or np.isnan(arr).all():
+        if arr.size == 0:
+            return np.nan
+        elif np.isnan(arr).all():
             return np.nan
         else:
-            return float(np.nanmean(arr))
+            return np.nanmean(arr)
     elif isinstance(a, (int, float, np.number)):
-        return np.nan if np.isnan(a) else float(a)
+        if np.isnan(a):
+            return np.nan
+        else:
+            return float(a)
+    elif isinstance(a, str):
+        if not a:
+            return np.nan
+        return float(a)
     else:
-        raise ValueError(f"to_avg: unsupported type: {type(a)}")
+        raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a: Any) -> Optional[float]:
+def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
     if a is None:
         return None
     elif isinstance(a, pd.Series):
@@ -229,57 +182,63 @@ def to_median(a: Any) -> Optional[float]:
             warnings.simplefilter("ignore", category=RuntimeWarning)
             return a.median()
     else:
-        raise ValueError("to_median: unsupported type.")
+        raise Exception("to_median: unsupported type.")
 
 
-def to_std(a: Any) -> Optional[float]:
+def to_std(a: pd.Series) -> float:
     if isinstance(a, pd.Series):
         return a.std()
     else:
-        raise ValueError("to_std: unsupported type.")
+        raise Exception("to_std: unsupported type.")
 
 
-def to_int(a: Any) -> Any:
+def to_int(
+    a: Union[int, float, str, np.integer, pd.Series, None],
+) -> Union[int, pd.Series, None]:
     if a is None:
         return None
     elif isinstance(a, (int, float, np.integer)):
         return int(a)
     elif isinstance(a, pd.Series):
-        return a.astype("Int64")
+        return a.astype(int)
+    elif isinstance(a, str):
+        return int(a)
     else:
-        raise ValueError("to_int: unsupported type.")
+        raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Any) -> Optional[float]:
-    if (
-        a is None
-        or (hasattr(a, "empty") and a.empty)
-        or (hasattr(a, "__iter__") and np.isnan(a).all())
-    ):
+def to_sum(a: Union[pd.Series, None]) -> Union[float, None]:
+    if a is None:
+        return np.nan
+    elif np.isnan(a).all():
+        return np.nan
+    elif a.empty:
         return np.nan
     elif isinstance(a, pd.Series):
         return a.sum()
     else:
-        raise ValueError("to_sum: unsupported type.")
+        raise Exception("to_sum: unsupported type.")
 
 
-def to_round(a: Any, b: int) -> Any:
+def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
     if isinstance(a, pd.Series):
         return a.round(b)
     else:
         return round(a, b)
 
 
-def to_quantile(a: Any, b: float) -> Optional[float]:
+def to_quantile(a: Union[pd.Series, None], b: float) -> Union[float, None]:
     if a is None:
         return None
     elif isinstance(a, pd.Series):
         return a.quantile(b)
     else:
-        raise ValueError("to_quantile: unsupported type.")
+        raise Exception("to_quantile: unsupported type.")
 
 
-def to_mod(a: Any, b: Any) -> Any:
+def to_mod(
+    a: Union[pd.Series, float], b: Union[pd.Series, float]
+) -> Union[pd.Series, float]:
     if isinstance(a, pd.Series):
         return a.mod(b)
     else:
@@ -298,20 +257,21 @@ class CodeTransformer(ast.NodeTransformer):
     def visit_Call(self, node: ast.Call) -> ast.Call:
         self.generic_visit(node)
         if isinstance(node.func, ast.Name):
-            if node.func.id in SUPPORTED_CALLS:
-                node.func.id = SUPPORTED_CALLS[node.func.id]
+            if node.func.id in SUPPORTED_CALL:
+                node.func.id = SUPPORTED_CALL[node.func.id]
             else:
-                raise ValueError(f"Unknown call: {node.func.id}")
+                raise Exception("Unknown call:", node.func.id)
         return node
 
     def visit_IfExp(self, node: ast.IfExp) -> ast.Expr:
         self.generic_visit(node)
 
-        if isinstance(node.body, ast.Num):
-            raise ValueError(
+        if isinstance(node.body, ast.Constant):
+            raise Exception(
                 "Don't support body of IF with number only! Has to be expr with "
                 "df['column']."
             )
+
         new_node = ast.Expr(
             value=ast.Call(
                 func=ast.Attribute(value=node.body, attr="where", ctx=ast.Load()),
@@ -319,6 +279,7 @@ class CodeTransformer(ast.NodeTransformer):
                 keywords=[],
             )
         )
+
         return new_node
 
     # NB:
@@ -331,19 +292,105 @@ class CodeTransformer(ast.NodeTransformer):
     #     in correct way or work around.
     #   - The 'raw_pmc_df' is hack code. For other data sources, like wavefront
     #     data,We need to think about template or pass it as a parameter.
-    def visit_Name(self, node):
+    def visit_Name(self, node: ast.Name) -> Union[ast.Name, ast.Subscript]:
         self.generic_visit(node)
-        if (not node.id.startswith("ammolite__")) and (not node.id in SUPPORTED_CALLS):
-            new_node = ast.Subscript(
+        if (not node.id.startswith("ammolite__")) and (not node.id in SUPPORTED_CALL):
+            return ast.Subscript(
                 value=ast.Name(id="raw_pmc_df", ctx=ast.Load()),
                 slice=ast.Constant(value=node.id),
                 ctx=ast.Load(),
             )
-            return new_node
+
         return node
 
 
-def build_eval_string(equation: str, coll_level: str, config: dict[str, Any]) -> str:
+class MetricEvaluator:
+    """Encapsulates metric evaluation logic and eliminates global variables."""
+
+    def __init__(
+        self,
+        raw_pmc_df: Union[pd.DataFrame, dict],
+        sys_vars: dict[str, Any],
+        empirical_peaks: dict[str, Any],
+    ):
+        self.raw_pmc_df = raw_pmc_df
+        self.sys_vars = sys_vars
+        self.empirical_peaks = empirical_peaks
+        self._prepare_df_cache()
+
+    def _prepare_df_cache(self) -> None:
+        """Prepare cached dataframe access for performance."""
+        if isinstance(self.raw_pmc_df, dict):
+            self.df_cache = {
+                f"raw_pmc_df_{key}": self.raw_pmc_df[key]
+                for key in self.raw_pmc_df.keys()
+            }
+        elif isinstance(self.raw_pmc_df, pd.DataFrame):
+            raw_pmc_df_keys = set(self.raw_pmc_df.columns.get_level_values(0))
+            self.df_cache = {
+                f"raw_pmc_df_{key}": self.raw_pmc_df[key] for key in raw_pmc_df_keys
+            }
+        else:
+            raise ValueError(f"Unknown `raw_pmc_df` type '{type(self.raw_pmc_df)}'.")
+
+    def eval_expression(self, expr: str) -> Union[str, float, int]:
+        """Evaluate a single expression with proper local context."""
+        try:
+            # Optimize dataframe access by replacing dict notation with dir_pathect variable access
+            opt_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", expr)
+
+            # Create comprehensive local context
+            local_expr_context = {}
+            local_expr_context.update(self.df_cache)
+            local_expr_context.update(self.sys_vars)
+            local_expr_context.update(self.empirical_peaks)
+
+            # Add utility functions to local context
+            local_expr_context.update(
+                {
+                    "to_min": to_min,
+                    "to_max": to_max,
+                    "to_avg": to_avg,
+                    "to_median": to_median,
+                    "to_std": to_std,
+                    "to_int": to_int,
+                    "to_sum": to_sum,
+                    "to_round": to_round,
+                    "to_quantile": to_quantile,
+                    "to_mod": to_mod,
+                    "to_concat": to_concat,
+                }
+            )
+
+            eval_result = eval(
+                compile(opt_expr, "<string>", "eval"),
+                {},
+                local_expr_context,
+            )
+
+            if np.isnan(eval_result):
+                return ""
+            else:
+                return eval_result
+
+        except (TypeError, NameError, KeyError) as exception:
+            if "empirical_peak" in str(exception):
+                console_warning(
+                    f"Missing empirical peak data: {exception}. Using empty value."
+                )
+                return ""
+            else:
+                return ""
+
+        except AttributeError as attribute_error:
+            if str(attribute_error) == "'NoneType' object has no attribute 'get'":
+                return ""
+            else:
+                console_error("analysis", str(attribute_error))
+                return ""
+
+
+def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     """
     Convert user defined equation string to eval executable string.
     For example,
@@ -397,59 +444,66 @@ def build_eval_string(equation: str, coll_level: str, config: dict[str, Any]) ->
                 )
             )
     """
-
     if coll_level is None:
-        raise ValueError("Error: coll_level can not be None.")
+        raise Exception("Error: coll_level can not be None.")
 
     if not equation:
         return ""
 
-    s = str(equation)
+    equation_string = str(equation)
 
     # build-in variable starts with '$', python can not handle it.
     # replace '$' with 'ammolite__'.
-    # TODO: pre-check there is no "ammolite__" in all config files.
-    s = re.sub(r"\$", "ammolite__", s)
+    equation_string = re.sub(r"\$", "ammolite__", equation_string)
 
     # convert equation string to intermediate expression in df array format
-    ast_node = ast.parse(s)
+    ast_node = ast.parse(equation_string)
+    # print(astunparse.dump(ast_node))
     transformer = CodeTransformer()
     transformer.visit(ast_node)
 
-    s = astunparse.unparse(ast_node)
+    equation_string = astunparse.unparse(ast_node)
 
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']
-    s = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", s)
+    equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
 
     # apply coll_level
     if config.get("format_rocprof_output") == "rocpd":
         # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
-        s = re.sub("SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
-        s = re.sub(
-            r"raw_pmc_df", "raw_pmc_df['" + schema.PMC_PERF_FILE_PREFIX + "']", s
+        equation_string = re.sub(
+            "SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", equation_string
+        )
+        equation_string = re.sub(
+            r"raw_pmc_df",
+            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
+            equation_string,
         )
     else:
-        s = re.sub(r"raw_pmc_df", "raw_pmc_df['" + coll_level + "']", s)
+        equation_string = re.sub(
+            r"raw_pmc_df", f"raw_pmc_df['{coll_level}']", equation_string
+        )
+    return equation_string
 
-    return s
 
-
-def update_denom_string(equation: str, unit: str) -> str:
+def update_denominator_string(equation: str, normal_unit: str) -> str:
     """
     Update $denom in equation with runtime normalization unit.
     """
     if not equation:
         return ""
 
-    s = str(equation)
-    if unit in SUPPORTED_DENOM:
-        s = re.sub(r"\$denom", SUPPORTED_DENOM[unit], s)
+    equation_string = str(equation)
 
-    return s
+    if normal_unit in SUPPORTED_DENOM.keys():
+        equation_string = re.sub(
+            r"\$denom", SUPPORTED_DENOM[normal_unit], equation_string
+        )
+
+    return equation_string
 
 
-def update_normunit_string(equation: str, unit: str) -> str:
+def update_normal_unit_string(equation: str, normal_unit: str) -> str:
     """
     Update $normUnit in equation with runtime normalization unit.
     It is string replacement for display only.
@@ -461,18 +515,50 @@ def update_normunit_string(equation: str, unit: str) -> str:
 
     return re.sub(
         r"\((?P<PREFIX>\w*)\s+\+\s+(\$normUnit\))",
-        r"\g<PREFIX> " + re.sub("_", " ", unit),
+        rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
         str(equation),
     ).capitalize()
 
 
 def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
-    visited = False
-    counters: list[str] = []
+    function_filter = {
+        "MIN": None,
+        "MAX": None,
+        "AVG": None,
+        "ROUND": None,
+        "TO_INT": None,
+        "GB": None,
+        "STD": None,
+        "GFLOP": None,
+        "GOP": None,
+        "OP": None,
+        "CU": None,
+        "NC": None,
+        "UC": None,
+        "CC": None,
+        "RW": None,
+        "GIOP": None,
+        "GFLOPs": None,
+        "CONCAT": None,
+        "MOD": None,
+    }
 
+    built_in_counter = [
+        "LDS_Per_Workgroup",
+        "Grid_Size",
+        "Workgroup_Size",
+        "Arch_VGPR",
+        "Accum_VGPR",
+        "SGPR",
+        "Scratch_Per_Workitem",
+        "Start_Timestamp",
+        "End_Timestamp",
+    ]
+
+    visited = False
+    counters = []
     if not isinstance(formula, str):
         return visited, counters
-
     try:
         tree = ast.parse(
             formula.replace("$normUnit", "SQ_WAVES")
@@ -491,10 +577,10 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
                 val = (
                     str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
                 )
-                if val.isupper() and val not in FUNCTION_FILTER:
+                if val.isupper() and val not in function_filter:
                     counters.append(val)
                     visited = True
-                if val in BUILT_IN_COUNTERS:
+                if val in built_in_counter:
                     visited = True
     except Exception:
         pass
@@ -502,209 +588,16 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
     return visited, counters
 
 
-def calc_builtin_var(var: Any, sys_info: Any) -> Optional[int]:
+def calc_builtin_var(var: Union[int, str], sys_info: Any) -> Optional[int]:
     """
     Calculate build-in variable based on sys_info:
     """
     if isinstance(var, int):
         return var
     elif isinstance(var, str) and var.startswith("$total_l2_chan"):
-        return sys_info.total_l2_chan
+        return int(sys_info.total_l2_chan)
     else:
         console_error(f'Built-in var "{var}" is not supported')
-
-
-def init_metric_evaluator(
-    raw_pmc_df: dict[str, pd.DataFrame],
-    ammolite_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> None:
-    if isinstance(raw_pmc_df, dict):
-        raw_pmc_df_keys = set(raw_pmc_df.keys())
-    elif isinstance(raw_pmc_df, pd.DataFrame):
-        raw_pmc_df_keys = set(raw_pmc_df.columns.get_level_values(0))
-    else:
-        raise ValueError(f"Unknown `raw_pmc_df` type '{type(raw_pmc_df)}'.")
-
-    raw_pmc_df_items = {f"raw_pmc_df_{key}": raw_pmc_df[key] for key in raw_pmc_df_keys}
-
-    # The globals here are not shared across all processes,
-    # they exist only within the subprocess's context,
-    # and their lifetime ends when the process terminates.
-    # The process-local globals are used for performance optimization.
-    globals().update(raw_pmc_df_items)
-    globals().update(ammolite_vars)
-    globals().update(empirical_peaks)
-
-
-def run_metric_evaluator(row_expr: str) -> Any:
-    try:
-        # cache dataframes of 'raw_pmc_df'
-        # this may replace some KeyErrors with NameErrors
-        # e.g. row_pmc_df['key'] -> row_pmc_df_key will throw NameError now
-        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", row_expr)
-        out = eval(compile(row_expr, "<string>", "eval"))
-
-        if isinstance(out, (int, float)) and np.isnan(out):
-            return ""
-        else:
-            return out
-
-    except (TypeError, NameError, KeyError) as e:
-        if "empirical_peak" in str(e):
-            console_warning(f"Missing empirical peak data: {e}. Using empty value.")
-        return ""
-
-    except AttributeError as ae:
-        if str(ae) == "'NoneType' object has no attribute 'get'":
-            return ""
-        else:
-            console_error("analysis", str(ae))
-
-
-def build_metric_row_values(
-    metric_idx: str,
-    key: str,
-    entries: dict[str, Any],
-    data_config: dict[str, Any],
-    panel: dict[str, Any],
-) -> list[Any]:
-    values = [metric_idx, key]
-
-    if "simple_box" == data_config.get("cli_style"):
-        for k, v in entries.items():
-            if "expr" == k:
-                for box_k, box_v in SIMPLE_BOX_STATS.items():
-                    values.append(box_v[0] + v + box_v[1])
-            else:
-                if k not in {"coll_level", "alias"}:
-                    values.append(v)
-    else:
-        for k, v in entries.items():
-            if k not in {"coll_level", "alias"}:
-                values.append(v)
-
-    if "alias" in entries:
-        values.append(entries["alias"])
-
-    values.append(entries.get("coll_level", schema.PMC_PERF_FILE_PREFIX))
-
-    if "metrics_description" in panel:
-        values.append(panel["metrics_description"].get(key, ""))
-
-    return values
-
-
-def collect_metric_counters(
-    entries: dict[str, Any], key: str, metric_counters: dict[str, list[str]]
-) -> None:
-    filter_dict: dict[str, None] = {}
-    visited = False
-
-    for formula in entries.values():
-        if formula is not None and str(formula) != "None":
-            is_visited, counters = gen_counter_list(str(formula))
-            if is_visited:
-                visited = True
-            for counter in counters:
-                filter_dict[counter] = None
-
-    if filter_dict or visited:
-        metric_counters[key] = list(filter_dict.keys())
-
-
-def build_metric_table_df(
-    panel_id: int,
-    data_config: dict[str, Any],
-    panel: dict[str, Any],
-    filter_metrics: Optional[list[str]],
-    metric_list: dict[str, str],
-    metric_counters: dict[str, list[str]],
-) -> pd.DataFrame:
-    headers = ["Metric_ID"]
-    data_source_idx = str(data_config["id"] // 100)
-
-    if "0" != data_source_idx or (filter_metrics and data_source_idx in filter_metrics):
-        metric_list[data_source_idx] = panel["title"]
-
-    if "simple_box" == data_config.get("cli_style"):
-        headers.append(data_config["header"]["metric"])
-        headers.extend(SIMPLE_BOX_STATS.keys())
-
-        for key, tile in data_config["header"].items():
-            if key not in {"metric", "expr"}:
-                headers.append(tile)
-    else:
-        headers.append(data_config["header"]["metric"])
-        for key, tile in data_config["header"].items():
-            if "metric" != key:
-                headers.append(tile)
-
-    headers.append("coll_level")
-
-    if "metrics_description" in panel:
-        headers.append("Description")
-
-    df = pd.DataFrame(columns=headers)
-
-    for i, (key, entries) in enumerate(data_config["metric"].items()):
-        data_source_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-        metric_idx = f"{data_source_idx}.{i}"
-
-        if (
-            (not filter_metrics)
-            or (metric_idx in filter_metrics)  # no filter  # metric in filter
-            or
-            # the whole table in filter
-            (data_source_idx in filter_metrics)
-            or
-            # the whole IP block in filter
-            (str(panel_id // 100) in filter_metrics)
-        ):
-            values = build_metric_row_values(
-                metric_idx, key, entries, data_config, panel
-            )
-
-            df_new_row = pd.DataFrame([values], columns=headers)
-            df = pd.concat([df, df_new_row])
-
-            metric_list[data_source_idx] = data_config["title"]
-
-        # Collect metric counters
-        metric_list[metric_idx] = key
-        collect_metric_counters(entries, key, metric_counters)
-
-    df.set_index("Metric_ID", inplace=True)
-    return df
-
-
-def build_raw_csv_table_df(
-    data_config: dict[str, Any],
-    filter_metrics: Optional[list[str]],
-    metric_list: dict[str, str],
-) -> pd.DataFrame:
-    data_source_idx = str(data_config["id"] // 100)
-
-    if (
-        not filter_metrics
-        or data_source_idx == "0"
-        or data_source_idx in filter_metrics
-    ):
-        column = "from_csv_columnwise" if data_config.get("columnwise") else "from_csv"
-        df = pd.DataFrame([data_config["source"]], columns=[column])
-        metric_list[data_source_idx] = data_config["title"]
-        return df
-
-    return pd.DataFrame()
-
-
-def build_pc_sampling_table_df(
-    data_config: dict[str, Any], metric_list: dict[str, str]
-) -> pd.DataFrame:
-    data_source_idx = str(data_config["id"] // 100)
-    df = pd.DataFrame([data_config["source"]], columns=["from_pc_sampling"])
-    metric_list[data_source_idx] = data_config["title"]
-    return df
 
 
 @demarcate
@@ -724,22 +617,29 @@ def build_dfs(
     #         if not metric in avail_ip_blocks:
     #             print("{} is not a valid metric to filter".format(metric))
     #             exit(1)
+    simple_box = {
+        "Min": ["MIN(", ")"],
+        "Q1": ["QUANTILE(", ", 0.25)"],
+        "Median": ["MEDIAN(", ")"],
+        "Q3": ["QUANTILE(", ", 0.75)"],
+        "Max": ["MAX(", ")"],
+    }
 
-    d: dict[int, pd.DataFrame] = {}
-    metric_list: dict[str, str] = {}
-    dfs_type: dict[int, str] = {}
-    metric_counters: dict[str, list[str]] = {}
+    dfs = {}
+    metric_list = {}
+    dfs_type = {}
+    metric_counters = {}
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
-            for type_key, data_config in data_source.items():
+            for type, data_config in data_source.items():
                 if (
-                    "metric_table" == type_key
+                    type == "metric_table"
                     and "metric" in data_config
                     and "placeholder_range" in data_config["metric"]
                 ):
+                    new_metrics = {}
                     # NB: support single placeholder for now!!
-                    new_metrics: dict[str, dict[str, str]] = {}
                     p_range = data_config["metric"].pop("placeholder_range")
                     metric, metric_expr = data_config["metric"].popitem()
 
@@ -749,69 +649,181 @@ def build_dfs(
                         #   eval_metric(). This is the only reason we need
                         #   sys_info at this stage.
                         var = calc_builtin_var(r, sys_info)
-                        if var is not None:
-                            for i in range(int(var)):
+                        if var:
+                            for i in range(var):
                                 new_key = metric.replace(p, str(i))
-                                new_val = {
-                                    k: v.replace(p, str(i))
-                                    for k, v in metric_expr.items()
-                                }
+                                new_val = {}
+                                for k, v in metric_expr.items():
+                                    new_val[k] = metric_expr[k].replace(p, str(i))
                                 new_metrics[new_key] = new_val
 
                     data_config["metric"] = new_metrics
 
-    # Build dataframes
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
-            for type_key, data_config in data_source.items():
-                if type_key == "metric_table":
-                    df = build_metric_table_df(
-                        panel_id,
-                        data_config,
-                        panel,
-                        filter_metrics,
-                        metric_list,
-                        metric_counters,
+            for type, data_config in data_source.items():
+                if type == "metric_table":
+                    headers = ["Metric_ID"]
+                    data_source_idx = str(data_config["id"] // 100)
+
+                    if data_source_idx != 0 or (
+                        filter_metrics and data_source_idx in filter_metrics
+                    ):
+                        metric_list[data_source_idx] = panel["title"]
+                    if (
+                        "cli_style" in data_config
+                        and data_config["cli_style"] == "simple_box"
+                    ):
+                        headers.append(data_config["header"]["metric"])
+                        for k in simple_box.keys():
+                            headers.append(k)
+
+                        for key, tile in data_config["header"].items():
+                            if key != "metric" and key != "expr":
+                                headers.append(tile)
+                    else:
+                        headers.append(data_config["header"]["metric"])
+                        for key, tile in data_config["header"].items():
+                            if key != "metric":
+                                headers.append(tile)
+
+                    headers.append("coll_level")
+
+                    # Only add Metrics Description column if it is defined in the panel
+                    if "metrics_description" in panel:
+                        headers.append("Description")
+
+                    df = pd.DataFrame(columns=headers)
+
+                    for i, (key, entries) in enumerate(data_config["metric"].items()):
+                        data_source_idx = (
+                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                        )
+                        metric_idx = f"{data_source_idx}.{i}"
+                        eqn_content = []
+
+                        if (
+                            (not filter_metrics)
+                            or (
+                                metric_idx in filter_metrics
+                            )  # no filter  # metric in filter
+                            or
+                            # the whole table in filter
+                            (data_source_idx in filter_metrics)
+                            or
+                            # the whole IP block in filter
+                            (str(panel_id // 100) in filter_metrics)
+                        ):
+                            values = [metric_idx, key]
+
+                            metric_list[data_source_idx] = data_config["title"]
+
+                            if (
+                                "cli_style" in data_config
+                                and data_config["cli_style"] == "simple_box"
+                            ):
+                                for k, v in entries.items():
+                                    if k == "expr":
+                                        for bv in simple_box.values():
+                                            values.append(bv[0] + v + bv[1])
+                                    else:
+                                        if k not in {"coll_level", "alias"}:
+                                            values.append(v)
+                            else:
+                                for k, v in entries.items():
+                                    if k not in {"coll_level", "alias"}:
+                                        values.append(v)
+                                        eqn_content.append(v)
+
+                            if "alias" in entries.keys():
+                                values.append(entries["alias"])
+
+                            values.append(
+                                entries.get("coll_level", schema.PMC_PERF_FILE_PREFIX)
+                            )
+
+                            if "metrics_description" in panel:
+                                values.append(panel["metrics_description"].get(key, ""))
+
+                            df_new_row = pd.DataFrame([values], columns=headers)
+                            df = pd.concat([df, df_new_row])
+
+                        # collect metric_list
+                        metric_list[metric_idx] = key
+
+                        # generate mapping of counters and metrics
+                        filtered_counters = {}
+                        formula_visited = False
+
+                        for formula in eqn_content:
+                            if formula is not None and formula != "None":
+                                visited, counters = gen_counter_list(formula)
+                                if visited:
+                                    formula_visited = True
+                                for counter in counters:
+                                    filtered_counters[counter] = None
+
+                        if filtered_counters or formula_visited:
+                            metric_counters[key] = list(filtered_counters)
+
+                    df.set_index("Metric_ID", inplace=True)
+                elif type == "raw_csv_table":
+                    data_source_idx = str(data_config["id"] // 100)
+                    if (
+                        (not filter_metrics)
+                        or (data_source_idx == "0")  # no filter
+                        or (data_source_idx in filter_metrics)
+                    ):
+                        if "columnwise" in data_config and data_config["columnwise"]:
+                            df = pd.DataFrame(
+                                [data_config["source"]], columns=["from_csv_columnwise"]
+                            )
+                        else:
+                            df = pd.DataFrame(
+                                [data_config["source"]], columns=["from_csv"]
+                            )
+                        metric_list[data_source_idx] = panel["title"]
+                    else:
+                        df = pd.DataFrame()
+                elif type == "pc_sampling_table":
+                    data_source_idx = str(data_config["id"] // 100)
+                    df = pd.DataFrame(
+                        [data_config["source"]], columns=["from_pc_sampling"]
                     )
-                elif type_key == "raw_csv_table":
-                    df = build_raw_csv_table_df(
-                        data_config, filter_metrics, metric_list
-                    )
-                elif type_key == "pc_sampling_table":
-                    df = build_pc_sampling_table_df(data_config, metric_list)
+                    metric_list[data_source_idx] = panel["title"]
                 else:
                     df = pd.DataFrame()
 
-                d[data_config["id"]] = df
-                dfs_type[data_config["id"]] = type_key
+                dfs[data_config["id"]] = df
+                dfs_type[data_config["id"]] = type
 
-    setattr(arch_configs, "dfs", d)
+    setattr(arch_configs, "dfs", dfs)
     setattr(arch_configs, "metric_list", metric_list)
     setattr(arch_configs, "dfs_type", dfs_type)
     setattr(arch_configs, "metric_counters", metric_counters)
 
 
 def build_metric_value_string(
-    dfs: dict[int, pd.DataFrame],
-    dfs_type: dict[int, str],
-    normal_unit: str,
-    profiling_config: dict[str, Any],
+    dfs: dict, dfs_type: dict, normal_unit: str, profiling_config: dict
 ) -> None:
     """
     Apply the real eval string to its field in the metric_table df.
     """
 
-    for table_id, df in dfs.items():
-        if dfs_type[table_id] == "metric_table":
+    for id, df in dfs.items():
+        if dfs_type[id] == "metric_table":
             for expr in df.columns:
                 if expr in schema.SUPPORTED_FIELD:
                     # NB: apply all build-in before building the whole string
-                    df[expr] = df[expr].apply(update_denom_string, unit=normal_unit)
+                    df[expr] = df[expr].apply(
+                        update_denominator_string, normal_unit=normal_unit
+                    )
 
                     # NB: there should be a faster way to do with single apply
                     if not df.empty:
                         for i in range(df.shape[0]):
                             row_idx_label = df.index.to_list()[i]
+                            # print(i, "row_idx_label", row_idx_label, expr)
                             if expr.lower() != "alias":
                                 df.at[row_idx_label, expr] = build_eval_string(
                                     df.at[row_idx_label, expr],
@@ -819,204 +831,65 @@ def build_metric_value_string(
                                     profiling_config,
                                 )
 
-                elif expr.lower() in {"unit", "units"}:
-                    df[expr] = df[expr].apply(update_normunit_string, unit=normal_unit)
-
-
-def eval_builtin_vars(config: dict[str, Any]) -> dict[str, Any]:
-    build_in: dict[str, Any] = {}
-
-    # First pass: per-XCD values
-    for key, value in BUILD_IN_VARS.items():
-        if "PER_XCD" not in key:
-            continue
-
-        s = build_eval_string(value, schema.PMC_PERF_FILE_PREFIX, config)
-        try:
-            build_in[f"ammolite__{key}"] = eval(compile(s, "<string>", "eval"))
-        except (TypeError, KeyError, AttributeError):
-            build_in[f"ammolite__{key}"] = None
-
-    # Update globals with per-XCD values for second pass
-    globals().update(build_in)
-
-    # Second pass: other built-in variables
-    for key, value in BUILD_IN_VARS.items():
-        if "PER_XCD" in key:
-            continue
-
-        s = build_eval_string(value, schema.PMC_PERF_FILE_PREFIX, config)
-        try:
-            build_in[f"ammolite__{key}"] = eval(compile(s, "<string>", "eval"))
-        except (TypeError, KeyError, AttributeError):
-            build_in[f"ammolite__{key}"] = None
-
-    return build_in
-
-
-def build_ammolite_vars(
-    sys_info: Any,
-    config: dict[str, Any],
-) -> dict[str, Any]:
-    ammolite_vars: dict[str, Any] = {}
-
-    # System info variables
-    sys_vars = [
-        "se_per_gpu",
-        "pipes_per_gpu",
-        "cu_per_gpu",
-        "simd_per_cu",
-        "sqc_per_gpu",
-        "lds_banks_per_cu",
-        "cur_sclk",
-        "cur_mclk",
-        "max_mclk",
-        "max_sclk",
-        "max_waves_per_cu",
-        "num_hbm_channels",
-        "num_xcd",
-        "wave_size",
-    ]
-
-    for var in sys_vars:
-        value = getattr(sys_info, var, None)
-        if (
-            value is None
-            or (isinstance(value, (int, float)) and np.isnan(value))
-            or value == 0
-        ):
-            console_warning(
-                f"{var} is not available in sysinfo.csv, please provide the correct "
-                "value using --specs-correction"
-            )
-            value = 0
-
-        if var in {
-            "se_per_gpu",
-            "pipes_per_gpu",
-            "cu_per_gpu",
-            "simd_per_cu",
-            "sqc_per_gpu",
-            "lds_banks_per_cu",
-            "max_waves_per_cu",
-            "num_xcd",
-            "wave_size",
-        }:
-            ammolite_vars[f"ammolite__{var}"] = int(value)
-        else:
-            ammolite_vars[f"ammolite__{var}"] = float(value)
-
-    # Total L2 channels
-    ammolite_vars["ammolite__total_l2_chan"] = calc_builtin_var(
-        "$total_l2_chan", sys_info
-    )
-
-    # TODO: fix all $normUnit in Unit column or title
-    # Build derived variables
-    build_in = eval_builtin_vars(config)
-    ammolite_vars.update(build_in)
-
-    return ammolite_vars
-
-
-def debug_expression(
-    expr: str,
-    row_expr: str,
-    raw_pmc_df: dict[str, pd.DataFrame],
-    empirical_peaks: dict[str, Any],
-) -> None:
-    print("~" * 40 + "\nExpression:")
-    print(f"{expr} = {row_expr}")
-    print("Inputs:")
-
-    matched_vars = re.findall(r"ammolite__\w+", row_expr)
-    if matched_vars:
-        for v in matched_vars:
-            try:
-                value = eval(compile(v, "<string>", "eval"))
-                print("Var ", v, ":", value)
-            except NameError:
-                if "_empirical_peak" in v:
-                    if v in empirical_peaks:
-                        print(
-                            "Var ",
-                            v,
-                            ":",
-                            empirical_peaks[v],
-                        )
-                    else:
-                        print(
-                            "Var ",
-                            v,
-                            ": [empirical peak not found]",  # noqa
-                        )
-                else:
-                    print(
-                        "Var ",
-                        v,
-                        ": [not available in main thread]",  # noqa
+                elif expr.lower() == "unit" or expr.lower() == "units":
+                    df[expr] = df[expr].apply(
+                        update_normal_unit_string, normal_unit=normal_unit
                     )
 
-    matched_cols = re.findall(r"raw_pmc_df\['\w+'\]\['\w+'\]", row_expr)
-    if matched_cols:
-        for c in matched_cols:
-            m = re.match(r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", c)
-            if m:
-                try:
-                    data = raw_pmc_df[m.group(1)][m.group(2)].tolist()
-                    print(f"{c}: {data}")
-                except KeyError as ke:
-                    console_warning(f"Skipping entry. Encountered a missing key: {ke}")
 
-    print("\nOutput:")
+def init_metric_evaluator(
+    raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict, empirical_peaks: dict
+) -> None:
+    if isinstance(raw_pmc_df, dict):
+        raw_pmc_df_keys = set(raw_pmc_df.keys())
+
+    elif isinstance(raw_pmc_df, pd.DataFrame):
+        raw_pmc_df_keys = set(raw_pmc_df.columns.get_level_values(0))
+
+    else:
+        raise ValueError(f"Unknown `raw_pmc_df` type '{type(raw_pmc_df)}'.")
+
+    raw_pmc_df_items = {f"raw_pmc_df_{key}": raw_pmc_df[key] for key in raw_pmc_df_keys}
+
+    # The globals here are not shared across all processes,
+    # they exist only within the subprocess's context,
+    # and their lifetime ends when the process terminates.
+    # The process-local globals are used for performance optimization.
+    globals().update(raw_pmc_df_items)
+    globals().update(ammolite_vars)
+    globals().update(empirical_peaks)
+
+
+def run_metric_evaluator(row_expr: str) -> str:
     try:
-        print(eval(compile(row_expr, "<string>", "eval")))
-        print("~" * 40)
-    except NameError as ne:
-        if "empirical_peak" in str(ne):
-            console_warning(
-                "Skipping debug evaluation. Empirical peak variables "  # noqa
-                "not available in main thread: {}".format(str(ne))  # noqa
-            )
+        # cache dataframes of 'raw_pmc_df'
+        # this may replace some KeyErrors with NameErrors
+        # e.g. row_pmc_df['key'] -> row_pmc_df_key will throw NameError now
+        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", row_expr)
+        out = eval(compile(row_expr, "<string>", "eval"))
+
+        if np.isnan(out):
+            return ""
+
         else:
-            console_warning(
-                "Skipping debug evaluation. Variable not available: {}".format(  # noqa
-                    str(ne)
-                )
-            )
-        print("~" * 40)
-    except (TypeError, KeyError) as e:
-        console_warning(f"Skipping entry. Encountered error: {e}")
+            return out
+
+    except (TypeError, NameError, KeyError) as e:
+        if "empirical_peak" in str(e):
+            console_warning(f"Missing empirical peak data: {e}. Using empty value.")
+            return ""
+        else:
+            return ""
+
     except AttributeError as ae:
         if str(ae) == "'NoneType' object has no attribute 'get'":
-            console_warning(f"Skipping entry. Encountered missing csv: {np.nan}")
+            return ""
+
         else:
             console_error("analysis", str(ae))
 
 
-def collect_expressions_for_evaluation(
-    df: pd.DataFrame,
-    table_id: int,
-    debug: bool,
-    raw_pmc_df: dict[str, pd.DataFrame],
-    row_expr_indexes: list[tuple[int, Any, str]],
-    row_exprs: list[str],
-    empirical_peaks: dict[str, Any],
-) -> None:
-    for idx, row in df.iterrows():
-        for expr in df.columns:
-            if expr in schema.SUPPORTED_FIELD and expr.lower() != "alias":
-                if row[expr]:
-                    row_expr_indexes.append((table_id, idx, expr))
-                    row_exprs.append(row[expr])
-
-                    if debug:
-                        debug_expression(expr, row[expr], raw_pmc_df, empirical_peaks)
-                else:
-                    row[expr] = ""
-
-
-def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, Any]:
+def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
     """Create empirical peaks dictionary"""
     empirical_peaks = {}
 
@@ -1048,161 +921,327 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, A
     return empirical_peaks
 
 
+def create_sys_vars(sys_info: Any) -> dict[str, Any]:
+    """Create variables from sys.info."""
+    sys_vars_collection = {}
+
+    sys_vars_config = [
+        ("se_per_gpu", int, "se_per_gpu"),
+        ("pipes_per_gpu", int, "pipes_per_gpu"),
+        ("cu_per_gpu", int, "cu_per_gpu"),
+        ("simd_per_cu", int, "simd_per_cu"),
+        ("sqc_per_gpu", int, "sqc_per_gpu"),
+        ("lds_banks_per_cu", int, "lds_banks_per_cu"),
+        ("cur_sclk", float, "cur_sclk"),
+        ("cur_mclk", float, "cur_mclk"),
+        ("max_mclk", float, "max_mclk"),
+        ("max_sclk", float, "max_sclk"),
+        ("max_waves_per_cu", int, "max_waves_per_cu"),
+        ("num_hbm_channels", float, "num_hbm_channels"),
+        ("num_xcd", int, "num_xcd"),
+        ("wave_size", int, "wave_size"),
+    ]
+
+    for var_name, var_type, attr_name in sys_vars_config:
+        variable_value = var_type(getattr(sys_info, attr_name))
+        if np.isnan(variable_value) or variable_value == 0:
+            console_warning(
+                f"{attr_name} is not available in sysinfo.csv, please provide the correct "
+                "value using --specs-correction"
+            )
+        sys_vars_collection[f"ammolite__{var_name}"] = variable_value
+
+    # Special case for total_l2_chan
+    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info)
+    if np.isnan(total_l2_channel_count) or total_l2_channel_count == 0:
+        console_warning(
+            "total_l2_chan is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
+        )
+    sys_vars_collection["ammolite__total_l2_chan"] = total_l2_channel_count
+
+    return sys_vars_collection
+
+
+def calc_builtin_vars(
+    raw_pmc_df: Union[pd.DataFrame, dict], config: dict
+) -> dict[str, Any]:
+    """Calculate built-in variables"""
+    # TODO: fix all $normUnit in Unit column or title
+    # build and eval all derived build-in global variables
+    builtin_vars_collection = {}
+
+    # First pass: calculate per-XCD values
+    for variable_key, variable_value in BUILD_IN_VARS.items():
+        if "PER_XCD" not in variable_key:
+            continue
+
+        # NB: assume all built-in vars from pmc_perf.csv for now
+        eval_string = build_eval_string(
+            variable_value, schema.PMC_PERF_FILE_PREFIX, config
+        )
+        try:
+            # Create temporary evaluator for this calculation
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, {}, {})
+            calculation_result = temporary_evaluator.eval_expression(eval_string)
+            builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
+        except (TypeError, NameError, KeyError, AttributeError):
+            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+
+    # Second pass: calculate remaining variables that depend on per-XCD values
+    for variable_key, variable_value in BUILD_IN_VARS.items():
+        if "PER_XCD" in variable_key:
+            continue
+
+        eval_string = build_eval_string(
+            variable_value, schema.PMC_PERF_FILE_PREFIX, config
+        )
+        try:
+            temporary_evaluator = MetricEvaluator(
+                raw_pmc_df, builtin_vars_collection, {}
+            )
+            calculation_result = temporary_evaluator.eval_expression(eval_string)
+            builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
+        except (TypeError, NameError, KeyError, AttributeError):
+            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+
+    return builtin_vars_collection
+
+
 @demarcate
 def eval_metric(
-    dfs: dict[int, pd.DataFrame],
-    dfs_type: dict[int, str],
+    dfs: dict,
+    dfs_type: dict,
     sys_info: Any,
     empirical_peaks_df: pd.DataFrame,
-    raw_pmc_df: dict[str, pd.DataFrame],
+    raw_pmc_df: Union[pd.DataFrame, dict],
     debug: bool,
-    config: dict[str, Any],
+    config: dict,
 ) -> None:
+    """
+    Execute the expr string for each metric in the df.
+    """
+
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
     if (
         (not roof_only_run)
-        and hasattr(raw_pmc_df.get("pmc_perf", pd.DataFrame()), "GRBM_GUI_ACTIVE")
-        and "GRBM_GUI_ACTIVE" in raw_pmc_df["pmc_perf"].columns
+        and hasattr(raw_pmc_df.get("pmc_perf", {}), "GRBM_GUI_ACTIVE")
         and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
     ):
         console_warning("Dectected GRBM_GUI_ACTIVE == 0")
-        console_error("Halting  execution for warning above.")
+        console_error("Hauting execution for warning above.")
 
-    # Build ammolite variables from sys_info
-    ammolite_vars = build_ammolite_vars(sys_info, config)
+    sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, config)
+    sys_vars.update(builtin_vars)
 
-    # Collect expressions to evaluate
-    row_expr_indexes: list[tuple[int, Any, str]] = []
-    row_exprs: list[str] = []
+    # Create metric evaluator
+    metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
-    for table_id, df in dfs.items():
-        if dfs_type[table_id] == "metric_table":
-            collect_expressions_for_evaluation(
-                df,
-                table_id,
-                debug,
-                raw_pmc_df,
-                row_expr_indexes,
-                row_exprs,
-                empirical_peaks,
-            )
+    exprs_to_eval = []
 
-    # Empirically, 16 is about as much as we need.
-    processes = min(16, multiprocessing.cpu_count() // 2)
+    # Hmmm... apply + lambda should just work
+    # df['Value'] = df['Value'].apply(
+    #     lambda s: eval(
+    #         compile(str(s), '<string>', 'eval')
+    #     )
+    # )
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] == "metric_table":
+            for row_id, row in df.iterrows():
+                for expr in df.columns:
+                    if expr in schema.SUPPORTED_FIELD and expr.lower() != "alias":
+                        if row[expr]:
+                            exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
-    # breakpoint()
-    with multiprocessing.Pool(
-        processes=processes,
-        initializer=init_metric_evaluator,
-        initargs=(raw_pmc_df, ammolite_vars, empirical_peaks),
-    ) as pool:
-        outs = pool.map(run_metric_evaluator, row_exprs)
+                            if debug:
+                                debug_evaluate_metrics(
+                                    expr, row[expr], metric_evaluator, raw_pmc_df
+                                )
+                        else:
+                            # If not insert nan, the whole col might be treated
+                            # as string but not nubmer if there is NONE
+                            row[expr] = ""
 
-    # update dataframes with results
-    for (df_id, row, col), out in zip(row_expr_indexes, outs):
-        dfs[df_id].loc[row, col] = out
+    for df_id, row_id, col, expr in exprs_to_eval:
+        eval_result = metric_evaluator.eval_expression(expr)
+        dfs[df_id].loc[row_id, col] = eval_result
+
+
+def debug_evaluate_metrics(
+    expr: str,
+    row_expr: str,
+    metric_evaluator: MetricEvaluator,
+    raw_pmc_df: Union[pd.DataFrame, dict],
+) -> None:
+    """Debug helper for expression evaluation."""
+    print("~" * 40 + "\nExpression:")
+    print(f"{expr} = {row_expr}")
+    print("Inputs:")
+
+    # Show matched variables
+    matched_vars = re.findall(r"ammolite__\w+", row_expr)
+    if matched_vars:
+        for vars in matched_vars:
+            if vars in metric_evaluator.sys_vars:
+                print(f"Var {vars}: {metric_evaluator.sys_vars[vars]}")
+            elif vars in metric_evaluator.empirical_peaks:
+                print(f"Var {vars}: {metric_evaluator.empirical_peaks[vars]}")
+            else:
+                print(f"Var {vars}: [not found]")
+
+    # Show matched columns
+    matched_cols = re.findall(r"raw_pmc_df\['\w+'\]\['\w+'\]", row_expr)
+    if matched_cols:
+        for cols in matched_cols:
+            col_match = re.match(r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", cols)
+            try:
+                if isinstance(raw_pmc_df, dict) and col_match.group(1) in raw_pmc_df:
+                    column_data = raw_pmc_df[col_match.group(1)][
+                        col_match.group(2)
+                    ].to_list()
+                    print(f"{cols}: {column_data}")
+            except KeyError as key_error:
+                console_warning(
+                    f"Skipping entry. Encountered a missing key: {key_error}"
+                )
+
+    print("\nOutput:")
+    try:
+        eval_result = metric_evaluator.eval_expression(row_expr)
+        print(eval_result)
+        print("~" * 40)
+    except Exception as e:
+        console_warning(f"Debug evaluation failed: {e}")
+        print("~" * 40)
 
 
 @demarcate
 def apply_filters(
-    workload: Any, directory: str, is_gui: bool, debug: bool
+    workload: Any, dir_path: str, is_gui: bool, debug: bool
 ) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
     """
 
-    ret_df = workload.raw_pmc.copy()
+    # TODO: error out properly if filters out of bound
+    filtered_df = workload.raw_pmc
 
+    # Apply node filter
     if workload.filter_nodes:
-        ret_df = ret_df.loc[
-            ret_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
+        filtered_df = filtered_df.loc[
+            filtered_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
             .astype(str)
             .isin([workload.filter_gpu_ids])
         ]
-        if ret_df.empty:
+        if filtered_df.empty:
             console_error("analysis", f"{workload.filter_nodes} is invalid")
 
+    # Apply GPU ID filter
     if workload.filter_gpu_ids:
-        ret_df = ret_df.loc[
-            ret_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
+        filtered_df = filtered_df.loc[
+            filtered_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
             .astype(str)
             .isin([workload.filter_gpu_ids])
         ]
-        if ret_df.empty:
+        if filtered_df.empty:
             console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
 
+    # Apply kernel filter
     # NB:
     # Kernel id is unique!
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
     if workload.filter_kernel_ids:
-        if all(isinstance(kid, int) for kid in workload.filter_kernel_ids):
-            # Verify valid kernel filter
-            kernels_df = pd.read_csv(str(Path(directory) / "pmc_kernel_top.csv"))
-            for kernel_id in workload.filter_kernel_ids:
-                if kernel_id >= len(kernels_df["Kernel_Name"]):
-                    console_error(
-                        f"{kernel_id} is an invalid kernel id. "
-                        f"Please enter an id between 0-"
-                        f"{len(kernels_df['Kernel_Name']) - 1}"
-                    )
+        filtered_df = apply_kernel_filter(filtered_df, workload, dir_path)
 
-            kernels = []
-            # NB: mark selected kernels with "*"
-            #     TODO: fix it for unaligned comparison
-            kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-            kernel_top_df["S"] = ""
-
-            for kernel_id in workload.filter_kernel_ids:
-                kernels.append(kernel_top_df.loc[kernel_id, "Kernel_Name"])
-                kernel_top_df.loc[kernel_id, "S"] = "*"
-
-            if kernels:
-                ret_df = ret_df.loc[
-                    ret_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].isin(kernels)
-                ]
-        elif all(isinstance(kid, str) for kid in workload.filter_kernel_ids):
-            df_cleaned = ret_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].apply(
-                lambda x: x.strip() if isinstance(x, str) else x
-            )
-            ret_df = ret_df.loc[df_cleaned.isin(workload.filter_kernel_ids)]
-        else:
-            console_error(
-                "analyze",
-                "Mixing kernel indices and string filters is not currently supported",
-            )
-
+    # Apply dispatch filter
     if workload.filter_dispatch_ids:
-        # NB: support ignoring the 1st n dispatched execution by '> n'
-        #     The better way may be parsing python slice string
-        for d in workload.filter_dispatch_ids:
-            if int(d) >= len(ret_df):  # subtract 2 bc of the two header rows
-                console_error("analysis", f"{d} is an invalid dispatch id.")
-
-        first_filter = workload.filter_dispatch_ids[0]
-        if first_filter.startswith(">"):
-            m = re.match(r">\s*(\d+)", first_filter)
-            if m:
-                threshold = int(m.group(1))
-                ret_df = ret_df[
-                    ret_df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"] > threshold
-                ]
-        else:
-            dispatches = [int(x) for x in workload.filter_dispatch_ids]
-            ret_df = ret_df.loc[dispatches]
+        filtered_df = apply_dispatch_filter(filtered_df, workload)
 
     if debug:
         print("~" * 40, "\nraw pmc df info:\n")
         print(workload.raw_pmc.info())
         print("~" * 40, "\nfiltered pmc df info:")
-        print(ret_df.info())
+        print(filtered_df.info())
 
-    return ret_df
+    return filtered_df
 
 
-def find_key_recursively(data: Any, search_key: str) -> Optional[Any]:
+def apply_kernel_filter(
+    df: pd.DataFrame, workload: Any, dir_path_path: str
+) -> pd.DataFrame:
+    """Apply kernel ID or name filters."""
+    if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
+        # Handle integer kernel IDs
+        kernels_dataframe = pd.read_csv(str(Path(dir_path_path) / "pmc_kernel_top.csv"))
+
+        # Validate kernel IDs
+        for kernel_id in workload.filter_kernel_ids:
+            if kernel_id >= len(kernels_dataframe["Kernel_Name"]):
+                console_error(
+                    f"{kernel_id} is an invalid kernel id. "
+                    f"Please enter an id between 0-{len(kernels_dataframe['Kernel_Name']) - 1}"
+                )
+
+        # Extract kernel names and mark selected kernels with "*"
+        # TODO: fix it for unaligned comparison
+        selected_kernels = []
+        kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+        kernel_top_dataframe["S"] = ""
+
+        for kernel_id in workload.filter_kernel_ids:
+            selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
+            kernel_top_dataframe.loc[kernel_id, "S"] = "*"
+
+        if selected_kernels:
+            df = df.loc[
+                df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].isin(selected_kernels)
+            ]
+
+    elif all(isinstance(kernel_id, str) for kernel_id in workload.filter_kernel_ids):
+        # Handle string kernel names
+        cleaned_dataframe = df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].apply(
+            lambda kernel_name: (
+                kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
+            )
+        )
+        df = df.loc[cleaned_dataframe.isin(workload.filter_kernel_ids)]
+    else:
+        console_error(
+            "analyze",
+            "Mixing kernel indices and string filters is not currently supported",
+        )
+
+    return df
+
+
+def apply_dispatch_filter(df: pd.DataFrame, workload: Any) -> pd.DataFrame:
+    """Apply dispatch ID filters."""
+    # NB: support ignoring the 1st n dispatched execution by '> n'
+    #     The better way may be parsing python slice string
+    for dispatch_id in workload.filter_dispatch_ids:
+        if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
+            console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
+
+    if ">" in workload.filter_dispatch_ids[0]:
+        dispatch_match = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
+        df = df[
+            df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]
+            > int(dispatch_match.group(1))
+        ]
+    else:
+        selected_dispatches = [
+            int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
+        ]
+        df = df.loc[selected_dispatches]
+
+    return df
+
+
+def find_key_recursively(data: Union[dict, list], search_key: str) -> Optional[Any]:
     """
     Recursively search for the search_key in the given data
     (which can be a dict or list).
@@ -1211,21 +1250,20 @@ def find_key_recursively(data: Any, search_key: str) -> Optional[Any]:
     if isinstance(data, dict):
         for key, value in data.items():
             if key == search_key:
-                # Convert JSON value to DataFrame
                 return value
             elif isinstance(value, (dict, list)):
                 result = find_key_recursively(value, search_key)
-                if result is not None:
+                if result:
                     return result
     elif isinstance(data, list):
         for item in data:
             result = find_key_recursively(item, search_key)
-            if result is not None:
+            if result:
                 return result
-    return None
+    return None  # Return None if the key was not found
 
 
-def search_key_in_json(file_path: str, search_key: str) -> Optional[Any]:
+def search_key_in_json(file_path: Path, search_key: str) -> Optional[Any]:
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
@@ -1237,91 +1275,92 @@ def search_key_in_json(file_path: str, search_key: str) -> Optional[Any]:
         return found
 
 
-def search_pc_sampling_record(
-    records: list[dict[str, Any]],
-) -> Optional[list[tuple[Any, ...]]]:
+def search_pc_sampling_record(records: list[dict]) -> Optional[list[tuple]]:
     """
     Search PC sampling records, and group and sort them
     """
 
     # NB:
     #  The field stall_reason is vailid only for HW stochastic pc sampling.
+    # TODO: might save wavefront count for HW stochastic pc sampling?
 
-    # Todo: might save wavefront count for HW stochastic pc sampling?
-
-    grouped_data: defaultdict[str, defaultdict[int, Any]] = defaultdict(
-        lambda: defaultdict(
-            lambda: {
-                "count": 0,
-                "count_issued": 0,
-                "count_stalled": 0,
-                "inst_index": None,
-                "stall_reason": {
-                    "NONE": 0,
-                    # No instruction available in the instruction cache.
-                    "NO_INSTRUCTION_AVAILABLE": 0,
-                    "ALU_DEPENDENCY": 0,  # ALU dependency not resolved.
-                    "WAITCNT": 0,
-                    "INTERNAL_INSTRUCTION": 0,  # Wave executes an internal instruction.
-                    "BARRIER_WAIT": 0,
-                    "ARBITER_NOT_WIN": 0,  # The instruction did not win the arbiter.
-                    "ARBITER_WIN_EX_STALL": 0,
-                    # Arbiter issued an instruction, but the execution pipe
-                    # pushed it back from execution.
-                    "OTHER_WAIT": 0,
-                    # Other types of wait (e.g., wait for XNACK acknowledgment).
-                    "SLEEP_WAIT": 0,
-                    "LAST": 0,
-                },
-            }
-        )
-    )
+    if not records:
+        console_warning("PC sampling: no pc sampling record found!")
+        return None
 
     rocp_inst_not_issued_prefix_len = len(PC_SAMPLING_NOT_ISSUE_PREFIX)
 
+    grouped_data = {}
+    stall_reason_keys = {
+        "NONE": 0,
+        # No instruction available in the instruction cache.
+        "NO_INSTRUCTION_AVAILABLE": 0,
+        "ALU_DEPENDENCY": 0,  # ALU dependency not resolved.
+        "WAITCNT": 0,
+        "INTERNAL_INSTRUCTION": 0,  # Wave executes an internal instruction.
+        "BARRIER_WAIT": 0,
+        "ARBITER_NOT_WIN": 0,  # The instruction did not win the arbiter.
+        "ARBITER_WIN_EX_STALL": 0,
+        # Arbiter issued an instruction, but the execution pipe
+        # pushed it back from execution.
+        "OTHER_WAIT": 0,
+        # Other types of wait (e.g., wait for XNACK acknowledgment).
+        "SLEEP_WAIT": 0,
+        "LAST": 0,
+    }
+
     # Populate grouped_data
     for item in records:
-        pc_info = item["record"].get("pc", {})
+        record = item["record"]
+        pc_info = record.get("pc", {})
+
         code_object_id = pc_info.get("code_object_id")
         code_object_offset = pc_info.get("code_object_offset")
-        snapshot = item["record"].get("snapshot", {})
         inst_index = item.get("inst_index")
-        issued = item["record"].get("wave_issued")
 
-        # TODO: opt me
-        if (
-            code_object_id is not None
-            and code_object_offset is not None
-            and inst_index is not None
-        ):
-            grouped_data[code_object_id][code_object_offset]["count"] += 1
-            # NB: the write here could be duplicated. If there is perf issue,
-            # We might want to opt it.
-            grouped_data[code_object_id][code_object_offset]["inst_index"] = inst_index
+        if None in (code_object_id, code_object_offset, inst_index):
+            continue
 
-            if snapshot:
-                if issued:
-                    grouped_data[code_object_id][code_object_offset][
-                        "count_issued"
-                    ] += 1
-                else:
-                    grouped_data[code_object_id][code_object_offset][
-                        "count_stalled"
-                    ] += 1
-                    stall_reason = snapshot.get("stall_reason", "")
-                    if stall_reason.startswith(
-                        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-                    ):
+        # Create composite key
+        key = (code_object_id, code_object_offset)
+
+        snapshot = record.get("snapshot", {})
+        issued = record.get("wave_issued")
+
+        if key not in grouped_data:
+            grouped_data[key] = [0, 0, 0, inst_index, {}]
+
+        # Update counts
+        entry = grouped_data[key]
+        entry[0] += 1  # count
+        entry[3] = inst_index  # inst_index
+
+        # Process snapshot data
+        if snapshot:
+            if issued:
+                entry[1] += 1  # count_issued
+            else:
+                entry[2] += 1  # count_stalled
+
+                # Process stall reason only when stalled
+                stall_reason = snapshot.get("stall_reason")
+                if stall_reason:
+                    # Extract reason key with bounds checking
+                    if len(stall_reason) > rocp_inst_not_issued_prefix_len:
                         reason_key = stall_reason[rocp_inst_not_issued_prefix_len:]
-                        grouped_data[code_object_id][code_object_offset][
-                            "stall_reason"
-                        ][reason_key] += 1
+                        # Only track known stall reasons
+                        if reason_key in stall_reason_keys:
+                            stall_reasons = entry[4]
+                            stall_reasons[reason_key] = (
+                                stall_reasons.get(reason_key, 0) + 1
+                            )
 
     if not grouped_data:
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
-    # Convert to sorted list of tuples
+    # Convert to sorted list of tuples:
+    # (code_object_id, inst_index, code_object_offset, count)
     sorted_counts = sorted(
         [
             (
@@ -1353,7 +1392,7 @@ def search_pc_sampling_record(
 
 @demarcate
 def load_pc_sampling_data_per_kernel(
-    method: str, file_name: str, kernel_name: str, sorting_type: str
+    method: str, file_name: Path, kernel_name: str, sorting_type: str
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data from json file with given method and kernel name,
@@ -1372,7 +1411,7 @@ def load_pc_sampling_data_per_kernel(
     :return: The counted and reordering pc sampling info.
     :rtype: pd.DataFrame:
     """
-    kernel_info_list = search_key_in_json(file_name, "kernel_symbols") or []
+    kernel_info_list = search_key_in_json(file_name, "kernel_symbols")
 
     kernel_info = {}
     if kernel_info_list:
@@ -1382,6 +1421,7 @@ def load_pc_sampling_data_per_kernel(
                 or item["demangled_kernel_name"] == kernel_name
                 or item["truncated_kernel_name"] == kernel_name
             ):
+                # kernel_info["kernel_id"] = item["kernel_id"]
                 kernel_info["code_object_id"] = item["code_object_id"]
                 kernel_info["entry_byte_offset"] = item["kernel_code_entry_byte_offset"]
                 break
@@ -1389,8 +1429,8 @@ def load_pc_sampling_data_per_kernel(
     if not kernel_info:
         console_warning("PC sampling: can not find the kernel %s " % kernel_name)
         return pd.DataFrame()
-
-    console_debug("PC sampling: kernel %s " % kernel_info)
+    else:
+        console_debug("PC sampling: kernel %s " % kernel_info)
 
     filtered_sorted_list = sorted(
         [
@@ -1418,9 +1458,6 @@ def load_pc_sampling_data_per_kernel(
         if method == "host_trap"
         else search_key_in_json(file_name, "pc_sample_stochastic")
     )
-
-    if not pc_sample_key_loc:
-        pc_sample_key_loc = []
 
     df = pd.DataFrame(
         search_pc_sampling_record(pc_sample_key_loc),
@@ -1452,24 +1489,22 @@ def load_pc_sampling_data_per_kernel(
 
     df["offset"] = df["offset"].apply(lambda x: hex(x))
 
-    pc_sample_instructions = (
-        search_key_in_json(file_name, "pc_sample_instructions") or {}
-    )
-
+    # Add instruction and source line information
+    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     df["instruction"] = df["inst_index"].apply(
         lambda x: pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
     )
 
-    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments") or {}
-
+    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
     df["source_line"] = df["inst_index"].apply(
         lambda x: (
-            str(Path("...") / Path(pc_sample_comments[x]).name)
+            ".../" + Path(pc_sample_comments[x]).name
             if x < len(pc_sample_instructions)
             else None
         )
     )
 
+    # Return sorted data based on sorting type
     if sorting_type == "offset":
         return (
             df[["source_line", "instruction", "offset", "count"]]
@@ -1509,7 +1544,7 @@ def load_pc_sampling_data_per_kernel(
 
 @demarcate
 def load_pc_sampling_data(
-    workload: Any, directory: str, file_prefix: str, sorting_type: str
+    workload: Any, dir_path: str, file_prefix: str, sorting_type: str
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data, filter and sort it by specified conditions,
@@ -1525,9 +1560,8 @@ def load_pc_sampling_data(
     #  - The default file name is subject to changes from rocprofv3
     #  - Prioritize stochastic
     #  - Alternatively, we could check pc_sampling_method in json
-
-    stochastic_path = Path(directory) / f"{file_prefix}_pc_sampling_stochastic.csv"
-    host_trap_path = Path(directory) / f"{file_prefix}_pc_sampling_host_trap.csv"
+    stochastic_path = Path(dir_path) / f"{file_prefix}_pc_sampling_stochastic.csv"
+    host_trap_path = Path(dir_path) / f"{file_prefix}_pc_sampling_host_trap.csv"
 
     if stochastic_path.exists():
         pc_sampling_method = "stochastic"
@@ -1537,11 +1571,11 @@ def load_pc_sampling_data(
         csv_file_path = host_trap_path
     else:
         console_warning(
-            f"PC sampling: cannot detect pc sampling method for {file_prefix}"
+            f"PC sampling: can not detect pc sampling method for {file_prefix}"
         )
         return pd.DataFrame()
 
-    # No kernel filter, return grouped and sorted csv directly
+    # No kernel filter, return grouped and sorted csv dir_pathectly
     if not workload.filter_kernel_ids:
         df = pd.read_csv(str(csv_file_path))
         # Group by 'Instruction_Comment' and count occurrences
@@ -1566,35 +1600,36 @@ def load_pc_sampling_data(
     elif len(workload.filter_kernel_ids) > 1:
         console_error(
             "PC sampling supports single kernel only! Please specify -k with "
-            "single kernel."
+            "single kernel.",
+            exit=False,
         )
         return pd.DataFrame()
 
     elif len(workload.filter_kernel_ids) == 1:
         # NB: the default file name is subject to changes from rocprofv3/rocprofiler_sdk
-        json_file_path = Path(directory) / f"{file_prefix}_results.json"
+        json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
         if not json_file_path.exists():
-            console_error(f"PC sampling: cannot read {json_file_path}")
+            console_error(f"PC sampling: can not read {json_file_path}", exit=False)
             return pd.DataFrame()
-
-        # NB:
-        #   We should find better way to remove the dependency on kernel_top_table
-        kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-        file_path = Path(directory) / kernel_top_df.loc[0, "from_csv"]
-        kernel_name = pd.read_csv(str(file_path)).loc[
-            workload.filter_kernel_ids[0], "Kernel_Name"
-        ]
-
-        return load_pc_sampling_data_per_kernel(
-            pc_sampling_method, str(json_file_path), kernel_name, sorting_type
-        )
+        else:
+            # NB:
+            #   We should find better way to remove the dependency on kernel_top_table
+            kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+            file = Path(dir_path) / str(kernel_top_df.loc[0, "from_csv"])
+            kernel_name = pd.read_csv(str(file)).loc[
+                workload.filter_kernel_ids[0], "Kernel_Name"
+            ]
+            return load_pc_sampling_data_per_kernel(
+                pc_sampling_method, json_file_path, kernel_name, sorting_type
+            )
     else:
         console_warning("PC sampling: No data")
         return pd.DataFrame()
 
 
 @demarcate
-def load_non_mertrics_table(workload: Any, directory: str, args: Any) -> None:
+def load_non_mertrics_table(workload: Any, dir_path: str, args: Any) -> None:
+
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
     #     kernel names.
@@ -1604,45 +1639,43 @@ def load_non_mertrics_table(workload: Any, directory: str, args: Any) -> None:
     #   "from_csv", "from_csv_columnwise", and "from_pc_sampling"
     #   are 3 internal symbols converted in build_dfs() for non-metrics table.
     #   There might be better way to store these info without the orginal entry.
-    tmp: dict[int, pd.DataFrame] = {}
-
-    for table_id, df in workload.dfs.items():
+    tmp = {}
+    for df_id, df in workload.dfs.items():
         if "from_csv" in df.columns:
-            file_path = Path(directory) / df.loc[0, "from_csv"]
-            if file_path.exists():
-                tmp[table_id] = pd.read_csv(str(file_path))
+            csv_file = Path(dir_path) / df.loc[0, "from_csv"]
+            if csv_file.exists():
+                tmp[df_id] = pd.read_csv(str(csv_file))
             else:
                 console_warning(
-                    f"Couldn't load {file_path.name}. "
+                    f"Couldn't load {csv_file.name}. "
                     "This may result in missing analysis data."
                 )
+        # NB: Special case for sysinfo. Probably room for improvement in this whole
+        # function design
+        elif "from_csv_columnwise" in df.columns and id == 101:
+            tmp[df_id] = workload.sys_info.transpose()
+            # All transposed columns should be marked with a general header
+            tmp[df_id].columns = ["Info"]
         elif "from_csv_columnwise" in df.columns:
-            if table_id == 101:
-                # NB: Special case for sysinfo. Probably room for improvement in this
-                # whole function design
-                tmp[table_id] = workload.sys_info.transpose()
-                # All transposed columns should be marked with a general header
-                tmp[table_id].columns = ["Info"]
-            else:
+            # NB:
+            #   Another way might be doing transpose in tty like metric_table.
+            #   But we need to figure out headers and comparison properly.
+            csv_file = Path(dir_path) / str(df.loc[0, "from_csv_columnwise"])
+            if csv_file.exists():
+                tmp[df_id] = pd.read_csv(str(csv_file)).transpose()
                 # NB:
-                #   Another way might be doing transpose in tty like metric_table.
-                #   But we need to figure out headers and comparison properly.
-                file_path = Path(directory) / df.loc[0, "from_csv_columnwise"]
-                if file_path.exists():
-                    tmp[table_id] = pd.read_csv(str(file_path)).transpose()
-                    # NB:
-                    #   All transposed columns should be marked with a general header,
-                    #   so tty could detect them and show them correctly in comparison.
-                    tmp[table_id].columns = ["Info"]
-                else:
-                    console_warning(
-                        f"Couldn't load {file_path.name}. "
-                        "This may result in missing analysis data."
-                    )
+                #   All transposed columns should be marked with a general header,
+                #   so tty could detect them and show them correctly in comparison.
+                tmp[df_id].columns = ["Info"]
+            else:
+                console_warning(
+                    f"Couldn't load {csv_file.name}. "
+                    "This may result in missing analysis data."
+                )
         elif "from_pc_sampling" in df.columns:
-            tmp[table_id] = load_pc_sampling_data(
+            tmp[df_id] = load_pc_sampling_data(
                 workload,
-                directory,
+                dir_path,
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
             )
@@ -1653,10 +1686,10 @@ def load_non_mertrics_table(workload: Any, directory: str, args: Any) -> None:
 @demarcate
 def load_table_data(
     workload: Any,
-    directory: str,
+    dir_path: str,
     is_gui: bool,
     args: Any,
-    config: dict[str, Any],
+    config: dict,
     skip_kernel_top: bool = False,
 ) -> None:
     """
@@ -1665,14 +1698,14 @@ def load_table_data(
     - Calculate mertric value for all "metric_table"
     """
     if not skip_kernel_top:
-        load_non_mertrics_table(workload, directory, args)
+        load_non_mertrics_table(workload, dir_path, args)
 
     eval_metric(
         workload.dfs,
         workload.dfs_type,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, directory, is_gui, args.debug),
+        apply_filters(workload, dir_path, is_gui, args.debug),
         args.debug,
         config,
     )
@@ -1692,19 +1725,19 @@ def build_comparable_columns(time_unit: str) -> list[str]:
         "Description",
     ]
 
-    for header in top_stat_base:
-        comparable_columns.append(f"{header}({time_unit})")
+    for h in top_stat_base:
+        comparable_columns.append(f"{h}({time_unit})")
 
     return comparable_columns
 
 
-def correct_sys_info(mspec: Any, specs_correction: str) -> Any:
+def correct_sys_info(mspec: Any, specs_correction: dict[str, Any]) -> Any:
     """
     Correct system spec items manually
     """
-    # TODO: more err checking for string specs_correction
+    # todo: more err checking for string specs_correction
 
-    pairs = dict(re.findall(r"(\w+):\s*(\d+)", specs_correction))
+    pairs = dict(re.findall(r"(\w+):\s*(\d+)", str(specs_correction)))
 
     for k, v in pairs.items():
         if not hasattr(mspec, str(k)):

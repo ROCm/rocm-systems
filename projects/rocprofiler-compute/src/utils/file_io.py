@@ -113,10 +113,10 @@ def create_df_kernel_top_stats(
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str) == filter_nodes]
+        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin(filter_gpu_ids)]
+        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -142,17 +142,21 @@ def create_df_kernel_top_stats(
 
     # Calculate execution times
     execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
-    time_stats = pd.DataFrame({
-        "Kernel_Name": df["Kernel_Name"],
-        "ExeTime": execution_times,
-    })
+    time_stats = pd.DataFrame(
+        {
+            "Kernel_Name": df["Kernel_Name"],
+            "ExeTime": execution_times,
+        }
+    )
 
-    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
-        "count",
-        "sum",
-        "mean",
-        "median",
-    ])
+    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg(
+        [
+            "count",
+            "sum",
+            "mean",
+            "median",
+        ]
+    )
 
     # Rename columns with time unit
     time_unit_suffix = f"({time_unit})"

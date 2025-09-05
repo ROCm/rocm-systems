@@ -50,12 +50,14 @@ class gfx940_soc(OmniSoC_Base):
                 )
             )
 
-        self.set_compatible_profilers([
-            "rocprofv1",
-            "rocprofv2",
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ])
+        self.set_compatible_profilers(
+            [
+                "rocprofv1",
+                "rocprofv2",
+                "rocprofv3",
+                "rocprofiler-sdk",
+            ]
+        )
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx940"))
 
@@ -89,7 +91,9 @@ class gfx940_soc(OmniSoC_Base):
 
         pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
         if not pmc_path.is_file():
-            console_warning("Incomplete or missing profiling data. Skipping roofline.")
+            console_warning(
+                f"Incomplete or missing profiling data {pmc_path}. Skipping roofline."
+            )
             return
 
         console_log("roofline", f"Checking for roofline.csv in {self.get_args().path}")

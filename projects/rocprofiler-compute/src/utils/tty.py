@@ -128,13 +128,13 @@ def is_roofline_shown(
     args: Any,
     runs: dict[str, Any],
     output: Any,
+    panel: dict[str, Any],
     roof_plot: Optional[str],
     hidden_cols: list[str],
 ) -> bool:
     has_roofline_style = any(
         data_source.get(table_type, {}).get("cli_style") == "Roofline"
-        for panel in args.arch_configs.panel_configs.get(400, {}).get("data source", [])
-        for data_source in [panel]
+        for data_source in panel["data source"]
         for table_type in data_source
     )
 
@@ -290,15 +290,12 @@ def process_table_data(
                     if run_name != base_run:
                         # Calculate percentage difference between current and
                         # base dataframe.
-                        base_values = [
-                            float(x) if x != "" else 0.0 for x in base_df[header]
-                        ]
-                        cur_values = [
-                            float(x) if x != "" else 0.0 for x in cur_df[header]
-                        ]
-
-                        base_series = pd.Series(base_values)
-                        cur_series = pd.Series(cur_values)
+                        base_series = pd.to_numeric(
+                            base_df[header], errors="coerce"
+                        ).fillna(0.0)
+                        cur_series = pd.to_numeric(
+                            cur_df[header], errors="coerce"
+                        ).fillna(0.0)
 
                         # Calculate absolute and percentage differences
                         absolute_diff = (cur_series - base_series).round(args.decimal)
@@ -356,7 +353,7 @@ def format_table_output(
     df: pd.DataFrame,
     table_type: str,
     runs: dict[str, Any],
-    output_dir: Path,
+    csv_dir: Optional[Path] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -378,11 +375,11 @@ def format_table_output(
     if "title" in table_config and table_config["title"]:
         content += f"{table_id_str} {table_config['title']}\n"
 
-    if args.output_format == "csv" and output_dir.is_dir():
+    if args.output_format == "csv" and csv_dir.is_dir():
         if "title" in table_config and table_config["title"]:
             table_id_str += f"_{table_config['title']}"
 
-        csv_filename = output_dir / f"{table_id_str.replace(' ', '_')}.csv"
+        csv_filename = csv_dir / f"{table_id_str.replace(' ', '_')}.csv"
         df.to_csv(csv_filename, index=False)
         console_warning(f"Created file: {csv_filename}")
 
@@ -436,6 +433,7 @@ def show_all(
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
     filter_panel_ids = profiling_config.get("filter_blocks", [])
+    csv_dir = None
 
     if isinstance(filter_panel_ids, dict):
         # For backward compatibility
@@ -471,7 +469,7 @@ def show_all(
         panel_content = ""  # store content of all data_source from one panel
 
         if panel_id == 400:
-            if is_roofline_shown(args, runs, output, roof_plot, hidden_cols):
+            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
                 continue
 
         for data_source in panel["data source"]:
@@ -539,12 +537,7 @@ def show_all(
 
                 if not processed_df.empty:
                     panel_content += format_table_output(
-                        args,
-                        table_config,
-                        processed_df,
-                        table_type,
-                        runs,
-                        output,
+                        args, table_config, processed_df, table_type, runs, csv_dir
                     )
 
         if panel_content:

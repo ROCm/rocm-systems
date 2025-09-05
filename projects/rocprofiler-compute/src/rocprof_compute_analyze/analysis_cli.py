@@ -77,7 +77,7 @@ class cli_analysis(OmniAnalyze_Base):
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
-                directory=path_info[0],
+                dir_path=path_info[0],
                 is_gui=False,
                 args=args,
                 config=self._profiling_config,
@@ -121,6 +121,8 @@ class cli_analysis(OmniAnalyze_Base):
                             config=self._profiling_config,
                             arch_config=arch_config,
                         )
+
+            print(f"output: {self._output}")
 
             tty.show_all(
                 args,

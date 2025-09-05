@@ -267,7 +267,7 @@ class Roofline:
         )
 
         msg = "AI at each mem level:"
-        for key, value in self._ai_data.items():
+        for key, value in self.__ai_data.items():
             msg += f"\n\t{key} -> {value}"
         console_debug(msg)
 
@@ -937,20 +937,17 @@ class Roofline:
                         color=color_scheme[cache_level],
                         marker=kernel_markers[i % len(kernel_markers)],
                     )
-                console_debug(
-                    "roofline",
-                    f"AI_{kernel_names[i]}: "
-                    f"{
-                        self.__ai_data[key][0][i]
-                        if i < len(self.__ai_data[key][0])
-                        else 'N/A'
-                    }, "
-                    f"{
-                        self.__ai_data[key][1][i]
-                        if i < len(self.__ai_data[key][1])
-                        else 'N/A'
-                    }",
+                val1 = (
+                    self.__ai_data[key][0][i]
+                    if i < len(self.__ai_data[key][0])
+                    else "N/A"
                 )
+                val2 = (
+                    self.__ai_data[key][1][i]
+                    if i < len(self.__ai_data[key][1])
+                    else "N/A"
+                )
+                console_debug("roofline", f"AI_{kernel_names[i]}: {val1}, {val2}")
         plt.xlabel(f"Arithmetic Intensity ({ops_flops}s/Byte)")
         plt.ylabel("Performance (GFLOP/sec)")
         plt.title(f"Roofline ({dtype}) - {base_path}")

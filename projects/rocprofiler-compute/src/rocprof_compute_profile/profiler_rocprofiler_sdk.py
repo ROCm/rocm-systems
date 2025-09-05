@@ -42,7 +42,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         super().__init__(profiling_args, profiler_mode, soc, supported_archs)
         self.ready_to_profile = (
             self.get_args().roof_only
-            and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
+            and not (Path(self.get_args().path) / "pmc_perf.csv").is_file()
             or not self.get_args().roof_only
         )
 

@@ -42,7 +42,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         super().__init__(profiling_args, profiler_mode, soc, supported_archs)
         self.ready_to_profile = (
             self.get_args().roof_only
-            and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
+            and not (Path(self.get_args().path) / "pmc_perf.csv").is_file()
             or not self.get_args().roof_only
         )
 
@@ -89,10 +89,12 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                     # 4 -> 5
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
-            profiling_options.extend([
-                "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
-            ])
+            profiling_options.extend(
+                [
+                    "--kernel-iteration-range",
+                    f"[{','.join(dispatch)}]",
+                ]
+            )
 
         profiling_options.append("--")
         profiling_options.extend(app_cmd)

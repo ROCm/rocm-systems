@@ -92,8 +92,7 @@ def omniarg_parser(
         help="Profile the target application",
         usage="""
 
-`rocprof-compute profile --name <workload_name>
-[profile options] [roofline options] -- <profile_cmd>`
+`rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
 
 ---------------------------------------------------------------------------------
 Examples:
@@ -103,7 +102,7 @@ Examples:
 \trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
 ---------------------------------------------------------------------------------
-        """,
+        """,  # noqa: E501
         prog="tool",
         allow_abbrev=False,
         formatter_class=lambda prog: argparse.RawTextHelpFormatter(
@@ -450,12 +449,10 @@ Examples:
 
             \n\n-------------------------------------------------------------------------------
             \nExamples:
-            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "
-            "workloads/vcopy/mi200/"
-            "\n\trocprof-compute database --remove -H pavii1 -u temp -w "
-            "rocprofiler-compute_asw_sample_mi200"
-            "\n-------------------------------------------------------------------------------\n"
-        """,
+            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "workloads/vcopy/mi200/"
+            \n\trocprof-compute database --remove -H pavii1 -u temp -w "rocprofiler-compute_asw_sample_mi200"
+            \n-------------------------------------------------------------------------------\n
+        """,  # noqa: E501
         prog="tool",
         allow_abbrev=False,
         formatter_class=lambda prog: argparse.RawTextHelpFormatter(
@@ -474,7 +471,7 @@ Examples:
         required=False,
         dest="upload",
         action="store_true",
-        help="\t\t\t\tImport workload to rocprofiler-compute DB",
+        help="\t\tImport workload to rocprofiler-compute DB",
     )
     interaction_group.add_argument(
         "-r",
@@ -482,7 +479,7 @@ Examples:
         required=False,
         dest="remove",
         action="store_true",
-        help="\t\t\t\tRemove a workload from rocprofiler-compute DB",
+        help="\t\tRemove a workload from rocprofiler-compute DB",
     )
 
     connection_group.add_argument(
@@ -490,14 +487,14 @@ Examples:
         "--host",
         required=True,
         metavar="",
-        help="\t\t\t\tName or IP address of the server host.",
+        help="\t\tName or IP address of the server host.",
     )
     connection_group.add_argument(
         "-P",
         "--port",
         required=False,
         metavar="",
-        help="\t\t\t\tTCP/IP Port. (DEFAULT: 27018)",
+        help="\t\tTCP/IP Port. (DEFAULT: 27018)",
         default=27018,
     )
     connection_group.add_argument(
@@ -505,17 +502,17 @@ Examples:
         "--username",
         required=True,
         metavar="",
-        help="\t\t\t\tUsername for authentication.",
+        help="\t\tUsername for authentication.",
     )
     connection_group.add_argument(
         "-p",
         "--password",
         metavar="",
-        help="\t\t\t\tThe user's password. (will be requested later if it's not set)",
+        help="\t\tThe user's password. (will be requested later if it's not set)",
         default="",
     )
     connection_group.add_argument(
-        "-t", "--team", required=False, metavar="", help="\t\t\t\tSpecify Team prefix."
+        "-t", "--team", required=False, metavar="", help="\t\tSpecify Team prefix."
     )
     connection_group.add_argument(
         "-w",
@@ -524,7 +521,7 @@ Examples:
         metavar="",
         dest="workload",
         help=(
-            "\t\t\t\tSpecify name of workload (to remove) or path to workload "
+            "\t\tSpecify name of workload (to remove) or path to workload "
             "(to import)"
         ),
     )
