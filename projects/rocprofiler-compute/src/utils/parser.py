@@ -25,11 +25,9 @@
 
 import ast
 import json
-import multiprocessing
 import re
 import sys
 import warnings
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -835,58 +833,6 @@ def build_metric_value_string(
                     df[expr] = df[expr].apply(
                         update_normal_unit_string, normal_unit=normal_unit
                     )
-
-
-def init_metric_evaluator(
-    raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict, empirical_peaks: dict
-) -> None:
-    if isinstance(raw_pmc_df, dict):
-        raw_pmc_df_keys = set(raw_pmc_df.keys())
-
-    elif isinstance(raw_pmc_df, pd.DataFrame):
-        raw_pmc_df_keys = set(raw_pmc_df.columns.get_level_values(0))
-
-    else:
-        raise ValueError(f"Unknown `raw_pmc_df` type '{type(raw_pmc_df)}'.")
-
-    raw_pmc_df_items = {f"raw_pmc_df_{key}": raw_pmc_df[key] for key in raw_pmc_df_keys}
-
-    # The globals here are not shared across all processes,
-    # they exist only within the subprocess's context,
-    # and their lifetime ends when the process terminates.
-    # The process-local globals are used for performance optimization.
-    globals().update(raw_pmc_df_items)
-    globals().update(ammolite_vars)
-    globals().update(empirical_peaks)
-
-
-def run_metric_evaluator(row_expr: str) -> str:
-    try:
-        # cache dataframes of 'raw_pmc_df'
-        # this may replace some KeyErrors with NameErrors
-        # e.g. row_pmc_df['key'] -> row_pmc_df_key will throw NameError now
-        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", row_expr)
-        out = eval(compile(row_expr, "<string>", "eval"))
-
-        if np.isnan(out):
-            return ""
-
-        else:
-            return out
-
-    except (TypeError, NameError, KeyError) as e:
-        if "empirical_peak" in str(e):
-            console_warning(f"Missing empirical peak data: {e}. Using empty value.")
-            return ""
-        else:
-            return ""
-
-    except AttributeError as ae:
-        if str(ae) == "'NoneType' object has no attribute 'get'":
-            return ""
-
-        else:
-            console_error("analysis", str(ae))
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
