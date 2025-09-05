@@ -1,0 +1,5 @@
+outs:
+- md5: fd5f7481a122f40f73d1f638e3b9b027
+  size: 16738
+  hash: md5
+  path: DriverUtilsService.lib
