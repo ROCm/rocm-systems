@@ -259,12 +259,13 @@ using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
 using kernel_rename_stack_t = std::stack<uint64_t>;
 
-auto*      tool_metadata     = as_pointer<tool::metadata>(tool::metadata::inprocess{});
-auto       target_kernels    = common::Synchronized<targeted_kernels_map_t>{};
-auto*      execution_profile = as_pointer<common::Synchronized<tool::execution_profile_data>>();
-auto       counter_collection_ctx             = rocprofiler_context_id_t{0};
-auto       att_device_context                 = rocprofiler_context_id_t{0};
-auto       att_consecutive_kernel_dispatch_id = std::atomic<rocprofiler_dispatch_id_t>{0};
+auto* tool_metadata          = as_pointer<tool::metadata>(tool::metadata::inprocess{});
+auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
+auto* execution_profile      = as_pointer<common::Synchronized<tool::execution_profile_data>>();
+auto  counter_collection_ctx = rocprofiler_context_id_t{0};
+auto  att_device_context     = rocprofiler_context_id_t{0};
+auto  att_consecutive_kernel_dispatch_id =
+    std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
@@ -1461,11 +1462,12 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                     if(_is_target)
                     {
                         num_consecutive_kernels = 0;
-                        bool _exp               = false;
-                        if(isprofiling.compare_exchange_strong(
-                               _exp, true, std::memory_order_relaxed))
+                        if(!isprofiling.load())
+                        {
                             ROCPROFILER_CALL(rocprofiler_start_context(att_device_context),
                                              "context start");
+                            isprofiling.store(true);
+                        }
                     }
                     const auto local_count = num_consecutive_kernels++;
                     if(isprofiling && local_count < _consecutive_kernels)
@@ -1473,11 +1475,8 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                         // Keep track of launched dispatch ids
                         _data.emplace(_dispatch_id);
                         // Store lowest dispatch id for shader callback function
-                        rocprofiler_dispatch_id_t _exp{};
-                        while((_exp = att_consecutive_kernel_dispatch_id.load()) > _dispatch_id &&
-                              !att_consecutive_kernel_dispatch_id.compare_exchange_strong(
-                                  _exp, _dispatch_id, std::memory_order_relaxed))
-                            ;
+                        if(att_consecutive_kernel_dispatch_id.load() > _dispatch_id)
+                            att_consecutive_kernel_dispatch_id.store(_dispatch_id);
                     }
                     if(local_count >= _consecutive_kernels) stop_profiling = true;
                 },
@@ -1504,6 +1503,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 
             ROCPROFILER_CALL(rocprofiler_stop_context(att_device_context), "context stop");
             stop_profiling = false;
+            att_consecutive_kernel_dispatch_id.store(std::numeric_limits<uint64_t>::max());
         },
         dispatch_id);
 }
