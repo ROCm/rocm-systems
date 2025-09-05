@@ -122,7 +122,7 @@ bool Graph::isGraphValid(Graph* pGraph) {
 // ================================================================================================
 void Graph::AddNode(const Node& node) {
   vertices_.emplace_back(node);
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
           GetGraphNodeTypeString(node->GetType()), node);
   node->SetParentGraph(this);
 }
@@ -140,7 +140,7 @@ std::vector<Node> Graph::GetRootNodes() const {
   for (auto entry : vertices_) {
     if (entry->GetInDegree() == 0) {
       roots.push_back(entry);
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Root node: %s(%p)",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Root node: %s(%p)",
               GetGraphNodeTypeString(entry->GetType()), entry);
     }
   }
@@ -702,6 +702,11 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   } else {
     repeatLaunch_ = true;
   }
+
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+          "GraphExec::Run max_streams: %d, "
+          "on device: %d, total number of nodes: %d",
+          max_streams_, launch_stream->DeviceId(), topoOrder_.size());
 
   if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {

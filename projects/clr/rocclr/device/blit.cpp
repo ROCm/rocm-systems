@@ -39,7 +39,7 @@ bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
     LogError("Couldn't map device memory for host read");
     return false;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy D2H, src=%p, dst=%p, size=%zu",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Using host memcpy D2H, src=%p, dst=%p, size=%zu",
           (reinterpret_cast<const_address>(src) + origin[0]), dstHost, size[0]);
   // Copy memory
   std::memcpy(dstHost, reinterpret_cast<const_address>(src) + origin[0], size[0]);
@@ -163,7 +163,7 @@ bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory
     return false;
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy H2D, src=%p, dst=%p, size=%zu",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Using host memcpy H2D, src=%p, dst=%p, size=%zu",
         srcHost, (reinterpret_cast<address>(dst) + origin[0]), size[0]);
   // Copy memory
   std::memcpy(reinterpret_cast<address>(dst) + origin[0], srcHost, size[0]);
@@ -294,7 +294,8 @@ bool HostBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstM
     LogError("Couldn't map destination memory");
     return false;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy for copyBuffer, src=%p, dst=%p, size=%zu",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY,
+          "Using host memcpy for copyBuffer, src=%p, dst=%p, size=%zu",
           (reinterpret_cast<const_address>(src) + srcOrigin[0]),
           (reinterpret_cast<address>(dst) + dstOrigin[0]), size[0]);
   // Straight forward buffer copy
@@ -328,8 +329,8 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
     return false;
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy for copyBufferRect, src=%p, "
-          "dst=%p, size=%zu",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY,
+          "Using host memcpy for copyBufferRect, src=%p, dst=%p, size=%zu",
           (reinterpret_cast<const_address>(src) + srcRect.offset(0, 0, 0)),
           (reinterpret_cast<address>(dst) + dstRect.offset(0, 0, 0)), size[0]);
 
