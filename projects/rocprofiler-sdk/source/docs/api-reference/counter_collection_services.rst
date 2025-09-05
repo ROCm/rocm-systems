@@ -253,7 +253,7 @@ Data from collected counter values is returned through a buffered callback. The 
 Counter Definitions
 -------------------
 
-Counters are defined in yaml format in the ``counter_defs.yaml`` file. The counter definition has the following format:
+Counters are defined in yaml format in the ``config.yaml`` file. The counter definition has the following format:
 
 .. code-block:: yaml
 
@@ -275,15 +275,27 @@ Firmware Restrictions
 
 ROCprofiler-SDK supports firmware version restrictions to ensure counter collection operates on devices with compatible firmware. This helps prevent issues that may arise from using outdated firmware versions that could cause device instability or incorrect counter data.
 
-Firmware Restrictions File Format
-++++++++++++++++++++++++++++++++++
+Firmware Restrictions in Counter Definitions File
+++++++++++++++++++++++++++++++++++++++++++++++++++
 
-Firmware restrictions are defined in YAML format in the ``firmware_restrictions.yaml`` file. The file uses the following schema:
+Firmware restrictions are defined alongside counter definitions in the ``config.yaml`` file. The combined file uses the following schema:
 
 .. code-block:: yaml
 
     rocprofiler-sdk:
-      # Required: Schema version for compatibility checking
+      # Counter definitions schema version
+      counters-schema-version: 1
+      
+      # Counter definitions
+      counters:
+        - name: ALUStalledByLDS
+          description: 'Percentage of GPUTime ALU units are stalled by LDS'
+          properties: []
+          definitions:
+            - architectures: ["gfx908", "gfx90a"]
+              expression: 400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
+      
+      # Required: Firmware restrictions schema version
       fw_restriction_schema_version: 1
       
       # List of firmware restrictions
@@ -320,24 +332,25 @@ Firmware restrictions are defined in YAML format in the ``firmware_restrictions.
   - ``reason`` (optional): Human-readable explanation for the restriction
   - ``affected_architectures`` (optional): Array of GPU architecture names (e.g., "gfx940", "gfx942") that must meet this restriction. If empty, the restriction applies to all architectures.
 
-Firmware Restrictions File Location
-++++++++++++++++++++++++++++++++++++
+Counter Definitions File Location
+++++++++++++++++++++++++++++++++++
 
-The firmware restrictions file is located using the following search order:
+The firmware restrictions are located within the counter definitions file using the following search order:
 
-1. **Environment Variable**: If the ``ROCPROFILER_FIRMWARE_RESTRICTIONS_PATH`` environment variable is set, ROCprofiler-SDK will look for ``firmware_restrictions.yaml`` in that directory.
+1. **Environment Variable**: If the ``ROCPROFILER_METRICS_PATH`` environment variable is set, ROCprofiler-SDK will look for ``config.yaml`` in that directory.
 
-2. **Installation Path**: If no environment variable is set, ROCprofiler-SDK searches in the installation directory at ``<install_path>/share/rocprofiler-sdk/firmware_restrictions.yaml``.
+2. **Installation Path**: If no environment variable is set, ROCprofiler-SDK searches in the installation directory at ``<install_path>/share/rocprofiler-sdk/config.yaml``.
 
 **Example:**
 
 .. code-block:: bash
 
-    # Set custom firmware restrictions path
-    export ROCPROFILER_FIRMWARE_RESTRICTIONS_PATH=/path/to/custom/restrictions/
+    # Set custom counter definitions path
+    export ROCPROFILER_METRICS_PATH=/path/to/custom/counters/
     
     # ROCprofiler-SDK will now look for:
-    # /path/to/custom/restrictions/firmware_restrictions.yaml
+    # /path/to/custom/counters/config.yaml
+    # (which contains both counter definitions and firmware restrictions)
 
 Derived Metrics
 ---------------
