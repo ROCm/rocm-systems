@@ -70,6 +70,38 @@ jobs:
           username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
 
+      - name: Get the latest build of The Rock tarball
+        id: therock
+        run: |
+          sudo apt-get install -y python3-pip
+          python3 -m pip install -U pip
+          python3 -m pip install -U awscli
+          export PATH=~/.local/bin:$PATH
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; }
+          echo "gfx120X=${KEY}" >> $GITHUB_OUTPUT
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+          echo "gfx94X=${KEY}" >> $GITHUB_OUTPUT
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; }
+          echo "gfx110X=${KEY}" >> $GITHUB_OUTPUT
+          
       - name: Build CI Container (PR - No Push)
         if: github.event_name == 'pull_request'
         timeout-minutes: 45
@@ -80,7 +112,14 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
+            ./build-docker-ci.sh \
+              --distro ${{ matrix.distro }} \
+              --versions ${{ matrix.version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --therock-gfx94x ${{ steps.therock.outputs.gfx94X }} \
+              --therock-gfx110x ${{ steps.therock.outputs.gfx110x }} \
+              --therock-gfx120x ${{ steps.therock.outputs.gfx120x }} \
+              --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
             popd
       
       - name: Build CI Container (Push)
@@ -93,7 +132,14 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} --push --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
+            ./build-docker-ci.sh \ 
+              --distro ${{ matrix.distro }} \
+              --versions ${{ matrix.version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --therock-gfx94x ${{ steps.therock.outputs.gfx94X }} \
+              --therock-gfx110x ${{ steps.therock.outputs.gfx110x }} \
+              --therock-gfx120x ${{ steps.therock.outputs.gfx120x }} \
+              --push --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
             popd
 
   prepare_matrix_release:

@@ -17,7 +17,6 @@ ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
-
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}"
@@ -53,6 +52,17 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
     shopt -s dotglob extglob && \
     rm -rf *
 
+ARG THEROCK_GFX94X
+ARG THEROCK_GFX110X
+ARG THEROCK_GFX120X
+
+RUN python3 -m pip install -U awscli && \
+    aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX94X}" rocm-gfx94X.tar.gz --no-sign-request && \
+    aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX110X}" rocm-gfx110X.tar.gz --no-sign-request && \
+    aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX120X}" rocm-gfx120X.tar.gz --no-sign-request && \
+    mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz && \
+    mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz && \
+    mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz
 
 ENV LC_ALL=C.UTF-8
 WORKDIR /home

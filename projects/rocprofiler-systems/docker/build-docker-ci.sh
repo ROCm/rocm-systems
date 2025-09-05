@@ -11,6 +11,9 @@ set -e
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
+: ${THEROCK_GFX94X:=""}
+: ${THEROCK_GFX110X:=""}
+: ${THEROCK_GFX120X:=""}
 
 verbose-run()
 {
@@ -99,6 +102,21 @@ do
             BOOST_VERSION=${1}
             reset-last
             ;;
+        "--therock-gfx94x")
+            shift
+            THEROCK_GFX94X=${1}
+            reset-last
+            ;;
+        "--therock-gfx110x")
+            shift
+            THEROCK_GFX110X=${1}
+            reset-last
+            ;;
+        "--therock-gfx120x")
+            shift
+            THEROCK_GFX120X=${1}
+            reset-last
+            ;;
         --user|-u)
             shift
             USER=${1}
@@ -162,7 +180,10 @@ do
         --build-arg NJOBS=${NJOBS} \
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
-        --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION}
+        --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION} \
+        --build-arg THEROCK_GFX94X=${THEROCK_GFX94X} \
+        --build-arg THEROCK_GFX110X=${THEROCK_GFX110X} \
+        --build-arg THEROCK_GFX120X=${THEROCK_GFX120X}
 done
 
 if [ "${PUSH}" -gt 0 ]; then
