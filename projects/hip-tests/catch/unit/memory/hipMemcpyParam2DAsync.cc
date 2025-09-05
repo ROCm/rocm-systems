@@ -36,12 +36,10 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Host") {
     Memcpy2DDeviceToHostShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#endif
   SECTION("Device to Device") {
     SECTION("Peer access disabled") {
       Memcpy2DDeviceToDeviceShell<async, false>(
@@ -56,12 +54,10 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
     Memcpy2DHostToDeviceShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Host to Host") {
     Memcpy2DHostToHostShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#endif
 }
 
 TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
