@@ -545,8 +545,14 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
-  STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
-                 blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
+  hip::Stream* hip_stream = hip::getStream(hStream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
+                         blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
+  }
 
   constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
   constexpr auto uint16_max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
@@ -593,9 +599,15 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
-  STREAM_CAPTURE(hipExtModuleLaunchKernel, hStream, f, globalWorkSizeX, globalWorkSizeY,
-                 globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
-                 kernelParams, extra, startEvent, stopEvent, flags);
+  hip::Stream* hip_stream = hip::getStream(hStream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipExtModuleLaunchKernel, hStream, f, globalWorkSizeX, globalWorkSizeY,
+                         globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
+                         kernelParams, extra, startEvent, stopEvent, flags);
+  }
 
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
                                   localWorkSizeY, localWorkSizeZ, sharedMemBytes);
@@ -636,8 +648,14 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
   int deviceId = hip::Stream::DeviceId(stream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
-  STREAM_CAPTURE(hipModuleLaunchCooperativeKernel, stream, f, gridDimX, gridDimY, gridDimZ,
-                 blockDimX, blockDimY, blockDimZ, sharedMemBytes, kernelParams);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipModuleLaunchCooperativeKernel, stream, f, gridDimX, gridDimY, gridDimZ,
+                         blockDimX, blockDimY, blockDimZ, sharedMemBytes, kernelParams);
+  }
 
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes);
@@ -815,7 +833,14 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                   void** args, size_t sharedMemBytes, hipStream_t stream) {
-  STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
+  }
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0);
 }
@@ -844,8 +869,15 @@ hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 block
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  STREAM_CAPTURE(hipExtLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes,
-                 startEvent, stopEvent, flags);
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipExtLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes,
+                         startEvent, stopEvent, flags);
+  }
   HIP_RETURN(ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream,
                               startEvent, stopEvent, flags));
 }
@@ -856,9 +888,15 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   if (!hip::isValid(hStream)) {
     return hipErrorInvalidHandle;
   }
-
-  STREAM_CAPTURE(hipLaunchCooperativeKernel, hStream, f, gridDim, blockDim, kernelParams,
-                 sharedMemBytes);
+  getStreamPerThread(hStream);
+  hip::Stream* hip_stream = hip::getStream(hStream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipLaunchCooperativeKernel, hStream, f, gridDim, blockDim, kernelParams,
+                         sharedMemBytes);
+  }
 
   if (f == nullptr) {
     return hipErrorInvalidDeviceFunction;

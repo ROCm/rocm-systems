@@ -304,8 +304,15 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
   void* extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &exec.arguments_[0],
                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
-  STREAM_CAPTURE(hipLaunchByPtr, exec.hStream_, func, exec.blockDim_, exec.gridDim_,
-                 exec.sharedMem_, extra);
+  getStreamPerThread(exec.hStream_);
+  hip::Stream* hip_stream = hip::getStream(exec.hStream_);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipLaunchByPtr, exec.hStream_, func, exec.blockDim_, exec.gridDim_,
+                         exec.sharedMem_, extra);
+  }
 
   HIP_RETURN(hipModuleLaunchKernel(func, exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
                                    exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,

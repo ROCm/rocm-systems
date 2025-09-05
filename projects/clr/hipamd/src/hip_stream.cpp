@@ -680,7 +680,14 @@ hipError_t hipStreamAddCallback_spt(hipStream_t stream, hipStreamCallback_t call
 
 // ================================================================================================
 hipError_t hipLaunchHostFunc_common(hipStream_t stream, hipHostFn_t fn, void* userData) {
-  STREAM_CAPTURE(hipLaunchHostFunc, stream, fn, userData);
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipLaunchHostFunc, stream, fn, userData);
+  }
   if (fn == nullptr) {
     return hipErrorInvalidValue;
   }
