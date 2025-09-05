@@ -1088,6 +1088,8 @@ typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** fu
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
 
+typedef hipError_t (*t_hipKernelGetFunction)(hipFunction_t * pFunc, hipKernel_t kernel);
+
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1652,6 +1654,7 @@ struct HipDispatchTable {
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
   t_hipStreamGetId hipStreamGetId_fn;
+  t_hipKernelGetFunctionn hipKernelGetFunction_fn;
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
 

@@ -2011,3 +2011,6 @@ hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
   return hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn(
       hGraphExec, hNode, nodeParams);
 }
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel);
+}

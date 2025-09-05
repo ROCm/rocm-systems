@@ -103,6 +103,17 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   HIP_RETURN(PlatformState::instance().getFuncCount(count, mod););
 }
 
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetFunction, pFunc, kernel);
+
+  if (pFunc == nullptr || kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Add function body here
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {
   HIP_INIT_API(hipModuleGetGlobal, dptr, bytes, hmod, name);
