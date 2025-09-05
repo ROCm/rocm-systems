@@ -173,9 +173,9 @@ def get_num_pmc_file(output_dir):
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
-    ])
+    return len(
+        [f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"]
+    )
 
 
 # =============================================================================
@@ -425,7 +425,7 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
         "shutil.which", lambda cmd: "/usr/bin/rocprof" if cmd == "rocprof" else None
     )
     # Path.resolve returns the same path for simplicity
-    monkeypatch.setattr("Path.resolve", lambda self: self)
+    monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
     # Track debug logs
     logs = []
     monkeypatch.setattr(
@@ -455,7 +455,7 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     monkeypatch.setattr(
         "shutil.which", lambda cmd: "/usr/bin/rocprofv3" if cmd == "rocprofv3" else None
     )
-    monkeypatch.setattr("Path.resolve", lambda self: self)
+    monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
     logs = []
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
@@ -482,7 +482,7 @@ def test_detect_rocprof_sdk(monkeypatch):
         rocprofiler_sdk_library_path = "/some/sdk/path"
 
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
-    monkeypatch.setattr("Path.exists", lambda self: True)
+    monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
     logs = []
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
@@ -2711,11 +2711,13 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
-    mock_df = pd.DataFrame({
-        "Dispatch_ID": [0],
-        "Start_Timestamp": [100],
-        "End_Timestamp": [200],
-    })
+    mock_df = pd.DataFrame(
+        {
+            "Dispatch_ID": [0],
+            "Start_Timestamp": [100],
+            "End_Timestamp": [200],
+        }
+    )
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -2795,14 +2797,16 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
-    old_headers_df = pd.DataFrame({
-        "KernelName": ["test_kernel"],
-        "Index": [0],
-        "grd": [64],
-        "gpu-id": [0],
-        "BeginNs": [100],
-        "EndNs": [200],
-    })
+    old_headers_df = pd.DataFrame(
+        {
+            "KernelName": ["test_kernel"],
+            "Index": [0],
+            "grd": [64],
+            "gpu-id": [0],
+            "BeginNs": [100],
+            "EndNs": [200],
+        }
+    )
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
     monkeypatch.setattr(
@@ -2873,11 +2877,13 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     def mock_flatten_tcc_info_across_xcds(file, xcds, l2_banks):
         nonlocal flatten_called
         flatten_called = True
-        return pd.DataFrame({
-            "Dispatch_ID": [0],
-            "TCC_HIT[0]": [100],
-            "TCC_HIT[16]": [200],
-        })
+        return pd.DataFrame(
+            {
+                "Dispatch_ID": [0],
+                "TCC_HIT[0]": [100],
+                "TCC_HIT[16]": [200],
+            }
+        )
 
     # Mock functions
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
@@ -3009,12 +3015,12 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         format_rocprof_output,
     )
 
-    assert capture_subprocess_called_with_env is not None, (
-        "new_env should have been created"
-    )
-    assert "EXISTING_VAR" in capture_subprocess_called_with_env, (
-        "new_env should be a copy of os.environ"
-    )
+    assert (
+        capture_subprocess_called_with_env is not None
+    ), "new_env should have been created"
+    assert (
+        "EXISTING_VAR" in capture_subprocess_called_with_env
+    ), "new_env should be a copy of os.environ"
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
     assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
     assert "APP_CMD" not in capture_subprocess_called_with_env
@@ -3322,7 +3328,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
 
     import utils.utils as utils_mod
 
-    with pytest.raises(ValueError, match='has no coresponding "agent info" file'):
+    with pytest.raises(ValueError, match='has no corresponding "agent info" file'):
         utils_mod.process_rocprofv3_output("csv", workload_dir, False)
 
 
@@ -3611,9 +3617,9 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "kokkos_malloc" in df["marker_name"].values
     assert "kokkos_parallel_reduce" in df["marker_name"].values
@@ -4081,9 +4087,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "hipMalloc" in df["api_name"].values
     assert "hipLaunchKernel" in df["api_name"].values
@@ -4091,9 +4097,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
     assert copied_file.exists(), "The copied output file was not created."
     df_copy = pd.read_csv(copied_file)
-    assert df.equals(df_copy), (
-        "The copied file content does not match the primary output."
-    )
+    assert df.equals(
+        df_copy
+    ), "The copied file content does not match the primary output."
 
 
 def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
@@ -4192,7 +4198,7 @@ def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
     def mock_is_file(self):
         return False
 
-    monkeypatch.setattr("Path.is_file", mock_is_file)
+    monkeypatch.setattr("pathlib.Path.is_file", mock_is_file)
 
     def mock_concat(dataframes, **kwargs):
         if not dataframes:
@@ -4610,7 +4616,7 @@ def test_ubuntu_22_04_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4645,7 +4651,7 @@ def test_ubuntu_24_04_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4679,8 +4685,8 @@ def test_rhel_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("Path.read_text", mock_path_read_text)
-    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     def mock_search(pattern, text):
         if "PLATFORM_ID" in pattern:
@@ -4714,7 +4720,7 @@ def test_sles_15_6_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4747,7 +4753,7 @@ def test_sles_15_7_detection(monkeypatch):
 
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
-    monkeypatch.setattr("Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
         if "VERSION_ID" in pattern:
@@ -4891,7 +4897,7 @@ def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -4968,7 +4974,7 @@ def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -5117,7 +5123,7 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -5237,7 +5243,7 @@ def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.config", mock_config)
     monkeypatch.setattr("subprocess.run", mock_subprocess_run)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("Path.exists", lambda *a, **k: True)
+    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     import utils.utils as utils_mod
 
@@ -6338,9 +6344,10 @@ NaN,,,"""
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert "profilingFound empty cells" in error_args[0]
-    assert "pmc_perf.csv" in error_args[0]
-    assert "Profiling data could be corrupt" in error_args[0]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
+    assert "pmc_perf.csv" in error_args[1]
+    assert "Profiling data could be corrupt" in error_args[1]
 
 
 def test_is_workload_empty_completely_empty_csv(tmp_path):
@@ -6406,7 +6413,8 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert "profilingFound empty cells" in error_args[0]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
 
 
 def test_is_workload_empty_no_pmc_perf_file(tmp_path):
@@ -6572,7 +6580,8 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert "profilingFound empty cells" in error_args[0]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
 
 
 def test_is_workload_empty_unicode_content(tmp_path):
@@ -6738,9 +6747,10 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
     expected_path = str(workload_dir / "pmc_perf.csv")
-    assert expected_path in error_args[0]
-    assert "profilingFound empty cells" in error_args[0]
-    assert "Profiling data could be corrupt" in error_args[0]
+    assert expected_path in error_args[1]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
+    assert "Profiling data could be corrupt" in error_args[1]
 
 
 def test_is_workload_empty_function_return_value(tmp_path):
@@ -6796,7 +6806,7 @@ def test_is_workload_empty_pandas_import_dependency():
     with patch.dict("sys.modules", {"pandas": mock_pandas}):
         with patch("utils.utils.pd", mock_pandas):
             with patch("utils.utils.console_error"):
-                with patch("Path.is_file", return_value=True):
+                with patch("pathlib.Path.is_file", return_value=True):
                     utils_mod.is_workload_empty("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
@@ -7511,9 +7521,9 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
                     utils_mod.set_locale_encoding()
 
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
+                    assert (
+                        len(console_error_calls) == scenario["expected_errors"]
+                    ), f"Failed scenario: {scenario['name']}"
 
 
 # =============================================================================
@@ -8742,9 +8752,9 @@ def test_store_app_cmd_sets_global_rocprof_args():
     else:
         pass
     utils.store_app_cmd(sample_args_object)
-    assert utils.rocprof_args is sample_args_object, (
-        "Global rocprof_args should be the same object as the passed args"
-    )
+    assert (
+        utils.rocprof_args is sample_args_object
+    ), "Global rocprof_args should be the same object as the passed args"
 
 
 # =============================================================================
@@ -8765,35 +8775,39 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     Tests Line 1: Successful parsing of 'Agent Id' string.
     Tests Line 2: Error during parsing of 'Agent Id' string, triggering console_error.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0, 1],
-        "Agent_Type": ["CPU", "GPU"],
-        "Wave_Front_Size": [0, 64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0, 1],
+            "Agent_Type": ["CPU", "GPU"],
+            "Wave_Front_Size": [0, 64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted.csv"
-    counter_content_success = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": ["Agent 1"],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content_success = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": ["Agent 1"],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath_success = tmp_path / "counter_success.csv"
     counter_filepath_success.write_text(counter_content_success)
 
@@ -8811,27 +8825,29 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
 
     mock_console_error.reset_mock()
 
-    counter_content_error = create_csv_string({
-        "Correlation_Id": [2],
-        "Dispatch_Id": [20],
-        "Agent_Id": ["Malformed Agent X"],
-        "Queue_Id": [200],
-        "Process_Id": [2000],
-        "Thread_Id": [20000],
-        "Grid_Size": [512],
-        "Kernel_Id": [2],
-        "Kernel_Name": ["kernelB"],
-        "Workgroup_Size": [128],
-        "LDS_Block_Size": [64],
-        "Scratch_Size": [0],
-        "VGPR_Count": [32],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [64],
-        "Start_Timestamp": [200000],
-        "End_Timestamp": [200200],
-        "Counter_Name": ["Instructions"],
-        "Counter_Value": [10000],
-    })
+    counter_content_error = create_csv_string(
+        {
+            "Correlation_Id": [2],
+            "Dispatch_Id": [20],
+            "Agent_Id": ["Malformed Agent X"],
+            "Queue_Id": [200],
+            "Process_Id": [2000],
+            "Thread_Id": [20000],
+            "Grid_Size": [512],
+            "Kernel_Id": [2],
+            "Kernel_Name": ["kernelB"],
+            "Workgroup_Size": [128],
+            "LDS_Block_Size": [64],
+            "Scratch_Size": [0],
+            "VGPR_Count": [32],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [64],
+            "Start_Timestamp": [200000],
+            "End_Timestamp": [200200],
+            "Counter_Name": ["Instructions"],
+            "Counter_Value": [10000],
+        }
+    )
     counter_filepath_error = tmp_path / "counter_error.csv"
     counter_filepath_error.write_text(counter_content_error)
 
@@ -8859,11 +8875,13 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
     """
     # --- Setup ---
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_accum.csv"
@@ -8910,35 +8928,39 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_no_accum_vgpr.csv"
 
-    counter_content = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": [0],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": [0],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"
     counter_filepath.write_text(counter_content)
 
@@ -9116,9 +9138,8 @@ def create_dummy_csv(filepath, data_dict):
 
 
 @mock.patch("utils.utils.console_warning")
-@mock.patch("utils.utils.Path")
 def test_replace_timestamps_no_timestamps_csv_returns_early(
-    mock_path_util, mock_console_warning, tmp_path
+    mock_console_warning, tmp_path
 ):
     """
     Edge Case: timestamps.csv does not exist in workload_dir.
@@ -9127,25 +9148,17 @@ def test_replace_timestamps_no_timestamps_csv_returns_early(
     """
     workload_dir = str(tmp_path)
 
-    mock_timestamps_path_obj = mock.Mock()
-    mock_timestamps_path_obj.is_file.return_value = False
-
-    mock_path_util.side_effect = lambda *args: (
-        mock_timestamps_path_obj if args[1] == "timestamps.csv" else mock.DEFAULT
-    )
-
     utils.replace_timestamps(workload_dir)
 
-    mock_path_util.assert_any_call(workload_dir, "timestamps.csv")
-    mock_timestamps_path_obj.is_file.assert_called_once()
+    # Since there's no timestamps.csv, function should return early
+    # and console_warning should not be called
     mock_console_warning.assert_not_called()
 
 
 @mock.patch("utils.utils.console_warning")
-@mock.patch("glob.glob")  # Mock glob.glob
-@mock.patch("utils.utils.Path")
+@mock.patch("glob.glob")
 def test_replace_timestamps_timestamps_csv_missing_columns_warns(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
+    mock_glob, mock_console_warning, tmp_path
 ):
     """
     Edge Case: timestamps.csv exists but is missing
@@ -9156,31 +9169,23 @@ def test_replace_timestamps_timestamps_csv_missing_columns_warns(
     workload_dir = str(tmp_path)
     timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")
 
+    # Create the actual CSV file with missing columns
     create_dummy_csv(timestamps_csv_path_str, {"Some_Other_Column": [123]})
-
-    mock_timestamps_path_obj = mock.Mock()
-    mock_timestamps_path_obj.is_file.return_value = True
-    mock_timestamps_path_obj.name = "timestamps.csv"
-
-    mock_path_util.side_effect = lambda *args, **kwargs: (
-        mock_timestamps_path_obj if args[-1] == "timestamps.csv" else mock.DEFAULT
-    )
 
     utils.replace_timestamps(workload_dir)
 
-    mock_path_util.assert_any_call(workload_dir, "timestamps.csv")
-    mock_timestamps_path_obj.is_file.assert_called_once()
+    # Verify console_warning was called
     mock_console_warning.assert_called_once_with(
         "Incomplete profiling data detected. Unable to update timestamps.\n"
     )
+    # Verify glob wasn't called (since we return early due to missing columns)
     mock_glob.assert_not_called()
 
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")
-@mock.patch("utils.utils.Path")
 def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
+    mock_glob, mock_console_warning, tmp_path
 ):
     """
     Edge Case: timestamps.csv is valid. Other CSVs exist, including sysinfo.csv.
@@ -9208,26 +9213,7 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
         {"Info": ["CPU", "MEM"], "Start_Timestamp": [5, 6], "End_Timestamp": [7, 8]},
     )
 
-    def path_side_effect(*args, **kwargs):
-        p_obj = mock.Mock()
-        full_path = args[0] if len(args) == 1 else os.path.join(args[0], args[1])
-
-        if full_path == timestamps_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "timestamps.csv"
-        elif full_path == data_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "data.csv"
-        elif full_path == sysinfo_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "sysinfo.csv"
-        else:
-            p_obj.is_file.return_value = False
-            p_obj.name = os.path.basename(full_path)
-        return p_obj
-
-    mock_path_util.side_effect = path_side_effect
-
+    # Mock glob to return the CSV files we created
     mock_glob.return_value = [
         data_csv_path_str,
         sysinfo_csv_path_str,
@@ -9238,6 +9224,7 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
 
     mock_console_warning.assert_not_called()
 
+    # Verify data.csv was updated with new timestamps
     df_data_updated = pd.read_csv(data_csv_path_str)
     pd.testing.assert_series_equal(
         df_data_updated["Start_Timestamp"],
@@ -9247,6 +9234,7 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
         df_data_updated["End_Timestamp"], pd.Series(new_end_ts, name="End_Timestamp")
     )
 
+    # Verify sysinfo.csv was NOT updated (timestamps should remain original)
     df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)
     assert list(df_sysinfo_original["Start_Timestamp"]) == [5, 6]
     assert list(df_sysinfo_original["End_Timestamp"]) == [7, 8]
@@ -9254,9 +9242,8 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")
-@mock.patch("utils.utils.Path")
 def test_replace_timestamps_no_other_csvs_to_update(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
+    mock_glob, mock_console_warning, tmp_path
 ):
     """
     Edge Case: timestamps.csv is valid, but no other *.csv files
@@ -9276,27 +9263,14 @@ def test_replace_timestamps_no_other_csvs_to_update(
         {"Info": ["CPU"], "Start_Timestamp": [5], "End_Timestamp": [7]},
     )
 
-    def path_side_effect(*args, **kwargs):
-        p_obj = mock.Mock()
-        full_path = args[0] if len(args) == 1 else os.path.join(args[0], args[1])
-        if full_path == timestamps_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "timestamps.csv"
-        elif full_path == sysinfo_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "sysinfo.csv"
-        else:
-            p_obj.is_file.return_value = False
-            p_obj.name = os.path.basename(full_path)
-        return p_obj
-
-    mock_path_util.side_effect = path_side_effect
-
+    # Mock glob to return only timestamps.csv and sysinfo.csv
     mock_glob.return_value = [timestamps_csv_path_str, sysinfo_csv_path_str]
 
     utils.replace_timestamps(workload_dir)
 
     mock_console_warning.assert_not_called()
+
+    # Verify sysinfo.csv was NOT updated (timestamps should remain original)
     df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)
     assert list(df_sysinfo_original["Start_Timestamp"]) == [5]
     assert list(df_sysinfo_original["End_Timestamp"]) == [7]

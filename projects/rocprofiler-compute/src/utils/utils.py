@@ -1118,7 +1118,7 @@ def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
 
 
 def replace_timestamps(workload_dir: str) -> None:
-    ts_path = Path(workload_dir, "timestamps.csv")
+    ts_path = Path(workload_dir) / "timestamps.csv"
     if not ts_path.is_file():
         return
 
@@ -1388,16 +1388,14 @@ def set_locale_encoding() -> None:
         if current_locale and current_locale[1] and "UTF-8" in current_locale[1]:
             try:
                 locale.setlocale(locale.LC_ALL, current_locale[0])
-            except locale.Error as error:
+            except locale.Error as e:
                 console_error(
-                    "locale",
                     "Failed to set locale to the current UTF-8-based locale.",
                     exit=False,
                 )
-                console_error("locale", str(error))
+                console_error(e)
         else:
             console_error(
-                "locale",
                 "Please ensure that a UTF-8-based locale is available on your system.",
                 exit=False,
             )
