@@ -160,7 +160,9 @@ def write_agent_info_csv(importData, config) -> None:
     # Build SELECT clause for Capability columns
     select_capability = []
     for capability in capabilities:
-        select_capability.append(f"json_extract(extdata, '$.capability.{capability}')")
+        select_capability.append(
+            f"json_extract(extdata, '$.capability.{capability}') AS Cap_{capability}"
+        )
 
     # Add non-JSON columns
     fixed_keys = [
