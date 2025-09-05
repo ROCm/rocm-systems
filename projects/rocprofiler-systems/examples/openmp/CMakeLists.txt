@@ -90,10 +90,32 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     )
 endif()
 
+set(DEFAULT_GPU_TARGETS
+    "gfx900"
+    "gfx906"
+    "gfx908"
+    "gfx90a"
+    "gfx940"
+    "gfx941"
+    "gfx942"
+    "gfx950"
+    "gfx1030"
+    "gfx1010"
+    "gfx1100"
+    "gfx1101"
+    "gfx1102"
+)
+
+set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
+
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
         add_subdirectory(target)
     endif()
+    if(NOT "openmp-vv" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+        add_subdirectory(external)
+    endif()
 else()
     add_subdirectory(target)
+    add_subdirectory(external)
 endif()

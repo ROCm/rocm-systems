@@ -30,24 +30,6 @@ project(rocprofiler-systems-example-openmp-target-lib LANGUAGES CXX)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx940"
-    "gfx941"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-)
-
-set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
-
 find_package(Threads REQUIRED)
 
 function(add_offload_flags tgt)

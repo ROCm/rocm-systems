@@ -117,6 +117,21 @@ rocprofiler_systems_add_validation_test(
          -p
 )
 
+# OpenMP tests generated using OMPVV binaries
+if(OMPVV_TESTS)
+    foreach(TEST_NAME ${OMPVV_TESTS})
+        rocprofiler_systems_add_test(
+            SKIP_RUNTIME
+            NAME openmp-vv-${TEST_NAME}
+            TARGET openmp-vv-${TEST_NAME}
+            GPU ON
+            LABELS "openmp"
+            ENVIRONMENT
+                "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
+        )
+    endforeach()
+endif()
+
 set(_ompt_sampling_environ
     "${_ompt_environment}"
     "ROCPROFSYS_VERBOSE=2"
