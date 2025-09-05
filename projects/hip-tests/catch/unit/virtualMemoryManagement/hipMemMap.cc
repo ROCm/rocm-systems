@@ -71,12 +71,17 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -142,12 +147,17 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -218,12 +228,17 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -278,20 +293,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   CTX_DESTROY();
 }
 
-/**
- * Test Description
- * ------------------------
- *    - Check if a physical chunk can be mapped/unmapped for
- * multiple vmm addresses. This test validates physical memory
- * reuse using different vmm ranges on multiple devices.
- * ------------------------
- *    - unit/virtualMemoryManagement/hipMemMap.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 7.0
- */
-TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
-  CHECK_P2P_SUPPORT
+void physicalMemoryReuse_MultiDev (hipMemAllocationProp prop) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
@@ -304,14 +306,6 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, devX));
     checkVMMSupported(device);
-    hipMemAllocationProp prop{};
-    prop.type = hipMemAllocationTypePinned;
-    #if HT_AMD
-    SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
-      prop.type = hipMemAllocationTypeUncached;
-    }
-    #endif
-    prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;  // Current Devices
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
@@ -356,7 +350,36 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
     }
   }
 }
+/**
+ * Test Description
+ * ------------------------
+ *    - Check if a physical chunk can be mapped/unmapped for
+ * multiple vmm addresses. This test validates physical memory
+ * reuse using different vmm ranges on multiple devices.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemMap.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
+  CHECK_P2P_SUPPORT
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    physicalMemoryReuse_MultiDev(prop);
+  }
 
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypeUncached;
+    prop.location.type = hipMemLocationTypeDevice;
+    physicalMemoryReuse_MultiDev(prop);
+  }
+  #endif
+}
 /**
  * Test Description
  * ------------------------
@@ -378,12 +401,17 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -436,20 +464,7 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
   CTX_DESTROY();
 }
 
-/**
- * Test Description
- * ------------------------
- *    - Check if different physical chunk allocated in different devices
- * can be mapped/unmapped to single vmm address. This test validates VMM
- * memory reuse using different physical ranges.
- * ------------------------
- *    - unit/virtualMemoryManagement/hipMemMap.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 7.0
- */
-TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
-  CHECK_P2P_SUPPORT
+void vMMMemoryReuse_MultiGPU (hipMemAllocationProp prop) {
   int deviceId = 0, devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
@@ -462,14 +477,6 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
   HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
-  hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
-  #if HT_AMD
-  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
-    prop.type = hipMemAllocationTypeUncached;
-  }
-  #endif
-  prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
@@ -533,7 +540,36 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
   }
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
 }
+/**
+ * Test Description
+ * ------------------------
+ *    - Check if different physical chunk allocated in different devices
+ * can be mapped/unmapped to single vmm address. This test validates VMM
+ * memory reuse using different physical ranges.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemMap.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
+  CHECK_P2P_SUPPORT
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    vMMMemoryReuse_MultiGPU(prop);
+  }
 
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypeUncached;
+    prop.location.type = hipMemLocationTypeDevice;
+    vMMMemoryReuse_MultiGPU(prop);
+  }
+  #endif
+}
 /**
  * Test Description
  * ------------------------
@@ -554,12 +590,17 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(

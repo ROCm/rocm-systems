@@ -68,12 +68,17 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -112,12 +117,17 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -176,12 +186,17 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -240,12 +255,17 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -309,12 +329,17 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -388,12 +413,17 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
   #if HT_AMD
   SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
     prop.type = hipMemAllocationTypeUncached;
   }
   #endif
-  prop.type = hipMemAllocationTypePinned;
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
