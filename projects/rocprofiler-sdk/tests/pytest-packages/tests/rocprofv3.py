@@ -378,7 +378,7 @@ def test_csv_data(
                     ]:
                         if item["kind"] == "MARKER_CORE_RANGE_API":
                             string_records = item["operations"]
-                    exclude_ops = {"roctxMarkA", "roctxGetThreadId"}
+                    exclude_ops = {"roctxGetThreadId"}
                     for entry in marker_records:
                         # exclude records where start and end times are the same
                         if entry["start_timestamp"] == entry["end_timestamp"]:
