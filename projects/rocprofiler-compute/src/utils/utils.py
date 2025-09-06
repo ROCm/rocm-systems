@@ -1186,9 +1186,8 @@ def detect_roofline(mspec):
     target_binary = {"rocm_ver": rocm_ver, "distro": "override", "path": None}
 
     os_release = path("/etc/os-release").read_text()
-    ubuntu_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
-    rhel_distro = specs.search(r'PLATFORM_ID="(.*?)"', os_release)
-    sles_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
+    id = specs.search(r'ID="(.*?)"', os_release)
+    id_like = (specs.search(r'ID_LIKE="(.*?)"', os_release)).split()
 
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
@@ -1207,27 +1206,17 @@ def detect_roofline(mspec):
             )
             console_error("roofline", msg)
 
-    # Must be a valid RHEL machine
-    elif (
-        rhel_distro == "platform:el8"
-        or rhel_distro == "platform:al8"
-        or rhel_distro == "platform:el9"
-        or rhel_distro == "platform:el10"
-    ):
+    elif "fedora" in id_like:
         distro = "platform:el8"
 
-    # Must be a valid SLES machine
-    elif (
-        (isinstance(sles_distro, str) and len(sles_distro) >= 3)
-        and sles_distro[:2] == "15"  # confirm string and len
-        and int(sles_distro[3]) >= 6  # SLES15 and SP >= 6
-    ):
-        # Use SP6 binary for all forward compatible service pack versions
+    elif "suse" in id_like:
         distro = "15.6"
 
-    # Must be a valid Ubuntu machine
-    elif ubuntu_distro == "22.04" or ubuntu_distro == "24.04":
+    elif "debian" in id_like:
         distro = "22.04"
+
+    elif id == "azurelinux":
+        distro = "azurelinux"
 
     else:
         console_error(
@@ -1247,6 +1236,7 @@ def mibench(args, mspec):
         "platform:el8": "rhel8",
         "15.6": "sles15sp6",
         "22.04": "ubuntu22_04",
+        "azurelinux": "azurelinux3",
     }
 
     binary_paths = []
