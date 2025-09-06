@@ -289,6 +289,7 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
     }
   }
   for (auto it : streams) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "Stream %p, cpu_wait %d", it, cpu_wait);
     it->finish(cpu_wait);
     it->release();
   }
