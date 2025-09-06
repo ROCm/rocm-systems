@@ -168,6 +168,7 @@ void HostQueue::finish(bool cpu_wait) {
 
     command = getLastQueuedCommand(true);
     if (command == nullptr) {
+      ClPrint(LOG_DEBUG, LOG_CMD, "No command awaiting completion on host");
       return;
     }
     // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands

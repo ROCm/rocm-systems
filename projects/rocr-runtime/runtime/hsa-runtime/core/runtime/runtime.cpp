@@ -832,7 +832,6 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_value_t value,
                                             hsa_amd_signal_handler handler,
                                             void* arg) {
-
   struct AsyncEventsInfo* asyncInfo = &asyncSignals_;
   int priority = runtime_singleton_->flag().async_events_thread_priority();
 
@@ -847,7 +846,6 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
     }
   }
 
-  ScopedAcquire<HybridMutex> scope_lock(&asyncInfo->control.lock);
 
   // Lazy initializer
   if (asyncInfo->control.async_events_thread_ == NULL) {
@@ -873,7 +871,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
   hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
-
+  
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1886,26 +1884,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     // Insert new signals and find plain functions
     typedef std::pair<void (*)(void*), void*> func_arg_t;
     std::vector<func_arg_t> functions;
-    {
-      ScopedAcquire<HybridMutex> scope_lock(&async_events_control_.lock);
-      for (size_t i = 0; i < new_async_events_.Size(); i++) {
-        if (new_async_events_.signal_[i].handle == 0) {
-          functions.push_back(
-              func_arg_t((void (*)(void*))new_async_events_.handler_[i],
-                         new_async_events_.arg_[i]));
-          continue;
-        }
-        async_events_.PushBack(
-            new_async_events_.signal_[i], new_async_events_.cond_[i],
-            new_async_events_.value_[i], new_async_events_.handler_[i],
-            new_async_events_.arg_[i]);
+    std::vector<AsyncEventItem*> new_events;
+    new_async_events_.GetAllEvents(new_events);
+    for (const auto& pevent : new_events) {
+      auto event = *pevent;
+      if (event.signal.handle == 0) {
+        functions.push_back(func_arg_t((void (*)(void*))event.handler, event.arg));
+        continue;
       }
-      new_async_events_.Clear();
-    }
-
+      async_events_.PushBack(event.signal, event.cond, event.value, event.handler,event.arg);
+    } 
     // Call plain functions
-    for (size_t i = 0; i < functions.size(); i++)
+    for (size_t i = 0; i < functions.size(); i++) {
       functions[i].first(functions[i].second);
+    }
     functions.clear();
   }
 
@@ -1914,9 +1906,62 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     hsa_signal_handle(async_events_.signal_[i])->Release();
   async_events_.Clear();
 
-  for (size_t i = 0; i < new_async_events_.Size(); i++)
-    hsa_signal_handle(new_async_events_.signal_[i])->Release();
-  new_async_events_.Clear();
+  std::vector<AsyncEventItem*> remaining_events;
+  new_async_events_.GetAllEvents(remaining_events);
+  for (const auto& pevent : remaining_events) {
+    auto event = *pevent;
+    if (event.signal.handle != 0) {
+      hsa_signal_handle(event.signal)->Release();
+    }
+  }
+
+}
+
+void Runtime::ConcurrentAsyncEvents::PushBack(hsa_signal_t signal,
+                                             hsa_signal_condition_t cond,
+                                             hsa_signal_value_t value,
+                                             hsa_amd_signal_handler handler, void* arg) {
+  // Allocate memory for the new event item
+  AsyncEventItem* item = new AsyncEventItem(signal, cond, value, handler, arg);
+  event_queue_.enqueue(item);
+}
+
+void Runtime::ConcurrentAsyncEvents::Clear() {
+  // Dequeue all items to clear the queue
+  while (!event_queue_.empty()) {
+    AsyncEventItem* item = event_queue_.dequeue();
+    if (item != nullptr) {
+      delete item;
+    }
+  }
+}
+
+bool Runtime::ConcurrentAsyncEvents::GetEvent(AsyncEventItem& event) {
+  AsyncEventItem* item = event_queue_.dequeue();
+  if (item != nullptr) {
+    event = *item;
+    delete item;
+    return true;
+  }
+  return false;
+}
+
+bool Runtime::ConcurrentAsyncEvents::GetAllEvents(std::vector<AsyncEventItem*>& all_events) {
+  if (event_queue_.dequeue_batch(all_events) == 0) {
+    return false;
+  }
+  return true;
+}
+
+void Runtime::ConcurrentAsyncEvents::AddEventsBack(const std::vector<AsyncEventItem>& events) {
+  for (const auto& event : events) {
+    AsyncEventItem* item = new AsyncEventItem(event);
+    event_queue_.enqueue(item);
+  }
+}
+
+size_t Runtime::ConcurrentAsyncEvents::Size() {
+  return event_queue_.size();
 }
 
 void Runtime::BindErrorHandlers() {
