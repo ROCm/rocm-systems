@@ -1186,8 +1186,15 @@ def detect_roofline(mspec):
     target_binary = {"rocm_ver": rocm_ver, "distro": "override", "path": None}
 
     os_release = path("/etc/os-release").read_text()
-    id = specs.search(r'ID="(.*?)"', os_release)
-    id_like = (specs.search(r'ID_LIKE="(.*?)"', os_release)).split()
+    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release)
+    id = specs.search(r'^ID="?(.*?)"?$', os_release)
+    if id is not None:
+        # create distro ID list based off of ID and (if present) ID_LIKE
+        if id_list is not None:
+            id_list = id_list.split()
+            id_list.append(id)
+        else:
+            id_list = [id]
 
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
@@ -1206,17 +1213,18 @@ def detect_roofline(mspec):
             )
             console_error("roofline", msg)
 
-    elif "fedora" in id_like:
-        distro = "platform:el8"
+    # check that the system OS is based off of one of the following distributions
+    elif "azurelinux" in id_list:
+        distro = "azurelinux"
 
-    elif "suse" in id_like:
-        distro = "15.6"
-
-    elif "debian" in id_like:
+    elif "debian" in id_list:
         distro = "22.04"
 
-    elif id == "azurelinux":
-        distro = "azurelinux"
+    elif "fedora" in id_list:
+        distro = "platform:el8"
+
+    elif "suse" in id_list:
+        distro = "15.6"
 
     else:
         console_error(
