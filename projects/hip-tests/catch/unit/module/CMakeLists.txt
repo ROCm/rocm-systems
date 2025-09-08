@@ -301,16 +301,8 @@ hip_add_exe_to_target(NAME matmul
 
 add_custom_target(kernel_count.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_count.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 
-hip_add_exe_to_target(NAME KernelCount
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS ${CMAKE_DL_LIBS})
 add_custom_target(emptyModuleCount.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/emptyModuleCount.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 
-hip_add_exe_to_target(NAME EmptyKernelCount
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS ${CMAKE_DL_LIBS})
 add_dependencies(ModuleTest kernel_count.code)
 add_dependencies(ModuleTest emptyModuleCount.code)
 add_custom_target(kernel_composite_test.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_composite_test.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
