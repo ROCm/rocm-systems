@@ -56,6 +56,11 @@ if(NOT amdflang_EXECUTABLE)
     "Could not find amdflang. This is required for the OMPVV tests.")
 endif()
 
+set(OMPVV_COMPILER
+    "${amdflang_EXECUTABLE}"
+    CACHE FILEPATH "Fortran compiler used for OMPVV tests")
+set(OMPVV_FC "amdflang")
+
 # ---------------------------------------------------------------------------------------#
 # Variables
 # ---------------------------------------------------------------------------------------#
