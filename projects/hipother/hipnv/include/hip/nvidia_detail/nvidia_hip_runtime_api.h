@@ -2060,9 +2060,11 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
 #if CUDA_VERSION >= 13000
-  return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count, advice, location));
+  return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count,
+      hipMemoryAdviseTocudaMemoryAdvise(advice), location));
 #else
-  return hipCUDAErrorTohipError(cudaMemAdvise_v2(dev_ptr, count, advice, location));
+  return hipCUDAErrorTohipError(
+      cudaMemAdvise_v2(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
 #endif
 }
 
@@ -2167,10 +2169,6 @@ inline static hipError_t hipHostFree(void* ptr) {
 
 inline static hipError_t hipSetDevice(int device) {
   return hipCUDAErrorTohipError(cudaSetDevice(device));
-}
-
-inline static hipError_t hipSetValidDevices(int* device_arr, int len) {
-  return hipCUDAErrorTohipError(cudaSetValidDevices(device_arr, len));
 }
 
 inline static hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop) {
@@ -3049,12 +3047,14 @@ inline static hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, s
 inline static hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) {
   return hipCUResultTohipError(cuMemRelease(handle));
 }
-inline static hipError_t hipMemAddressFree(hipDeviceptr_t ptr, size_t size) {
-  return hipCUResultTohipError(cuMemAddressFree(ptr, size));
+inline static hipError_t hipMemAddressFree(void* devPtr, size_t size) {
+  return hipCUResultTohipError(cuMemAddressFree(reinterpret_cast<CUdeviceptr>(devPtr), size));
 }
-inline static hipError_t hipMemAddressReserve(hipDeviceptr_t* ptr, size_t size, size_t alignment,
-                                              hipDeviceptr_t addr, unsigned long long flags) {
-  return hipCUResultTohipError(cuMemAddressReserve(ptr, size, alignment, addr, flags));
+inline static hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void* addr,
+                                              unsigned long long flags) {
+  return hipCUResultTohipError(cuMemAddressReserve(reinterpret_cast<CUdeviceptr*>(ptr), size,
+                                                   alignment, reinterpret_cast<CUdeviceptr>(addr),
+                                                   flags));
 }
 inline static hipError_t hipMemExportToShareableHandle(void* shareableHandle,
                                                        hipMemGenericAllocationHandle_t handle,
@@ -3064,12 +3064,12 @@ inline static hipError_t hipMemExportToShareableHandle(void* shareableHandle,
       shareableHandle, handle, (CUmemAllocationHandleType)handleType, flags));
 }
 inline static hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* location,
-                                         hipDeviceptr_t ptr) {
+                                         void* ptr) {
   if (location == NULL) {
-    return hipCUResultTohipError(cuMemGetAccess(flags, NULL, ptr));
+    return hipCUResultTohipError(cuMemGetAccess(flags, NULL, reinterpret_cast<CUdeviceptr>(ptr)));
   } else {
     CUmemLocation loc = hipMemLocationToCUmemLocation(location);
-    return hipCUResultTohipError(cuMemGetAccess(flags, &loc, ptr));
+    return hipCUResultTohipError(cuMemGetAccess(flags, &loc, reinterpret_cast<CUdeviceptr>(ptr)));
   }
 }
 inline static hipError_t hipMemGetAllocationPropertiesFromHandle(
@@ -3089,10 +3089,11 @@ inline static hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocation
   return hipCUResultTohipError(
       cuMemImportFromShareableHandle(handle, osHandle, (CUmemAllocationHandleType)shHandleType));
 }
-inline static hipError_t hipMemMap(hipDeviceptr_t ptr, size_t size, size_t offset,
+inline static hipError_t hipMemMap(void* ptr, size_t size, size_t offset,
                                    hipMemGenericAllocationHandle_t handle,
                                    unsigned long long flags) {
-  return hipCUResultTohipError(cuMemMap(ptr, size, offset, handle, flags));
+  return hipCUResultTohipError(
+      cuMemMap(reinterpret_cast<CUdeviceptr>(ptr), size, offset, handle, flags));
 }
 inline static hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
                                              hipStream_t stream) {
@@ -3102,19 +3103,21 @@ inline static hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHan
                                                       void* addr) {
   return hipCUResultTohipError(cuMemRetainAllocationHandle(handle, addr));
 }
-inline static hipError_t hipMemSetAccess(hipDeviceptr_t ptr, size_t size,
-                                         const hipMemAccessDesc* desc, size_t count) {
+inline static hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
+                                         size_t count) {
   if (desc == NULL) {
-    return hipCUResultTohipError(cuMemSetAccess(ptr, size, NULL, count));
+    return hipCUResultTohipError(
+        cuMemSetAccess(reinterpret_cast<CUdeviceptr>(ptr), size, NULL, count));
   } else {
     CUmemAccessDesc* cuDesc = hipMemAccessDescToCUmemAccessDesc(desc, count);
-    auto status = hipCUResultTohipError(cuMemSetAccess(ptr, size, cuDesc, count));
+    auto status = hipCUResultTohipError(
+        cuMemSetAccess(reinterpret_cast<CUdeviceptr>(ptr), size, cuDesc, count));
     free(cuDesc);
     return status;
   }
 }
-inline static hipError_t hipMemUnmap(hipDeviceptr_t ptr, size_t size) {
-  return hipCUResultTohipError(cuMemUnmap(ptr, size));
+inline static hipError_t hipMemUnmap(void* ptr, size_t size) {
+  return hipCUResultTohipError(cuMemUnmap(reinterpret_cast<CUdeviceptr>(ptr), size));
 }
 #endif  // CUDA_VERSION >= CUDA_10020
 
@@ -3285,6 +3288,10 @@ inline static hipError_t hipStreamDestroy(hipStream_t stream) {
 
 inline static hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags) {
   return hipCUDAErrorTohipError(cudaStreamGetFlags(stream, flags));
+}
+
+inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long *streamId) {
+  return hipCUDAErrorTohipError(cudaStreamGetId(stream, streamId));
 }
 
 inline static hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) {
@@ -5017,6 +5024,7 @@ inline static hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetD
   return hipCUDAErrorTohipError(cudaMemcpy2DArrayToArray(
       dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, width, height, kind));
 }
+
 inline static hipError_t hipSetValidDevices(int* device_arr, int len) {
   return hipCUDAErrorTohipError(cudaSetValidDevices(device_arr, len));
 }

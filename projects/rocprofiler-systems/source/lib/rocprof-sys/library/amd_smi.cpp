@@ -29,11 +29,13 @@
 #include "core/agent.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cache_utility.hpp"
+#include "core/trace_cache/sample_type.hpp"
+#include <amd_smi/amdsmi.h>
+#include <cstdint>
 #if defined(NDEBUG)
 #    undef NDEBUG
 #endif
 
-#include "core/agent_manager.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -41,7 +43,6 @@
 #include "core/gpu.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/amd_smi.hpp"
@@ -74,19 +75,6 @@ using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
 namespace
 {
-int64_t
-get_tid()
-{
-    static thread_local auto _v = threading::get_id();
-    return _v;
-}
-
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
-}
-
 void
 metadata_initialize_category()
 {
@@ -95,18 +83,73 @@ metadata_initialize_category()
 }
 
 void
-metadata_initialize_smi_tracks()
+metadata_initialize_smi_tracks(size_t gpu_id)
 {
     const auto thread_id = std::nullopt;
 
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_mm_busy>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_gfx_busy>(gpu_id),
+          thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_power>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_umc_busy>(gpu_id),
+          thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_temp>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_mm_busy>(gpu_id),
+          thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_memory_usage>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_power>(gpu_id),
+          thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_temp>(gpu_id),
+          thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_memory_usage>(
+              gpu_id),
+          thread_id, "{}" });
+
+    auto add_vcn_track = [&](std::optional<int> xcp_idx) {
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_VCN; ++clk)
+        {
+            auto name = trace_cache::info::annotate_with_device_id<
+                category::amd_smi_vcn_activity>(gpu_id, xcp_idx, clk);
+            trace_cache::get_metadata_registry().add_track(
+                { name.c_str(), thread_id, "{}" });
+        }
+    };
+
+    auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        {
+            auto name = trace_cache::info::annotate_with_device_id<
+                category::amd_smi_jpeg_activity>(gpu_id, xcp_idx, clk);
+            trace_cache::get_metadata_registry().add_track(
+                { name.c_str(), thread_id, "{}" });
+        }
+    };
+
+    if(gpu::is_vcn_activity_supported(gpu_id))
+    {
+        add_vcn_track(std::nullopt);
+    }
+    else
+    {
+        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        {
+            add_vcn_track(xcp);
+        }
+    }
+
+    if(gpu::is_jpeg_activity_supported(gpu_id))
+    {
+        add_jpeg_track(std::nullopt);
+    }
+    else
+    {
+        for(auto xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        {
+            add_jpeg_track(xcp);
+        }
+    }
 }
 
 void
@@ -125,7 +168,21 @@ metadata_initialize_smi_pmc(size_t gpu_id)
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_mm_busy>::value, "Busy",
+          trait::name<category::amd_smi_gfx_busy>::value, "GFX Busy",
+          trait::name<category::amd_smi_gfx_busy>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_umc_busy>::value, "UMC Busy",
+          trait::name<category::amd_smi_umc_busy>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_mm_busy>::value, "MM Busy",
           trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
           COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
           EXPRESSION, 0, 0, "{}" });
@@ -148,39 +205,74 @@ metadata_initialize_smi_pmc(size_t gpu_id)
           trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
           COMPONENT, tim::units::mem_repr(tim::units::megabyte),
           rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
-}
 
-void
-rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& settings,
-                             uint64_t timestamp, double busy, double temp, double power,
-                             double usage)
-{
-    if(!(settings.busy || settings.temp || settings.power || settings.mem_usage)) return;
+    auto add_vcn_pmc = [&](std::optional<int> xcp_idx) {
+        for(int clk = 0; clk < AMDSMI_MAX_NUM_VCN; ++clk)
+        {
+            std::stringstream name_ss;
+            name_ss << trait::name<category::amd_smi_vcn_activity>::value;
+            if(xcp_idx) name_ss << "_" << *xcp_idx;
+            name_ss << "_" << clk;
 
-    auto& data_processor = get_data_processor();
+            std::stringstream symbol_ss;
+            symbol_ss << "VcnAct";
+            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
+            symbol_ss << "_" << clk;
 
-    const auto* _name            = trait::name<category::amd_smi>::value;
-    auto        name_primary_key = data_processor.insert_string(_name);
-    auto        event_id         = data_processor.insert_event(name_primary_key, 0, 0, 0);
-
-    auto& _agent_manager = agent_manager::get_instance();
-    auto  base_id =
-        _agent_manager.get_agent_by_type_index(device_id, agent_type::GPU).base_id;
-
-    auto insert_event_and_sample = [&](bool enabled, const char* name, double value) {
-        if(!enabled) return;
-        data_processor.insert_pmc_event(event_id, base_id, name, value);
-        data_processor.insert_sample(name, timestamp, event_id);
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  name_ss.str(), symbol_ss.str(),
+                  trait::name<category::amd_smi_vcn_activity>::description,
+                  LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
+                  rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+        }
     };
 
-    insert_event_and_sample(settings.busy, trait::name<category::amd_smi_mm_busy>::value,
-                            busy);
-    insert_event_and_sample(settings.temp, trait::name<category::amd_smi_temp>::value,
-                            temp);
-    insert_event_and_sample(settings.power, trait::name<category::amd_smi_power>::value,
-                            power);
-    insert_event_and_sample(settings.mem_usage,
-                            trait::name<category::amd_smi_memory_usage>::value, usage);
+    auto add_jpeg_pmc = [&](std::optional<int> xcp_idx) {
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        {
+            std::stringstream name_ss;
+            name_ss << trait::name<category::amd_smi_jpeg_activity>::value;
+            if(xcp_idx) name_ss << "_" << *xcp_idx;
+            name_ss << "_" << std::to_string(clk);
+
+            std::stringstream symbol_ss;
+            symbol_ss << "JpegAct";
+            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
+            symbol_ss << "_" << std::to_string(clk);
+
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  name_ss.str(), symbol_ss.str(),
+                  trait::name<category::amd_smi_jpeg_activity>::description,
+                  LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
+                  rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+        }
+    };
+
+    if(gpu::is_vcn_activity_supported(gpu_id))
+    {
+        add_vcn_pmc(std::nullopt);
+    }
+    else
+    {
+        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        {
+            add_vcn_pmc(xcp);
+        }
+    }
+
+    if(gpu::is_jpeg_activity_supported(gpu_id))
+    {
+        add_jpeg_pmc(std::nullopt);
+    }
+    else
+    {
+        for(auto xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        {
+            add_jpeg_pmc(xcp);
+        }
+    }
 }
 
 auto&
@@ -241,6 +333,101 @@ get_state()
     static std::atomic<State> _v{ State::PreInit };
     return _v;
 }
+
+std::vector<uint8_t>
+serialize_xcp_metrics(const bool& use_vcn_activity, const bool& use_jpeg_activity,
+                      const amdsmi_gpu_metrics_t& gpu_metrics)
+{
+    // Chunk:
+    // <vcn_data_0>..<vcn_data_[vcn_count]> // lower and higher byte
+    // <jpeg_data_0>..<jpeg_data_[jpeg_count]> // lower and higher byte
+
+    // Serialized:
+    // <is_vcn_supported>
+    // <is_jpeg_supported>
+    // <xcp_count>
+    // <vcn_count>
+    // <jpeg_count>
+    // Chunk_0
+    // ...
+    // Chunk_[xcp_count]
+
+    constexpr uint8_t vcn_count          = AMDSMI_MAX_NUM_VCN;
+    constexpr uint8_t jpeg_count         = AMDSMI_MAX_NUM_JPEG;
+    constexpr uint8_t xcp_count          = AMDSMI_MAX_NUM_XCP;
+    constexpr size_t  elem_size          = sizeof(uint16_t) / sizeof(uint8_t);
+    constexpr uint8_t vector_size_header = sizeof(uint8_t);
+    constexpr uint8_t serialized_data_headers =
+        5 * vector_size_header;  // is_vcn_supported + is_jpeg_supported + xcp_count +
+                                 // vcn_count + jpeg_count
+    constexpr size_t chunk_size = ((vcn_count + jpeg_count) * elem_size);
+
+    auto serialize_uint16_array = [](std::vector<uint8_t>& data, const uint16_t* arr,
+                                     int array_size) {
+        for(int i = 0; i < array_size; ++i)
+        {
+            data.push_back(static_cast<uint8_t>(arr[i] & 0xFF));
+            data.push_back(static_cast<uint8_t>((arr[i] >> 8) & 0xFF));
+        }
+    };
+
+    std::vector<uint8_t> result;
+
+    const bool   is_vcn_jpeg_supported = (use_vcn_activity || use_jpeg_activity);
+    const size_t chunk_count           = is_vcn_jpeg_supported ? 1 : xcp_count;
+    const size_t total_size = serialized_data_headers + (chunk_count * chunk_size);
+
+    result.reserve(total_size);
+
+    result.push_back((uint8_t) use_vcn_activity);
+    result.push_back((uint8_t) use_jpeg_activity);
+    result.push_back(chunk_count);
+    result.push_back(vcn_count);
+    result.push_back(jpeg_count);
+
+    for(size_t count = 0; count < chunk_count; ++count)
+    {
+        const auto* vcn_data =
+            (is_vcn_jpeg_supported ? gpu_metrics.vcn_activity
+                                   : gpu_metrics.xcp_stats[count].vcn_busy);
+        const auto* jpeg_data =
+            (is_vcn_jpeg_supported ? gpu_metrics.jpeg_activity
+                                   : gpu_metrics.xcp_stats[count].jpeg_busy);
+
+        serialize_uint16_array(result, vcn_data, vcn_count);
+        serialize_uint16_array(result, jpeg_data, jpeg_count);
+    }
+
+    return result;
+}
+
+size_t
+serialize_settings(uint32_t _device_id)
+{
+    auto           settings = get_settings(_device_id);
+    std::bitset<8> settings_bits;
+    settings_bits.reset();
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::busy),
+        settings.busy);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::temp),
+        settings.temp);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::power),
+        settings.power);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::mem_usage),
+        settings.mem_usage);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::vcn_activity),
+        settings.vcn_activity);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::jpeg_activity),
+        settings.jpeg_activity);
+    return settings_bits.to_ulong();
+}
+
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -252,12 +439,12 @@ std::unique_ptr<data::promise_t> data::polling_finished = {};
 data::data(uint32_t _dev_id) { sample(_dev_id); }
 
 void
-data::sample(uint32_t _dev_id)
+data::sample(uint32_t _device_id)
 {
     if(is_child_process()) return;
 
-    auto _ts = tim::get_clock_real_now<size_t, std::nano>();
-    assert(_ts < std::numeric_limits<int64_t>::max());
+    auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
+    assert(_timestamp < std::numeric_limits<int64_t>::max());
     amdsmi_gpu_metrics_t _gpu_metrics;
     bool                 _vcn_or_jpeg_activity_enabled = false;
 
@@ -265,8 +452,8 @@ data::sample(uint32_t _dev_id)
 
     if(_state != State::Active) return;
 
-    m_dev_id = _dev_id;
-    m_ts     = _ts;
+    m_dev_id = _device_id;
+    m_ts     = _timestamp;
 
 #define ROCPROFSYS_AMDSMI_GET(OPTION, FUNCTION, ...)                                     \
     if(OPTION)                                                                           \
@@ -283,7 +470,7 @@ data::sample(uint32_t _dev_id)
         }                                                                                \
     }
 
-    amdsmi_processor_handle sample_handle = gpu::get_handle_from_id(_dev_id);
+    amdsmi_processor_handle sample_handle = gpu::get_handle_from_id(_device_id);
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).busy, amdsmi_get_gpu_activity,
                           sample_handle, &m_busy_perc);
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).temp, amdsmi_get_temp_metric,
@@ -354,8 +541,14 @@ data::sample(uint32_t _dev_id)
             }
         }
     }
-
 #undef ROCPROFSYS_AMDSMI_GET
+
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::amd_smi_sample, serialize_settings(m_dev_id), _device_id,
+        _timestamp, m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
+        m_busy_perc.mm_activity, m_power.current_socket_power, m_temp, m_mem_usage,
+        serialize_xcp_metrics(gpu::is_vcn_activity_supported(m_dev_id),
+                              gpu::is_jpeg_activity_supported(m_dev_id), _gpu_metrics));
 }
 
 void
@@ -396,10 +589,10 @@ config()
         data::get_initial().at(itr).sample(itr);
 
     metadata_initialize_category();
-    metadata_initialize_smi_tracks();
 
     for(const auto& _dev_id : data::device_list)
     {
+        metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
 }
@@ -408,6 +601,9 @@ void
 sample()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    // TODO: Reorganize amd_smi::data and sampling mechanism not to store same data in
+    // bundle_data and in trace_cache
 
     for(auto itr : data::device_list)
     {
@@ -486,7 +682,6 @@ data::post_process(uint32_t _dev_id)
     auto _settings = get_settings(_dev_id);
 
     auto use_perfetto = get_use_perfetto();
-    auto use_rocpd    = get_use_rocpd();
 
     for(auto& itr : _amd_smi)
     {
@@ -660,12 +855,6 @@ data::post_process(uint32_t _dev_id)
         {
             setup_perfetto_counter_tracks();
             write_perfetto_metrics();
-        }
-
-        if(use_rocpd)
-        {
-            rocpd_process_smi_pmc_events(_dev_id, _settings, _ts, _mmbusy, _temp, _power,
-                                         _usage);
         }
     }
 }

@@ -182,7 +182,7 @@ __device__ inline float unsafeAtomicMin(float* addr, float val) {
 __device__ inline double unsafeAtomicAdd(double* addr, double value) {
 #if defined(__gfx90a__) && __has_builtin(__builtin_amdgcn_flat_atomic_fadd_f64)
   return __builtin_amdgcn_flat_atomic_fadd_f64(addr, value);
-#elif defined(__hip_atomic_fetch_add)
+#elif __has_builtin(__hip_atomic_fetch_add)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }

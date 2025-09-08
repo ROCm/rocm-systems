@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <rocprofiler-systems/categories.h>
 #include <stdint.h>
@@ -59,6 +60,14 @@ private:
         {
             arg = std::string((const char*) data_pos);
             data_pos += arg.size() + 1;
+        }
+        else if constexpr(std::is_same_v<T, std::vector<uint8_t>>)
+        {
+            size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
+            data_pos += sizeof(size_t);
+            arg.reserve(vector_size);
+            std::copy_n(data_pos, vector_size, std::back_inserter(arg));
+            data_pos += vector_size;
         }
         else
         {

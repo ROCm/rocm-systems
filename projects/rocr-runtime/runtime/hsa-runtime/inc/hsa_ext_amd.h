@@ -1810,8 +1810,6 @@ hsa_status_t HSA_API
  *
  * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Agent does not have available SDMA engines.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT dst_agent and src_agent are the same as
- * dst_agent == src_agent is generally used for shader copies.
  */
 hsa_status_t HSA_API
 hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
@@ -1828,8 +1826,6 @@ hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
  *
  * @retval ::HSA_STATUS_SUCCESS For mask returned
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT dst_agent and src_agent are the same as
- * dst_agent == src_agent is generally used for shader copies.
  */
 hsa_status_t HSA_API
 hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,

@@ -62,6 +62,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/roctracer/**/*'
 
+"shared: amdgpu-windows-interop":
+- changed-files:
+  - any-glob-to-any-file: 'shared/amdgpu-windows-interop/**/*'
+
 documentation:
 - changed-files:
   - any-glob-to-any-file:

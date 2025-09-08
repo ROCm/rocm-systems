@@ -143,9 +143,10 @@ struct LaunchParams {
 struct HIPLaunchParams : public LaunchParams {
  public:
   HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX, uint32_t blockY,
-                  uint32_t blockZ, uint32_t sharedMemBytes)
-      : LaunchParams(static_cast<uint32_t>(gridX) * blockX, static_cast<uint32_t>(gridY) * blockY,
-                     static_cast<uint32_t>(gridZ) * blockZ, blockX, blockY, blockZ,
+                  uint32_t blockZ, uint32_t sharedMemBytes,
+                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0)
+      : LaunchParams(static_cast<uint32_t>(gridX) * blockX + globalX_remainder, static_cast<uint32_t>(gridY) * blockY +
+                     globalY_remainder, static_cast<uint32_t>(gridZ) * blockZ + globalZ_remainder, blockX, blockY, blockZ,
                      sharedMemBytes) {
     if (global_[0] > std::numeric_limits<uint32_t>::max() ||
         global_[1] > std::numeric_limits<uint32_t>::max() ||
