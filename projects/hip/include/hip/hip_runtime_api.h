@@ -1246,6 +1246,13 @@ typedef enum hipFuncAttribute {
       8,  ///< The maximum number of bytes requested for dynamically allocated shared memory
   hipFuncAttributePreferredSharedMemoryCarveout =
       9,  ///< Sets the percentage of total shared memory allocated as the shared memory carveout
+  hipFuncAttributeClusterDimMustBeSet = 10,  ///< If this attribute is set, the cluster size must be specified.
+  hipFuncAttributeRequiredClusterWidth = 11,  ///< Required cluster width.
+  hipFuncAttributeRequiredClusterHeight = 12, ///< Required cluster height.
+  hipFuncAttributeRequiredClusterDepth = 13,  ///< Required cluster depth.
+  hipFuncAttributeNonPortableClusterSizeAllowed = 14,  ///< If this attribute is set,
+                                                       /// non-portable cluster sizes are allowed.
+  hipFuncAttributeClusterSchedulingPolicyPreference = 15,  ///< Preferred cluster scheduling policy.
   hipFuncAttributeMax
 } hipFuncAttribute;
 /**

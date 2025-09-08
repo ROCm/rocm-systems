@@ -628,6 +628,12 @@ typedef enum hipFunction_attribute {
   HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,  ///< The shared memory carveout preference
                                                         ///< in percent of the maximum shared
                                                         ///< memory.
+  HIP_FUNC_ATTRIBUTE_CLUSTER_SIZE_MUST_BE_SET,  ///< If this attribute is set, the cluster size must be specified.
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH,     ///< Required cluster width.
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT,    ///< Required cluster height.
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH,     ///< Required cluster depth.
+  HIP_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED,  ///< If this attribute is set, non-portable cluster sizes are allowed.
+  HIP_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE,  ///< Preferred cluster scheduling policy.
   HIP_FUNC_ATTRIBUTE_MAX
 } hipFunction_attribute;
 
