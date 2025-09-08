@@ -1676,7 +1676,6 @@ struct HipDispatchTable {
   t_hipLibraryUnload hipLibraryUnload_fn;
   t_hipLibraryGetKernel hipLibraryGetKernel_fn;
   t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15

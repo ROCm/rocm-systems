@@ -3979,7 +3979,7 @@ typedef struct hip_api_data_s {
     } hipLibraryUnload;
     struct {
       hipKernel_t* kernel;
-      hipFunction_t kernel__val;
+      hipKernel_t kernel__val;
       hipLibrary_t library;
       const char* kname;
       char kname__val;
@@ -8401,7 +8401,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
     default:
       break;
-    default: break;
   };
 }
 
@@ -11876,7 +11875,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.libraryOptions);
       oss << ", libraryOptionsValues=";
       roctracer::hip_support::detail::operator<<(
-          oss, data->args.hipLibraryLoadData.libraryOptionsValues);
+          oss, data->args.hipLibraryLoadData.libraryOptionValues);
       oss << ", numLibraryOptions=";
       roctracer::hip_support::detail::operator<<(oss,
                                                  data->args.hipLibraryLoadData.numLibraryOptions);
@@ -11913,7 +11912,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ")";
       oss << ", libraryOptionsValues=";
       roctracer::hip_support::detail::operator<<(
-          oss, data->args.hipLibraryLoadFromFile.libraryOptionsValues);
+          oss, data->args.hipLibraryLoadFromFile.libraryOptionValues);
       oss << ")";
       oss << ", numLibraryOptions=";
       roctracer::hip_support::detail::operator<<(oss,
