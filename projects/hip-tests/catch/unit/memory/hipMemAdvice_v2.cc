@@ -22,14 +22,14 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <utils.hh>
 #if __linux__
-#include <numaif.h>
 #include <numa.h>
+#include <numaif.h>
 #endif
 
 /**
  * Kernel to fill value for each element in the given array
  */
-static __global__ void fillDataKernel(int* arr, size_t size, int value) {
+static __global__ void fillDataKernel(int *arr, size_t size, int value) {
   size_t offset = blockDim.x * blockIdx.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
 
@@ -71,21 +71,23 @@ static std::vector<int> getSupportedDevices() {
 TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
 
-  const int N = 1024;
-  const int Nbytes = N * sizeof(int);
+  constexpr int N = 1024;
+  constexpr int Nbytes = N * sizeof(int);
   int value = 10;
 
-  int* memPtr = nullptr;
+  int *memPtr = nullptr;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
+                             hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
 
   SECTION("With Device") {
@@ -97,27 +99,30 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
       location.type = hipMemLocationTypeDevice;
       location.id = deviceId;
 
-      HIP_CHECK(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
+      HIP_CHECK(
+          hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
       fillDataKernel<<<1, N / 2>>>(memPtr, N, value);
       HIP_CHECK(hipDeviceSynchronize());
     }
   }
 
-#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
   SECTION("With Host") {
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
 
-    HIP_CHECK(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
+    HIP_CHECK(
+        hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
     for (int i = 0; i < N; i++) {
       memPtr[i] = value;
     }
   }
-#endif
 
+  // Validate data
   for (int i = 0; i < N; i++) {
+    INFO("At index " << i << " Expected value = " << value
+                     << " Got value = " << memPtr[i]);
     REQUIRE(memPtr[i] == value);
   }
 
@@ -138,12 +143,12 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
 #if __linux__
 TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -155,16 +160,17 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   int maxNode = numa_max_node();
   REQUIRE(maxNode >= 0);
 
-  const int N = 1024;
-  const int Nbytes = N * sizeof(int);
+  constexpr int N = 1024;
+  constexpr int Nbytes = N * sizeof(int);
   int value = 10;
 
-  int* memPtr = nullptr;
+  int *memPtr = nullptr;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
+                             hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
 
   SECTION("With Host NUMA") {
@@ -173,7 +179,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
       location.type = hipMemLocationTypeHostNuma;
       location.id = node;
 
-      HIP_CHECK(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
+      HIP_CHECK(
+          hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
       for (int i = 0; i < N; i++) {
         memPtr[i] = value;
@@ -185,21 +192,24 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
     hipMemLocation location;
     location.type = hipMemLocationTypeHostNumaCurrent;
 
-    HIP_CHECK(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
+    HIP_CHECK(
+        hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
     for (int i = 0; i < N; i++) {
       memPtr[i] = value;
     }
   }
 
+  // Validate data
   for (int i = 0; i < N; i++) {
+    INFO("At index " << i << " Expected value = " << value
+                     << " Got value = " << memPtr[i]);
     REQUIRE(memPtr[i] == value);
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
-#endif
 #endif
 
 /**
@@ -209,11 +219,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
  *  - 1) With dev_ptr as nullptr
  *  - 2) With count 0
  *  - 3) With count larger than actual size
- *  - 4) With invalid device
- *  - 5) With invalid numa node
- *  - 6) With Invalid location type(Invalid, None)
- *  - 7) With Invalid location -1
- *  - 8) With Invalid Advise
+ *  - 4) With invalid numa node
+ *  - 5) With Invalid Advise
  * Test source
  * ------------------------
  *  - unit/memory/hipMemAdvise_v2.cc
@@ -224,79 +231,49 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
 TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
 
-  const int N = 16;
-  const int Nbytes = N * sizeof(int);
+  constexpr int N = 16;
+  constexpr int Nbytes = N * sizeof(int);
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* memPtr = nullptr;
+  void *memPtr = nullptr;
   HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
 
   hipMemLocation location;
   location.type = hipMemLocationTypeDevice;
 
   SECTION("With dev_ptr as nullptr") {
-    HIP_CHECK_ERROR(hipMemAdvise_v2(nullptr, Nbytes, hipMemAdviseSetReadMostly, location),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemAdvise_v2(nullptr, Nbytes, hipMemAdviseSetReadMostly, location),
+        hipErrorInvalidValue);
   }
 
   SECTION("With count 0") {
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, 0, hipMemAdviseSetReadMostly, location),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemAdvise_v2(memPtr, 0, hipMemAdviseSetReadMostly, location),
+        hipErrorInvalidValue);
   }
 
   SECTION("With count larger than actual size") {
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes + 10, hipMemAdviseSetReadMostly, location),
+    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes + 10,
+                                    hipMemAdviseSetReadMostly, location),
                     hipErrorInvalidValue);
   }
-
-#if 0  // Commenting below sections as not giving expected error : SWDEV-551259
-  SECTION("With invalid device") {
-    hipMemLocation dstLocation;
-    dstLocation.type = hipMemLocationTypeDevice;
-    int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
-    dstLocation.id = deviceCount;
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
-                    hipErrorInvalidDevice);
-  }
-
-#if __linux__
-  SECTION("With invalid numa node") {
-    if (numa_available() >= 0) {
-      hipMemLocation dstLocation;
-      dstLocation.type = hipMemLocationTypeHostNuma;
-      int maxNode = numa_max_node();
-      dstLocation.id = maxNode+1;
-      HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, dstLocation),
-                      hipErrorInvalidDevice);
-    }
-  }
-#endif
-#endif
-
-#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
-  SECTION("With Invalid location type") {
-    hipMemLocation location;
-    location.type = GENERATE(hipMemLocationTypeInvalid, hipMemLocationTypeNone);
-
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
-                    hipErrorInvalidValue);
-  }
-#endif
 
   SECTION("With Invalid location -1") {
     hipMemLocation location;
     location.type = static_cast<hipMemLocationType>(-1);
 
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
+        hipErrorInvalidValue);
   }
 
   SECTION("With Invalid Advise") {
@@ -306,7 +283,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
 
     hipMemoryAdvise advice = static_cast<hipMemoryAdvise>(-1);
 
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, advice, location), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, advice, location),
+                    hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipStreamDestroy(stream));

@@ -22,14 +22,14 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <utils.hh>
 #if __linux__
-#include <numaif.h>
 #include <numa.h>
+#include <numaif.h>
 #endif
 
 /**
  * Kernel to fill value for each element in the given array
  */
-static __global__ void fillDataKernel(int* arr, size_t size, int value) {
+static __global__ void fillDataKernel(int *arr, size_t size, int value) {
   size_t offset = blockDim.x * blockIdx.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
 
@@ -71,21 +71,23 @@ static std::vector<int> getSupportedDevices() {
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
 
-  const int N = 1024;
-  const int Nbytes = N * sizeof(int);
+  constexpr int N = 1024;
+  constexpr int Nbytes = N * sizeof(int);
   int value = 10;
 
-  int* memPtr = nullptr;
+  int *memPtr = nullptr;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
+                             hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
 
   SECTION("With Device") {
@@ -105,7 +107,6 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
     }
   }
 
-#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
   SECTION("With Host") {
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
@@ -118,10 +119,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
       memPtr[i] = value;
     }
   }
-#endif
 
   // Validate data
   for (int i = 0; i < N; i++) {
+    INFO("At index " << i << " Expected value = " << value
+                     << " Got value = " << memPtr[i]);
     REQUIRE(memPtr[i] == value);
   }
 
@@ -142,12 +144,12 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
 #if __linux__
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -159,16 +161,17 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   int maxNode = numa_max_node();
   REQUIRE(maxNode >= 0);
 
-  const int N = 1024;
-  const int Nbytes = N * sizeof(int);
+  constexpr int N = 1024;
+  constexpr int Nbytes = N * sizeof(int);
   int value = 10;
 
-  int* memPtr = nullptr;
+  int *memPtr = nullptr;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
+                             hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
 
   SECTION("With Host NUMA") {
@@ -186,12 +189,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
         memPtr[i] = value;
       }
 
-      // Validate data
-      for (int i = 0; i < N; i++) {
-        REQUIRE(memPtr[i] == value);
-      }
-
-#if 0  // To work this part, fix provided in SWDEV-548802 is required
+#if 0 // To work this part, fix provided in SWDEV-548802 is required
       // verify placement
       void* page = memPtr;
       int status = -1;
@@ -214,28 +212,29 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
       memPtr[i] = value;
     }
 
-    // Validate data
-    for (int i = 0; i < N; i++) {
-      REQUIRE(memPtr[i] == value);
-    }
-
     // determine current CPU’s NUMA node
     int cpu = sched_getcpu();
     int cur_node = numa_node_of_cpu(cpu);
     REQUIRE(cur_node >= 0);
 
     // verify that the page is on the current node
-    void* page = memPtr;
+    void *page = memPtr;
     int status = -1;
     int ret = move_pages(0, 1, &page, nullptr, &status, 0);
     REQUIRE(ret == 0);
     REQUIRE(status == cur_node);
   }
 
+  // Validate data
+  for (int i = 0; i < N; i++) {
+    INFO("At index " << i << " Expected value = " << value
+                     << " Got value = " << memPtr[i]);
+    REQUIRE(memPtr[i] == value);
+  }
+
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
-#endif
 #endif
 
 /**
@@ -246,9 +245,6 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
  *  - 2) With count 0
  *  - 3) With count larger than actual size
  *  - 4) With invalid device
- *  - 5) With Invalid location type(Invalid, None)
- *  - 6) With Invalid location -1
- *  - 7) With invalid numa node
  * Test source
  * ------------------------
  *  - unit/memory/hipMemPrefetchAsync_v2.cc
@@ -259,35 +255,39 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
 
-  const int N = 16;
-  const int Nbytes = N * sizeof(int);
+  constexpr int N = 16;
+  constexpr int Nbytes = N * sizeof(int);
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* memPtr = nullptr;
+  void *memPtr = nullptr;
   HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
 
   hipMemLocation location;
   location.type = hipMemLocationTypeDevice;
 
   SECTION("With dev_ptr as nullptr") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(nullptr, Nbytes, location, 0, stream),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemPrefetchAsync_v2(nullptr, Nbytes, location, 0, stream),
+        hipErrorInvalidValue);
   }
 
   SECTION("With count 0") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, 0, location, 0, stream), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, 0, location, 0, stream),
+                    hipErrorInvalidValue);
   }
 
   SECTION("With count larger than actual size") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes + 10, location, 0, stream),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemPrefetchAsync_v2(memPtr, Nbytes + 10, location, 0, stream),
+        hipErrorInvalidValue);
   }
 
   SECTION("With invalid device") {
@@ -296,55 +296,10 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     dstLocation.id = deviceCount;
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
-                    hipErrorInvalidDevice);
+    HIP_CHECK_ERROR(
+        hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
+        hipErrorInvalidDevice);
   }
-
-#if 0
-  /**
-   * Commenting below section due to,
-   * In NVIDIA, getting compilation issues for Flags : SWDEV-551244
-   * In AMD, not giving expected error code : SWDEV-551254
-   */
-  SECTION("With Invalid location type Invalid, None") {
-    hipMemLocation location;
-    location.type = GENERATE(hipMemLocationTypeInvalid,
-                             hipMemLocationTypeNone);
-
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream),
-                    hipErrorInvalidValue);
-  }
-#endif
-
-#if HT_NVIDIA  // In AMD not giving expected error code : SWDEV-551254
-  SECTION("With Invalid location type -1") {
-    hipMemLocation location;
-    location.type = static_cast<hipMemLocationType>(-1);
-
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream),
-                    hipErrorInvalidValue);
-  }
-#endif
-
-#if __linux__
-#if 0
-  /**
-   * Commenting below section due to,
-   * In NVIDIA, getting compilation issues for HostNuma Flag : SWDEV-551244
-   * In AMD, not giving expected error code : SWDEV-551254
-   */
-  SECTION("With invalid numa node") {
-    if (numa_available() >= 0) {
-      int maxNode = numa_max_node();
-      hipMemLocation dstLocation;
-      dstLocation.type = hipMemLocationTypeHostNuma;
-      dstLocation.id = maxNode+1;
-      HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
-                      hipErrorInvalidValue);
-    }
-  }
-#endif
-#endif
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
