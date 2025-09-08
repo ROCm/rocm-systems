@@ -72,13 +72,13 @@ There are three high-level GPU analysis views:
    * Visualized memory chart requires the width of the terminal output to be greater than or equal to 234 to display the whole chart properly.
    * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
 
-.. _cli-list-metrics:
+.. _cli-list-available-metrics:
 
-2. Use ``--list-metrics`` to generate a list of available metrics for inspection.
+2. Use ``--list-available-metrics`` to generate a list of available metrics for inspection.
 
    .. code-block:: shell-session
 
-      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics gfx90a
+      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-available-metrics
 
                                        __                                       _
        _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
