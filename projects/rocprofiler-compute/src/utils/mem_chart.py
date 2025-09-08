@@ -22,11 +22,14 @@
 # SOFTWARE.
 ###############################################################################el
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict
 
 from plotille import Canvas
+
+from .utils import format_scientific_notation_if_needed
 
 
 def make_format_spec(num, align=">"):
@@ -83,25 +86,30 @@ def format_text(
 ):
     """
     Format a text string for canvas to display according to
-    input key value pair and make proper aligment
-    For invalid value, it displays N/A
-    All strings to be displayed on Canvas need to use this method
+    input key-value pair and make proper alignment.
+    Uses scientific notation formatting when needed.
+    For invalid value, it displays N/A.
     """
+
+    # Step 1: Build format spec using make_format_spec
     value_format = make_format_spec(value_step_prec_rightalign, value_align)
 
-    if is_value_valid(value):
-        value_str = "{val:{format}}".format(val=value, format=value_format)
+    # Step 2: Extract width and precision as integer
+    match = re.match(r"([<>=^])(\d+)(?:\.(\d+))?([a-zA-Z])?", value_format)
+    if match:
+        align_char = match.group(1)
+        width_align = int(match.group(2))
+        precision_digits = match.group(3)
+        fmt_type_align = match.group(4) or "f"
+        precision = int(precision_digits) if precision_digits else 0
     else:
-        import re
+        # Fallback to default values
+        align_char = value_align
+        width_align = 6
+        precision = 2
+        fmt_type_align = "f"
 
-        match = re.search(r"[<>=^](\d+)", value_format)
-        width = int(match.group(1)) if match else 6
-
-        # Use same alignment as in value_format (first char)
-        align = value_format[0]
-
-        value_str = f"{'N/A':{align}{width}}"
-
+    # Step 3: Format the key using make_format_spec
     key_format = (
         make_format_spec(key_step_prec_leftalign, key_align)
         if key is not None
@@ -109,19 +117,36 @@ def format_text(
     )
     key_str = (
         "{key:{key_format}}".format(key=key, key_format=key_format)
-        if key and isinstance(key, (int, float))
+        if key is not None and isinstance(key, (int, float))
         else str(key)
-        if key
+        if key is not None
         else None
     )
 
-    unit_string = post_description_with_space if not "N/A" in value_str else ""
+    # Step 4: Format the value or fallback to N/A
+    if is_value_valid(value):
+        formatted_value = format_scientific_notation_if_needed(
+            value,
+            align=align_char,
+            width_align=width_align,
+            precision=precision,
+            fmt_type_align=fmt_type_align,
+            max_length=width_align,
+            sci_lower_bound=1e-3,
+            sci_upper_bound=1e3,
+        )
+        value_str = formatted_value
+    else:
+        value_str = f"{'N/A':{align_char}{width_align}}"
 
-    result_str_no_unit = (
-        "{key}{mark}{value}".format(key=key_str, value=value_str, mark=mark_between)
-        if key is not None
-        else "{value}".format(value=value_str)
-    )
+    # Step 5: Unit and Final Output
+    unit_string = post_description_with_space if "N/A" not in value_str else ""
+
+    if key_str is not None:
+        result_str_no_unit = f"{key_str}{mark_between}{value_str}"
+    else:
+        result_str_no_unit = value_str
+
     result_str = result_str_no_unit + unit_string
     return result_str
 
@@ -603,7 +628,7 @@ class ScalarL1DCache(RectFrame):
                 key="Hit",
                 value=self.hit,
                 key_step_prec_leftalign=6,
-                value_step_prec_rightalign=6,
+                value_step_prec_rightalign=6.0,
                 post_description_with_space=" %",
             ),
         )
