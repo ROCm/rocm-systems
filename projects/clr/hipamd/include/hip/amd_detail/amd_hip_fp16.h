@@ -47,7 +47,7 @@ THE SOFTWARE.
 #define HIPRT_ONE_FP16 __ushort_as_half((unsigned short)0x3C00U)
 #define HIPRT_ZERO_FP16 __ushort_as_half((unsigned short)0x0000U)
 
-#if defined(__clang__) && defined(__HIP__)
+#if defined(__clang__)
 typedef _Float16 _Float16_2 __attribute__((ext_vector_type(2)));
 
 struct __half_raw {
@@ -75,8 +75,10 @@ struct __half2_raw {
 #if !defined(__HIPCC_RTC__)
 #include "hip_fp16_math_fwd.h"
 #include "host_defines.h"
+#if defined(__clang__) && defined(__HIP__)
 #include "amd_device_functions.h"
 #include "amd_warp_functions.h"
+#endif  // defined(__clang__) && defined(__HIP__)
 #endif
 namespace __hip_internal {
 template <> struct is_floating_point<_Float16> : __hip_internal::true_type {};
@@ -480,15 +482,30 @@ inline __HOST_DEVICE__ __half __float2half(float x) { return __half_raw{static_c
 inline __HOST_DEVICE__ __half __float2half_rn(float x) {
   return __half_raw{static_cast<_Float16>(x)};
 }
-#if !defined(__HIPCC_RTC__)
+
 // TODO: rounding behaviour is not correct for host functions.
-inline __host__ __half __float2half_rz(float x) { return __half_raw{static_cast<_Float16>(x)}; }
-inline __host__ __half __float2half_rd(float x) { return __half_raw{static_cast<_Float16>(x)}; }
-inline __host__ __half __float2half_ru(float x) { return __half_raw{static_cast<_Float16>(x)}; }
+inline __HOST_DEVICE__ __half __float2half_rz(float x) {
+#if __HIP_DEVICE_COMPILE__
+  return __half_raw{__ocml_cvtrtz_f16_f32(x)};
+#else
+  return __half_raw{static_cast<_Float16>(x)};
 #endif
-inline __device__ __half __float2half_rz(float x) { return __half_raw{__ocml_cvtrtz_f16_f32(x)}; }
-inline __device__ __half __float2half_rd(float x) { return __half_raw{__ocml_cvtrtn_f16_f32(x)}; }
-inline __device__ __half __float2half_ru(float x) { return __half_raw{__ocml_cvtrtp_f16_f32(x)}; }
+}
+inline __HOST_DEVICE__ __half __float2half_rd(float x) {
+#if __HIP_DEVICE_COMPILE__
+  return __half_raw{__ocml_cvtrtn_f16_f32(x)};
+#else
+  return __half_raw{static_cast<_Float16>(x)};
+#endif
+}
+inline __HOST_DEVICE__ __half __float2half_ru(float x) {
+#if __HIP_DEVICE_COMPILE__
+  return __half_raw{__ocml_cvtrtp_f16_f32(x)};
+#else
+  return __half_raw{static_cast<_Float16>(x)};
+#endif
+}
+
 inline __HOST_DEVICE__ __half2 __float2half2_rn(float x) {
   return __half2{_Float16_2{static_cast<_Float16>(x), static_cast<_Float16>(x)}};
 }
@@ -1044,6 +1061,8 @@ inline __HOST_DEVICE__ __half2 __hneg2(__half2 x) {
 using half = __half;
 using half2 = __half2;
 #endif
+
+#if defined(__clang__) && defined(__HIP__)
 __device__ inline __half __shfl(__half var, int src_lane, int width = warpSize) {
   union {
     int i;
@@ -1142,7 +1161,7 @@ template <typename MaskT> __device__ inline __half __reduce_max_sync(MaskT mask,
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
-
+#endif  // defined(__clang__) && defined(__HIP__)
 #endif  // __HIP_NO_HALF_OPERATORS__
 
 #endif  // defined(__cplusplus)
