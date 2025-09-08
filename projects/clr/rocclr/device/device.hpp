@@ -733,13 +733,6 @@ class Settings : public amd::HeapObject {
 
   //! Disable assignment
   Settings& operator=(const Settings&);
-
-protected:
-  //! Checks if OCL runtime can use code object manager for compilation
-  bool ValidateComgr();
-
-  //! Checks if OCL runtime can use hsail for compilation
-  bool ValidateHsail();
 };
 
 //! Device-independent cache memory, base class for the device-specific
@@ -2074,6 +2067,12 @@ class Device : public RuntimeObject {
   // P2P devices for memory allocation. This list contains devices that can have access to the
   // current device
   std::vector<Device*> p2p_access_devices_;
+
+  //! Checks if OCL runtime can use code object manager for compilation
+  bool ValidateComgr();
+
+  //! Checks if OCL runtime can use hsail for compilation
+  bool ValidateHsail();
 
   bool IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const;
 

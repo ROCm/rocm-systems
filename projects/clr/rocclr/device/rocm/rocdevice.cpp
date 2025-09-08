@@ -106,6 +106,12 @@ bool NullDevice::create(const amd::Isa& isa) {
     return false;
   }
 
+  if (!ValidateComgr()) {
+    LogPrintfError("Code object manager initialization failed for offline HSA device %s",
+                   isa.targetId());
+    return false;
+  }
+
   if (!amd::Device::create(isa)) {
     LogPrintfError("Unable to setup offline HSA device %s", isa.targetId());
     return false;
@@ -623,6 +629,12 @@ bool Device::create() {
                                            isXgmi_, hasValidHDPFlush)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
+    return false;
+  }
+
+  if (!ValidateComgr()) {
+    LogPrintfError("Code object manager initialization failed for HSA device %s (PCI ID %x)",
+                   agent_name, pciDeviceId_);
     return false;
   }
 

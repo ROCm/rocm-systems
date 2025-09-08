@@ -778,6 +778,32 @@ Device::~Device() {
   delete[] info_.extensions_;
 }
 
+bool Device::ValidateComgr() {
+#if defined(USE_COMGR_LIBRARY)
+  // Check if Lightning compiler was requested
+  if (settings_->useLightning_) {
+    constexpr bool kComgrVersioned = false;
+    std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+    // Use Lightning only if it's available
+    settings_->useLightning_ = amd::Comgr::IsReady();
+    return settings_->useLightning_;
+  }
+#endif
+  return true;
+}
+
+bool Device::ValidateHsail() {
+#if defined(WITH_COMPILER_LIB)
+  // Check if HSAIL compiler was requested
+  if (!settings_->useLightning_) {
+    std::call_once(amd::Hsail::initialized, amd::Hsail::LoadLib);
+    // Use Hsail only if it's available
+    return amd::Hsail::IsReady();
+  }
+#endif
+  return true;
+}
+
 size_t GetMaxStackSize(const std::string& procName) {
   if (procName.find("gfx9") != std::string::npos || procName.find("gfx8") != std::string::npos) {
     return kMaxStackSize9X;
@@ -1180,32 +1206,6 @@ Settings::Settings() : value_(0) {
   }
 
   gwsInitSupported_ = true;
-}
-
-bool Settings::ValidateComgr() {
-#if defined(USE_COMGR_LIBRARY)
-  // Check if Lightning compiler was requested
-  if (useLightning_) {
-    constexpr bool kComgrVersioned = false;
-    std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
-    // Use Lightning only if it's available
-    useLightning_ = amd::Comgr::IsReady();
-    return useLightning_;
-  }
-#endif
-  return true;
-}
-
-bool Settings::ValidateHsail() {
-#if defined(WITH_COMPILER_LIB)
-  // Check if HSAIL compiler was requested
-  if (useLightning_) {
-    std::call_once(amd::Hsail::initialized, amd::Hsail::LoadLib);
-    // Use Hsail only if it's available
-    return amd::Hsail::IsReady();
-  }
-#endif
-  return true;
 }
 
 void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,
