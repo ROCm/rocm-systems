@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* On memory chart, long string of numbers are displayed as scientific notation. It also solves the issue of overflow of displaying long number
+
 * Add notice for change in default output format to `rocpd` in a future release
   * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
 

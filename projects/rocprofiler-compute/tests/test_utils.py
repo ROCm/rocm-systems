@@ -9290,3 +9290,72 @@ def test_set_parser():
 
     assert "compute_thruput_util" in result
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_below_lower_bound():
+    value = 0.0001
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_at_lower_bound():
+    value = 0.01
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+def test_scientific_notation_trigger_above_upper_bound():
+    value = 1234567890
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_just_below_upper_bound():
+    value = 999999
+    result = utils.format_scientific_notation_if_needed(value, precision=6)
+    assert pytest.approx(float(result.strip()), rel=1e-6) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_zero():
+    value = 0
+    result = utils.format_scientific_notation_if_needed(value)
+    assert float(result.strip()) == value  # Exact match for zero
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_slightly_below_lower_bound():
+    value = 0.009
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_well_below_lower_bound():
+    value = 1e-5
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_well_above_upper_bound():
+    value = 1e10
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_alignment_and_width():
+    value = 1e10
+    result = utils.format_scientific_notation_if_needed(
+        value,
+        align=">",
+        width_align=12,
+        precision=2,
+        fmt_type_align="f",
+        max_length=8,
+    )
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value

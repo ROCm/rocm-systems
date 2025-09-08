@@ -27,6 +27,7 @@ from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
 from utils.logger import console_error
+from utils.utils import format_scientific_notation_if_needed
 
 
 def insert_chart_data(mem_data, base_data):
@@ -60,7 +61,9 @@ def insert_chart_data(mem_data, base_data):
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=memchart_values["Wavefront Occupancy"],
+                children=format_value_for_display(
+                    memchart_values.get("Wavefront Occupancy")
+                ),
             ),
             Text(
                 x="49",
@@ -69,7 +72,7 @@ def insert_chart_data(mem_data, base_data):
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=memchart_values["Wave Life"],
+                children=format_value_for_display(memchart_values.get("Wave Life")),
             ),
             # ----------------------------------------
             # Instr Dispatch Block
@@ -79,7 +82,7 @@ def insert_chart_data(mem_data, base_data):
                 id="salu",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["SALU"]),
+                children=format_value_for_display(memchart_values.get("SALU")),
             ),
             Text(
                 x="386",
@@ -87,7 +90,7 @@ def insert_chart_data(mem_data, base_data):
                 id="smem",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["SMEM"]),
+                children=format_value_for_display(memchart_values.get("SMEM")),
             ),
             Text(
                 x="386",
@@ -95,7 +98,7 @@ def insert_chart_data(mem_data, base_data):
                 id="valu",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VALU"]),
+                children=format_value_for_display(memchart_values.get("VALU")),
             ),
             Text(
                 x="386",
@@ -103,7 +106,7 @@ def insert_chart_data(mem_data, base_data):
                 id="mfma",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["MFMA"]),
+                children=format_value_for_display(memchart_values.get("MFMA")),
             ),
             Text(
                 x="386",
@@ -111,7 +114,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vmem",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VMEM"]),
+                children=format_value_for_display(memchart_values.get("VMEM")),
             ),
             Text(
                 x="386",
@@ -119,7 +122,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS"],
+                children=format_value_for_display(memchart_values.get("LDS")),
             ),
             Text(
                 x="386",
@@ -127,7 +130,7 @@ def insert_chart_data(mem_data, base_data):
                 id="gws",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["GWS"],
+                children=format_value_for_display(memchart_values.get("GWS")),
             ),
             Text(
                 x="386",
@@ -135,7 +138,7 @@ def insert_chart_data(mem_data, base_data):
                 id="br",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["BR"],
+                children=format_value_for_display(memchart_values.get("BR")),
             ),
             # ----------------------------------------
             # Exec Block
@@ -146,7 +149,7 @@ def insert_chart_data(mem_data, base_data):
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=memchart_values["Active CUs"],
+                children=format_value_for_display(memchart_values.get("Active CUs")),
             ),  # x=454
             Text(
                 x="580",
@@ -154,7 +157,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vgpr",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VGPR"],
+                children=format_value_for_display(memchart_values.get("VGPR")),
             ),
             Text(
                 x="581",
@@ -162,7 +165,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sgpr",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["SGPR"],
+                children=format_value_for_display(memchart_values.get("SGPR")),
             ),
             Text(
                 x="580",
@@ -170,7 +173,9 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_alloc",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS Allocation"],
+                children=format_value_for_display(
+                    memchart_values.get("LDS Allocation")
+                ),
             ),
             Text(
                 x="580",
@@ -178,7 +183,9 @@ def insert_chart_data(mem_data, base_data):
                 id="scratch_alloc",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Scratch Allocation"],
+                children=format_value_for_display(
+                    memchart_values.get("Scratch Allocation")
+                ),
             ),
             Text(
                 x="580",
@@ -186,7 +193,7 @@ def insert_chart_data(mem_data, base_data):
                 id="wavefronts",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Wavefronts"],
+                children=format_value_for_display(memchart_values.get("Wavefronts")),
             ),
             Text(
                 x="580",
@@ -194,7 +201,7 @@ def insert_chart_data(mem_data, base_data):
                 id="workgroups",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Workgroups"],
+                children=format_value_for_display(memchart_values.get("Workgroups")),
             ),
             # ----------------------------------------
             # LDS Block
@@ -204,7 +211,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_req",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["LDS Req"],
+                children=format_value_for_display(memchart_values.get("LDS Req")),
             ),
             Text(
                 x="839",
@@ -212,7 +219,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_util",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS Util"],
+                children=format_value_for_display(memchart_values.get("LDS Util")),
             ),
             Text(
                 x="839",
@@ -220,7 +227,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS Latency"],
+                children=format_value_for_display(memchart_values.get("LDS Latency")),
             ),
             # ----------------------------------------
             # Vector L1 Cache Block
@@ -230,7 +237,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1 Rd"]),
+                children=format_value_for_display(memchart_values.get("VL1 Rd")),
             ),
             Text(
                 x="708",
@@ -238,7 +245,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1 Wr"]),
+                children=format_value_for_display(memchart_values.get("VL1 Wr")),
             ),
             Text(
                 x="716",
@@ -246,7 +253,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["VL1 Atomic"],
+                children=format_value_for_display(memchart_values.get("VL1 Atomic")),
             ),
             Text(
                 x="840",
@@ -254,7 +261,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Hit"],
+                children=format_value_for_display(memchart_values.get("VL1 Hit")),
             ),
             Text(
                 x="840",
@@ -262,7 +269,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Lat"],
+                children=format_value_for_display(memchart_values.get("VL1 Lat")),
             ),
             Text(
                 x="840",
@@ -270,7 +277,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_coales",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Coalesce"],
+                children=format_value_for_display(memchart_values.get("VL1 Coalesce")),
             ),
             Text(
                 x="838",
@@ -278,7 +285,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_stall",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Stall"],
+                children=format_value_for_display(memchart_values.get("VL1 Stall")),
             ),
             Text(
                 x="1000",
@@ -286,7 +293,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_l2_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("VL1_L2 Rd")),
             ),
             Text(
                 x="1000",
@@ -294,7 +301,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_l2_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1_L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("VL1_L2 Wr")),
             ),
             Text(
                 x="1008",
@@ -302,7 +309,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_l2_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["VL1_L2 Atomic"],
+                children=format_value_for_display(memchart_values.get("VL1_L2 Atomic")),
             ),
             # ----------------------------------------
             # Scalar L1D Cache Block
@@ -312,7 +319,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D Rd"],
+                children=format_value_for_display(memchart_values.get("sL1D Rd")),
             ),
             Text(
                 x="838",
@@ -320,7 +327,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["sL1D Hit"],
+                children=format_value_for_display(memchart_values.get("sL1D Hit")),
             ),
             Text(
                 x="838",
@@ -328,7 +335,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["sL1D Lat"],
+                children=format_value_for_display(memchart_values.get("sL1D Lat")),
             ),
             Text(
                 x="1000",
@@ -336,7 +343,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D_L2 Rd"],
+                children=format_value_for_display(memchart_values.get("sL1D_L2 Rd")),
             ),
             Text(
                 x="1000",
@@ -344,7 +351,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D_L2 Wr"],
+                children=format_value_for_display(memchart_values.get("sL1D_L2 Wr")),
             ),
             Text(
                 x="1008",
@@ -352,7 +359,9 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D_L2 Atomic"],
+                children=format_value_for_display(
+                    memchart_values.get("sL1D_L2 Atomic")
+                ),
             ),
             # ----------------------------------------
             # Instr L1  Cache Block
@@ -362,7 +371,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_fetch",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["IL1 Fetch"],
+                children=format_value_for_display(memchart_values.get("IL1 Fetch")),
             ),
             Text(
                 x="837",
@@ -370,7 +379,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["IL1 Hit"],
+                children=format_value_for_display(memchart_values.get("IL1 Hit")),
             ),
             Text(
                 x="837",
@@ -378,7 +387,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["IL1 Lat"],
+                children=format_value_for_display(memchart_values.get("IL1 Lat")),
             ),
             Text(
                 x="1015",
@@ -386,7 +395,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_l2_req",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["IL1_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("IL1_L2 Rd")),
             ),
             # ----------------------------------------
             # L2 Cache Block(inside)
@@ -396,7 +405,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_rd",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("L2 Rd")),
             ),
             Text(
                 x="1145",
@@ -404,7 +413,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_wr",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("L2 Wr")),
             ),
             Text(
                 x="1145",
@@ -412,7 +421,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_atom",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Atomic"],
+                children=format_value_for_display(memchart_values.get("L2 Atomic")),
             ),
             Text(
                 x="1145",
@@ -420,7 +429,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Hit"],
+                children=format_value_for_display(memchart_values.get("L2 Hit")),
             ),
             Text(
                 x="1145",
@@ -428,7 +437,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_rd_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Rd Lat"],
+                children=format_value_for_display(memchart_values.get("L2 Rd Lat")),
             ),
             Text(
                 x="1145",
@@ -436,7 +445,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_wr_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Wr Lat"],
+                children=format_value_for_display(memchart_values.get("L2 Wr Lat")),
             ),
             # ----------------------------------------
             # Fabric Block
@@ -446,7 +455,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_fabric_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["Fabric_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("Fabric_L2 Rd")),
             ),
             Text(
                 x="1317",
@@ -454,7 +463,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_fabric_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["Fabric_L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("Fabric_L2 Wr")),
             ),
             Text(
                 x="1319",
@@ -462,7 +471,9 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_fabric_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["Fabric_L2 Atomic"],
+                children=format_value_for_display(
+                    memchart_values.get("Fabric_L2 Atomic")
+                ),
             ),
             Text(
                 x="1435",
@@ -470,7 +481,7 @@ def insert_chart_data(mem_data, base_data):
                 id="fabric_rd_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Fabric Rd Lat"],
+                children=format_value_for_display(memchart_values.get("Fabric Rd Lat")),
             ),
             Text(
                 x="1435",
@@ -478,7 +489,7 @@ def insert_chart_data(mem_data, base_data):
                 id="fabric_wr_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Fabric Wr Lat"],
+                children=format_value_for_display(memchart_values.get("Fabric Wr Lat")),
             ),
             Text(
                 x="1435",
@@ -486,7 +497,9 @@ def insert_chart_data(mem_data, base_data):
                 id="fabric_atom_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Fabric Atomic Lat"],
+                children=format_value_for_display(
+                    memchart_values.get("Fabric Atomic Lat")
+                ),
             ),
             Text(
                 x="1578",
@@ -494,7 +507,7 @@ def insert_chart_data(mem_data, base_data):
                 id="hbm_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["HBM Rd"]),
+                children=format_value_for_display(memchart_values.get("HBM Rd")),
             ),
             Text(
                 x="1577",
@@ -502,7 +515,7 @@ def insert_chart_data(mem_data, base_data):
                 id="hbm_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["HBM Wr"]),
+                children=format_value_for_display(memchart_values.get("HBM Wr")),
             ),
         ],
     )
@@ -2028,42 +2041,91 @@ def get_memchart(mem_data, base_data):
 
 def format_value_for_display(value, max_length=6):
     """
-    Format values to prevent overflow in SVG text elements.
-    """
-    #####
-    # TODO: this is quick fix to prevent value overflow.
-    # The long term solution should be dynamically adjust
-    # SVG dimensions and positions to maintain visual
-    # integrity while preventing overflow.
-    #####
+    Format a value (int, float, or str) into a concise string suitable for display.
 
-    # 1. If non-numerical
+    The function attempts to convert strings to numeric types if possible.
+    It then decides between normal decimal notation and scientific notation
+    based on length constraints and value magnitude.
+
+    If the formatted string is too long, it truncates it gracefully,
+    preserving scientific notation exponent parts where applicable.
+
+    Parameters:
+    - value: The input value to format. Can be int, float, or string.
+             Strings representing numbers are converted to numeric types if possible.
+    - max_length: Maximum allowed length of the output string.
+                  Longer strings are truncated with an ellipsis ('…').
+
+    Returns:
+    - A string representation of the input value, formatted either
+      in fixed-point or scientific notation, and truncated if too long.
+      Returns "N/A" if the value is invalid (e.g., None or NaN).
+    """
+
+    if value is None:
+        return "N/A"
+
     if isinstance(value, str):
         try:
             if "." in value:
+                # when dot is in the string, we know it's a float number and convert with "float"
                 value = float(value)
             else:
+                # without dot, we assume it's an integer and convert with "int"
                 value = int(value)
         except ValueError:
-            pass  # Keep as string
-    # 2. If numerical
+            # when conversion fails, the string is neither legit float or int, then assume it's invalid and display "N/A"
+            return "N/A"
+
     if isinstance(value, (int, float)):
-        value = abs(value)
-        if value >= 1000000000:
-            value = f"{value / 1000000000:.1f}B"
-        elif value >= 1000000:
-            value = f"{value / 1000000:.1f}M"
-        elif value >= 1000:
-            value = f"{value / 1000:.1f}K"
-        elif value == int(value):
-            value = str(int(value))
+        is_negative = value < 0
+        abs_val = abs(value)
+
+        if isinstance(abs_val, float):
+            if value != value:
+                return "N/A"
+
+            if abs_val.is_integer():
+                normal = str(int(abs_val))
+            else:
+                normal = f"{abs_val:.1f}"
         else:
-            value = f"{value:.1f}"
+            normal = str(abs_val)
+
+        sci = format_scientific_notation_if_needed(
+            abs_val,
+            align=">",
+            width_align=8,
+            precision=1,
+            fmt_type_align="e",
+            max_length=max_length,
+        ).strip()
+
+        # Choose shorter notation or if normal too long
+        if len(sci) < len(normal) or len(normal) > max_length:
+            value = sci
+        else:
+            value = normal
+
+        if is_negative:
+            value = "-" + value
+
     else:
         value = str(value)
 
-    # 3. Truncate if needed
+    # Custom truncation logic:
     if len(value) > max_length:
-        value = value[: max_length - 1] + "…"
+        if "e" in value.lower():
+            e_index = value.lower().index("e")
+            mantissa = value[:e_index]
+            exponent = value[e_index:]
+            max_mantissa_len = max_length - len(exponent)
+            if max_mantissa_len < 1:
+                value = exponent[: max_length - 1] + "…"
+            else:
+                truncated_mantissa = mantissa[:max_mantissa_len]
+                value = truncated_mantissa + exponent
+        else:
+            value = value[: max_length - 1] + "…"
 
     return value
