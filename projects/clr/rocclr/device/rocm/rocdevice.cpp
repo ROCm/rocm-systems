@@ -234,12 +234,13 @@ Device::~Device() {
       hsa_queue_t* queue = qIter->first;
       auto& qInfo = qIter->second;
       if (qInfo.hostcallBuffer_) {
-        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hostcall buffer %p for hardware queue %p",
-                qInfo.hostcallBuffer_, qIter->first->base_address);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
+                "Deleting hostcall buffer %p for hardware queue %p", qInfo.hostcallBuffer_,
+                qIter->first->base_address);
         amd::disableHostcalls(qInfo.hostcallBuffer_);
         context().svmFree(qInfo.hostcallBuffer_);
       }
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
       hsa_queue_destroy(queue);
@@ -1987,11 +1988,11 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
       break;
     case kUncachedAtomics:
       if (agentInfo->ext_fine_grain_pool.handle != 0) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Using extended fine grained access system memory pool");
         segment = agentInfo->ext_fine_grain_pool;
       } else {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Falling through on fine grained access system memory pool");
         segment = agentInfo->fine_grain_pool;
       }
@@ -2065,7 +2066,7 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
     LogPrintfError("get_mempolicy failed with error %ld", res);
     return ptr;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
           "get_mempolicy() succeed with mode %d, nodeMask 0x%lx, cpuCount %zu", mode,
           *nodeMask->maskp, cpuCount);
 
@@ -2805,7 +2806,7 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   void* hw_event =
       (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
   if (hw_event == nullptr) {
-    ClPrint(amd::LOG_INFO, amd::LOG_SIG, "No HW event");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_SIG, "No HW event");
     return false;
   } else if (wait) {
     // hipEventBlockingSync
