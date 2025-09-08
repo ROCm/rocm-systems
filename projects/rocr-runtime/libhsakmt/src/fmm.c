@@ -2780,6 +2780,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
 				    strcmp(mfmaHighPrecisionModeStr, "0"));
+	mfma_high_precision_mode = mfma_high_precision_mode ?
+					KFD_PROC_FLAG_MFMA_HIGH_PRECISION : 0;
 	/* Sets the max VA alignment order size during mapping. By default the order
 	 * size is set to 18(1G) for GFX950 to reduce TLB hits. If any non-gfx950
 	 * ASIC is found in the system, set back to 9(2MB).
