@@ -56,7 +56,7 @@ ARG THEROCK_GFX94X
 ARG THEROCK_GFX110X
 ARG THEROCK_GFX120X
 
-RUN python3 -m pip install -U awscli && \
+RUN pip install awscli && \
     aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX94X}" rocm-gfx94X.tar.gz --no-sign-request && \
     aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX110X}" rocm-gfx110X.tar.gz --no-sign-request && \
     aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX120X}" rocm-gfx120X.tar.gz --no-sign-request && \
