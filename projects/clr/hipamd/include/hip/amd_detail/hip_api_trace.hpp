@@ -1650,6 +1650,8 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 13
   // removed HIP_MEMSET_NODE_PARAMS replaced by hipMemsetParams
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
   t_hipModuleGetFunctionCount hipModuleGetFunctionCount_fn;
   t_hipMemsetD2D8 hipMemsetD2D8_fn;
   t_hipMemsetD2D8Async hipMemsetD2D8Async_fn;
@@ -1677,7 +1679,7 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
 
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 14
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
 
   // ******************************************************************************************* //
   //

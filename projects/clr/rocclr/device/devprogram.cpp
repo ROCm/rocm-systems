@@ -1049,7 +1049,7 @@ static void dumpCodeObject(const std::string& image) {
   char fname[30];
   static std::atomic<int> index;
   sprintf(fname, "_code_object%04d.o", index++);
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Code object saved in %s\n", fname);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Code object saved in %s\n", fname);
   std::ofstream ofs;
   ofs.open(fname, std::ios::binary);
   ofs << image;
@@ -2539,7 +2539,7 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
 
   status = amd::Comgr::metadata_lookup(metadata_, "Kernels", &kernelsMD);
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Using Code Object V2.");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V2.");
     hasKernelMD = true;
     codeObjectVer_ = 2;
   } else {
@@ -2591,13 +2591,13 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
 
     if (major_version == '1') {
       if (minor_version == '0') {
-        ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Using Code Object V3.");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V3.");
         codeObjectVer_ = 3;
       } else if (minor_version == '1') {
-        ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Using Code Object V4.");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V4.");
         codeObjectVer_ = 4;
       } else if (minor_version == '2') {
-        ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Using Code Object V5.");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V5.");
         codeObjectVer_ = 5;
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
