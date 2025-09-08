@@ -42,6 +42,8 @@ project(
 )
 set(PROJECT_NAME_UNDERSCORED "rocprofiler_systems")
 
+set(ROCPROFSYS_CTEST_ONLY FALSE CACHE BOOL "CTest only build")
+
 set(BINARY_NAME_PREFIX "rocprof-sys")
 
 find_package(Git)
