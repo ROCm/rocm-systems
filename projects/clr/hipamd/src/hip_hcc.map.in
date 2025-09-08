@@ -626,6 +626,7 @@ global:
     hipGetDriverEntryPoint_spt;
     hipMemPrefetchAsync_v2;
     hipMemAdvise_v2;
+    hipStreamGetId;
 local:
     *;
 } hip_6.5;

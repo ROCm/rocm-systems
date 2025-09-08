@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
+#include "hip_graph_internal.hpp"
 #include "hip_event.hpp"
 #include "thread/monitor.hpp"
 #include "hip_prof_api.h"
@@ -42,6 +43,7 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
       originStream_(false),
       captureID_(0) {
   device_->AddStream(this);
+  stream_id_ = GenerateStreamId();
 }
 
 // ================================================================================================
@@ -101,6 +103,13 @@ bool isValid(hipStream_t& stream) {
     }
   }
   return false;
+}
+
+void Stream::ReleaseCaptureGraph() {
+  if (pCaptureGraph_ != nullptr) {
+    delete pCaptureGraph_;
+    pCaptureGraph_ = nullptr;
+  }
 }
 
 // ================================================================================================
@@ -341,6 +350,29 @@ hipError_t hipStreamGetFlags_spt(hipStream_t stream, unsigned int* flags) {
 }
 
 // ================================================================================================
+hipError_t hipStreamGetId_common(hipStream_t stream, unsigned long long* streamId) {
+  if (streamId == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  getStreamPerThread(stream);
+  constexpr bool wait = false;
+  hip::Stream* hip_stream = hip::getStream(stream, wait);
+  *streamId = hip_stream->GetStreamId();
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
+  HIP_INIT_API(hipStreamGetId, stream, streamId);
+  HIP_RETURN(hipStreamGetId_common(stream, streamId));
+}
+
+// ================================================================================================
 hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   getStreamPerThread(stream);
   if (stream != nullptr && stream != hipStreamLegacy) {
@@ -452,7 +484,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
 
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
   if (eventStream != nullptr && eventStream->IsEventCaptured(event) == true) {
-    ClPrint(amd::LOG_INFO, amd::LOG_API,
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
             "[hipGraph] Current capture node StreamWaitEvent on stream : %p, Event %p", stream,
             event);
     if (waitStream == nullptr) {

@@ -56,7 +56,6 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
-#include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -85,6 +84,7 @@
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/agent.h>
+#    include <rocprofiler-sdk/registration.h>
 #endif
 
 #include <atomic>
@@ -410,6 +410,22 @@ rocprofsys_init_library_hidden()
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
 
+    int _selinux_mode = 0;
+    {
+        std::ifstream _fenforcing{ "/sys/fs/selinux/enforce" };
+        if(!(_fenforcing >> _selinux_mode)) _selinux_mode = 0;
+        _fenforcing.close();
+    }
+
+    if(_selinux_mode == 1)
+    {
+        ROCPROFSYS_BASIC_VERBOSE(0, "/sys/fs/selinux/enforce has a value of %i. \n",
+                                 _selinux_mode);
+        std::cerr << "SELinux enforcing mode detected. Consider disabling SELinux "
+                  << "or configure permissive mode with 'sudo setenforce 0'. Aborting.\n";
+        std::exit(EXIT_FAILURE);
+    }
+
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
 
@@ -600,12 +616,6 @@ rocprofsys_init_tooling_hidden(void)
         {
             tim::trait::runtime_enabled<project::rocprofsys>::set(false);
         }
-    }
-
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up OMPT...\n");
-        ompt::setup();
     }
 
     if(get_use_perfetto())
@@ -851,12 +861,6 @@ rocprofsys_finalize_hidden(void)
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down VA-API tracing...\n");
         component::vaapi_gotcha::shutdown();
-    }
-
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down OMPT...\n");
-        ompt::shutdown();
     }
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0

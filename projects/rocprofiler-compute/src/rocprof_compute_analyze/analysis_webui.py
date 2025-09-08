@@ -193,6 +193,7 @@ class webui_analysis(OmniAnalyze_Base):
                         "include_kernel_names": False,
                         "is_standalone": False,
                         "roofline_data_type": self.__roofline_data_type,
+                        "kernel_filter": False,
                     }
                 )
                 roof_obj = self.get_socs()[self.arch].roofline_obj

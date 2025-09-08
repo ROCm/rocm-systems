@@ -78,8 +78,6 @@ ALL_CSVS_MI100 = sorted([
     "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
@@ -89,7 +87,6 @@ ALL_CSVS_MI100 = sorted([
     "pmc_perf_4.csv",
     "pmc_perf_5.csv",
     "pmc_perf_6.csv",
-    "pmc_perf_7.csv",
     "sysinfo.csv",
 ])
 
@@ -752,6 +749,10 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.misc
 def test_roof_rocpd(binary_handler_profile_rocprof_compute):
+    if soc == "MI100":
+        pytest.skip("Roofline not supported on MI100")
+        return
+
     workload_dir = test_utils.get_output_dir()
     options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
@@ -763,6 +764,32 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
     )
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+def test_analyze_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
+
+    db_name = "test"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "db",
+        "--output-name",
+        f"{db_name}",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+    assert os.path.isfile(f"{db_name}.db")
+
+    # Remove test.db
+    os.remove(f"{db_name}.db")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -870,8 +897,47 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
+    """
+    Test roofline multi-attempt profiling with `--kernel`
+    Expect to be able to re-profile from same workload if kernels are valid.
+    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--kernel-names",
+    ]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+    # Don't clean output dir, use same workload
+    options.extend(["--kernel", config["kernel_name_1"]])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    # Test nonexistent kernel on roof profile using existing profiling data
+    # Since already profiled, throw error if non-existent kernel requested for roofline
+    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
+    assert returncode == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -908,6 +974,10 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         assert True
         return
 
+    # Test `--kernel` filtering outputs are present and labelled correctly
+    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
+    filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
+
     plot_configurations = [
         {
             "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
@@ -918,8 +988,15 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
             "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
         },
         {
-            "options": ["--device", "0", "--roof-only", "--kernel-names"],
-            "expected_files": ["kernelName_legend.pdf"],
+            "options": [
+                "--device",
+                "0",
+                "--roof-only",
+                "--kernel-names",
+                "--kernel",
+                config["kernel_name_1"],
+            ],
+            "expected_files": [filter_kernelName, filter_empirRoof],
         },
     ]
 
@@ -1629,11 +1706,58 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 
 @pytest.mark.section
 def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics"]
+    options = ["--list-metrics", "gfx90a"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
+    options = ["--list-metrics", "gfx90a", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-metrics
+    assert code == 1
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
+    options = ["--list-available-metrics"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "0 -> Top Stats" in output
+    assert "1 -> System Info" in output
+
+
+@pytest.mark.section
+def test_list_available_metrics_with_block(
+    binary_handler_profile_rocprof_compute, capsys
+):
+    options = ["--list-available-metrics", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-available-metrics
+    assert code == 1
     # workload dir should be empty
     assert not os.listdir(workload_dir)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

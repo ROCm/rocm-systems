@@ -32,6 +32,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/simple_timer.hpp"
 #include "lib/common/static_object.hpp"
@@ -940,12 +941,14 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 auto kernel_filter_exclude = tool::get_config().kernel_filter_exclude;
                 auto kernel_filter_range   = tool::get_config().kernel_filter_range;
 
-                std::regex include_regex(kernel_filter_include);
-                std::regex exclude_regex(kernel_filter_exclude);
-                if(std::regex_search(kernel_info->formatted_kernel_name, include_regex))
+                std::string_view include_regex(kernel_filter_include);
+                std::string_view exclude_regex(kernel_filter_exclude);
+                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                            include_regex))
                 {
                     if(kernel_filter_exclude.empty() ||
-                       !std::regex_search(kernel_info->formatted_kernel_name, exclude_regex))
+                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                                 exclude_regex))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
             }
@@ -2197,8 +2200,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     // Handle kernel id of zero
-    bool include = std::regex_search("0", std::regex(tool::get_config().kernel_filter_include));
-    bool exclude = std::regex_search("0", std::regex(tool::get_config().kernel_filter_exclude));
+    bool include =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_include);
+    bool exclude =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_exclude);
     if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
         add_kernel_target(0, tool::get_config().kernel_filter_range);
 
