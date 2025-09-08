@@ -65,7 +65,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
       if (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                     kTimeout100us, HSA_WAIT_STATE_ACTIVE) != 0) {
         if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
-          ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+          ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                   "Device not Stable, while waiting for Signal ="
                   "(0x%lx) for %d ns",
                   signal.handle, kTimeout100us);
@@ -79,7 +79,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
     while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
-        ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+        ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                 "Device not Stable, while waiting for Signal ="
                 "(0x%lx) for %d ns",
                 signal.handle, kTimeout4Secs);
