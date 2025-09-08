@@ -76,7 +76,6 @@ set(COMPONENT_NAME_docs "rocprofiler-sdk-docs")
 set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
 set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
-set(COMPONENT_NAME_attach "rocprofiler-sdk-attach")
 
 set(COMPONENT_DEP_core "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
                        "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
@@ -87,16 +86,14 @@ set(COMPONENT_DEP_tests
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
-set(COMPONENT_DEP_attach "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
 set(COMPONENT_DESC_docs "rocprofiler-sdk documentation")
 set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
 set(COMPONENT_DESC_roctx "ROCm Tools Extension library and headers")
 set(COMPONENT_DESC_rocpd "ROCm Profiling Data library and headers")
-set(COMPONENT_DESC_attach "rocprofiler-sdk attach Library")
 
-set(EXPECTED_PACKAGING_COMPONENTS 8)
+set(EXPECTED_PACKAGING_COMPONENTS 7)
 if(ROCPROFILER_BUILD_DOCS)
     math(EXPR EXPECTED_PACKAGING_COMPONENTS "${EXPECTED_PACKAGING_COMPONENTS} + 1")
 endif()

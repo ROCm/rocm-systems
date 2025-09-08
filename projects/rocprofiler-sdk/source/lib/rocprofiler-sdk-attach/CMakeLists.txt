@@ -1,7 +1,6 @@
 #
 # rocprofiler-sdk attach Library
 #
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "attach")
 
 add_library(rocprofiler-sdk-attach-shared-library SHARED)
 add_library(rocprofiler-sdk::rocprofiler-sdk-attach-shared-library ALIAS
@@ -41,5 +40,5 @@ set_target_properties(
 install(
     TARGETS rocprofiler-sdk-attach-shared-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT attach
+    COMPONENT core
     EXPORT rocprofiler-sdk-attach-targets)
