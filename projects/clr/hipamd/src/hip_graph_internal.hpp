@@ -2327,7 +2327,7 @@ class GraphMemAllocNode final : public GraphNode {
                                      amd::Device::VmmAccess::kReadWrite);
       va_->retain();
       graph_->IncrementMemAllocNodeCount();  // Increment count of unreleased mem alloc nodes
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
               vaddr_sub_obj->getSvmPtr(),
               reinterpret_cast<char*>(vaddr_sub_obj->getSvmPtr()) + aligned_size, memory());
     }
@@ -2390,7 +2390,7 @@ class GraphMemAllocNode final : public GraphNode {
           // be executed again
           amd::MemObjMap::AddMemObj(node_params_.dptr, va_);
         }
-        ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemAlloc create: %p", node_params_.dptr);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc create: %p", node_params_.dptr);
       }
     }
     return error;
@@ -2405,7 +2405,7 @@ class GraphMemAllocNode final : public GraphNode {
         va_ = amd::MemObjMap::FindVirtualMemObj(node_params_.dptr);
         amd::MemObjMap::AddMemObj(node_params_.dptr, va_);
       }
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemAlloc reserve VA: %p", node_params_.dptr);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc reserve VA: %p", node_params_.dptr);
     }
     return node_params_.dptr;
   }
@@ -2470,7 +2470,7 @@ class GraphMemFreeNode : public GraphNode {
       }
       amd::MemObjMap::AddMemObj(ptr(), vaddr_mem_obj);
       graph_->DecrementMemAllocNodeCount();  // Decrement count of unreleased memalloc nodes
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemFree execute: %p, %p", ptr(),
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemFree execute: %p, %p", ptr(),
               vaddr_sub_obj);
     }
 
@@ -2500,7 +2500,7 @@ class GraphMemFreeNode : public GraphNode {
             graph, stream->DeviceId(), *stream, amd::Command::EventWaitList{}, device_ptr_,
             amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularity_), nullptr);
         commands_.push_back(cmd);
-        ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph FreeMem create: %p", device_ptr_);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph FreeMem create: %p", device_ptr_);
       }
     }
     return error;

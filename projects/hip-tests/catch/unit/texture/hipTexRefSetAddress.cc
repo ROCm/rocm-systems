@@ -68,6 +68,9 @@ TEST_CASE("Unit_hipTexRefSetAddress_Positive") {
     HIP_CHECK(
         hipTexRefSetAddress(&offset, tex_ref, reinterpret_cast<hipDeviceptr_t>(tex_buffer), 0));
   }
+
+  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipFree(tex_buffer));
 }
 
 TEST_CASE("Unit_hipTexRefSetAddress_Negative") {
