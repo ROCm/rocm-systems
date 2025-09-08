@@ -476,7 +476,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
 
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
   if (eventStream != nullptr && eventStream->IsEventCaptured(event) == true) {
-    ClPrint(amd::LOG_INFO, amd::LOG_API,
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
             "[hipGraph] Current capture node StreamWaitEvent on stream : %p, Event %p", stream,
             event);
     if (waitStream == nullptr) {

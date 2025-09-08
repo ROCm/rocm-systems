@@ -1,0 +1,5 @@
+outs:
+- md5: 32f4aa9943ab5fde0da6f09bcbacf9be
+  size: 72778
+  hash: md5
+  path: ddCore.lib

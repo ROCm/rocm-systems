@@ -75,7 +75,7 @@ bool HostQueue::terminate() {
         if (GetSubmissionBatch() != nullptr) {
           auto command = new Marker(*this, false);
           if (command != nullptr) {
-            ClPrint(LOG_DEBUG, LOG_CMD, "Marker queued to ensure finish");
+            ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Marker queued to ensure finish");
             command->enqueue();
             lastCommand->release();
             lastCommand = command;
@@ -145,7 +145,7 @@ void HostQueue::finishCommand(Command* command) {
   if (command == nullptr) {
     command = getLastQueuedCommand(true);
     if (command != nullptr) {
-      ClPrint(LOG_DEBUG, LOG_CMD, "No command, awaiting complete status on host");
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "No command, awaiting complete status on host");
       command->awaitCompletion();
       command->release();
     }
@@ -154,7 +154,7 @@ void HostQueue::finishCommand(Command* command) {
   // Check hardware event status for the specific command
   static constexpr bool kWaitCompletion = true;
   if (!device().IsHwEventReady(command->event(), kWaitCompletion)) {
-    ClPrint(LOG_DEBUG, LOG_CMD, "No HW event, awaiting complete status on host");
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "No HW event, awaiting complete status on host");
     command->awaitCompletion();
   }
 }
@@ -181,7 +181,7 @@ void HostQueue::finish(bool cpu_wait) {
   }
 
   size_t batchSize = GetSubmissionBatchSize();
-  ClPrint(LOG_DEBUG, LOG_CMD,
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
           "finish() called with batch size: %zu, cpu_wait: %d, "
           "fence dirty: %d",
           batchSize, cpu_wait, vdev()->isFenceDirty());
@@ -203,7 +203,7 @@ void HostQueue::finish(bool cpu_wait) {
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
   if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
-    ClPrint(LOG_DEBUG, LOG_CMD,
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
             "No HW event or batch size is less than %zu, "
             "await command completion",
             minBatchSize);
@@ -258,14 +258,14 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     // Process the command's event wait list.
     const Command::EventWaitList& events = command->eventWaitList();
     bool dependencyFailed = false;
-    ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
             amd::activity_prof::getOclCommandKindString(command->type()), command, events.size());
     for (const auto& it : events) {
       // Only wait if the command is enqueued into another queue.
       if (it->command().queue() != this) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
         if (it->command().status() != CL_COMPLETE) {
-          ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
+          ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
                   amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
           tail = head = NULL;
@@ -287,7 +287,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       continue;
     }
 
-    ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
             amd::activity_prof::getOclCommandKindString(command->type()), command);
 
     command->setStatus(CL_SUBMITTED);

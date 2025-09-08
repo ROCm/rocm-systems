@@ -151,6 +151,16 @@ static __forceinline unsigned long long int strtoull(const char* str,
       rocr::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
   } while (false);
 
+#define LogSignalDuration(flag, signal, msg)                                                       \
+  do {                                                                                             \
+    if (hsa_flag_isset64(log_flags, flag)) {                                                       \
+      amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(signal.handle);                   \
+      rocr::log_printf(__FILENAME__, __LINE__,                                                     \
+        "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu", msg, signal,      \
+        amd_signal->start_ts, amd_signal->end_ts, amd_signal->end_ts - amd_signal->start_ts);      \
+    }                                                                                              \
+  } while (false);
+
 // A macro to remove unused variable warnings
 #define UNUSED(x) (void)(x)
 
