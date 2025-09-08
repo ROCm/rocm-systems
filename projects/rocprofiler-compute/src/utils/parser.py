@@ -345,19 +345,21 @@ class MetricEvaluator:
             local_expr_context.update(self.empirical_peaks)
 
             # Add utility functions to local context
-            local_expr_context.update({
-                "to_min": to_min,
-                "to_max": to_max,
-                "to_avg": to_avg,
-                "to_median": to_median,
-                "to_std": to_std,
-                "to_int": to_int,
-                "to_sum": to_sum,
-                "to_round": to_round,
-                "to_quantile": to_quantile,
-                "to_mod": to_mod,
-                "to_concat": to_concat,
-            })
+            local_expr_context.update(
+                {
+                    "to_min": to_min,
+                    "to_max": to_max,
+                    "to_avg": to_avg,
+                    "to_median": to_median,
+                    "to_std": to_std,
+                    "to_int": to_int,
+                    "to_sum": to_sum,
+                    "to_round": to_round,
+                    "to_quantile": to_quantile,
+                    "to_mod": to_mod,
+                    "to_concat": to_concat,
+                }
+            )
 
             eval_result = eval(
                 compile(opt_expr, "<string>", "eval"),
@@ -695,11 +697,8 @@ def build_dfs(
 
                     if not data_config["metric"]:
                         data_source_idx = (
-                            str(data_config["id"] // 100)
-                            + "."
-                            + str(data_config["id"] % 100)
+                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
                         )
-                        metric_idx = data_source_idx + "." + str(i)
                         metric_list[data_source_idx] = data_config["title"]
 
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
