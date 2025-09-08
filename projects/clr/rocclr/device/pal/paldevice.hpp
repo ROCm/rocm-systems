@@ -490,10 +490,10 @@ class Device : public NullDevice {
   //! Returns the number of available compute rings
   uint numExclusiveComputeEngines() const {
     return exclusiveComputeEnginesId_.size() +
-        ((exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1) ==
-          exclusiveComputeEnginesId().end())
-             ? 1
-             : 0);
+           ((exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1) ==
+             exclusiveComputeEnginesId().end())
+                ? 1
+                : 0);
   }
 
   //! Returns the map of available exclusive compute rings with the engine index
@@ -535,7 +535,8 @@ class Device : public NullDevice {
   ) const;
 
   //! host memory alloc
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const;
+  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const;
 
   //! SVM allocation
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,

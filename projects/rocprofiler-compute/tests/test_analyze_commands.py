@@ -25,6 +25,7 @@
 
 import os
 import shutil
+from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
@@ -39,7 +40,6 @@ indirs = [
     "tests/workloads/vcopy/MI200",
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
-    "tests/workloads/vcopy/MI300X_A1_rocpd",
     "tests/workloads/vcopy/MI350",
 ]
 
@@ -116,6 +116,86 @@ def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
             "gfx908",
         ])
         assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-metrics",
+        "gfx908",
+        "--block",
+        "1",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-metrics",
+            "gfx908",
+            "--block",
+            "1",
+        ])
+        assert code == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-available-metrics",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-available-metrics",
+        ])
+        assert code == 0
+
+        # Test output
+        output = capsys.readouterr().out
+        assert "0. Top Stats" in output
+        assert "1. System Info" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_available_metrics_with_block(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-available-metrics",
+        "--block",
+        "1",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-available-metrics",
+            "--block",
+            "1",
+        ])
+        assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -350,11 +430,7 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        # if dir.endswith("MI350") or dir.endswith("MI300X_A1_rocpd"):
-        if dir in (
-            "tests/workloads/vcopy/MI350",
-            "tests/workloads/vcopy/MI300X_A1_rocpd",
-        ):
+        if dir == "tests/workloads/vcopy/MI350":
             gpu_id = "0"
         else:
             gpu_id = "2"
@@ -613,14 +689,16 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.misc
 def test_save_dfs(binary_handler_analyze_rocprof_compute):
-    output_path = "tests/workloads/vcopy/saved_analysis"
+    output_path = test_utils.get_output_dir()
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
             workload_dir,
-            "--save-dfs",
+            "--output-format",
+            "csv",
+            "--output-name",
             output_path,
         ])
         assert code == 0
@@ -632,6 +710,7 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
 
         shutil.rmtree(output_path)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], output_path)
 
 
 @pytest.mark.col
@@ -865,7 +944,6 @@ def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
 def test_parser_utility_functions():
     """Test parser utility functions edge cases"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -974,7 +1052,6 @@ def test_parser_utility_functions():
 def test_parser_error_handling():
     """Test parser error handling paths"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1014,7 +1091,6 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
 def test_ast_transformer_edge_cases():
     """Simplified test focusing on the actual code paths"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1056,7 +1132,6 @@ def test_ast_transformer_edge_cases():
 def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     """Test analyze to cover debug paths in eval_metric - using direct function call"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1143,7 +1218,6 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
 def test_apply_filters_direct():
     """Test apply_filters function directly to cover filter branches"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1218,7 +1292,6 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
 def test_pc_sampling_basic_coverage():
     """Test PC sampling functions with minimal data"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1250,7 +1323,6 @@ def test_pc_sampling_basic_coverage():
 def test_build_dfs_edge_cases():
     """Test build_dfs and gen_counter_list with various configurations"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1280,7 +1352,6 @@ def test_build_dfs_edge_cases():
 def test_update_functions_coverage():
     """Test update_denom_string and update_normUnit_string branches"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 

@@ -65,7 +65,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
       if (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                     kTimeout100us, HSA_WAIT_STATE_ACTIVE) != 0) {
         if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
-          ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+          ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                   "Device not Stable, while waiting for Signal ="
                   "(0x%lx) for %d ns",
                   signal.handle, kTimeout100us);
@@ -79,7 +79,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
     while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
-        ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+        ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                 "Device not Stable, while waiting for Signal ="
                 "(0x%lx) for %d ns",
                 signal.handle, kTimeout4Secs);
@@ -475,9 +475,9 @@ class VirtualGPU : public device::VirtualDevice {
                          const uint8_t* aqlPacket = nullptr, bool attach_signal = false);
   bool dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
                          bool blocking = true, bool attach_signal = false);
-  template <typename AqlPacket>
-  bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest, bool blocking,
-                                bool attach_signal = false);
+  template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
+                                                              uint16_t rest, bool blocking,
+                                                              bool attach_signal = false);
 
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);

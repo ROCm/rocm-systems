@@ -39,9 +39,9 @@ __device__ void sum(T* sdata, unsigned groupElements, unsigned tid) {
   __syncthreads();
 }
 
-template <typename T>
-__global__ void testExternSharedKernel(const T* A_d, const T* B_d, T* C_d, size_t numElements,
-                                       size_t groupElements) {
+template <typename T> __global__ void testExternSharedKernel(const T* A_d, const T* B_d, T* C_d,
+                                                             size_t numElements,
+                                                             size_t groupElements) {
   // declare dynamic shared memory
   extern __shared__ double sdata0[];
   T* sdata = reinterpret_cast<T*>(sdata0);

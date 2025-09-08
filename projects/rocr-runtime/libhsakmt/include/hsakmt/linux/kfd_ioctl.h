@@ -43,9 +43,10 @@
  * - 1.15 - Enable managing mappings in compute VMs with GEM_VA ioctl
  * - 1.16 - Add contiguous VRAM allocation flag
  * - 1.17 - Add SDMA queue creation with target SDMA engine ID
+ * - 1.18 - Rename pad in set_memory_policy_args to misc_process_flag
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 17
+#define KFD_IOCTL_MINOR_VERSION 18
 
 struct kfd_ioctl_get_version_args {
 	__u32 major_version;	/* from KFD */
@@ -364,7 +365,7 @@ enum kfd_dbg_trap_exception_code {
 			(!!(KFD_EC_MASK(ecode) & KFD_EC_MASK_PROCESS))
 
 /* Misc. per process flags */
-#define ENABLE_MFMA_HIGH_PRECISION              (1 << 0)
+#define KFD_PROC_FLAG_MFMA_HIGH_PRECISION              (1 << 0)
 
 enum kfd_dbg_runtime_state {
 	DEBUG_RUNTIME_STATE_DISABLED = 0,
@@ -1608,6 +1609,31 @@ struct kfd_ioctl_pc_sample_args {
 	__u32 reserved;
 };
 
+#define KFD_IOC_PROFILER_VERSION_NUM 1
+enum kfd_profiler_ops {
+	KFD_IOC_PROFILER_PMC = 0,
+	KFD_IOC_PROFILER_PC_SAMPLE = 1,
+	KFD_IOC_PROFILER_VERSION = 2,
+};
+
+/**
+ * Enables/Disables GPU Specific profiler settings
+ */
+struct kfd_ioctl_pmc_settings {
+	__u32 gpu_id;             /* This is the user_gpu_id */
+	__u32 lock;               /* Lock GPU for Profiling */
+	__u32 perfcount_enable;   /* Force Perfcount Enable for queues on GPU */
+};
+
+struct kfd_ioctl_profiler_args {
+	__u32 op;						/* kfd_profiler_op */
+	union {
+		struct kfd_ioctl_pc_sample_args pc_sample;
+		struct kfd_ioctl_pmc_settings  pmc;
+		__u32 version;				/* KFD_IOC_PROFILER_VERSION_NUM */
+	};
+};
+
 #define AMDKFD_IOCTL_BASE 'K'
 #define AMDKFD_IO(nr)			_IO(AMDKFD_IOCTL_BASE, nr)
 #define AMDKFD_IOR(nr, type)		_IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -1747,7 +1773,10 @@ struct kfd_ioctl_pc_sample_args {
 #define AMDKFD_IOC_PC_SAMPLE		\
 		AMDKFD_IOWR(0x85, struct kfd_ioctl_pc_sample_args)
 
+#define AMDKFD_IOC_PROFILER			\
+		AMDKFD_IOWR(0x86, struct kfd_ioctl_profiler_args)
+
 #define AMDKFD_COMMAND_START_2		0x80
-#define AMDKFD_COMMAND_END_2		0x86
+#define AMDKFD_COMMAND_END_2		0x87
 
 #endif

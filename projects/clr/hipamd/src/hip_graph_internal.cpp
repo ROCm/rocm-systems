@@ -122,7 +122,7 @@ bool Graph::isGraphValid(Graph* pGraph) {
 // ================================================================================================
 void Graph::AddNode(const Node& node) {
   vertices_.emplace_back(node);
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
           GetGraphNodeTypeString(node->GetType()), node);
   node->SetParentGraph(this);
 }
@@ -140,7 +140,7 @@ std::vector<Node> Graph::GetRootNodes() const {
   for (auto entry : vertices_) {
     if (entry->GetInDegree() == 0) {
       roots.push_back(entry);
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Root node: %s(%p)",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Root node: %s(%p)",
               GetGraphNodeTypeString(entry->GetType()), entry);
     }
   }
@@ -581,8 +581,8 @@ bool Graph::RunOneNode(Node node, bool wait) {
     for (auto edge : node->GetEdges()) {
       // Don't wait in the nodes, executed on the same streams and if it has just one dependency
       bool wait = ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1))
-          ? true
-          : false;
+                      ? true
+                      : false;
       // Execute the edge node
       if (!RunOneNode(edge, wait)) {
         return false;
@@ -703,6 +703,11 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     repeatLaunch_ = true;
   }
 
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+          "GraphExec::Run max_streams: %d, "
+          "on device: %d, total number of nodes: %d",
+          max_streams_, launch_stream->DeviceId(), topoOrder_.size());
+
   if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       // If the graph has kernels that does device side allocation,  during packet capture, heap is
@@ -753,7 +758,9 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
   // callback thread.
   device_ = device;
   if (device->info().largeBar_) {
-    graph_kernarg_base = reinterpret_cast<address>(device->deviceLocalAlloc(pool_size));
+    amd::Device::AllocationFlags flags = {};
+    flags.executable_ = true;
+    graph_kernarg_base = reinterpret_cast<address>(device->deviceLocalAlloc(pool_size, flags));
     device_kernarg_pool_ = true;
   } else {
     graph_kernarg_base = reinterpret_cast<address>(

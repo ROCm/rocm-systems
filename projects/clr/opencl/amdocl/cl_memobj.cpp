@@ -70,12 +70,10 @@ static bool validateFlags(cl_mem_flags flags, bool chkReadWrite = false) {
     temp |= (flags & CL_MEM_KERNEL_READ_AND_WRITE);
   }
 
-  if (temp &&
-      !(CL_MEM_READ_WRITE == temp || CL_MEM_WRITE_ONLY == temp ||
-        (chkReadWrite &&
-         (CL_MEM_KERNEL_READ_AND_WRITE == temp ||
-          (CL_MEM_KERNEL_READ_AND_WRITE | CL_MEM_READ_WRITE) == temp)) ||
-        CL_MEM_READ_ONLY == temp)) {
+  if (temp && !(CL_MEM_READ_WRITE == temp || CL_MEM_WRITE_ONLY == temp ||
+                (chkReadWrite && (CL_MEM_KERNEL_READ_AND_WRITE == temp ||
+                                  (CL_MEM_KERNEL_READ_AND_WRITE | CL_MEM_READ_WRITE) == temp)) ||
+                CL_MEM_READ_ONLY == temp)) {
     return false;
   }
 
@@ -89,9 +87,8 @@ static bool validateFlags(cl_mem_flags flags, bool chkReadWrite = false) {
   }
 
   if ((flags & CL_MEM_EXTERNAL_PHYSICAL_AMD) &&
-      (flags &
-       (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_READ_WRITE |
-        CL_MEM_READ_ONLY))) {
+      (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR |
+                CL_MEM_READ_WRITE | CL_MEM_READ_ONLY))) {
     return false;
   }
 
@@ -414,9 +411,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBuffer,
 
   // check extensions flag consistency
   if ((flags & CL_MEM_USE_PERSISTENT_MEM_AMD) &&
-      (flags &
-       (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_EXTERNAL_PHYSICAL_AMD |
-        CL_MEM_BUS_ADDRESSABLE_AMD))) {
+      (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_EXTERNAL_PHYSICAL_AMD |
+                CL_MEM_BUS_ADDRESSABLE_AMD))) {
     *not_null(errcode_ret) = CL_INVALID_VALUE;
     LogWarning("conflicting flags CL_MEM_USE_PERSISTENT_MEM_AMD and host memory specific flags");
     return (cl_mem)0;
@@ -901,9 +897,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBuffer,
     return CL_INVALID_VALUE;
   }
 
-  if (srcBuffer == dstBuffer &&
-      ((src_offset <= dst_offset && dst_offset < src_offset + cb) ||
-       (dst_offset <= src_offset && src_offset < dst_offset + cb))) {
+  if (srcBuffer == dstBuffer && ((src_offset <= dst_offset && dst_offset < src_offset + cb) ||
+                                 (dst_offset <= src_offset && src_offset < dst_offset + cb))) {
     return CL_MEM_COPY_OVERLAP;
   }
 

@@ -28,6 +28,7 @@ set(TEST_SRC
     hipDeviceSetGetMemPool.cc
     hipInit.cc
     hipDriverGetVersion.cc
+    hipSetValidDevices.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)

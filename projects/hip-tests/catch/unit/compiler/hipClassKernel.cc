@@ -90,7 +90,8 @@ TEST_CASE("Unit_hipClassKernel_Empty") {
 __global__ void sizeClassBKernel(bool* result_ecd) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   result_ecd[tid] = (sizeof(testSizeB) == 12) && (sizeof(testSizeC) == 16) &&
-      (sizeof(testSizeP1) == 6) && (sizeof(testSizeP2) == 13) && (sizeof(testSizeP3) == 8);
+                    (sizeof(testSizeP1) == 6) && (sizeof(testSizeP2) == 13) &&
+                    (sizeof(testSizeP3) == 8);
 }
 
 TEST_CASE("Unit_hipClassKernel_BSize") {
@@ -107,7 +108,7 @@ TEST_CASE("Unit_hipClassKernel_BSize") {
 __global__ void sizeClassKernel(bool* result_ecd) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   result_ecd[tid] = (sizeof(testSizeA) == 16) && (sizeof(testSizeDerived) == 24) &&
-      (sizeof(testSizeDerived2) == 20);
+                    (sizeof(testSizeDerived2) == 20);
 }
 
 TEST_CASE("Unit_hipClassKernel_Size") {
@@ -124,10 +125,10 @@ TEST_CASE("Unit_hipClassKernel_Size") {
 __global__ void sizeVirtualClassKernel(bool* result_ecd, refStructSizes structSizes) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   result_ecd[tid] = (structSizes.sizeOftestSizeDV == sizeof(testSizeDV)) &&
-      (structSizes.sizeOftestSizeDerivedDV == sizeof(testSizeDerivedDV)) &&
-      (structSizes.sizeOftestSizeVirtDer = sizeof(testSizeVirtDer)) &&
-      (structSizes.sizeOftestSizeVirtDerPack = sizeof(testSizeVirtDerPack)) &&
-      (structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti));
+                    (structSizes.sizeOftestSizeDerivedDV == sizeof(testSizeDerivedDV)) &&
+                    (structSizes.sizeOftestSizeVirtDer = sizeof(testSizeVirtDer)) &&
+                    (structSizes.sizeOftestSizeVirtDerPack = sizeof(testSizeVirtDerPack)) &&
+                    (structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti));
 }
 
 TEST_CASE("Unit_hipClassKernel_Virtual") {

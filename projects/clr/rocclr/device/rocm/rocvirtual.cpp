@@ -773,7 +773,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
         mem = memories[index];
         const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
         if (mem == nullptr) {
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
                   desc.name_.c_str(), globalAddress);
           //! This condition is for SVM fine-grain
           if (dev().isFineGrainedSystem(true)) {
@@ -787,7 +787,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
           gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
 
           const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
                   desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
                   gpuMem->getDeviceMemory(),
                   reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
@@ -874,16 +874,16 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
           if (desc.size_ > kMaxBytes) {
             bytes += "...";
           }
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
                   desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
         } else {
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
                   desc.typeName_.c_str(), desc.name_.c_str(),
-                  (desc.size_ == 1)       ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
-                      : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
-                      : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
-                      : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
-                                          : 0LL,
+                  (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
+                  : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
+                  : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
+                  : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
+                                      : 0LL,
                   desc.size_);
         }
       }
@@ -1362,10 +1362,10 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
                          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
           cache_state, barrier_value_packet_.signal, barrier_value_packet_.value,
           barrier_value_packet_.mask,
-          barrier_value_packet_.cond == 0       ? "EQ"
-              : barrier_value_packet_.cond == 1 ? "NE"
-              : barrier_value_packet_.cond == 2 ? "LT"
-                                                : "GTE",
+          barrier_value_packet_.cond == 0   ? "EQ"
+          : barrier_value_packet_.cond == 1 ? "NE"
+          : barrier_value_packet_.cond == 2 ? "LT"
+                                            : "GTE",
           barrier_value_packet_.completion_signal, read, index);
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
@@ -1432,21 +1432,23 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   cooperative_ = cooperative;
 
   if (device.settings().fenceScopeAgent_) {
-    dispatchPacketHeaderNoSync_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+    dispatchPacketHeaderNoSync_ =
+        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
         (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
         (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     dispatchPacketHeader_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER) |
-        (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+                            (1 << HSA_PACKET_HEADER_BARRIER) |
+                            (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                            (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   } else {
-    dispatchPacketHeaderNoSync_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+    dispatchPacketHeaderNoSync_ =
+        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     dispatchPacketHeader_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+                            (1 << HSA_PACKET_HEADER_BARRIER) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   }
 
   aqlHeader_ = dispatchPacketHeader_;
@@ -1580,7 +1582,9 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   if (mem_segment == Device::MemorySegment::kKernArg &&
       (gpu_.dev().settings().kernel_arg_impl_ != KernelArgImpl::HostKernelArgs) &&
       gpu_.dev().info().largeBar_) {
-    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_));
+    amd::Device::AllocationFlags flags = {};
+    flags.executable_ = true;
+    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags));
     if (pool_base_ != nullptr) {
       // @note Workaround first access penalty.
       // KFD may update CPU page tables on the first CPU access
@@ -1619,7 +1623,8 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
   } else {
     // Reset the signal for the barrier packet
     hsa_signal_silent_store_relaxed(pool_signal_[active_chunk_], kInitSignalValueOne);
-    ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Issue barrier to flush chunk %d", active_chunk_);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Issue barrier to flush chunk %d",
+            active_chunk_);
     // Currently don't skip wait signal check, because SDMA engine cna be used in staging copy
     constexpr bool kSkipSignal = false;
     // Dispatch a barrier packet into the queue
@@ -2091,8 +2096,8 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
     // Find the requested agent for the transfer
     hsa_agent_t agent =
         (cmd.cpu_access() || (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory))
-        ? dev().getCpuAgent(cmd.numa_id())
-        : (static_cast<const roc::Device*>(cmd.device()))->getBackendDevice();
+            ? dev().getCpuAgent(cmd.numa_id())
+            : (static_cast<const roc::Device*>(cmd.device()))->getBackendDevice();
 
     // Initiate a prefetch command
     hsa_status_t status =
@@ -3000,7 +3005,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
     size_t fillSize = patternSize * cmd.times();
 
     size_t offset = reinterpret_cast<uintptr_t>(cmd.dst()) -
-        reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
+                    reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
     Memory* memory = dev().getRocMemory(dstMemory);
 
@@ -3487,7 +3492,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                                              gpuKernel.KernargSegmentAlignment());
       command_->SetKernelName(gpuKernel.getDemangledName().c_str());
     } else {
-      ClPrint(amd::LOG_INFO, amd::LOG_KERN,
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
               "KernargSegmentByteSize = %lu "
               "KernargSegmentAlignment = %lu",
               gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
@@ -3542,11 +3547,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     // Validate privateMemSize is more than max allowed.
     size_t maxStackSize = dev().MaxStackSize();
     if (dispatchPacket.private_segment_size > maxStackSize) {
-      ClPrint(amd::LOG_INFO, amd::LOG_KERN,
+      ClPrint(amd::LOG_ERROR, amd::LOG_KERN,
               "Scratch size (%u) exceeds max allowed (%zu) for kernel : %s",
               dispatchPacket.private_segment_size, maxStackSize,
               gpuKernel.getDemangledName().c_str());
-      LogError("Scratch size exceeds max allowed.");
       return false;
     }
   }
@@ -3567,9 +3571,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   if (aql_packet != nullptr) {
     *aql_packet = dispatchPacket;
     aql_packet->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+                         (1 << HSA_PACKET_HEADER_BARRIER) |
+                         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+                         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
     aql_packet->setup = sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   }
 
