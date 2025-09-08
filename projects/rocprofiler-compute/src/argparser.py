@@ -30,13 +30,15 @@ from pathlib import Path
 
 
 def print_avail_arch(avail_arch: list):
-    ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
+    ret_str = "List all available metrics for analysis on specified arch:"
     for arch in avail_arch:
-        ret_str += "\n\t\t\t   {}".format(arch)
+        ret_str += "\n   {}".format(arch)
     return ret_str
 
 
-def add_general_group(parser, rocprof_compute_version):
+def add_general_group(
+    parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+):
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -55,6 +57,20 @@ def add_general_group(parser, rocprof_compute_version):
     general_group.add_argument(
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
+    general_group.add_argument(
+        "--list-metrics",
+        dest="list_metrics",
+        metavar="",
+        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        help=print_avail_arch(supported_archs.keys()),
+    )
+    general_group.add_argument(
+        "--config-dir",
+        dest="config_dir",
+        metavar="",
+        help="Specify the directory of customized report section configs.",
+        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
+    )
     # Nowhere to load specs from in db mode
     if "database" not in parser.usage:
         general_group.add_argument(
@@ -71,7 +87,9 @@ def omniarg_parser(
 
     ## General Command Line Options
     ## ----------------------------
-    add_general_group(parser, rocprof_compute_version)
+    add_general_group(
+        parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
 
@@ -106,7 +124,9 @@ Examples:
     )
     profile_parser._optionals.title = "Help"
 
-    add_general_group(profile_parser, rocprof_compute_version)
+    add_general_group(
+        profile_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
@@ -195,6 +215,12 @@ Examples:
         raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
 
     profile_group.add_argument(
+        "--list-available-metrics",
+        dest="list_available_metrics",
+        help="\t\t\tList all available metrics for analysis on current arch",
+        action="store_true",
+    )
+    profile_group.add_argument(
         "-b",
         "--block",
         type=validate_block,
@@ -210,16 +236,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--list-metrics",
-        metavar="",
-        nargs="?",
-        const="",
-        # Argument to --list-metrics is optional
-        choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
-    )
-
-    profile_group.add_argument(
         "--list-sets",
         action="store_true",
         help="\t\t\tDisplay available metric sets and their descriptions",
@@ -232,13 +248,6 @@ Examples:
         "counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
     )
 
-    profile_group.add_argument(
-        "--config-dir",
-        dest="config_dir",
-        metavar="",
-        help="\t\t\tSpecify the directory of customized report section configs.",
-        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
-    )
     profile_group.add_argument(
         "--join-type",
         metavar="",
@@ -465,7 +474,9 @@ Examples:
     )
     db_parser._optionals.title = "Help"
 
-    add_general_group(db_parser, rocprof_compute_version)
+    add_general_group(
+        db_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
 
@@ -565,7 +576,9 @@ Examples:
     )
     analyze_parser._optionals.title = "Help"
 
-    add_general_group(analyze_parser, rocprof_compute_version)
+    add_general_group(
+        analyze_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
 
@@ -585,10 +598,10 @@ Examples:
         help="\t\tList all detected kernels and kernel dispatches.",
     )
     analyze_group.add_argument(
-        "--list-metrics",
-        metavar="",
-        choices=supported_archs.keys(),  # ["gfx906", "gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
+        "--list-available-metrics",
+        dest="list_available_metrics",
+        help="\t\tList all available metrics for analysis on current arch",
+        action="store_true",
     )
     analyze_group.add_argument(
         "-k",
@@ -766,13 +779,6 @@ Examples:
         metavar="",
         default=2,
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
-    )
-    analyze_advanced_group.add_argument(
-        "--config-dir",
-        dest="config_dir",
-        metavar="",
-        help="\t\tSpecify the directory of customized configs.",
-        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
     )
     analyze_advanced_group.add_argument(
         "--cols",
