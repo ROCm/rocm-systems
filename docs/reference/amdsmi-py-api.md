@@ -5309,7 +5309,7 @@ Output: amdsmi build version
 Exceptions that can be thrown by `amdsmi_get_lib_version` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiParameterException`
+
 Example:
 
 ```python
