@@ -1226,12 +1226,14 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
             std::move(func));
 }
 
+void iterate_attach_code_object(hsa_executable_t executable, void*)
+{
+    executable_freeze_internal(executable);
+}
+
 void load_attach_code_objects(RocAttachDispatchTable* attach_table)
 {
-    auto iter_func = [](hsa_executable_t executable, void*){
-        executable_freeze_internal(executable);
-    };
-    CHECK_NOTNULL(attach_table)->rocprofiler_attach_iterate_all_code_objects(iter_func, nullptr);
+    CHECK_NOTNULL(attach_table)->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
     // TODO: add registration for new objects
 }
 
