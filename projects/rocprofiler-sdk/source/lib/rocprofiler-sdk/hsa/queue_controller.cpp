@@ -482,46 +482,49 @@ queue_controller_fini()
 }
 
 void
-queue_controller_load_attach_queues(RocAttachDispatchTable* attach_table)
+queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, void*)
 {
-    auto iter_func = [](hsa_queue_t* queue, hsa_agent_t agent, void* data){
-        auto qc = CHECK_NOTNULL(get_queue_controller());
-        bool registration_consumed = false;
-        
-        auto attach_set_write_interceptor_fn = reinterpret_cast<rocprofiler_attach_set_write_interceptor_t>(data);
-        auto set_write_interceptor = [&queue, &attach_set_write_interceptor_fn] (write_interceptor_t wi, void* data) {
-            attach_set_write_interceptor_fn(queue, wi, data);
-        };
+    auto qc = CHECK_NOTNULL(get_queue_controller());
+    bool registration_consumed = false;
 
-        for(const auto& [_, agent_info] : qc->get_supported_agents())
-        {
-            if(agent_info.get_hsa_agent().handle == agent.handle)
-            {
-                auto new_queue = std::make_unique<rocprofiler::hsa::Queue>(agent_info,
-                                                                           qc->get_core_table(),
-                                                                           qc->get_ext_table(),
-                                                                           queue,
-                                                                           set_write_interceptor);
-
-                qc->serializer(new_queue.get()).wlock([&](auto& serializer) {
-                    serializer.add_queue(&queue, *new_queue);
-                });
-                qc->add_queue(queue, std::move(new_queue));
-                registration_consumed = true;
-                ROCP_INFO << "Adding queue from queue registration for HSA agent handle "
-                          << agent.handle;
-                break;
-            }
-        }
-        if(!registration_consumed)
-        {
-            ROCP_FATAL << "Could not find agent " << agent.handle << " for queue registration";
-        }
-
+    auto set_write_interceptor = [&queue, &qc] (write_interceptor_t wi, void* data) {
+        qc->get_attach_table().rocprofiler_attach_set_write_interceptor(queue, wi, data);
     };
 
-    CHECK_NOTNULL(attach_table)->rocprofiler_attach_iterate_all_queues(iter_func, (void*)attach_table->rocprofiler_attach_set_write_interceptor);
-    // TODO: add entry to attach API table for callbacks
+    for(const auto& [_, agent_info] : qc->get_supported_agents())
+    {
+        if(agent_info.get_hsa_agent().handle == agent.handle)
+        {
+            auto new_queue = std::make_unique<rocprofiler::hsa::Queue>(agent_info,
+                                                                        qc->get_core_table(),
+                                                                        qc->get_ext_table(),
+                                                                        queue,
+                                                                        set_write_interceptor);
+
+            qc->serializer(new_queue.get()).wlock([&](auto& serializer) {
+                serializer.add_queue(&queue, *new_queue);
+            });
+            qc->add_queue(queue, std::move(new_queue));
+            registration_consumed = true;
+            ROCP_INFO << "Adding queue from queue registration for HSA agent handle "
+                        << agent.handle;
+            break;
+        }
+    }
+    if(!registration_consumed)
+    {
+        ROCP_FATAL << "Could not find agent " << agent.handle << " for queue registration";
+    }
+}
+
+void
+queue_controller_load_attach_queues(RocAttachDispatchTable* attach_table)
+{
+    auto* controller = CHECK_NOTNULL(get_queue_controller());
+    controller->get_attach_table() = *attach_table;
+
+    CHECK_NOTNULL(attach_table)->rocprofiler_attach_iterate_all_queues(queue_controller_iterate_attach_queue, nullptr);
+    attach_table->rocprofiler_attach_notify_new_queue = queue_controller_iterate_attach_queue;
 }
 
 }  // namespace hsa

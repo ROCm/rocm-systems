@@ -83,7 +83,7 @@ handle_ptrace_operations(uint32_t pid)
         for(; *invars; invars++)
         {
             const char* var = *invars;
-            if(strncmp("ROCPROF", var, 7) != 0)
+            if(strncmp("ROCP", var, 4) != 0)
             {
                 continue;
             }

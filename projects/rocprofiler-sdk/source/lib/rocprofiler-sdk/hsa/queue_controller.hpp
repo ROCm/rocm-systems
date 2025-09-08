@@ -70,6 +70,7 @@ public:
 
     const CoreApiTable& get_core_table() const { return _core_table; }
     const AmdExtTable&  get_ext_table() const { return _ext_table; }
+    RocAttachDispatchTable& get_attach_table() { return _attach_table; };
 
     // Gets the list of supported HSA agents that can be Pintercepted
     const agent_cache_map_t& get_supported_agents() const;
@@ -111,6 +112,7 @@ private:
 
     CoreApiTable                          _core_table         = {};
     AmdExtTable                           _ext_table          = {};
+    RocAttachDispatchTable                _attach_table       = {};
     common::Synchronized<queue_map_t>     _queues             = {};
     common::Synchronized<client_id_map_t> _callback_cache     = {};
     agent_cache_map_t                     _supported_agents   = {};
