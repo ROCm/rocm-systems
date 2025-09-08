@@ -19,7 +19,6 @@ It is the successor to `<https://github.com/ROCm/omnitrace>`__.
 
   .. grid-item-card:: Install
 
-    * :doc:`Quick start <./install/quick-start>`
     * :doc:`ROCm Systems Profiler installation <./install/install>`
 
 Use the following topics to learn more about the advantages of ROCm Systems Profiler in application

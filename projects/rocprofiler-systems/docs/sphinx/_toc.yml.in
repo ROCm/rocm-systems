@@ -10,8 +10,6 @@ subtrees:
 
   - caption: Install
     entries:
-    - file: install/quick-start.rst
-      title: ROCm Systems Profiler quick start
     - file: install/install.rst
       title: ROCm Systems Profiler installation guide
 
