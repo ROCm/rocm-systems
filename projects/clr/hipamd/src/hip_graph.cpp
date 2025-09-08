@@ -1218,9 +1218,7 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
     *pGraph = nullptr;
     // When capture is invalidated, graph should be deleted, otherwise it leaks
-    hip::Graph* graph = s->GetCaptureGraph();
-    delete graph;
-    s->ResetCaptureGraph();
+    s->ReleaseCaptureGraph();
 
     return hipErrorStreamCaptureInvalidated;
   }
@@ -1257,6 +1255,8 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     s->GetCaptureGraph()->RemoveNode(pGraphNode);
     s->GetCaptureGraph()->RemoveManualNodesDuringCapture();
     if (leafNodes.size() > 1 && foundInRemovedDep == false) {
+      // Release created graph as it can't be retrieved anymore
+      s->ReleaseCaptureGraph();
       return hipErrorStreamCaptureUnjoined;
     }
   } else {

@@ -359,11 +359,11 @@ The following example only collects the counters required to calculate ``Total V
    ...
 
 
-To see a list of available hardware report blocks, use the ``--list-metrics`` option.
+To see a list of available hardware report blocks, use the ``--list-available-metrics`` option.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --list-metrics
+   $ rocprof-compute profile --list-available-metrics
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___

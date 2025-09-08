@@ -110,6 +110,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Add ``--output-name`` analysis mode option to override the default file/folder name.
   * Replace `--save-dfs` analyze mode option with `--output-format csv`
 
+* Command-line options:
+  * `--list-metrics` and `--config-dir` options moved to general command-line options.
+  * * `--list-metrics` option cannot be used without argument (GPU architecture).
+  * `--list-metrics` option do not show number of L2 channels.
+  * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
+  * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
+  * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi
