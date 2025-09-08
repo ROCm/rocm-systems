@@ -58,17 +58,24 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* On memory chart, long string of numbers are displayed as scientific notation. It also solves the issue of overflow of displaying long number
+
 * Add notice for change in default output format to `rocpd` in a future release
   * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
+
 * When `--format-rocprof-output rocpd` is used, only pmc_perf.csv will be written to workload directory instead of mulitple csv files.
+
 * Improve analysis block based filtering to accept metric id level filtering
   * This can be used to collect individual metrics from various sections of analysis config
+
 * CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
   * Remove metrics from analysis configuration files which are explicitly marked as empty or None
+
 * Changed the basic (default) view of TUI from aggregated analysis data to individual kernel analysis data.
+
 * Updated Roofline plots to handle and apply kernel filtering.
-* Updated metric names for better alignment between analysis configuration and documentation.
-* Updated `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
+
+* Update `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
   * Theoretical Bandwidth (section 1202)
   * L1I-L2 Bandwidth (section 1303)
   * sL1D-L2 BW (section 1403)
@@ -79,7 +86,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Bandwidth (section 1703)
   * Atomic/Read/Write Bandwidth (section 1703)
   * Atomic/Read/Write Bandwidth - (HBM/PCIe/Infinity Fabric) (section 1706)
-* Updated `System Speed-of-Light` panel to `GPU Speed-of-Light` in TUI with the following metrics:
+
+* Add `Utilization` to metric name for the following `Bandwidth` related metrics whose `Unit` is `Percent`
+  * Theoretical Bandwidth Utilization (section 1201)
+  * L1I-L2 Bandwidth Utilization (section 1301)
+  * Bandwidth Utilization (section 1301)
+  * Bandwidth Utilization (section 1401)
+  * sL1D-L2 BW Utilization (section 1401)
+  * Bandwidth Utilization (section 1601)
+
+* Update `System Speed-of-Light` panel to `GPU Speed-of-Light` in TUI with the following metrics:
   * Theoretical LDS Bandwidth
   * vL1D Cache BW
   * L2 Cache BW
@@ -89,13 +105,23 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Kernel Time (Cycles)
   * SIMD Utilization
   * Clock Rate
-* Analysis output updated:
-  * Replaced `-o / --output` analyze mode option with `--output-format` and `--output-name`
+
+* Analysis output:
+  * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
     * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
     * Add ``--output-name`` analysis mode option to override the default file/folder name.
-  * Replaced `--save-dfs` analyze mode option with `--output-format csv`
+  * Replace `--save-dfs` analyze mode option with `--output-format csv`
+
+* Command-line options:
+  * `--list-metrics` and `--config-dir` options moved to general command-line options.
+  * * `--list-metrics` option cannot be used without argument (GPU architecture).
+  * `--list-metrics` option do not show number of L2 channels.
+  * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
+  * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
+  * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
 
 ### Removed
+
 * Usage of `rocm-smi` in favor of `amd-smi`.
 * Hardware IP block-based filtering has been removed in favor of analysis report block-based filtering.
 * Removed aggregated analysis view from TUI analyze mode.
@@ -111,8 +137,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed an issue of not detecting the memory clock when using `amd-smi`.
 * Fixed standalone GUI crashing.
 * Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series accelerators.
+* Update metric names for better alignment between analysis configuration and documentation
 * Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100.
-
+* Updated Roofline plots to handle and apply kernel filtering.
 
 ### Known issues
 

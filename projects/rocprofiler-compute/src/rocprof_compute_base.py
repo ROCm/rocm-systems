@@ -85,6 +85,8 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
+        self.sanitize()
+
         if self.__mode == "profile":
             self.detect_profiler()
         elif self.__mode == "analyze":
@@ -143,6 +145,21 @@ class RocProfCompute:
             self.__analyze_mode = "cli"
         return
 
+    def sanitize(self):
+        block = False
+        if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
+            hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
+        ):
+            block = True
+
+        if self.__args.list_metrics is not None and block:
+            console_error("Cannot use --list-metrics with --blocks")
+        if (
+            hasattr(self.__args, "list_available_metrics")
+            and self.__args.list_available_metrics
+        ) and block:
+            console_error("Cannot use --list-available-metrics with --blocks")
+
     @demarcate
     def load_soc_specs(self, sysinfo: dict = None):
         """Load OmniSoC instance for RocProfCompute run"""
@@ -190,6 +207,15 @@ class RocProfCompute:
             if self.__args.specs:
                 print(generate_machine_specs(self.__args))
                 sys.exit(0)
+            elif self.__args.list_metrics is not None:
+                self.list_metrics()
+                sys.exit(0)
+            elif self.__args.config_dir:
+                parser.print_help(sys.stderr)
+                console_error(
+                    "rocprof-compute requires you to pass --list-metrics "
+                    "with --config-dir."
+                )
             parser.print_help(sys.stderr)
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
@@ -225,16 +251,27 @@ class RocProfCompute:
 
     @demarcate
     def list_metrics(self):
-        if not self.__args.list_metrics:
-            arch = self.__mspec.gpu_arch
-        else:
-            arch = self.__args.list_metrics
+        self.load_soc_specs()
+
+        for_current_arch = False
+        if (
+            hasattr(self.__args, "list_available_metrics")
+            and self.__args.list_available_metrics
+        ):
+            for_current_arch = True
+
+        arch = (
+            self.__mspec.gpu_arch
+            if (for_current_arch or self.__args.list_metrics is None)
+            else self.__args.list_metrics
+        )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                self.__args.config_dir.joinpath(arch)
-            ])
-            sys_info = self.__mspec.get_class_members().iloc[0]
+            config_dir = Path(self.__args.config_dir)
+            ac.panel_configs = file_io.load_panel_configs([config_dir.joinpath(arch)])
+            sys_info = (
+                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
+            )
             parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
                 prefix = ""
@@ -303,7 +340,7 @@ class RocProfCompute:
         self.print_graphic()
         self.load_soc_specs()
 
-        if self.__args.list_metrics is not None:
+        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
             self.list_metrics()
         elif self.__args.list_sets:
             self.list_sets()

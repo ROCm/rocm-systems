@@ -298,9 +298,6 @@ class Roofline:
                 original_kernel_names = []
             else:
                 original_kernel_names = self.__ai_data.get("kernelNames", [])
-                if self.__run_parameters.get("kernel_filter", False):
-                    for name in sorted(self.__args.kernel):
-                        kernel_list += "_" + name
 
             num_kernels = len(original_kernel_names)
 
@@ -426,6 +423,9 @@ class Roofline:
         # otherwise return HTML to be used in GUI output
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
+            if self.__run_parameters.get("kernel_filter", False):
+                for name in sorted(self.__args.kernel):
+                    kernel_list += "_" + name
 
             # Re-save to remove loading MathJax pop up
             for i in range(2):
