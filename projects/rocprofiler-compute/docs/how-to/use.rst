@@ -61,13 +61,14 @@ Common filters to customize data collection include:
 
 See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 
-To view available metrics by hardware block, use the ``profile`` mode ``--list-metrics``
-option with an optional system architecture argument (inferred if not provided):
+To view available metrics by hardware block, use the ``--list-metrics``
+option with a system architecture argument or ``--list-available-metrics``
+to view the metrics for current system architecture:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile --list-metrics
-   $ rocprof-compute profile --list-metrics <sys_arch>
+   $ rocprof-compute --list-metrics <sys_arch>
+   $ rocprof-compute profile --list-available-metrics
 
 .. _basic-analyze-cli:
 

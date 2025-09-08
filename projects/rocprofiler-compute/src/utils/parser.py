@@ -636,23 +636,24 @@ def build_dfs(
                     and "placeholder_range" in data_config["metric"]
                 ):
                     new_metrics = {}
-                    # NB: support single placeholder for now!!
-                    p_range = data_config["metric"].pop("placeholder_range")
-                    metric, metric_expr = data_config["metric"].popitem()
-
-                    for p, r in p_range.items():
-                        # NB: We have to resolve placeholder range first if it
-                        #   is a build-in var. It will be too late to do it in
-                        #   eval_metric(). This is the only reason we need
-                        #   sys_info at this stage.
-                        var = calc_builtin_var(r, sys_info)
-                        if var:
+                    if sys_info is not None:
+                        # NB: support single placeholder for now!!
+                        p_range = data_config["metric"].pop("placeholder_range")
+                        metric, metric_expr = data_config["metric"].popitem()
+                        # print(len(data_config["metric"]))
+                        # data_config['metric'].clear()
+                        for p, r in p_range.items():
+                            # NB: We have to resolve placeholder range first if it
+                            #   is a build-in var. It will be too late to do it in
+                            #   eval_metric(). This is the only reason we need
+                            #   sys_info at this stage.
+                            var = calc_builtin_var(r, sys_info)
                             for i in range(var):
                                 new_key = metric.replace(p, str(i))
                                 new_val = {}
                                 for k, v in metric_expr.items():
                                     new_val[k] = metric_expr[k].replace(p, str(i))
-                                new_metrics[new_key] = new_val
+                                    new_metrics[new_key] = new_val
 
                     data_config["metric"] = new_metrics
 
@@ -691,6 +692,15 @@ def build_dfs(
                         headers.append("Description")
 
                     df = pd.DataFrame(columns=headers)
+
+                    if not data_config["metric"]:
+                        data_source_idx = (
+                            str(data_config["id"] // 100)
+                            + "."
+                            + str(data_config["id"] % 100)
+                        )
+                        metric_idx = data_source_idx + "." + str(i)
+                        metric_list[data_source_idx] = data_config["title"]
 
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
                         data_source_idx = (

@@ -29,6 +29,8 @@ from typing import Any, Optional, Union
 
 from plotille import Canvas  # type: ignore
 
+from .utils import format_scientific_notation_if_needed
+
 
 def make_format_spec(num: Union[int, float], align: str = ">") -> str:
     """
@@ -89,10 +91,12 @@ def format_text(
 ) -> str:
     """
     Format a text string for canvas to display according to
-    input key value pair and make proper aligment
-    For invalid value, it displays N/A
-    All strings to be displayed on Canvas need to use this method
+    input key-value pair and make proper alignment.
+    Uses scientific notation formatting when needed.
+    For invalid value, it displays N/A.
     """
+
+    # Step 1: Build format spec using make_format_spec
     value_format = make_format_spec(value_step_prec_rightalign, value_align)
 
     if is_value_valid(value):
@@ -590,7 +594,7 @@ class ScalarL1DCache(RectFrame):
                 key="Hit",
                 value=self.hit,
                 key_step_prec_leftalign=6,
-                value_step_prec_rightalign=6,
+                value_step_prec_rightalign=6.0,
                 post_description_with_space=" %",
             ),
         )

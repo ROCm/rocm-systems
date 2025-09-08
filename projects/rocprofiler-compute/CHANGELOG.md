@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* On memory chart, long string of numbers are displayed as scientific notation. It also solves the issue of overflow of displaying long number
+
 * Add notice for change in default output format to `rocpd` in a future release
   * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
 
@@ -107,6 +109,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
     * Add ``--output-name`` analysis mode option to override the default file/folder name.
   * Replace `--save-dfs` analyze mode option with `--output-format csv`
+
+* Command-line options:
+  * `--list-metrics` and `--config-dir` options moved to general command-line options.
+  * * `--list-metrics` option cannot be used without argument (GPU architecture).
+  * `--list-metrics` option do not show number of L2 channels.
+  * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
+  * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
+  * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
 
 ### Resolved issues
 
