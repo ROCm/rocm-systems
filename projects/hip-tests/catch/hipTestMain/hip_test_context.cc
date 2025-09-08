@@ -211,6 +211,7 @@ TestContext::TestContext(int argc, char** argv) {
   getConfigFiles();
   parseJsonFiles();
   parseOptions(argc, argv);
+  disableCoreDumps();
 }
 
 void TestContext::setExePath(int argc, char** argv) {
@@ -297,7 +298,51 @@ bool TestContext::parseJsonFiles() {
   return true;
 }
 
+void TestContext::disableCoreDumps() {
+#if HT_LINUX
+  // Save original core limit
+  if (getrlimit(RLIMIT_CORE, &core_limit_) != 0) {
+    LogPrintf("%s", "Warning: Failed to get original RLIMIT_CORE");
+    return;
+  }
+
+  // Already disabled
+  if (core_limit_.rlim_cur == 0) {
+    return;
+  }
+
+  // Set core limit to 0
+  struct rlimit rlimit;
+  rlimit.rlim_cur = 0;
+  rlimit.rlim_max = core_limit_.rlim_max;
+
+  if (setrlimit(RLIMIT_CORE, &rlimit) != 0) {
+    LogPrintf("%s", "Warning: Failed to disable core dump");
+    return;
+  }
+
+  rlimit_saved_ = true;
+#endif
+}
+
+void TestContext::restoreCoreDumps() {
+#if HT_LINUX
+  if (!rlimit_saved_) {
+    return;
+  }
+
+  if (setrlimit(RLIMIT_CORE, &core_limit_) != 0) {
+    LogPrintf("%s", "Warning: Failed to restore RLIMIT_CORE");
+  }
+
+  rlimit_saved_ = false;
+#endif
+}
+
+
 void TestContext::cleanContext() {
+  restoreCoreDumps();
+
   for (auto& pair : compiledKernels) {
     hipError_t error = hipModuleUnload(pair.second.module);
     if (error != hipSuccess) {
