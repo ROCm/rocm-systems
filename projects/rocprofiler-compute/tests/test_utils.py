@@ -4593,18 +4593,18 @@ def test_process_hip_trace_output_invalid_fbase_characters(tmp_path, monkeypatch
 # ==============================================================================
 
 
-def test_ubuntu_22_04_detection(monkeypatch):
+def test_ubuntu_detection(monkeypatch):
     """
-    Test Ubuntu 22.04 detection.
+    Test Ubuntu detection.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
 
     Returns:
-        Verifies that the function correctly identifies Ubuntu 22.04
-        and returns the appropriate distro
+        Verifies that the function correctly identifies Ubuntu and
+        returns the appropriate distro
     """
-    mock_os_release = 'VERSION_ID="22.04"\nNAME="Ubuntu"'
+    mock_os_release = "ID=ubuntu\nID_LIKE=debian"
 
     def mock_path_read_text(self):
         return mock_os_release
@@ -4614,8 +4614,8 @@ def test_ubuntu_22_04_detection(monkeypatch):
     monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "22.04"
+        if "ID_LIKE" in pattern:
+            return "debian"
         return None
 
     monkeypatch.setattr("utils.specs.search", mock_search)
@@ -4628,18 +4628,18 @@ def test_ubuntu_22_04_detection(monkeypatch):
     assert result["rocm_ver"] == 0
 
 
-def test_ubuntu_24_04_detection(monkeypatch):
+def test_debian_detection(monkeypatch):
     """
-    Test Ubuntu 24.04 detection.
+    Test Debian detection.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
 
     Returns:
-        Verifies that the function correctly identifies Ubuntu 24.04
+        Verifies that the function correctly identifies Debian
         and returns the appropriate distro
     """
-    mock_os_release = 'VERSION_ID="24.04"\nNAME="Ubuntu"'
+    mock_os_release = "ID=debian"
 
     def mock_path_read_text(self):
         return mock_os_release
@@ -4649,14 +4649,15 @@ def test_ubuntu_24_04_detection(monkeypatch):
     monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "24.04"
+        if "ID" in pattern:
+            return "debian"
         return None
 
     monkeypatch.setattr("utils.specs.search", mock_search)
 
     import utils.utils as utils_mod
 
+    # Create an object with attribute value = 1
     result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
 
     assert result["rocm_ver"] == 0
@@ -4673,7 +4674,7 @@ def test_rhel_detection(monkeypatch):
         Verifies that the function correctly identifies RHEL
         and returns the appropriate distro
     """
-    mock_os_release = 'PLATFORM_ID="platform:el9"\nNAME="Red Hat Enterprise Linux"'
+    mock_os_release = 'ID_LIKE="rhel fedora"\nID="rhel"'
 
     def mock_path_read_text(self):
         return mock_os_release
@@ -4684,8 +4685,8 @@ def test_rhel_detection(monkeypatch):
     monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     def mock_search(pattern, text):
-        if "PLATFORM_ID" in pattern:
-            return "platform:el9"
+        if "ID_LIKE" in pattern:
+            return "rhel fedora"
         return None
 
     monkeypatch.setattr("utils.specs.search", mock_search)
@@ -4697,18 +4698,18 @@ def test_rhel_detection(monkeypatch):
     assert result["rocm_ver"] == 7
 
 
-def test_sles_15_6_detection(monkeypatch):
+def test_azl_detection(monkeypatch):
     """
-    Test SLES 15.6 detection.
+    Test Azure Linux distro detection.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
 
     Returns:
-        Verifies that the function correctly identifies SLES 15.6
+        Verifies that the function correctly identifies AZL
         and returns the appropriate distro
     """
-    mock_os_release = 'VERSION_ID="15.6"\nNAME="SLES"'
+    mock_os_release = "ID=azurelinux"
 
     def mock_path_read_text(self):
         return mock_os_release
@@ -4716,32 +4717,34 @@ def test_sles_15_6_detection(monkeypatch):
     monkeypatch.setattr("os.environ", {"keys": lambda: []})
 
     monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
+    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
 
     def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "15.6"
+        if "ID" in pattern:
+            return "azurelinux"
         return None
 
     monkeypatch.setattr("utils.specs.search", mock_search)
 
     import utils.utils as utils_mod
 
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
+    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="7.x.x"))
 
-    assert result["rocm_ver"] == 0
+    assert result["rocm_ver"] == 7
 
 
-def test_sles_15_7_detection(monkeypatch):
+def test_sles_detection(monkeypatch):
     """
-    Test SLES 15.7 detection (edge case with higher service pack).
+    Test SLES detection.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
 
     Returns:
-        Verifies that the function correctly handles newer SLES service packs
+        Verifies that the function correctly identifies SLES
+        and returns the appropriate distro
     """
-    mock_os_release = 'VERSION_ID="15.7"\nNAME="SLES"'
+    mock_os_release = 'ID="opensuse-leap"\nID_LIKE="suse opensuse"'
 
     def mock_path_read_text(self):
         return mock_os_release
@@ -4751,8 +4754,8 @@ def test_sles_15_7_detection(monkeypatch):
     monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
 
     def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "15.7"
+        if "ID_LIKE" in pattern:
+            return "suse openuse"
         return None
 
     monkeypatch.setattr("utils.specs.search", mock_search)
