@@ -1913,6 +1913,19 @@ typedef struct hipGraphNodeParams {
   long long reserved2;
 } hipGraphNodeParams;
 
+typedef struct ihipAsyncCallbackHandle_t* hipAsyncCallbackHandle_t;
+typedef enum hipAsyncNotificationType {
+    HIP_ASYNC_NOTIFICATION_TYPE_OVERBUDGET = 0
+} hipAsyncNotificationType;
+typedef struct hipAsyncNotificationInfo {
+    hipAsyncNotificationType type;
+    union {
+        struct {
+            size_t bytesOverBudget;
+        } overBudget;
+    } info;
+} hipAsyncNotificationInfo;
+
 /**
  * This port activates when the kernel has finished executing.
  */
@@ -2315,6 +2328,32 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
  *          change and might have outstanding issues.
  */
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
+
+/**
+ * @brief Register a callback to receive asynchronous notifications.
+ *
+ * @param [in] device to register the callback for.
+ * @param [in] callback to register
+ * @param [in] userData pointer to pass to the callback
+ * @param [in] callback handle to registered callback
+ *
+ */
+typedef void (*hipAsyncCallback_t)( hipAsyncNotificationInfo* info, void* userData,
+                                    hipAsyncCallbackHandle_t callback);
+hipError_t hipDeviceRegisterAsyncNotification(hipDevice_t device,
+                                              hipAsyncCallback_t callbackFunc, 
+                                              void* userData, 
+                                              hipAsyncCallbackHandle_t* callback);
+
+/**
+ * @brief Unregister a callback notification.
+ *
+ * @param [in] device to unregister the callback for.
+ * @param [in] callback to unregister
+ *
+ */
+hipError_t hipDeviceUnregisterAsyncNotification(hipDevice_t device,
+                                                hipAsyncCallbackHandle_t callback);
 /**
  * @brief Returns device properties.
  *

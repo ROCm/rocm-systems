@@ -540,4 +540,25 @@ bool MemoryPool::Import(amd::Os::FileDesc handle) {
   }
   return result;
 }
+void MemoryPool::ProcessAsyncCallbacks() {
+  while(true) {
+    ScopedLock sl(AsyncNotifyLock_);
+    if (AsyncNotifydone_) {
+      break;
+    }
+    if (AsyncCallbacks.empty()) {
+      AsyncNotifyLock_.wait();
+      continue;
+      }
+      if (memOverBudget_.load()) {
+        // Notify the user about the memory over budget situation
+        for (auto callback : AsyncCallbacks) {
+          if (callback->deviceId() == device_->deviceId()) {
+            callback->callback();
+          }
+        }
+        memOverBudget_.store(false);
+      }
+    }
+}
 }  // namespace hip

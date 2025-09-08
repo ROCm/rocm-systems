@@ -2011,3 +2011,17 @@ hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
   return hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn(
       hGraphExec, hNode, nodeParams);
 }
+
+hipError_t hipDeviceRegisterAsyncNotification(hipDevice_t device,
+                                              hipAsyncCallback_t callbackFunc, 
+                                              void* userData, 
+                                              hipAsyncCallbackHandle_t* callback) {
+  return hip::GetHipDispatchTable()->hipDeviceRegisterAsyncNotification_fn(device,
+                                                                           callbackFunc,
+                                                                           userData,
+                                                                           callback);
+}
+
+hipError_t hipDeviceUnRegisterAsyncNotification(hipDevice_t device, hipAsyncCallbackHandle_t callback) {
+  return hip::GetHipDispatchTable()->hipDeviceUnRegisterAsyncNotification_fn(device, callback);
+}

@@ -31,7 +31,6 @@ namespace hip {
 
 class Device;
 class Stream;
-
 struct SharedMemPointer {
   size_t offset_;
   size_t size_;
@@ -194,17 +193,47 @@ class Heap : public amd::EmbeddedObject {
   bool use_vm_heap_ = false;   //!< Use virtual heap or direct allocations
 };
 
+class AsyncNotificationCallback {
+  hipAsyncCallback_t callBack_;
+  void* handle_;
+  void* userData_;
+  hipAsyncNotificationInfo* info_;
+  int device_id_; 
+ public:
+  AsyncNotificationCallback(hipDevice_t id, 
+                    hipAsyncNotificationInfo* info, void* userData, hipAsyncCallback_t callBack){
+    callBack_ = callBack;
+    userData_ = userData;
+    info_ = info;
+    device_id_ = id;
+    handle_ = NULL;
+  }
+
+  void CL_CALLBACK callback() {
+    hipAsyncCallbackHandle_t handle = reinterpret_cast<hipAsyncCallbackHandle_t>(handle_);
+    callBack_(info_, userData_, handle);
+  }
+  int deviceId() {
+    return device_id_;
+  }
+  void setHandle(void* handle) {
+    handle_ = handle;
+  }
+  void* handle() {
+    return handle_;
+  }
+};
 /// Allocates memory in the pool on the specified stream and places the allocation into busy_heap_
 /// @note: the logic also will look in free_heap for possible reuse.
 /// hipMemPoolReuseAllowOpportunistic option will validate if HIP event,
 /// associated with memory is done, then reuse can be performed.
 class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
  public:
+   Monitor AsyncNotifyLock_;                   //!< Lock protecting callbacks
   struct SharedAccess {
     int device_id_;            //!< Device ID for access with a specified shared resource
     hipMemAccessFlags flags_;  //!< Flags which define access type
   };
-
   static constexpr uint32_t kMaxMgpuAccess = 32;
   struct SharedMemPool {
     amd::Os::FileDesc handle_;             //!< File descriptor for shared memory
@@ -212,7 +241,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
     uint32_t access_size_;                 //!< The number of entries in access array
     SharedAccess access_[kMaxMgpuAccess];  //!< The list of devices for access
   };
-
+  std::unordered_set<AsyncNotificationCallback*> AsyncCallbacks;
   MemoryPool(hip::Device* device, const hipMemPoolProps* props = nullptr, bool phys_mem = false)
       : VmHeapArray(device->devices()[0],
                     [this]() -> amd::HostQueue& { return *device_->NullStream(); }),
@@ -221,7 +250,8 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
         lock_pool_ops_(true),
         device_(device),
         shared_(nullptr),
-        max_total_size_(0) {
+        max_total_size_(0), 
+        AsyncNotifyLock_() {
     device_->AddMemoryPool(this);
     state_.value_ = 0;
     state_.event_dependencies_ = 1;
@@ -245,6 +275,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
       busy_heap_.EnableVmHeap();
       free_heap_.EnableVmHeap();
     }
+    thread_.start(this);
   }
 
   virtual ~MemoryPool() override {
@@ -258,8 +289,27 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
       // Note: The app supposes to close the handle... Double close in Windows will cause a crash
       amd::Os::CloseIpcMemory(0, shared_, sizeof(SharedMemPool));
     }
+    {
+      ScopedLock sl(AsyncNotifyLock_);
+      thread_.AsyncNotifydone_ = true;
+      AsyncNotifyLock_.notify();
+    }
+      while (thread_.state() < Thread::FINISHED && Os::isThreadAlive(thread_)) {
+        Os::yield();
+    }
   }
-
+  
+  class Thread : public amd::Thread {
+   public:
+    Thread() : amd::Thread("Async notification Thread", CQ_THREAD_STACK_SIZE),
+                AsyncNotifydone_(false) {}
+    volatile bool AsyncNotifydone_;
+    //! The async notification thread entry point.
+    void run(void *data) override {
+      auto pool = reinterpret_cast<MemoryPool*>(data);
+      pool->ProcessAsyncCallbacks();
+    }
+  } thread_;  //!< The async notification thread.
   /// The same stream can reuse memory without HIP event validation
   void* AllocateMemory(size_t size, Stream* stream, void* dptr = nullptr);
 
@@ -326,7 +376,9 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   bool InternalDependencies() const { return (state_.internal_dependencies_) ? true : false; }
   bool GraphInUse() const { return (state_.graph_in_use_) ? true : false; }
   void SetGraphInUse() { state_.graph_in_use_ = true; }
-
+  void ProcessAsyncCallback()
+  void SetOverBudget() { memOverBudget_ = true; }
+  bool IsOverBudget() const { return memOverBudget_.load(); }
  private:
   MemoryPool() = delete;
   MemoryPool(const MemoryPool&) = delete;
@@ -356,6 +408,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   hip::Device* device_;      //!< Hip device the heap will reside
   SharedMemPool* shared_;    //!< Pointer to shared memory for IPC
   uint64_t max_total_size_;  //!< Max of total reserved memory in the pool since last reset
+  std::atomic<bool> memOverBudget_;  //!< if memory is going over budget
 };
 
 

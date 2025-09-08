@@ -488,4 +488,51 @@ hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
   mpool->retain();
   HIP_RETURN(hipSuccess);
 }
+
+// ================================================================================================
+hipError_t hipDeviceRegisterAsyncNotification(hipDevice_t device,
+                                              hipAsyncCallback_t callbackFunc, 
+                                              void* userData, 
+                                              hipAsyncCallbackHandle_t* callback) {
+  HIP_INIT_API(hipDeviceRegisterAsyncNotification, device);
+  if (device < 0  || callback == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  auto mem_pool = g_devices[device]->GetCurrentMemoryPool();
+  hipAsyncNotificationInfo info = {};
+  info.type = hipAsyncNotificationType::HIP_ASYNC_NOTIFICATION_TYPE_OVERBUDGET;
+
+  AsyncNotificationCallback* AsyncCallback = new AsyncNotificationCallback(device,
+                                                       &info, userData, callbackFunc);
+  AsyncCallback->setHandle(reinterpret_cast<void*>(AsyncCallback));
+  ScopedLock sl(mem_pool->AsyncNotifyLock_);
+  mem_pool->AsyncCallbacks.insert(AsyncCallback);
+  if(mem_pool->AsyncCallbacks.size() == 1) {
+    mem_pool->AsyncNotifyLock_.notify();
+  }
+  *callback = reinterpret_cast<hipAsyncCallbackHandle_t>(AsyncCallback->handle());
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipDeviceUnregisterAsyncNotification(hipDevice_t device, hipAsyncCallbackHandle_t callback) {
+  HIP_INIT_API(hipDeviceUnregisterAsyncNotification, device);
+  if (device < 0 || callback == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  auto mem_pool = g_devices[device]->GetCurrentMemoryPool();
+  ScopedLock sl(mem_pool->AsyncNotifyLock_);
+  auto callback_handle = reinterpret_cast<AsyncNotificationCallback*>(callback);
+  auto it = mem_pool->AsyncCallbacks.find(callback_handle);
+  if (it == mem_pool->AsyncCallbacks.end()) {
+        return hipErrorInvalidValue;
+  } else {
+      AsyncNotificationCallback *callback = *it;
+      mem_pool->AsyncCallbacks.erase(it);
+      delete callback;
+  }
+  HIP_RETURN(hipSuccess);
+}
 }  // namespace hip
+

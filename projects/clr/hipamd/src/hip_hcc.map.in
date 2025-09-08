@@ -630,3 +630,11 @@ global:
 local:
     *;
 } hip_6.5;
+
+hip_7.2 {
+global:
+    hipDeviceRegisterAsyncNotification;
+    hipDeviceUnRegisterAsyncNotification;
+local:
+    *;
+} hip_7.1;

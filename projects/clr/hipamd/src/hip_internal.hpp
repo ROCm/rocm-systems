@@ -663,7 +663,7 @@ public:
   extern bool isValid(hipStream_t& stream);
   extern bool isValid(hipEvent_t event);
   extern amd::Monitor hipArraySetLock;
-  extern std::unordered_set<hipArray*> hipArraySet;
+  extern std::unordered_set<hipArray*> hipArraySet;  
 
   extern void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data);
 

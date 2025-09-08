@@ -100,7 +100,7 @@ enum hip_api_id_t {
   HIP_API_ID_hipGetDeviceFlags = 80,
   HIP_API_ID_hipGetDevicePropertiesR0000 = 81,
   HIP_API_ID_RESERVED_82 = 82,
-  HIP_API_ID_hipGetErrorString = 83,
+  HIP_API_ID_RESERVED_83 = 83,
   HIP_API_ID_hipGetLastError = 84,
   HIP_API_ID_hipGetMipmappedArrayLevel = 85,
   HIP_API_ID_hipGetSymbolAddress = 86,
@@ -456,7 +456,10 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemPrefetchAsync_v2 = 436,
   HIP_API_ID_hipMemAdvise_v2 = 437,
   HIP_API_ID_hipStreamGetId = 438,
-  HIP_API_ID_LAST = 438,
+  HIP_API_ID_hipDeviceRegisterAsyncNotification = 439,
+  HIP_API_ID_hipDeviceUnregisterAsyncNotification = 440,
+  HIP_API_ID_hipMemGetHandleForAddressRange = 441,
+  HIP_API_ID_LAST = 441,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -469,13 +472,11 @@ enum hip_api_id_t {
   HIP_API_ID_hipDestroyTextureObject = HIP_API_ID_NONE,
   HIP_API_ID_hipDeviceGetCount = HIP_API_ID_NONE,
   HIP_API_ID_hipDeviceGetTexture1DLinearMaxWidth = HIP_API_ID_NONE,
-  HIP_API_ID_hipGetDriverEntryPoint_spt = HIP_API_ID_NONE,
   HIP_API_ID_hipGetTextureAlignmentOffset = HIP_API_ID_NONE,
   HIP_API_ID_hipGetTextureObjectResourceDesc = HIP_API_ID_NONE,
   HIP_API_ID_hipGetTextureObjectResourceViewDesc = HIP_API_ID_NONE,
   HIP_API_ID_hipGetTextureObjectTextureDesc = HIP_API_ID_NONE,
   HIP_API_ID_hipGetTextureReference = HIP_API_ID_NONE,
-  HIP_API_ID_hipMemGetHandleForAddressRange = HIP_API_ID_NONE,
   HIP_API_ID_hipTexObjectCreate = HIP_API_ID_NONE,
   HIP_API_ID_hipTexObjectDestroy = HIP_API_ID_NONE,
   HIP_API_ID_hipTexObjectGetResourceDesc = HIP_API_ID_NONE,
@@ -551,6 +552,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDevicePrimaryCtxReset: return "hipDevicePrimaryCtxReset";
     case HIP_API_ID_hipDevicePrimaryCtxRetain: return "hipDevicePrimaryCtxRetain";
     case HIP_API_ID_hipDevicePrimaryCtxSetFlags: return "hipDevicePrimaryCtxSetFlags";
+    case HIP_API_ID_hipDeviceRegisterAsyncNotification: return "hipDeviceRegisterAsyncNotification";
     case HIP_API_ID_hipDeviceReset: return "hipDeviceReset";
     case HIP_API_ID_hipDeviceSetCacheConfig: return "hipDeviceSetCacheConfig";
     case HIP_API_ID_hipDeviceSetGraphMemAttribute: return "hipDeviceSetGraphMemAttribute";
@@ -559,6 +561,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceSetSharedMemConfig: return "hipDeviceSetSharedMemConfig";
     case HIP_API_ID_hipDeviceSynchronize: return "hipDeviceSynchronize";
     case HIP_API_ID_hipDeviceTotalMem: return "hipDeviceTotalMem";
+    case HIP_API_ID_hipDeviceUnregisterAsyncNotification: return "hipDeviceUnregisterAsyncNotification";
     case HIP_API_ID_hipDriverGetVersion: return "hipDriverGetVersion";
     case HIP_API_ID_hipDrvGraphAddMemFreeNode: return "hipDrvGraphAddMemFreeNode";
     case HIP_API_ID_hipDrvGraphAddMemcpyNode: return "hipDrvGraphAddMemcpyNode";
@@ -608,7 +611,6 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGetDevicePropertiesR0000: return "hipGetDevicePropertiesR0000";
     case HIP_API_ID_hipGetDevicePropertiesR0600: return "hipGetDevicePropertiesR0600";
     case HIP_API_ID_hipGetDriverEntryPoint: return "hipGetDriverEntryPoint";
-    case HIP_API_ID_hipGetErrorString: return "hipGetErrorString";
     case HIP_API_ID_hipGetFuncBySymbol: return "hipGetFuncBySymbol";
     case HIP_API_ID_hipGetLastError: return "hipGetLastError";
     case HIP_API_ID_hipGetMipmappedArrayLevel: return "hipGetMipmappedArrayLevel";
@@ -756,6 +758,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMemGetAddressRange: return "hipMemGetAddressRange";
     case HIP_API_ID_hipMemGetAllocationGranularity: return "hipMemGetAllocationGranularity";
     case HIP_API_ID_hipMemGetAllocationPropertiesFromHandle: return "hipMemGetAllocationPropertiesFromHandle";
+    case HIP_API_ID_hipMemGetHandleForAddressRange: return "hipMemGetHandleForAddressRange";
     case HIP_API_ID_hipMemGetInfo: return "hipMemGetInfo";
     case HIP_API_ID_hipMemImportFromShareableHandle: return "hipMemImportFromShareableHandle";
     case HIP_API_ID_hipMemMap: return "hipMemMap";
@@ -841,15 +844,16 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMipmappedArrayDestroy: return "hipMipmappedArrayDestroy";
     case HIP_API_ID_hipMipmappedArrayGetLevel: return "hipMipmappedArrayGetLevel";
     case HIP_API_ID_hipModuleGetFunction: return "hipModuleGetFunction";
+    case HIP_API_ID_hipModuleGetFunctionCount: return "hipModuleGetFunctionCount";
     case HIP_API_ID_hipModuleGetGlobal: return "hipModuleGetGlobal";
     case HIP_API_ID_hipModuleGetTexRef: return "hipModuleGetTexRef";
     case HIP_API_ID_hipModuleLaunchCooperativeKernel: return "hipModuleLaunchCooperativeKernel";
     case HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice: return "hipModuleLaunchCooperativeKernelMultiDevice";
     case HIP_API_ID_hipModuleLaunchKernel: return "hipModuleLaunchKernel";
-    case HIP_API_ID_hipModuleLoadFatBinary: return "hipModuleLoadFatBinary";
     case HIP_API_ID_hipModuleLoad: return "hipModuleLoad";
     case HIP_API_ID_hipModuleLoadData: return "hipModuleLoadData";
     case HIP_API_ID_hipModuleLoadDataEx: return "hipModuleLoadDataEx";
+    case HIP_API_ID_hipModuleLoadFatBinary: return "hipModuleLoadFatBinary";
     case HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor: return "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor";
     case HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags: return "hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags";
     case HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSize: return "hipModuleOccupancyMaxPotentialBlockSize";
@@ -921,7 +925,6 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipUserObjectRelease: return "hipUserObjectRelease";
     case HIP_API_ID_hipUserObjectRetain: return "hipUserObjectRetain";
     case HIP_API_ID_hipWaitExternalSemaphoresAsync: return "hipWaitExternalSemaphoresAsync";
-    case HIP_API_ID_hipModuleGetFunctionCount: return "hipModuleGetFunctionCount";
   };
   return "unknown";
 };
@@ -984,6 +987,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDevicePrimaryCtxReset", name) == 0) return HIP_API_ID_hipDevicePrimaryCtxReset;
   if (strcmp("hipDevicePrimaryCtxRetain", name) == 0) return HIP_API_ID_hipDevicePrimaryCtxRetain;
   if (strcmp("hipDevicePrimaryCtxSetFlags", name) == 0) return HIP_API_ID_hipDevicePrimaryCtxSetFlags;
+  if (strcmp("hipDeviceRegisterAsyncNotification", name) == 0) return HIP_API_ID_hipDeviceRegisterAsyncNotification;
   if (strcmp("hipDeviceReset", name) == 0) return HIP_API_ID_hipDeviceReset;
   if (strcmp("hipDeviceSetCacheConfig", name) == 0) return HIP_API_ID_hipDeviceSetCacheConfig;
   if (strcmp("hipDeviceSetGraphMemAttribute", name) == 0) return HIP_API_ID_hipDeviceSetGraphMemAttribute;
@@ -992,6 +996,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceSetSharedMemConfig", name) == 0) return HIP_API_ID_hipDeviceSetSharedMemConfig;
   if (strcmp("hipDeviceSynchronize", name) == 0) return HIP_API_ID_hipDeviceSynchronize;
   if (strcmp("hipDeviceTotalMem", name) == 0) return HIP_API_ID_hipDeviceTotalMem;
+  if (strcmp("hipDeviceUnregisterAsyncNotification", name) == 0) return HIP_API_ID_hipDeviceUnregisterAsyncNotification;
   if (strcmp("hipDriverGetVersion", name) == 0) return HIP_API_ID_hipDriverGetVersion;
   if (strcmp("hipDrvGraphAddMemFreeNode", name) == 0) return HIP_API_ID_hipDrvGraphAddMemFreeNode;
   if (strcmp("hipDrvGraphAddMemcpyNode", name) == 0) return HIP_API_ID_hipDrvGraphAddMemcpyNode;
@@ -1041,7 +1046,6 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGetDevicePropertiesR0000", name) == 0) return HIP_API_ID_hipGetDevicePropertiesR0000;
   if (strcmp("hipGetDevicePropertiesR0600", name) == 0) return HIP_API_ID_hipGetDevicePropertiesR0600;
   if (strcmp("hipGetDriverEntryPoint", name) == 0) return HIP_API_ID_hipGetDriverEntryPoint;
-  if (strcmp("hipGetErrorString", name) == 0) return HIP_API_ID_hipGetErrorString;
   if (strcmp("hipGetFuncBySymbol", name) == 0) return HIP_API_ID_hipGetFuncBySymbol;
   if (strcmp("hipGetLastError", name) == 0) return HIP_API_ID_hipGetLastError;
   if (strcmp("hipGetMipmappedArrayLevel", name) == 0) return HIP_API_ID_hipGetMipmappedArrayLevel;
@@ -1189,6 +1193,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMemGetAddressRange", name) == 0) return HIP_API_ID_hipMemGetAddressRange;
   if (strcmp("hipMemGetAllocationGranularity", name) == 0) return HIP_API_ID_hipMemGetAllocationGranularity;
   if (strcmp("hipMemGetAllocationPropertiesFromHandle", name) == 0) return HIP_API_ID_hipMemGetAllocationPropertiesFromHandle;
+  if (strcmp("hipMemGetHandleForAddressRange", name) == 0) return HIP_API_ID_hipMemGetHandleForAddressRange;
   if (strcmp("hipMemGetInfo", name) == 0) return HIP_API_ID_hipMemGetInfo;
   if (strcmp("hipMemImportFromShareableHandle", name) == 0) return HIP_API_ID_hipMemImportFromShareableHandle;
   if (strcmp("hipMemMap", name) == 0) return HIP_API_ID_hipMemMap;
@@ -1274,15 +1279,16 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMipmappedArrayDestroy", name) == 0) return HIP_API_ID_hipMipmappedArrayDestroy;
   if (strcmp("hipMipmappedArrayGetLevel", name) == 0) return HIP_API_ID_hipMipmappedArrayGetLevel;
   if (strcmp("hipModuleGetFunction", name) == 0) return HIP_API_ID_hipModuleGetFunction;
+  if (strcmp("hipModuleGetFunctionCount", name) == 0) return HIP_API_ID_hipModuleGetFunctionCount;
   if (strcmp("hipModuleGetGlobal", name) == 0) return HIP_API_ID_hipModuleGetGlobal;
   if (strcmp("hipModuleGetTexRef", name) == 0) return HIP_API_ID_hipModuleGetTexRef;
   if (strcmp("hipModuleLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernel;
   if (strcmp("hipModuleLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice;
   if (strcmp("hipModuleLaunchKernel", name) == 0) return HIP_API_ID_hipModuleLaunchKernel;
-  if (strcmp("hipModuleLoadFatBinary", name) == 0) return HIP_API_ID_hipModuleLoadFatBinary;
   if (strcmp("hipModuleLoad", name) == 0) return HIP_API_ID_hipModuleLoad;
   if (strcmp("hipModuleLoadData", name) == 0) return HIP_API_ID_hipModuleLoadData;
   if (strcmp("hipModuleLoadDataEx", name) == 0) return HIP_API_ID_hipModuleLoadDataEx;
+  if (strcmp("hipModuleLoadFatBinary", name) == 0) return HIP_API_ID_hipModuleLoadFatBinary;
   if (strcmp("hipModuleOccupancyMaxActiveBlocksPerMultiprocessor", name) == 0) return HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor;
   if (strcmp("hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", name) == 0) return HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
   if (strcmp("hipModuleOccupancyMaxPotentialBlockSize", name) == 0) return HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSize;
@@ -1354,7 +1360,6 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipUserObjectRelease", name) == 0) return HIP_API_ID_hipUserObjectRelease;
   if (strcmp("hipUserObjectRetain", name) == 0) return HIP_API_ID_hipUserObjectRetain;
   if (strcmp("hipWaitExternalSemaphoresAsync", name) == 0) return HIP_API_ID_hipWaitExternalSemaphoresAsync;
-  if (strcmp("hipModuleGetFunctionCount", name) == 0) return HIP_API_ID_hipModuleGetFunctionCount;
   return HIP_API_ID_NONE;
 }
 
@@ -1624,6 +1629,13 @@ typedef struct hip_api_data_s {
       unsigned int flags;
     } hipDevicePrimaryCtxSetFlags;
     struct {
+      hipDevice_t device;
+      hipAsyncCallback_t callbackFunc;
+      void* userData;
+      hipAsyncCallbackHandle_t* callback;
+      hipAsyncCallbackHandle_t callback__val;
+    } hipDeviceRegisterAsyncNotification;
+    struct {
       hipFuncCache_t cacheConfig;
     } hipDeviceSetCacheConfig;
     struct {
@@ -1647,6 +1659,10 @@ typedef struct hip_api_data_s {
       size_t bytes__val;
       hipDevice_t device;
     } hipDeviceTotalMem;
+    struct {
+      hipDevice_t device;
+      hipAsyncCallbackHandle_t callback;
+    } hipDeviceUnregisterAsyncNotification;
     struct {
       int* driverVersion;
       int driverVersion__val;
@@ -2884,6 +2900,13 @@ typedef struct hip_api_data_s {
       hipMemGenericAllocationHandle_t handle;
     } hipMemGetAllocationPropertiesFromHandle;
     struct {
+      void* handle;
+      hipDeviceptr_t dptr;
+      size_t size;
+      hipMemRangeHandleType handleType;
+      unsigned long long flags;
+    } hipMemGetHandleForAddressRange;
+    struct {
       size_t* free;
       size_t free__val;
       size_t* total;
@@ -3504,11 +3527,6 @@ typedef struct hip_api_data_s {
     struct {
       hipModule_t* module;
       hipModule_t module__val;
-      const void* fatbin;
-    } hipModuleLoadFatBinary;
-    struct {
-      hipModule_t* module;
-      hipModule_t module__val;
       const char* fname;
       char fname__val;
     } hipModuleLoad;
@@ -3527,6 +3545,11 @@ typedef struct hip_api_data_s {
       void** optionsValues;
       void* optionsValues__val;
     } hipModuleLoadDataEx;
+    struct {
+      hipModule_t* module;
+      hipModule_t module__val;
+      const void* fatbin;
+    } hipModuleLoadFatBinary;
     struct {
       int* numBlocks;
       int numBlocks__val;
@@ -3690,7 +3713,7 @@ typedef struct hip_api_data_s {
     struct {
       hipStream_t stream;
       hipLaunchAttributeID attr;
-      const hipLaunchAttributeValue* value_out;
+      hipLaunchAttributeValue* value_out;
       hipLaunchAttributeValue value_out__val;
     } hipStreamGetAttribute;
     struct {
@@ -4210,6 +4233,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDevicePrimaryCtxSetFlags.dev = (hipDevice_t)dev; \
   cb_data.args.hipDevicePrimaryCtxSetFlags.flags = (unsigned int)flags; \
 };
+// hipDeviceRegisterAsyncNotification[('hipDevice_t', 'device'), ('hipAsyncCallback_t', 'callbackFunc'), ('void*', 'userData'), ('hipAsyncCallbackHandle_t*', 'callback')]
+#define INIT_hipDeviceRegisterAsyncNotification_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceRegisterAsyncNotification.device = (hipDevice_t)device; \
+  cb_data.args.hipDeviceRegisterAsyncNotification.callbackFunc = (hipAsyncCallback_t)callbackFunc; \
+  cb_data.args.hipDeviceRegisterAsyncNotification.userData = (void*)userData; \
+  cb_data.args.hipDeviceRegisterAsyncNotification.callback = (hipAsyncCallbackHandle_t*)callback; \
+};
 // hipDeviceReset[]
 #define INIT_hipDeviceReset_CB_ARGS_DATA(cb_data) { \
 };
@@ -4244,6 +4274,11 @@ typedef struct hip_api_data_s {
 #define INIT_hipDeviceTotalMem_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDeviceTotalMem.bytes = (size_t*)bytes; \
   cb_data.args.hipDeviceTotalMem.device = (hipDevice_t)device; \
+};
+// hipDeviceUnregisterAsyncNotification[('hipDevice_t', 'device'), ('hipAsyncCallbackHandle_t', 'callback')]
+#define INIT_hipDeviceUnregisterAsyncNotification_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceUnregisterAsyncNotification.device = (hipDevice_t)device; \
+  cb_data.args.hipDeviceUnregisterAsyncNotification.callback = (hipAsyncCallbackHandle_t)callback; \
 };
 // hipDriverGetVersion[('int*', 'driverVersion')]
 #define INIT_hipDriverGetVersion_CB_ARGS_DATA(cb_data) { \
@@ -4527,9 +4562,6 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGetDriverEntryPoint.funcPtr = (void**)funcPtr; \
   cb_data.args.hipGetDriverEntryPoint.flags = (unsigned long long)flags; \
   cb_data.args.hipGetDriverEntryPoint.driverStatus = (hipDriverEntryPointQueryResult*)status; \
-};
-// hipGetErrorString[]
-#define INIT_hipGetErrorString_CB_ARGS_DATA(cb_data) { \
 };
 // hipGetFuncBySymbol[('hipFunction_t*', 'functionPtr'), ('const void*', 'symbolPtr')]
 #define INIT_hipGetFuncBySymbol_CB_ARGS_DATA(cb_data) { \
@@ -5454,6 +5486,14 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemGetAllocationPropertiesFromHandle.prop = (hipMemAllocationProp*)prop; \
   cb_data.args.hipMemGetAllocationPropertiesFromHandle.handle = (hipMemGenericAllocationHandle_t)handle; \
 };
+// hipMemGetHandleForAddressRange[('void*', 'handle'), ('hipDeviceptr_t', 'dptr'), ('size_t', 'size'), ('hipMemRangeHandleType', 'handleType'), ('unsigned long long', 'flags')]
+#define INIT_hipMemGetHandleForAddressRange_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemGetHandleForAddressRange.handle = (void*)handle; \
+  cb_data.args.hipMemGetHandleForAddressRange.dptr = (hipDeviceptr_t)dptr; \
+  cb_data.args.hipMemGetHandleForAddressRange.size = (size_t)size; \
+  cb_data.args.hipMemGetHandleForAddressRange.handleType = (hipMemRangeHandleType)handleType; \
+  cb_data.args.hipMemGetHandleForAddressRange.flags = (unsigned long long)flags; \
+};
 // hipMemGetInfo[('size_t*', 'free'), ('size_t*', 'total')]
 #define INIT_hipMemGetInfo_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipMemGetInfo.free = (size_t*)free; \
@@ -6064,6 +6104,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleGetFunction.module = (hipModule_t)hmod; \
   cb_data.args.hipModuleGetFunction.kname = (name) ? strdup(name) : NULL; \
 };
+// hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
+#define INIT_hipModuleGetFunctionCount_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipModuleGetFunctionCount.count = (unsigned int*)count; \
+  cb_data.args.hipModuleGetFunctionCount.mod = (hipModule_t)mod; \
+};
 // hipModuleGetGlobal[('hipDeviceptr_t*', 'dptr'), ('size_t*', 'bytes'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
 #define INIT_hipModuleGetGlobal_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleGetGlobal.dptr = (hipDeviceptr_t*)dptr; \
@@ -6110,11 +6155,6 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleLaunchKernel.kernelParams = (void**)kernelParams; \
   cb_data.args.hipModuleLaunchKernel.extra = (void**)extra; \
 };
-// hipModuleLoadFatBinary[('hipModule_t*', 'module'), ('const void*', 'fatbin')]
-#define INIT_hipModuleLoadFatBinary_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipModuleLoadFatBinary.module = (hipModule_t*)module; \
-  cb_data.args.hipModuleLoadFatBinary.fatbin = (const void*)fatbin; \
-};
 // hipModuleLoad[('hipModule_t*', 'module'), ('const char*', 'fname')]
 #define INIT_hipModuleLoad_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleLoad.module = (hipModule_t*)module; \
@@ -6132,6 +6172,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleLoadDataEx.numOptions = (unsigned int)numOptions; \
   cb_data.args.hipModuleLoadDataEx.options = (hipJitOption*)options; \
   cb_data.args.hipModuleLoadDataEx.optionsValues = (void**)optionsValues; \
+};
+// hipModuleLoadFatBinary[('hipModule_t*', 'module'), ('const void*', 'fatbin')]
+#define INIT_hipModuleLoadFatBinary_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipModuleLoadFatBinary.module = (hipModule_t*)module; \
+  cb_data.args.hipModuleLoadFatBinary.fatbin = (const void*)fatbin; \
 };
 // hipModuleOccupancyMaxActiveBlocksPerMultiprocessor[('int*', 'numBlocks'), ('hipFunction_t', 'f'), ('int', 'blockSize'), ('size_t', 'dynSharedMemPerBlk')]
 #define INIT_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_CB_ARGS_DATA(cb_data) { \
@@ -6307,7 +6352,7 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamEndCapture.stream = (hipStream_t)stream; \
   cb_data.args.hipStreamEndCapture.pGraph = (hipGraph_t*)pGraph; \
 };
-// hipStreamGetAttribute[('hipStream_t', 'stream'), ('hipLaunchAttributeID', 'attr'), ('const hipLaunchAttributeValue*', 'value_out')]
+// hipStreamGetAttribute[('hipStream_t', 'stream'), ('hipLaunchAttributeID', 'attr'), ('hipLaunchAttributeValue*', 'value_out')]
 #define INIT_hipStreamGetAttribute_CB_ARGS_DATA(cb_data) { \
 };
 // hipStreamGetCaptureInfo[('hipStream_t', 'stream'), ('hipStreamCaptureStatus*', 'pCaptureStatus'), ('unsigned long long*', 'pId')]
@@ -6538,12 +6583,6 @@ typedef struct hip_api_data_s {
   cb_data.args.hipWaitExternalSemaphoresAsync.numExtSems = (unsigned int)numExtSems; \
   cb_data.args.hipWaitExternalSemaphoresAsync.stream = (hipStream_t)stream; \
 };
-// hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
-#define INIT_hipModuleGetFunctionCount_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipModuleGetFunctionCount.count = (unsigned int*)count; \
-  cb_data.args.hipModuleGetFunctionCount.mod = (hipModule_t)mod; \
-};
-
 #define INIT_CB_ARGS_DATA(cb_id, cb_data) INIT_##cb_id##_CB_ARGS_DATA(cb_data)
 
 // Macros for non-public API primitives
@@ -6563,8 +6602,6 @@ typedef struct hip_api_data_s {
 #define INIT_hipDeviceGetCount_CB_ARGS_DATA(cb_data) {};
 // hipDeviceGetTexture1DLinearMaxWidth()
 #define INIT_hipDeviceGetTexture1DLinearMaxWidth_CB_ARGS_DATA(cb_data) {};
-// hipGetDriverEntryPoint_spt()
-#define INIT_hipGetDriverEntryPoint_spt_CB_ARGS_DATA(cb_data) {};
 // hipGetTextureAlignmentOffset()
 #define INIT_hipGetTextureAlignmentOffset_CB_ARGS_DATA(cb_data) {};
 // hipGetTextureObjectResourceDesc()
@@ -6575,8 +6612,6 @@ typedef struct hip_api_data_s {
 #define INIT_hipGetTextureObjectTextureDesc_CB_ARGS_DATA(cb_data) {};
 // hipGetTextureReference()
 #define INIT_hipGetTextureReference_CB_ARGS_DATA(cb_data) {};
-// hipMemGetHandleForAddressRange()
-#define INIT_hipMemGetHandleForAddressRange_CB_ARGS_DATA(cb_data) {};
 // hipTexObjectCreate()
 #define INIT_hipTexObjectCreate_CB_ARGS_DATA(cb_data) {};
 // hipTexObjectDestroy()
@@ -6821,6 +6856,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDevicePrimaryCtxSetFlags[('hipDevice_t', 'dev'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipDevicePrimaryCtxSetFlags:
       break;
+// hipDeviceRegisterAsyncNotification[('hipDevice_t', 'device'), ('hipAsyncCallback_t', 'callbackFunc'), ('void*', 'userData'), ('hipAsyncCallbackHandle_t*', 'callback')]
+    case HIP_API_ID_hipDeviceRegisterAsyncNotification:
+      if (data->args.hipDeviceRegisterAsyncNotification.callback) data->args.hipDeviceRegisterAsyncNotification.callback__val = *(data->args.hipDeviceRegisterAsyncNotification.callback);
+      break;
 // hipDeviceReset[]
     case HIP_API_ID_hipDeviceReset:
       break;
@@ -6845,6 +6884,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDeviceTotalMem[('size_t*', 'bytes'), ('hipDevice_t', 'device')]
     case HIP_API_ID_hipDeviceTotalMem:
       if (data->args.hipDeviceTotalMem.bytes) data->args.hipDeviceTotalMem.bytes__val = *(data->args.hipDeviceTotalMem.bytes);
+      break;
+// hipDeviceUnregisterAsyncNotification[('hipDevice_t', 'device'), ('hipAsyncCallbackHandle_t', 'callback')]
+    case HIP_API_ID_hipDeviceUnregisterAsyncNotification:
       break;
 // hipDriverGetVersion[('int*', 'driverVersion')]
     case HIP_API_ID_hipDriverGetVersion:
@@ -7043,9 +7085,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipGetDriverEntryPoint.symbol) data->args.hipGetDriverEntryPoint.symbol__val = *(data->args.hipGetDriverEntryPoint.symbol);
       if (data->args.hipGetDriverEntryPoint.funcPtr) data->args.hipGetDriverEntryPoint.funcPtr__val = *(data->args.hipGetDriverEntryPoint.funcPtr);
       if (data->args.hipGetDriverEntryPoint.driverStatus) data->args.hipGetDriverEntryPoint.driverStatus__val = *(data->args.hipGetDriverEntryPoint.driverStatus);
-      break;
-// hipGetErrorString[]
-    case HIP_API_ID_hipGetErrorString:
       break;
 // hipGetFuncBySymbol[('hipFunction_t*', 'functionPtr'), ('const void*', 'symbolPtr')]
     case HIP_API_ID_hipGetFuncBySymbol:
@@ -7661,6 +7700,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipMemGetAllocationPropertiesFromHandle:
       if (data->args.hipMemGetAllocationPropertiesFromHandle.prop) data->args.hipMemGetAllocationPropertiesFromHandle.prop__val = *(data->args.hipMemGetAllocationPropertiesFromHandle.prop);
       break;
+// hipMemGetHandleForAddressRange[('void*', 'handle'), ('hipDeviceptr_t', 'dptr'), ('size_t', 'size'), ('hipMemRangeHandleType', 'handleType'), ('unsigned long long', 'flags')]
+    case HIP_API_ID_hipMemGetHandleForAddressRange:
+      break;
 // hipMemGetInfo[('size_t*', 'free'), ('size_t*', 'total')]
     case HIP_API_ID_hipMemGetInfo:
       if (data->args.hipMemGetInfo.free) data->args.hipMemGetInfo.free__val = *(data->args.hipMemGetInfo.free);
@@ -7954,6 +7996,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipModuleGetFunction.function) data->args.hipModuleGetFunction.function__val = *(data->args.hipModuleGetFunction.function);
       if (data->args.hipModuleGetFunction.kname) data->args.hipModuleGetFunction.kname__val = *(data->args.hipModuleGetFunction.kname);
       break;
+// hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
+    case HIP_API_ID_hipModuleGetFunctionCount:
+      if (data->args.hipModuleGetFunctionCount.count) data->args.hipModuleGetFunctionCount.count__val = *(data->args.hipModuleGetFunctionCount.count);
+      break;
 // hipModuleGetGlobal[('hipDeviceptr_t*', 'dptr'), ('size_t*', 'bytes'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
     case HIP_API_ID_hipModuleGetGlobal:
       if (data->args.hipModuleGetGlobal.dptr) data->args.hipModuleGetGlobal.dptr__val = *(data->args.hipModuleGetGlobal.dptr);
@@ -7978,10 +8024,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipModuleLaunchKernel.kernelParams) data->args.hipModuleLaunchKernel.kernelParams__val = *(data->args.hipModuleLaunchKernel.kernelParams);
       if (data->args.hipModuleLaunchKernel.extra) data->args.hipModuleLaunchKernel.extra__val = *(data->args.hipModuleLaunchKernel.extra);
       break;
-// hipModuleLoadFatBinary[('hipModule_t*', 'module'), ('const void*', 'fatbin')]
-    case HIP_API_ID_hipModuleLoadFatBinary:
-      if (data->args.hipModuleLoadFatBinary.module) data->args.hipModuleLoadFatBinary.module__val = *(data->args.hipModuleLoadFatBinary.module);
-      break;
 // hipModuleLoad[('hipModule_t*', 'module'), ('const char*', 'fname')]
     case HIP_API_ID_hipModuleLoad:
       if (data->args.hipModuleLoad.module) data->args.hipModuleLoad.module__val = *(data->args.hipModuleLoad.module);
@@ -7996,6 +8038,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipModuleLoadDataEx.module) data->args.hipModuleLoadDataEx.module__val = *(data->args.hipModuleLoadDataEx.module);
       if (data->args.hipModuleLoadDataEx.options) data->args.hipModuleLoadDataEx.options__val = *(data->args.hipModuleLoadDataEx.options);
       if (data->args.hipModuleLoadDataEx.optionsValues) data->args.hipModuleLoadDataEx.optionsValues__val = *(data->args.hipModuleLoadDataEx.optionsValues);
+      break;
+// hipModuleLoadFatBinary[('hipModule_t*', 'module'), ('const void*', 'fatbin')]
+    case HIP_API_ID_hipModuleLoadFatBinary:
+      if (data->args.hipModuleLoadFatBinary.module) data->args.hipModuleLoadFatBinary.module__val = *(data->args.hipModuleLoadFatBinary.module);
       break;
 // hipModuleOccupancyMaxActiveBlocksPerMultiprocessor[('int*', 'numBlocks'), ('hipFunction_t', 'f'), ('int', 'blockSize'), ('size_t', 'dynSharedMemPerBlk')]
     case HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor:
@@ -8109,7 +8155,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipStreamEndCapture:
       if (data->args.hipStreamEndCapture.pGraph) data->args.hipStreamEndCapture.pGraph__val = *(data->args.hipStreamEndCapture.pGraph);
       break;
-// hipStreamGetAttribute[('hipStream_t', 'stream'), ('hipLaunchAttributeID', 'attr'), ('const hipLaunchAttributeValue*', 'value_out')]
+// hipStreamGetAttribute[('hipStream_t', 'stream'), ('hipLaunchAttributeID', 'attr'), ('hipLaunchAttributeValue*', 'value_out')]
     case HIP_API_ID_hipStreamGetAttribute:
       if (data->args.hipStreamGetAttribute.value_out) data->args.hipStreamGetAttribute.value_out__val = *(data->args.hipStreamGetAttribute.value_out);
       break;
@@ -8284,10 +8330,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipWaitExternalSemaphoresAsync:
       if (data->args.hipWaitExternalSemaphoresAsync.extSemArray) data->args.hipWaitExternalSemaphoresAsync.extSemArray__val = *(data->args.hipWaitExternalSemaphoresAsync.extSemArray);
       if (data->args.hipWaitExternalSemaphoresAsync.paramsArray) data->args.hipWaitExternalSemaphoresAsync.paramsArray__val = *(data->args.hipWaitExternalSemaphoresAsync.paramsArray);
-      break;
-// hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
-    case HIP_API_ID_hipModuleGetFunctionCount:
-      if (data->args.hipModuleGetFunctionCount.count) data->args.hipModuleGetFunctionCount.count__val = *(data->args.hipModuleGetFunctionCount.count);
       break;
     default: break;
   };
@@ -8671,6 +8713,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevicePrimaryCtxSetFlags.flags);
       oss << ")";
     break;
+    case HIP_API_ID_hipDeviceRegisterAsyncNotification:
+      oss << "hipDeviceRegisterAsyncNotification(";
+      oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceRegisterAsyncNotification.device);
+      oss << ", callbackFunc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceRegisterAsyncNotification.callbackFunc);
+      oss << ", userData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceRegisterAsyncNotification.userData);
+      if (data->args.hipDeviceRegisterAsyncNotification.callback == NULL) oss << ", callback=NULL";
+      else { oss << ", callback="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceRegisterAsyncNotification.callback__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipDeviceReset:
       oss << "hipDeviceReset(";
       oss << ")";
@@ -8713,6 +8764,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipDeviceTotalMem.bytes == NULL) oss << "bytes=NULL";
       else { oss << "bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceTotalMem.bytes__val); }
       oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceTotalMem.device);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceUnregisterAsyncNotification:
+      oss << "hipDeviceUnregisterAsyncNotification(";
+      oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceUnregisterAsyncNotification.device);
+      oss << ", callback="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceUnregisterAsyncNotification.callback);
       oss << ")";
     break;
     case HIP_API_ID_hipDriverGetVersion:
@@ -9096,10 +9153,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGetDriverEntryPoint.flags);
       if (data->args.hipGetDriverEntryPoint.driverStatus == NULL) oss << ", driverStatus=NULL";
       else { oss << ", driverStatus="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGetDriverEntryPoint.driverStatus__val); }
-      oss << ")";
-    break;
-    case HIP_API_ID_hipGetErrorString:
-      oss << "hipGetErrorString(";
       oss << ")";
     break;
     case HIP_API_ID_hipGetFuncBySymbol:
@@ -10351,6 +10404,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetAllocationPropertiesFromHandle.handle);
       oss << ")";
     break;
+    case HIP_API_ID_hipMemGetHandleForAddressRange:
+      oss << "hipMemGetHandleForAddressRange(";
+      oss << "handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetHandleForAddressRange.handle);
+      oss << ", dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetHandleForAddressRange.dptr);
+      oss << ", size="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetHandleForAddressRange.size);
+      oss << ", handleType="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetHandleForAddressRange.handleType);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetHandleForAddressRange.flags);
+      oss << ")";
+    break;
     case HIP_API_ID_hipMemGetInfo:
       oss << "hipMemGetInfo(";
       if (data->args.hipMemGetInfo.free == NULL) oss << "free=NULL";
@@ -11084,6 +11146,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", kname="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunction.kname__val); }
       oss << ")";
     break;
+    case HIP_API_ID_hipModuleGetFunctionCount:
+      oss << "hipModuleGetFunctionCount(";
+      if (data->args.hipModuleGetFunctionCount.count == NULL) oss << "count=NULL";
+      else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.count__val); }
+      oss << ", mod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.mod);
+      oss << ")";
+    break;
     case HIP_API_ID_hipModuleGetGlobal:
       oss << "hipModuleGetGlobal(";
       if (data->args.hipModuleGetGlobal.dptr == NULL) oss << "dptr=NULL";
@@ -11144,13 +11213,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", extra="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLaunchKernel.extra__val); }
       oss << ")";
     break;
-    case HIP_API_ID_hipModuleLoadFatBinary:
-      oss << "hipModuleLoadFatBinary(";
-      if (data->args.hipModuleLoadFatBinary.module == NULL) oss << "module=NULL";
-      else { oss << "module="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLoadFatBinary.module__val); }
-      oss << ", fatbin="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLoadFatBinary.fatbin);
-      oss << ")";
-    break;
     case HIP_API_ID_hipModuleLoad:
       oss << "hipModuleLoad(";
       if (data->args.hipModuleLoad.module == NULL) oss << "module=NULL";
@@ -11176,6 +11238,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", options="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLoadDataEx.options__val); }
       if (data->args.hipModuleLoadDataEx.optionsValues == NULL) oss << ", optionsValues=NULL";
       else { oss << ", optionsValues="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLoadDataEx.optionsValues__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipModuleLoadFatBinary:
+      oss << "hipModuleLoadFatBinary(";
+      if (data->args.hipModuleLoadFatBinary.module == NULL) oss << "module=NULL";
+      else { oss << "module="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLoadFatBinary.module__val); }
+      oss << ", fatbin="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleLoadFatBinary.fatbin);
       oss << ")";
     break;
     case HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor:
@@ -11733,13 +11802,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", paramsArray="; roctracer::hip_support::detail::operator<<(oss, data->args.hipWaitExternalSemaphoresAsync.paramsArray__val); }
       oss << ", numExtSems="; roctracer::hip_support::detail::operator<<(oss, data->args.hipWaitExternalSemaphoresAsync.numExtSems);
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipWaitExternalSemaphoresAsync.stream);
-      oss << ")";
-    break;
-    case HIP_API_ID_hipModuleGetFunctionCount:
-      oss << "hipModuleGetFunctionCount(";
-      if (data->args.hipModuleGetFunctionCount.count == NULL) oss << "count=NULL";
-      else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.count__val); }
-      oss << ", mod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.mod);
       oss << ")";
     break;
     default: oss << "unknown";
