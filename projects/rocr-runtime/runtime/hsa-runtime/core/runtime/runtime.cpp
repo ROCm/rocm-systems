@@ -55,7 +55,6 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include "hsakmt/hsakmt_drm.h"
 #else
 #define debug_warning(__VA_ARGS__)
 #endif

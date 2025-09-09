@@ -337,13 +337,13 @@ inline size_t PageSize();
 /// @param: None
 uint64_t TimeNanos();
 
-using address = void*;
+using address = char*;
 enum MemProt { MEM_PROT_NONE = 0, MEM_PROT_READ, MEM_PROT_RW, MEM_PROT_RWX };
 
 /// @brief Reserves a chunk of memory (priv | anon | noreserve)
 /// @param:
-address ReserveMemory(address start, size_t size, size_t alignment = 0,
-                      MemProt prot = MEM_PROT_NONE);
+void* ReserveMemory(void* start, size_t size, size_t alignment = 0,
+                    MemProt prot = MEM_PROT_NONE);
 
 /// Release a chunk of memory reserved with reserveMemory.
 bool ReleaseMemory(void* addr, size_t size);

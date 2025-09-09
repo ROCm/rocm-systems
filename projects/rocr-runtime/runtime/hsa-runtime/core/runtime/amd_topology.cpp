@@ -90,7 +90,7 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #endif
                  >
     discover_driver_funcs = {
-        KfdDriver::DiscoverDriver,
+        KfdDriver::DiscoverDriver
 #ifdef __linux__
         , XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED

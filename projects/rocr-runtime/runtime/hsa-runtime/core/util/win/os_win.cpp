@@ -416,7 +416,7 @@ size_t PageSize() {
   return g_page_size_;
 }
 
-address ReserveMemory(address start, size_t size, size_t alignment, MemProt prot) {
+void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size = AlignUp(size, PageSize());
   if (allocationGranularity_ == 0) {
     SYSTEM_INFO si;

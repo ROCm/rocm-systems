@@ -61,6 +61,7 @@
 #include <utility>
 #include <semaphore.h>
 #include "core/inc/runtime.h"
+#include <sys/mman.h>
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -579,7 +580,7 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
   }
 
   int ret_code = 0;
-  
+
   if (!eventDescrp->state) {
     if (milli_seconds == 0) {
       ret_code = 1;
@@ -846,23 +847,23 @@ size_t PageSize() {
   return g_page_size_;
 }
 
-address ReserveMemory(address start, size_t size, size_t alignment, MemProt prot) {
-  size = alignUp(size, pageSize());
+void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
+  size = AlignUp(size, PageSize());
   // check for invalid input size
   if (size == 0) {
     return NULL;
   }
-  alignment = std::max(pageSize(), alignUp(alignment, pageSize()));
+  alignment = std::max(PageSize(), AlignUp(alignment, PageSize()));
   assert(IsPowerOfTwo(alignment) && "not a power of 2");
 
-  size_t requested = size + alignment - pageSize();
+  size_t requested = size + alignment - PageSize();
   address mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
                                 MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
 
   // check for out of memory
   if (mem == MAP_FAILED) return NULL;
 
-  address aligned = alignUp(mem, alignment);
+  address aligned = AlignUp(mem, alignment);
 
   // return the unused leading pages to the free state
   if (&aligned[0] != &mem[0]) {
@@ -880,11 +881,11 @@ address ReserveMemory(address start, size_t size, size_t alignment, MemProt prot
   }
 
   // Hint to enable THP for large host allocations which can help in performance gain
-  constexpr size_t kLargePageSize = 2 * Mi;
+  constexpr size_t kLargePageSize = 2 * 1024 * 1024;
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+      LogPrint(HSA_AMD_LOG_FLAG_INFO,
               "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));
@@ -895,23 +896,23 @@ address ReserveMemory(address start, size_t size, size_t alignment, MemProt prot
 }
 
 bool ReleaseMemory(void* addr, size_t size) {
-  assert(isMultipleOf(addr, pageSize()) && "not page aligned!");
-  size = alignUp(size, pageSize());
+  assert(IsMultipleOf(addr, PageSize()) && "not page aligned!");
+  size = AlignUp(size, PageSize());
 
   return 0 == ::munmap(addr, size);
 }
 
 bool CommitMemory(void* addr, size_t size, MemProt prot) {
-  assert(isMultipleOf(addr, pageSize()) && "not page aligned!");
-  size = alignUp(size, pageSize());
+  assert(IsMultipleOf(addr, PageSize()) && "not page aligned!");
+  size = AlignUp(size, PageSize());
 
-  return ::mmap(addr, size, memProtToOsProt(prot), MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1,
+  return ::mmap(addr, size, MemProtToOsProt(prot), MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1,
                 0) != MAP_FAILED;
 }
 
 bool UncommitMemory(void* addr, size_t size) {
-  assert(isMultipleOf(addr, pageSize()) && "not page aligned!");
-  size = alignUp(size, pageSize());
+  assert(IsMultipleOf(addr, PageSize()) && "not page aligned!");
+  size = AlignUp(size, PageSize());
 
   return ::mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANONYMOUS, -1,
                 0) != MAP_FAILED;
@@ -930,7 +931,7 @@ uint64_t HostTotalPhysicalMemory() {
 
 int Ffs(int i) { return ffs(i); }
 
-int Ctz(uint64_t i) { return __builtin_ctz(i); } 
+int Ctz(uint64_t i) { return __builtin_ctz(i); }
 
 char* DlError() { return dlerror(); }
 

@@ -43,11 +43,12 @@
 #include "core/inc/thunk_loader.h"
 #include "core/inc/runtime.h"
 
-#if defined(__linux__)
-#include <dlfcn.h>
-#endif 
 #include <core/util/os.h>
 #include <iostream>
+#if defined(__linux__)
+#include <dlfcn.h>
+#include <fcntl.h>
+#endif
 
 namespace rocr {
 namespace core {
@@ -506,7 +507,9 @@ ERROR:
       HSAKMT_PFN(hsaKmtPcSamplingStart) = (HSAKMT_DEF(hsaKmtPcSamplingStart)*)(&hsaKmtPcSamplingStart);
       HSAKMT_PFN(hsaKmtPcSamplingStop) = (HSAKMT_DEF(hsaKmtPcSamplingStop)*)(&hsaKmtPcSamplingStop);
       HSAKMT_PFN(hsaKmtPcSamplingSupport) = (HSAKMT_DEF(hsaKmtPcSamplingSupport)*)(&hsaKmtPcSamplingSupport);
+#if defined(_WIN32)
       HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)(&hsaKmtQueueRingDoorbell);
+#endif
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
