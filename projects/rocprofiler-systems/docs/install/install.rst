@@ -160,8 +160,10 @@ via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/rocprofiler-systems.git rocprof-sys-source
-   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON -DROCPROFSYS_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON -S rocprof-sys-source
+   git clone https://github.com/ROCm/rocm-systems.git
+   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON \
+         -DROCPROFSYS_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON \
+         -S rocm-systems/projects/rocprofiler-systems
 
 where ``-DROCPROFSYS_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by
 the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_BOOST=ON ...``
@@ -201,7 +203,7 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/rocprofiler-systems.git rocprof-sys-source
+   git clone git@github.com:ROCm/rocm-systems
    cmake                                                 \
        -B rocprof-sys-build                              \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
@@ -216,7 +218,7 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
        -D ROCPROFSYS_BUILD_BOOST=ON                      \
        -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
        -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
-       -S rocprof-sys-source
+       -S rocm-systems/projects/rocprofiler-systems
    cmake --build rocprof-sys-build --target all --parallel 8
    cmake --build rocprof-sys-build --target install
    source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh

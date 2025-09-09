@@ -6,7 +6,7 @@
 Understanding the Systems Profiler output
 ****************************************************
 
-The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is
+The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ is
 ``<OUTPUT_PATH>[/<TIMESTAMP>]/[<PREFIX>]<DATA_NAME>[-<OUTPUT_SUFFIX>].<EXT>``.
 
 For example, starting with the following base configuration:
