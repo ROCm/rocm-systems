@@ -589,8 +589,11 @@ rocprofiler_register_library_api_table(
     // rocprofiler library is dlopened and we have the functor to pass the API data
     auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
 
-    // TODO: upgrade this to use cmake define
-    auto _attachment_enabled = common::get_env<bool>("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", false);
+#if defined ROCP_REG_ALWAYS_SUPPORT_ATTACH && ROCP_REG_ALWAYS_SUPPORT_ATTACH == 1
+    auto _attachment_enabled = true;
+#else
+    auto _attachment_enabled = common::get_env<bool>("ROCPROFILER_REGISTER_ATTACHMENT_ENABLED", false);
+#endif
 
     rocp_import* _import_match = nullptr;
     for(auto& itr : import_info)
