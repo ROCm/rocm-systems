@@ -269,6 +269,7 @@ Filtering options
 ``-b``, ``--block <block-name>``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
@@ -480,6 +481,7 @@ If you want to focus only on roofline-specific performance data and reduce the t
 This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
 	a) If found, uses the data files with the provided arguments to create another roofline PDF output; otherwise,
 	b) Profile mode runs but is limited to collecting only roofline performance counters.
+Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
 Roofline options
 ----------------
