@@ -90,21 +90,6 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 
 ### Installation
 
-- Visit [Releases](https://github.com/ROCm/rocprofiler-systems/releases) page
-- Select appropriate installer (recommendation: `.sh` scripts do not require super-user priviledges unlike the DEB/RPM installers)
-  - If targeting a ROCm application, find the installer script with the matching ROCm version
-  - If you are unsure about your Linux distro, check `/etc/os-release` or use the `rocprofiler-systems-install.py` script
-
-If the above recommendation is not desired, download the `rocprofiler-systems-install.py` and specify `--prefix <install-directory>` when
-executing it. This script will attempt to auto-detect a compatible OS distribution and version.
-If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major version and `Y`
-is the ROCm minor version, e.g. `--rocm 6.2`.
-
-```console
-wget https://github.com/ROCm/rocprofiler-systems/releases/latest/download/rocprofiler-systems-install.py
-python3 ./rocprofiler-systems-install.py --prefix /opt/rocprofiler-systems --rocm 6.2
-```
-
 See the [ROCm Systems Profiler installation guide](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/install/install.html) for detailed information.
 
 ### Setup
