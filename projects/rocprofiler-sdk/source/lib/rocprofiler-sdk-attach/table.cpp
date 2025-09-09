@@ -36,6 +36,13 @@ RocAttachDispatchTable* get_dispatch_table()
     return dispatch_table;
 }
 
+void** get_dispatch_registration_table()
+{
+    static auto**& dispatch_registration_table = rocprofiler::common::static_object<RocAttachDispatchTable*>::construct();
+    *dispatch_registration_table = get_dispatch_table();
+    return reinterpret_cast<void**>(dispatch_registration_table);
+}
+
 void dispatch_table_init()
 {
     auto table = get_dispatch_table();
@@ -46,7 +53,7 @@ void dispatch_table_init()
     table->rocprofiler_attach_set_write_interceptor = &rocprofiler_attach_set_write_interceptor;
     table->rocprofiler_attach_iterate_all_code_objects = &rocprofiler_attach_iterate_all_code_objects;
     table->rocprofiler_attach_notify_new_queue = nullptr;
-    table->rocprofiler_attach_notify_code_object = nullptr;
+    table->rocprofiler_attach_notify_new_code_object = nullptr;
 };
 
 }
