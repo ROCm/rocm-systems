@@ -3,6 +3,7 @@
 set -e
 
 : ${USER:=$(whoami)}
+: ${TYPE:="base"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=24.04}
 : ${NJOBS=$(nproc)}
@@ -48,6 +49,7 @@ usage()
     print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
+    print_default_option type "[base|gfx]" "Type of image to create" "${TYPE}"
 }
 
 send-error()
@@ -71,6 +73,11 @@ do
         -h|--help)
             usage
             exit 0
+            ;;
+        "--type")
+            shift
+            TYPE=${1}
+            reset-last
             ;;
         "--distro")
             shift
@@ -174,7 +181,7 @@ do
     verbose-run docker build . \
         ${PULL} \
         -f ${DOCKER_FILE} \
-        --tag ${USER}/rocprofiler-systems:ci-base-${DISTRO}-${VERSION} \
+        --tag ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg NJOBS=${NJOBS} \
