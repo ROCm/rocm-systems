@@ -334,13 +334,12 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
-inline bool isPcieAtomicsSupported() {
-  int pcieAtomics = 1;
+inline bool isPcieAtomicSupported() {
+  int pcieAtomic = 1;
   int device;
   HIP_CHECK(hipGetDevice(&device));
-  HIPCHECK(hipDeviceGetAttribute(&pcieAtomics, hipDeviceAttributeHostNativeAtomicSupported,
-           device));
-  return pcieAtomics != 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, device));
+  return pcieAtomic;
 }
 
 inline bool isP2PSupported(int& d1, int& d2) {
@@ -549,12 +548,11 @@ class BlockingContext {
     return;                                                                                        \
   }
 
-// This must be called in host-device memory conherency tests
-#define CHECK_PCIE_ATOMICS_SUPPORT                                                                 \
-  if (!HipTest::isPcieAtomicsSupported()) {                                                        \
-    INFO("Pcie atomics is not support on the device. Skipped.");                                   \
+#define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \
+  if (!HipTest::isPcieAtomicSupported()) {                                                        \
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");                         \
     return;                                                                                        \
-  }
+  }   
 
 #define CHECK_P2P_SUPPORT                                                                          \
   int d1, d2;                                                                                      \
