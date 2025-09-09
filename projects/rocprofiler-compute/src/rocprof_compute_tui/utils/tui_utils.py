@@ -30,6 +30,7 @@ from enum import Enum
 from typing import Any, Hashable, Optional
 
 import pandas as pd
+from textual.widgets import TextArea
 
 import config
 
@@ -42,7 +43,7 @@ class LogLevel(str, Enum):
 
 
 class Logger:
-    def __init__(self, output_area: Optional[Any] = None) -> None:
+    def __init__(self, output_area: Optional[TextArea] = None) -> None:
         self.output_area = output_area
         self._setup_logger()
 
@@ -58,7 +59,7 @@ class Logger:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-    def set_output_area(self, output_area: Any) -> None:
+    def set_output_area(self, output_area: TextArea) -> None:
         self.output_area = output_area
 
     def log(

@@ -29,8 +29,6 @@ from typing import Any, Optional, Union
 
 from plotille import Canvas  # type: ignore
 
-from .utils import format_scientific_notation_if_needed
-
 
 def make_format_spec(num: Union[int, float], align: str = ">") -> str:
     """

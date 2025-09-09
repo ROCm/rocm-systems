@@ -410,15 +410,13 @@ class RocProfCompute_Base:
 
             # Kernel filtering (in-place replacement)
             if not args.kernel == None:
-                success, output = capture_subprocess_output(
-                    [
-                        "sed",
-                        "-i",
-                        "-r",
-                        f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                        fname,
-                    ]
-                )
+                success, output = capture_subprocess_output([
+                    "sed",
+                    "-i",
+                    "-r",
+                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
+                    fname,
+                ])
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -427,15 +425,13 @@ class RocProfCompute_Base:
 
             # Dispatch filtering (inplace replacement)
             if not args.dispatch == None:
-                success, output = capture_subprocess_output(
-                    [
-                        "sed",
-                        "-i",
-                        "-r",
-                        f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                        fname,
-                    ]
-                )
+                success, output = capture_subprocess_output([
+                    "sed",
+                    "-i",
+                    "-r",
+                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
+                    fname,
+                ])
                 # log output from profile filtering
                 if not success:
                     console_error(output)

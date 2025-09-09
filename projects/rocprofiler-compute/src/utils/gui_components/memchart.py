@@ -22,7 +22,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
-from typing import Any, Union
+from typing import Any
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
@@ -2127,11 +2127,11 @@ def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -
             exponent = value[e_index:]
             max_mantissa_len = max_length - len(exponent)
             if max_mantissa_len < 1:
-                value = f"{exponent[:max_length-1]}…"
+                value = f"{exponent[: max_length - 1]}…"
             else:
                 truncated_mantissa = mantissa[:max_mantissa_len]
                 value = truncated_mantissa + exponent
         else:
-            value = f"{value[:max_length-1]}…"
+            value = f"{value[: max_length - 1]}…"
 
     return value

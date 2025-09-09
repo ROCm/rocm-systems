@@ -25,7 +25,7 @@
 
 import argparse
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -51,14 +51,12 @@ class gfx942_soc(OmniSoC_Base):
                 )
             )
 
-        self.set_compatible_profilers(
-            [
-                "rocprofv1",
-                "rocprofv2",
-                "rocprofv3",
-                "rocprofiler-sdk",
-            ]
-        )
+        self.set_compatible_profilers([
+            "rocprofv1",
+            "rocprofv2",
+            "rocprofv3",
+            "rocprofiler-sdk",
+        ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx942"))
 

@@ -29,7 +29,7 @@ Panel Widget Modules
 Contains the panel widgets used in the main layout.
 """
 
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from textual import on
 from textual.app import ComposeResult
