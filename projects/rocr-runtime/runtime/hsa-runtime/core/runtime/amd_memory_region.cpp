@@ -63,34 +63,6 @@ namespace AMD {
 size_t MemoryRegion::max_sysmem_alloc_size_ = 0;
 const size_t MemoryRegion::kPageSize_ = os::PageSize();
 
-bool MemoryRegion::RegisterMemory(void* ptr, size_t size, const HsaMemFlags& MemFlags) {
-  assert(ptr != NULL);
-  assert(size != 0);
-
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags(ptr, size, MemFlags));
-  return (status == HSAKMT_STATUS_SUCCESS);
-}
-
-void MemoryRegion::DeregisterMemory(void* ptr) { HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)); }
-
-bool MemoryRegion::MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* ptr,
-                                         size_t size, uint64_t* alternate_va,
-                                         HsaMemMapFlags map_flag) {
-  assert(num_node > 0);
-  assert(nodes != NULL);
-
-  *alternate_va = 0;
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
-      const_cast<void*>(ptr), size, alternate_va, map_flag, num_node, const_cast<uint32_t*>(nodes)));
-
-  return (status == HSAKMT_STATUS_SUCCESS);
-}
-
-bool MemoryRegion::MakeKfdMemoryUnresident(const void* ptr) {
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(const_cast<void*>(ptr)));
-  return (status == HSAKMT_STATUS_SUCCESS);
-}
-
 MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
                            bool extended_scope_fine_grain, bool user_visible, core::Agent* owner,
                            const HsaMemoryProperties& mem_props)
