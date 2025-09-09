@@ -51,12 +51,20 @@ DEFINE_BUFFER_TYPE_NAME(COUNTER_COLLECTION,
                         "COUNTER_COLLECTION",
                         "counter_collection",
                         "counter_collection_stats")
+DEFINE_BUFFER_TYPE_NAME(STREAMING_PERFORMANCE_MONITOR,
+                        "STREAMING_PERFORMANCE_MONITOR",
+                        "streaming_performance_monitor",
+                        "streaming_performance_monitor")
 DEFINE_BUFFER_TYPE_NAME(RCCL, "RCCL_API", "rccl_api_trace", "rccl_api_stats")
 DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
                         "MEMORY_ALLOCATION",
                         "memory_allocation_trace",
                         "memory_allocation_stats")
 DEFINE_BUFFER_TYPE_NAME(COUNTER_VALUES, "COUNTER_VALUES", "counter_values", "no_filename")
+DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_VALUES,
+                        "SPM_COUNTER_VALUES",
+                        "spm_counter_values",
+                        "no_filename")
 DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
                         "PC_SAMPLING_HOST_TRAP",
                         "pc_sampling_host_trap",
