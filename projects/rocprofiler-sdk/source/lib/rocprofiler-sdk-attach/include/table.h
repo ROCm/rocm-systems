@@ -35,7 +35,7 @@ typedef int  (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_ite
 typedef int  (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
 typedef int  (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t, void*);
 typedef void (*rocprofiler_attach_notify_new_queue_t)(hsa_queue_t*, hsa_agent_t, void*);
-typedef void (*rocprofiler_attach_notify_new_code_object_t)(hsa_executable_t);
+typedef void (*rocprofiler_attach_notify_new_code_object_t)(hsa_executable_t, void*);
 
 struct RocAttachDispatchTable
 {
@@ -45,7 +45,7 @@ struct RocAttachDispatchTable
     rocprofiler_attach_set_write_interceptor_t    rocprofiler_attach_set_write_interceptor;
     rocprofiler_attach_iterate_all_code_objects_t rocprofiler_attach_iterate_all_code_objects;
     rocprofiler_attach_notify_new_queue_t         rocprofiler_attach_notify_new_queue;
-    rocprofiler_attach_notify_new_code_object_t   rocprofiler_attach_notify_code_object;
+    rocprofiler_attach_notify_new_code_object_t   rocprofiler_attach_notify_new_code_object;
 };
 
 ROCPROFILER_EXTERN_C_FINI

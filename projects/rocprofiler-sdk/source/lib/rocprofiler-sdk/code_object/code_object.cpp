@@ -1141,6 +1141,25 @@ shutdown(hsa_executable_t executable)
 
     return _unloaded;
 }
+
+RocAttachDispatchTable** get_attach_table()
+{
+    static auto table = common::static_object<RocAttachDispatchTable*>::construct();
+    return table;
+}
+
+void iterate_attach_code_object(hsa_executable_t executable, void*)
+{
+    executable_freeze_internal(executable);
+}
+
+void load_attach_code_objects()
+{
+    auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
+    attach_table->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
+    attach_table->rocprofiler_attach_notify_new_code_object = iterate_attach_code_object;
+}
+
 }  // namespace
 
 void
@@ -1158,14 +1177,19 @@ initialize(HsaApiTable* table)
 
     if(_status == HSA_STATUS_SUCCESS)
     {
-        get_freeze_function()                = CHECK_NOTNULL(core_table.hsa_executable_freeze_fn);
-        get_destroy_function()               = CHECK_NOTNULL(core_table.hsa_executable_destroy_fn);
-        core_table.hsa_executable_freeze_fn  = executable_freeze;
-        core_table.hsa_executable_destroy_fn = executable_destroy;
-        ROCP_FATAL_IF(get_freeze_function() == core_table.hsa_executable_freeze_fn)
-            << "infinite recursion";
-        ROCP_FATAL_IF(get_destroy_function() == core_table.hsa_executable_destroy_fn)
-            << "infinite recursion";
+        if (*(get_attach_table()))
+        {
+            load_attach_code_objects();
+        } else {
+            get_freeze_function()                = CHECK_NOTNULL(core_table.hsa_executable_freeze_fn);
+            get_destroy_function()               = CHECK_NOTNULL(core_table.hsa_executable_destroy_fn);
+            core_table.hsa_executable_freeze_fn  = executable_freeze;
+            core_table.hsa_executable_destroy_fn = executable_destroy;
+            ROCP_FATAL_IF(get_freeze_function() == core_table.hsa_executable_freeze_fn)
+                << "infinite recursion";
+            ROCP_FATAL_IF(get_destroy_function() == core_table.hsa_executable_destroy_fn)
+                << "infinite recursion";
+        }
     }
 }
 
@@ -1226,15 +1250,12 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
             std::move(func));
 }
 
-void iterate_attach_code_object(hsa_executable_t executable, void*)
+void code_object_set_attach_table(RocAttachDispatchTable* attach_table)
 {
-    executable_freeze_internal(executable);
-}
-
-void load_attach_code_objects(RocAttachDispatchTable* attach_table)
-{
-    CHECK_NOTNULL(attach_table)->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
-    // TODO: add registration for new objects
+    // We need to save the attach table for later, when the code object module receives the HSA table and is initialized.
+    // We must get the attach table before HSA for correct behavior. This is guaranteed by rocprofiler-register.
+    ROCP_ERROR_IF(get_freeze_function()) << "Code object module was initialized before attach table was provided. Future HSA code objects may not be instrumented correctly.";
+    *(get_attach_table()) = attach_table;
 }
 
 }  // namespace code_object

@@ -22,6 +22,7 @@
 
 #include "include/queue_registration.h"
 #include "queue_registration.hpp"
+#include "table.hpp"
 
 #include "lib/common/static_object.hpp"
 
@@ -131,6 +132,13 @@ create_queue(hsa_agent_t        agent,
     *queue = new_queue;
 
     ROCP_INFO << "created attach queue for HSA agent handle " << agent.handle;
+
+    auto attach_table = rocprofiler::attach::get_dispatch_table();
+    if (attach_table->rocprofiler_attach_notify_new_queue)
+    {
+        attach_table->rocprofiler_attach_notify_new_queue(new_queue, agent, nullptr);
+    }
+
     return HSA_STATUS_SUCCESS;
 }
 
