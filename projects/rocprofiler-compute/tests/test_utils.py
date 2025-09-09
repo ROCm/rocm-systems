@@ -9359,3 +9359,19 @@ def test_alignment_and_width():
         max_length=8,
     )
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+# =============================================================================
+# TESTS FOR MODELESS COMMAND LINE OPTIONS
+# =============================================================================
+
+
+@pytest.mark.list_metrics
+def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
+    return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
+    assert return_code == 0
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "6 -> Workgroup Manager (SPI)" in output
+    assert "5.2 -> Command processor packet processor (CPC)" in output
