@@ -79,7 +79,7 @@ Causal profiling requires "progress points" to track progress through the code
 in between samples. Progress points must be triggered in a deterministic manner via instrumentation.
 This can happen in three different ways:
 
-* `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ can leverage the callbacks from
+* `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can leverage the callbacks from
   Kokkos-Tools, OpenMP-Tools, rocprofiler-sdk, etc. and the wrappers around functions for
   MPI, NUMA, RCCL, etc. to act as progress points
 * Users can leverage the :doc:`runtime instrumentation capabilities <./instrumenting-rewriting-binary-application>`

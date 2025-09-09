@@ -6,7 +6,7 @@
 Profiling Python scripts
 ****************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ supports profiling Python code at the
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports profiling Python code at the
 source level and the script level.
 Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
 ``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>`` CMake options.

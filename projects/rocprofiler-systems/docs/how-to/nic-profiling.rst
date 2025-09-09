@@ -6,7 +6,7 @@
 Network performance profiling
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ supports network profiling.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network profiling.
 
 All network events that can be traced on the system can be listed by running the command:
 

@@ -23,7 +23,7 @@ We welcome contributions to rocprofiler-systems.  Please follow these details to
 
 Please use the GitHub Issues tab to notify us of issues.
 
-* Use your best judgement for issue creation. Search [existing issues](https://github.com/ROCm/rocprofiler-systems/issues) to make sure your issue isn't already listed
+* Use your best judgement for issue creation. Search [existing issues](https://github.com/ROCm/rocm-systems/issues) to make sure your issue isn't already listed
 * If your issue is already listed, upvote the issue and comment or post to provide additional details, such as how you reproduced this issue.
 * If you're not sure if your issue is the same, err on the side of caution and file your issue. You can add a comment to include the issue number (and link) for the similar issue. If we evaluate your issue as being the same as the existing issue, we'll close the duplicate.
 * If your issue doesn't exist, use the issue template to file a new issue.
@@ -58,13 +58,13 @@ By creating a pull request, you agree to the statements made in the [code licens
 
 ### Setting Up the Development Environment ###
 
-* It is recommended to [fork](https://github.com/ROCm/rocprofiler-systems/fork) the repository.
-* Clone your forked repository: `git clone https://github.com/ROCm/<yourgithub-id>/rocprofiler-systems.git`
-* Navigate to the project directory: `cd rocprofiler-systems`
-* Set the original repository URL as the remote upstream using `git remote add upstream https://github.com/ROCm/rocprofiler-systems` (or `git remote set-url upstream https://github.com/ROCm/rocprofiler-systems`)
+* It is recommended to [fork](https://github.com/ROCm/rocm-systems/fork) the repository.
+* Clone your forked repository: `git clone https://github.com/ROCm/<yourgithub-id>/rocm-systems.git`
+* Navigate to the project directory: `cd rocm-systems`
+* Set the original repository URL as the remote upstream using `git remote add upstream https://github.com/ROCm/rocm-systems` (or `git remote set-url upstream https://github.com/ROCm/rocm-systems`)
 * Verify if origin and upstream points correctly with `git remote -v`.
 * Start a new branch for your work: `git checkout -b topic-<yourFeatureName>`
-* Build the project as outlined in [ROCm documentation](https://github.com/ROCm/rocprofiler-systems/blob/a03770c0606c23fda5e2c83782f2d188eb8522f5/docs/install/install.rst#building-and-installing-rocm-systems-profiler).
+* Build the project as outlined in [ROCm documentation](https://github.com/ROCm/rocprofiler-systems/blob/develop/docs/install/install.rst#building-and-installing-rocm-systems-profiler#building-rocm-systems-profiler-from-source).
 
 ### Running Tests ###
 
