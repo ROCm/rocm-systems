@@ -37,7 +37,9 @@ try:
 except ImportError:
     # In wheel package, softlink is not supported.
     # rocprof-compute will get installed in bin and libexec/rocprofiler-compute.
-    # When invoked from bin folder, the extra paths are required to import the dependent scripts
+    # When invoked from bin folder, the extra paths are required to import the
+    # dependent scripts
+
     try:
         current_path = Path(__file__).resolve().parent
         additional_path = current_path / "../libexec/rocprofiler-compute"

@@ -53,7 +53,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.specs import MachineSpecs
 
 rocprof_cmd = ""
 rocprof_args = ""
@@ -1212,7 +1211,7 @@ def detect_roofline(mspec: Any) -> dict[str, Any]:
     return target_binary
 
 
-def mibench(args: argparse.Namespace, mspec: MachineSpecs) -> None:
+def mibench(args: argparse.Namespace, mspec: Any) -> None:
     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
     console_log("roofline", "No roofline data found. Generating...")
 
