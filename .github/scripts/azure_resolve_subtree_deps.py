@@ -75,6 +75,7 @@ def main(argv=None) -> None:
     definition_ids = {
         "projects/rocprofiler-register": 327,
         "projects/rocprofiler": 329,
+        "projects/roctracer": 331,
         "projects/clr": 335,
         "projects/hip": 335,
         "prjects/hipother": 335

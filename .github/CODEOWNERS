@@ -55,11 +55,12 @@
 
 # rocr-runtime section-specific code owners
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd
+/projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd
 /projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl
-/projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri @dayatsin-amd
+/projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd
 
 # Documentation-specific ownership by project
