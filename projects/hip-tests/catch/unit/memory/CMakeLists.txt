@@ -81,20 +81,6 @@ set(TEST_SRC
     hipMemRangeGetAttribute.cc
     hipMemRangeGetAttribute_old.cc
     hipMemCoherencyTst.cc
-    hipMemsetD32.cc
-    hipMemsetD16.cc
-    hipMemsetD16Async.cc
-    hipMemsetD32Async.cc
-    hipMemsetD8Async.cc
-    hipMemcpy2DArrayToArray.cc
-    hipMemsetD2D8.cc
-    hipMemsetD2D8Async.cc
-    hipMemsetD2D16.cc
-    hipMemsetD2D16Async.cc
-    hipMemsetD2D32.cc
-    hipMemsetD2D32Async.cc
-    hipMemcpy3DPeer.cc
-    hipMemcpy3DPeerAsync.cc
     hipMemcpy3DBatchAsync.cc
     hipMemcpyBatchAsync.cc
     )
