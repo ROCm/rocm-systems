@@ -151,12 +151,6 @@ TEST_CASE("Unit_hipMemcpy3DPeerAsync_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemcpy3DPeerAsync_NegativeTsts") {
-  CHECK_IMAGE_SUPPORT
-  SECTION("Memcpy3DPeer Params struct as nullptr") {
-    hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(nullptr, stream), hipErrorInvalidValue);
-  }
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
   int numW = 16;
@@ -178,58 +172,74 @@ TEST_CASE("Unit_hipMemcpy3DPeerAsync_NegativeTsts") {
   hipArray_t array_2;
   hipChannelFormatDesc channelDesc_2 = hipCreateChannelDesc<char>();
   HIP_CHECK(hipMalloc3DArray(&array_2, &channelDesc_2, extent, 0));
-  SECTION("Invalid Memcpy3DPeer Params") {
-    hipMemcpy3DPeerParms peerCopyParams{};
-    peerCopyParams.dstArray = array_2;
-    peerCopyParams.dstPos = make_hipPos(0, 0, 0);
-    peerCopyParams.dstPtr = make_hipPitchedPtr(0, 0, 0, 0);
-    peerCopyParams.srcArray = array_1;
-    peerCopyParams.srcPos = make_hipPos(0, 0, 0);
-    peerCopyParams.srcPtr = make_hipPitchedPtr(0, 0, 0, 0);
-    peerCopyParams.extent = extent;
-    SECTION("Max Destination device id") {
-      peerCopyParams.dstDevice = device_count + 1;
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
-    }
-    SECTION("Max Source device id") {
-      peerCopyParams.srcDevice = device_count + 1;
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
-    }
-    SECTION("Neg Source device id") {
-      peerCopyParams.srcDevice = -1;
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
-    }
-    SECTION("Neg Destination device id") {
-      peerCopyParams.dstDevice = -1;
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
-    }
-    SECTION("Source Array as Null") {
-      peerCopyParams.srcArray = nullptr;
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
-    }
-    SECTION("Destination Array as Null") {
-      peerCopyParams.dstArray = nullptr;
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
-    }
-    SECTION("Passing Max value to extent") {
-      peerCopyParams.extent =
-          make_hipExtent(std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
-                         std::numeric_limits<int>::max());
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
-    }
-    SECTION("Passing width > max width size in extent") {
-      peerCopyParams.extent = make_hipExtent(numW + 1, numH, depth);
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
-    }
-    SECTION("Passing height > max height size in extent") {
-      peerCopyParams.extent = make_hipExtent(numW, numH + 1, depth);
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
-    }
-    SECTION("Passing depth > max depth size in extent") {
-      peerCopyParams.extent = make_hipExtent(numW, numH, depth + 1);
-      HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
-    }
+
+  hipMemcpy3DPeerParms peerCopyParams{};
+  peerCopyParams.dstArray = array_2;
+  peerCopyParams.dstPos = make_hipPos(0, 0, 0);
+  peerCopyParams.dstPtr = make_hipPitchedPtr(0, 0, 0, 0);
+  peerCopyParams.srcArray = array_1;
+  peerCopyParams.srcPos = make_hipPos(0, 0, 0);
+  peerCopyParams.srcPtr = make_hipPitchedPtr(0, 0, 0, 0);
+  peerCopyParams.extent = extent;
+
+  SECTION("Max Destination device id") {
+    peerCopyParams.dstDevice = device_count + 1;
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
   }
+
+  SECTION("Max Source device id") {
+    peerCopyParams.srcDevice = device_count + 1;
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
+  }
+
+  SECTION("Neg Source device id") {
+    peerCopyParams.srcDevice = -1;
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
+  }
+
+  SECTION("Neg Destination device id") {
+    peerCopyParams.dstDevice = -1;
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidDevice);
+  }
+
+  SECTION("Source Array as Null") {
+    peerCopyParams.srcArray = nullptr;
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("Destination Array as Null") {
+    peerCopyParams.dstArray = nullptr;
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("Passing Max value to extent") {
+    peerCopyParams.extent =
+        make_hipExtent(std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
+                       std::numeric_limits<int>::max());
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("Passing width > max width size in extent") {
+    peerCopyParams.extent = make_hipExtent(numW + 1, numH, depth);
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("Passing height > max height size in extent") {
+    peerCopyParams.extent = make_hipExtent(numW, numH + 1, depth);
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("Passing depth > max depth size in extent") {
+    peerCopyParams.extent = make_hipExtent(numW, numH, depth + 1);
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(&peerCopyParams, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("Memcpy3DPeer Params struct as nullptr") {
+    hipStream_t stream = nullptr;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(nullptr, stream), hipErrorInvalidValue);
+  }
+
   HIP_CHECK(hipFreeArray(array_1));
   HIP_CHECK(hipFreeArray(array_2));
   HIP_CHECK(hipStreamDestroy(stream));
