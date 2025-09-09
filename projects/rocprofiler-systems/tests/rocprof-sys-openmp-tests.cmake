@@ -29,32 +29,35 @@
 # #
 
 if(ROCmVersion_DIR)
-  set(_rocm_root "${ROCmVersion_DIR}")
+    set(_rocm_root "${ROCmVersion_DIR}")
 elseif(DEFINED ENV{ROCM_PATH})
-  set(_rocm_root "$ENV{ROCM_PATH}")
+    set(_rocm_root "$ENV{ROCM_PATH}")
 else()
-  set(_rocm_root "/opt/rocm")
+    set(_rocm_root "/opt/rocm")
 endif()
 
 set(_rocm_llvm_lib "${_rocm_root}/lib/llvm/lib")
 
-set(_rocm_ld_env "LD_PRELOAD=libomptarget.so"
-                 "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}")
+set(_rocm_ld_env
+    "LD_PRELOAD=libomptarget.so"
+    "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}"
+)
 
 if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
-  message(
-    FATAL_ERROR
-      "libomptarget.so not found in ${_rocm_llvm_lib}. "
-      "Verify that ROCm is installed correctly and that _rocm_root "
-      "(${_rocm_root}) points at the right location.")
+    message(
+        FATAL_ERROR
+        "libomptarget.so not found in ${_rocm_llvm_lib}. "
+        "Verify that ROCm is installed correctly and that _rocm_root "
+        "(${_rocm_root}) points at the right location."
+    )
 endif()
 
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
-  set(_OMPT_PASS_REGEX "\\|_omp_")
-  set(_OMPVV_TARGET_PASS_REGEX "_+omp_offloading")
+    set(_OMPT_PASS_REGEX "\\|_omp_")
+    set(_OMPVV_TARGET_PASS_REGEX "_+omp_offloading")
 else()
-  set(_OMPT_PASS_REGEX "")
-  set(_OMPVV_OFFLOAD_PASS_REGEX "")
+    set(_OMPT_PASS_REGEX "")
+    set(_OMPVV_OFFLOAD_PASS_REGEX "")
 endif()
 
 rocprofiler_systems_add_test(
@@ -87,7 +90,8 @@ rocprofiler_systems_add_test(
   RUNTIME_PASS_REGEX
   "${_OMPT_PASS_REGEX}"
   REWRITE_FAIL_REGEX
-  "0 instrumented loops in procedure")
+  "0 instrumented loops in procedure"
+)
 
 rocprofiler_systems_add_test(
   SKIP_RUNTIME
@@ -120,7 +124,8 @@ rocprofiler_systems_add_test(
   REWRITE_RUN_PASS_REGEX
   "${_OMPT_PASS_REGEX}"
   REWRITE_FAIL_REGEX
-  "0 instrumented loops in procedure")
+  "0 instrumented loops in procedure"
+)
 
 rocprofiler_systems_add_test(
   SKIP_RUNTIME
@@ -161,67 +166,70 @@ rocprofiler_systems_add_validation_test(
   0
   0
   0
-  -p)
+  -p
+)
 
 # OpenMP tests generated using OMPVV binaries
 if(ROCPROFSYS_OMPVV_HOST_TESTS)
-  foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
-    rocprofiler_systems_add_test(
-      SKIP_RUNTIME
-      NAME
-      ${HOST_TEST_NAME}
-      TARGET
-      ${HOST_TEST_NAME}
-      LABELS
-      "openmp"
-      REWRITE_ARGS
-      -e
-      -v
-      2
-      --instrument-loops
-      RUNTIME_ARGS
-      -e
-      -v
-      1
-      --label
-      return
-      args
-      -E
-      ^GOMP
-      REWRITE_TIMEOUT
-      180
-      RUNTIME_TIMEOUT
-      360
-      ENVIRONMENT
-      "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
-      REWRITE_RUN_PASS_REGEX
-      "${_OMPT_PASS_REGEX}"
-      REWRITE_FAIL_REGEX
-      "0 instrumented loops in procedure")
-  endforeach()
+    foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
+        rocprofiler_systems_add_test(
+          SKIP_RUNTIME
+          NAME
+          ${HOST_TEST_NAME}
+          TARGET
+          ${HOST_TEST_NAME}
+          LABELS
+          "openmp"
+          REWRITE_ARGS
+          -e
+          -v
+          2
+          --instrument-loops
+          RUNTIME_ARGS
+          -e
+          -v
+          1
+          --label
+          return
+          args
+          -E
+          ^GOMP
+          REWRITE_TIMEOUT
+          180
+          RUNTIME_TIMEOUT
+          360
+          ENVIRONMENT
+          "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+          REWRITE_RUN_PASS_REGEX
+          "${_OMPT_PASS_REGEX}"
+          REWRITE_FAIL_REGEX
+          "0 instrumented loops in procedure"
+        )
+    endforeach()
 endif()
 
 if(ROCPROFSYS_OMPVV_OFFLOAD_TESTS)
-  foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
-    rocprofiler_systems_add_test(
-      SKIP_RUNTIME
-      NAME
-      ${OFFLOAD_TEST_NAME}
-      TARGET
-      ${OFFLOAD_TEST_NAME}
-      GPU
-      ON
-      LABELS
-      "openmp"
-      REWRITE_ARGS
-      -e
-      -v
-      2
-      ENVIRONMENT
-      "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
-      REWRITE_RUN_PASS_REGEX
-      "${_OMPVV_OFFLOAD_PASS_REGEX}")
-  endforeach()
+    foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
+        rocprofiler_systems_add_test(
+          SKIP_RUNTIME
+          NAME
+          ${OFFLOAD_TEST_NAME}
+          TARGET
+          ${OFFLOAD_TEST_NAME}
+          GPU
+          ON
+          LABELS
+          "openmp"
+          REWRITE_ARGS
+          -e
+          -v
+          2
+          ENVIRONMENT
+          "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
+          REWRITE_RUN_PASS_REGEX
+          "${_OMPVV_OFFLOAD_PASS_REGEX}"
+        )
+    endforeach()
 endif()
 
 set(_ompt_sampling_environ
@@ -237,7 +245,8 @@ set(_ompt_sampling_environ
     "ROCPROFSYS_SAMPLING_REALTIME=ON"
     "ROCPROFSYS_SAMPLING_CPUTIME_FREQ=1000"
     "ROCPROFSYS_SAMPLING_REALTIME_FREQ=500"
-    "ROCPROFSYS_MONOCHROME=ON")
+    "ROCPROFSYS_MONOCHROME=ON"
+)
 
 set(_ompt_sample_no_tmpfiles_environ
     "${_ompt_environment}"
@@ -249,7 +258,8 @@ set(_ompt_sample_no_tmpfiles_environ
     "ROCPROFSYS_SAMPLING_REALTIME=OFF"
     "ROCPROFSYS_SAMPLING_CPUTIME_FREQ=700"
     "ROCPROFSYS_USE_TEMPORARY_FILES=OFF"
-    "ROCPROFSYS_MONOCHROME=ON")
+    "ROCPROFSYS_MONOCHROME=ON"
+)
 
 set(_ompt_sampling_samp_regex
     "Sampler for thread 0 will be triggered 1000.0x per second of CPU-time(.*)Sampler for thread 0 will be triggered 500.0x per second of wall-time(.*)Sampling will be disabled after 0.250000 seconds(.*)Sampling duration of 0.250000 seconds has elapsed. Shutting down sampling"
@@ -274,7 +284,8 @@ rocprofiler_systems_add_test(
   ENVIRONMENT
   "${_ompt_sampling_environ}"
   SAMPLING_PASS_REGEX
-  "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}")
+  "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}"
+)
 
 rocprofiler_systems_add_test(
   SKIP_BASELINE
@@ -289,7 +300,8 @@ rocprofiler_systems_add_test(
   ENVIRONMENT
   "${_ompt_sampling_environ}"
   SAMPLING_PASS_REGEX
-  "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}")
+  "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}"
+)
 
 rocprofiler_systems_add_test(
   SKIP_BASELINE
@@ -304,4 +316,5 @@ rocprofiler_systems_add_test(
   ENVIRONMENT
   "${_ompt_sample_no_tmpfiles_environ}"
   SAMPLING_PASS_REGEX
-  "${_notmp_sampling_file_regex}")
+  "${_notmp_sampling_file_regex}"
+)
