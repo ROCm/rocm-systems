@@ -28,6 +28,8 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -343,6 +345,44 @@ checkValidMetric(const std::string& agent, const Metric& metric)
     auto        metrics   = loadMetrics();
     const auto* agent_map = common::get_val(metrics->arch_to_id, agent);
     return agent_map != nullptr && agent_map->count(metric.id()) > 0;
+}
+
+const std::set<uint64_t>*
+getSupportedSPMCounters(rocprofiler_agent_id_t agent_id)
+{
+    const auto* agent = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+
+    static auto*& map =
+        common::static_object<std::unordered_map<std::string, std::set<uint64_t>>>::construct();
+
+    static std::mutex mut{};
+    auto              lock = std::unique_lock{mut};
+
+    if(map->find(agent->name) != map->end()) return &map->at(agent->name);
+
+    std::set<uint64_t> ret{};
+
+    SPM::Dlsym sym{};
+    ROCP_FATAL_IF(!sym.valid()) << "SPM sym is not valid";
+
+    auto metrics   = getMetricsForAgent(agent->name);
+    auto aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent_id));
+
+    for(auto& metric : metrics)
+    {
+        if(metric.event().empty()) continue;  // Skip derived
+
+        auto query_info = rocprofiler::aql::get_query_info(agent_id, metric);
+
+        aqlprofile_pmc_event_t event{};
+        event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+        event.event_id   = std::atoi(metric.event().c_str());
+
+        if(sym.is_supported_fn(aql_agent, event)) ret.insert(metric.id());
+    }
+
+    map->emplace(agent->name, std::move(ret));
+    return &map->at(agent->name);
 }
 
 bool
