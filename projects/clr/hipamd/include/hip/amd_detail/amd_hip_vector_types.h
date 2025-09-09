@@ -41,7 +41,7 @@ THE SOFTWARE.
 #define __HIP_USE_NATIVE_VECTOR__ 1
 #define __NATIVE_VECTOR__(n, T) T __attribute__((ext_vector_type(n)))
 #else
-#define __NATIVE_VECTOR__(n, T) alignas(__hip_vec_align_v<T, n>()) T[n]
+#define __NATIVE_VECTOR__(n, T) T[n]
 #endif
 
 #if defined(__cplusplus)
@@ -50,10 +50,6 @@ THE SOFTWARE.
 #include <iosfwd>
 #include <type_traits>
 #endif  // defined(__HIPCC_RTC__)
-
-template <class T, int _hip_N> constexpr __hip_internal::size_t __hip_vec_align_v() {
-  return (_hip_N == 4 && alignof(T) == 8) ? 16 : _hip_N * alignof(T);
-}
 
 template <typename T, unsigned int n> struct HIP_vector_base;
 template <typename T, unsigned int rank> struct HIP_vector_type;
@@ -111,7 +107,7 @@ template <typename T> struct HIP_vector_base<T, 1> {
   HIP_vector_base& operator=(const HIP_vector_base&) = default;
 };
 
-template <typename T> struct alignas(alignof(__NATIVE_VECTOR__(2, T))) HIP_vector_base<T, 2> {
+template <typename T> struct alignas(2 * sizeof(T)) HIP_vector_base<T, 2> {
   using Native_vec_ = __NATIVE_VECTOR__(2, T);
 
   T x, y;
@@ -268,7 +264,7 @@ template <typename T> struct HIP_vector_base<T, 3> {
   HIP_vector_base& operator=(HIP_vector_base&&) = default;
 };
 
-template <typename T> struct alignas(__NATIVE_VECTOR__(4, T)) HIP_vector_base<T, 4> {
+template <typename T> struct alignas(4 * sizeof(T)) HIP_vector_base<T, 4> {
   using Native_vec_ = __NATIVE_VECTOR__(4, T);
 
   T x, y, z, w;
