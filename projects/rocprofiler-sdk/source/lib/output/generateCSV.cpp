@@ -625,9 +625,9 @@ generate_csv(const output_config&                    cfg,
             const auto* kernel_info    = tool_metadata.get_kernel_symbol(kernel_id);
             auto        lds_block_size_v =
                 (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
-
             auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
-            auto row_ss    = std::stringstream{};
+
+            auto row_ss = std::stringstream{};
             for(auto& [counter_id, counter_value] : counter_id_value)
             {
                 tool::csv::counter_collection_csv_encoder::write_row(
@@ -1014,5 +1014,107 @@ generate_csv(const output_config& cfg,
         ofs << _row.str() << std::flush;
     }
 }
+
+void
+generate_csv(const output_config&                        cfg,
+             const metadata&                             tool_metadata,
+             const generator<tool_spm_counter_record_t>& data,
+             const stats_entry_t&                        stats)
+{
+    if(data.empty()) return;
+    if(cfg.stats && stats)
+        write_stats(get_stats_output_file(cfg, domain_type::STREAMING_PERFORMANCE_MONITOR),
+                    stats.entries);
+
+    auto ofs = tool::csv_output_file{cfg,
+                                     domain_type::STREAMING_PERFORMANCE_MONITOR,
+                                     tool::csv::spm_csv_encoder{},
+                                     {"Correlation_Id",
+                                      "Dispatch_Id",
+                                      "Agent_Id",
+                                      "Queue_Id",
+                                      "Process_Id",
+                                      "Thread_Id",
+                                      "Grid_Size",
+                                      "Kernel_Id",
+                                      "Kernel_Name",
+                                      "Workgroup_Size",
+                                      "LDS_Block_Size",
+                                      "Scratch_Size",
+                                      "VGPR_Count",
+                                      "Accum_VGPR_Count",
+                                      "SGPR_Count",
+                                      "Counter_Name",
+                                      "Counter_Value",
+                                      "Sample_Timestamp"}};
+
+    auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
+    for(const auto& itr : tool_metadata.get_counter_info())
+        counter_id_to_name.emplace(itr.id, itr.name);
+
+    for(auto ditr : data)
+    {
+        for(auto record : data.get(ditr))
+        {
+            auto row_ss        = std::stringstream{};
+            auto record_vector = record.read();
+
+            auto        dispatch_data  = record.dispatch_data;
+            auto        kernel_id      = dispatch_data.dispatch_info.kernel_id;
+            const auto& correlation_id = dispatch_data.correlation_id;
+            const auto* kernel_info    = tool_metadata.get_kernel_symbol(kernel_id);
+            auto        lds_block_size_v =
+                (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
+
+            auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
+
+            for(auto& count : record_vector)
+            {
+                auto counter_name_dim = std::stringstream{};
+                auto dimensions       = tool_metadata.get_counter_dimension_info();
+                counter_name_dim << counter_id_to_name.at(count.id) << "[";
+                size_t dim_count = -1;
+                auto   delim     = ",";
+                for(auto dim : dimensions)
+                {
+                    size_t pos = 0;
+                    dim_count++;
+                    ROCPROFILER_CHECK(rocprofiler_query_record_dimension_position(
+                        count.instance_id, dim.id, &pos));
+                    counter_name_dim << std::string(dim.name).erase(0, 10) << ":" << pos;
+                    if(dim_count != dimensions.size() - 1) counter_name_dim << delim;
+                }
+                counter_name_dim << "]";
+
+                tool::csv::spm_csv_encoder::write_row(
+                    row_ss,
+                    correlation_id.internal,
+                    dispatch_data.dispatch_info.dispatch_id,
+                    tool_metadata
+                        .get_agent_index(dispatch_data.dispatch_info.agent_id,
+                                         cfg.agent_index_value)
+                        .as_string(),
+                    dispatch_data.dispatch_info.queue_id.handle,
+                    tool_metadata.process_id,
+                    record.thread_id,
+                    magnitude(dispatch_data.dispatch_info.grid_size),
+                    dispatch_data.dispatch_info.kernel_id,
+                    tool_metadata.get_kernel_name(
+                        kernel_id, cfg.kernel_rename, correlation_id.external.value),
+                    magnitude(dispatch_data.dispatch_info.workgroup_size),
+                    lds_block_size_v,
+                    dispatch_data.dispatch_info.private_segment_size,
+                    kernel_info->arch_vgpr_count,
+                    kernel_info->accum_vgpr_count,
+                    kernel_info->sgpr_count,
+                    counter_name_dim.str(),
+                    count.value,
+                    count.timestamp);
+            }
+            ofs << row_ss.str();
+        }
+    }
+}
+
 }  // namespace tool
 }  // namespace rocprofiler

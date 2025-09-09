@@ -25,6 +25,14 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <cstdint>
+#include <optional>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
@@ -32,6 +40,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -64,9 +73,11 @@ public:
     uint64_t           id() const { return id_; }
     uint32_t           flags() const { return flags_; }
     bool               empty() const { return empty_; }
+    bool               spm() const { return spm_; }
 
     void setflags(uint32_t flags) { this->flags_ = flags; }
     void set_id(uint64_t id) { this->id_ = id; }
+    void setSpm(bool is_spm) { this->spm_ = is_spm; }
 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
     friend bool operator==(Metric const& lhs, Metric const& rhs);
@@ -80,6 +91,7 @@ private:
     std::string constant_    = {};
     int64_t     id_          = -1;
     bool        empty_       = false;
+    bool        spm_         = false;
     uint32_t    flags_       = 0;
 };
 
@@ -129,6 +141,9 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
+
+bool
+isSupportSpm(const std::string& agent_name, const Metric& metric);
 }  // namespace counters
 }  // namespace rocprofiler
 

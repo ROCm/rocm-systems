@@ -116,7 +116,11 @@ generate_csv(const output_config&                                               
              const metadata&                                                    tool_metadata,
              const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& data,
              const stats_entry_t&                                               stats);
-
+void
+generate_csv(const output_config&                        cfg,
+             const metadata&                             tool_metadata,
+             const generator<tool_spm_counter_record_t>& data,
+             const stats_entry_t&                        stats);
 void
 generate_csv(const output_config&      cfg,
              const metadata&           tool_metadata,

@@ -278,5 +278,136 @@ CounterPacketConstruct::can_collect()
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
+SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agent_id,
+                                       const std::vector<counters::Metric>& metrics,
+                                       uint64_t                             sample_freq,
+                                       uint64_t                             buffer_size,
+                                       uint64_t                             timeout)
+: _agent_id(agent_id)
+{
+    auto*        agent       = CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id));
+    const double sclk_freq   = agent->max_engine_clk_fcompute * 1E6;  // MHz
+    const size_t sclk_period = static_cast<size_t>(std::round(sclk_freq / sample_freq));
+
+    params.clear();
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, buffer_size});
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, sclk_period});
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, timeout});
+
+    events.clear();
+    for(auto& metric : metrics)
+    {
+        auto query_info                = get_query_info(_agent_id, metric);
+        _metrics.emplace_back().metric = metric;
+
+        auto event       = aqlprofile_pmc_event_t{};
+        event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+        event.event_id =
+            static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr) & 0xFFFFFFFF);
+        event.flags = aqlprofile_pmc_event_flags_t{metric.flags()};
+
+        for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
+        {
+            _metrics.back().instances.push_back(
+                {.block_index = block_index,
+                 .event_id    = event.event_id,
+                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
+                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
+
+            _metrics.back().events.push_back(
+                {.block_index = block_index,
+                 .event_id    = event.event_id,
+                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
+                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
+
+            event.block_index = block_index;
+            events.push_back(event);
+            id_map.push_back({rocprofiler_counter_id_t{.handle = metric.id()}, block_index});
+        }
+    }
+}
+
+std::unique_ptr<hsa::SPMPacket>
+SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
+{
+    const auto* agent = rocprofiler::agent::get_agent_cache(
+        CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id)));
+    auto pool = std::make_shared<hsa::SPMMemoryPool>(*agent, ext, coreapi.hsa_memory_copy_fn);
+    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
+
+    aqlprofile_spm_profile_t profile{};
+    profile.events          = events.data();
+    profile.event_count     = events.size();
+    profile.parameter_count = params.size();
+    profile.parameters      = params.data();
+
+    profile.aql_agent  = *aql_agent;
+    profile.hsa_agent  = pool->gpu_agent;
+    profile.alloc_cb   = &(hsa::SPMMemoryPool::Alloc);
+    profile.dealloc_cb = &(hsa::SPMMemoryPool::Free);
+    profile.memcpy_cb  = &(hsa::SPMMemoryPool::Copy);
+    profile.userdata   = pool.get();
+
+    auto pkt = std::make_unique<hsa::SPMPacket>(*aql_agent, profile);
+    if(!pkt->Valid()) return nullptr;
+
+    pool->delete_packets_fn = pkt->sym.delete_packets_fn;
+    pool->handle            = pkt->handle;
+    pkt->pool               = std::move(pool);
+
+    pkt->spm_desc.size =
+        sizeof(SPM::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
+
+    pkt->container_desc_data = std::make_shared<std::vector<char>>(pkt->spm_desc.size);
+    pkt->spm_desc.data       = pkt->container_desc_data->data();
+
+    auto* desc = static_cast<SPM::spm_desc_v0_t*>(pkt->spm_desc.data);
+
+    *desc               = SPM::spm_desc_v0_t{};
+    desc->aql_desc_size = pkt->aql_desc.size;
+    desc->num_events    = id_map.size();
+
+    std::memcpy(desc->aqlprofile_desc(), pkt->aql_desc.data, pkt->aql_desc.size);
+    std::memcpy(desc->events(), id_map.data(), id_map.size() * sizeof(id_map[0]));
+
+    pkt->clear();
+    return pkt;
+}
+
+// Following the PMC check for now
+// ToDO: change this to SPM
+rocprofiler_status_t
+SPMPacketConstruct::can_collect()
+{
+    // Verify that the counters fit within harrdware limits
+    std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t> counter_count;
+    std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t> max_allowed;
+
+    for(auto& metric : _metrics)
+    {
+        for(auto& instance : metric.events)
+        {
+            auto block_pair       = std::make_pair(instance.block_name, instance.block_index);
+            auto [iter, inserted] = counter_count.emplace(block_pair, 0);
+            iter->second++;
+            if(inserted)
+            {
+                max_allowed.emplace(block_pair, get_block_counters(_agent_id, instance));
+            }
+        }
+    }
+
+    // Check if the block count > max count
+    for(auto& [block_name, count] : counter_count)
+    {
+        if(auto* max = CHECK_NOTNULL(common::get_val(max_allowed, block_name)); count > *max)
+        {
+            return ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT;
+        }
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 }  // namespace aql
 }  // namespace rocprofiler
