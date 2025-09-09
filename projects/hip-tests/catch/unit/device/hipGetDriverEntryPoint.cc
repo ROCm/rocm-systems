@@ -70,6 +70,8 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
 
   int count;
   HIP_CHECK(hipGetDeviceCount(&count));
+
+  REQUIRE(count > 0);
   REQUIRE(countFuncPtr == count);
 }
 
@@ -161,6 +163,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
   int count;
   HIP_CHECK(hipGetDeviceCount(&count));
 
+  REQUIRE(count > 0);
   REQUIRE(countFuncPtr == count);
 }
 
