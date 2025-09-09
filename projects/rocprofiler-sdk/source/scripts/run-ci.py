@@ -14,8 +14,8 @@ import multiprocessing
 # and default value for CTEST_SUBMIT_URL
 # _PROJECT_NAME = "rocprofiler-v2-internal"
 # _BASE_URL = "10.194.116.31/cdash"
-_PROJECT_NAME = "rocprofiler-sdk"
-_BASE_URL = "cdash.rocprofiler.amd.com"
+_PROJECT_NAME = "rocprofiler-sdk-alt"
+_BASE_URL = "my.cdash.org"
 _GCOVR_GENERATE_CMD = None
 
 # these are various default values
@@ -193,9 +193,9 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_PROJECT_NAME "{_PROJECT_NAME}")
         set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
-        set(CTEST_DROP_METHOD "http")
+        set(CTEST_DROP_METHOD "https")
         set(CTEST_DROP_SITE_CDASH TRUE)
-        set(CTEST_SUBMIT_URL "http://{SUBMIT_URL}")
+        set(CTEST_SUBMIT_URL "https://{SUBMIT_URL}")
 
         set(CTEST_UPDATE_TYPE git)
         set(CTEST_UPDATE_VERSION_ONLY TRUE)

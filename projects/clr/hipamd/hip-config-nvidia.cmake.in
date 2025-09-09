@@ -18,6 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_library(hip::device INTERFACE IMPORTED)
-add_library(hip::host INTERFACE IMPORTED)
-add_library(hip::amdhip64 INTERFACE IMPORTED)
+foreach(__lib device host amdhip64)
+    if (NOT TARGET hip::${__lib})
+        add_library(hip::${__lib} INTERFACE IMPORTED)
+        set_target_properties(hip::${__lib} PROPERTIES
+		INTERFACE_INCLUDE_DIRECTORIES @PACKAGE_INCLUDE_INSTALL_DIR@
+		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES @PACKAGE_INCLUDE_INSTALL_DIR@)
+    endif()
+endforeach()
