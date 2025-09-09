@@ -145,15 +145,8 @@ constexpr auto rocprofiler_attach_lib_name = "librocprofiler-sdk-attach.so";
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     "rocprofiler_attach_set_api_table";
 
-<<<<<<< HEAD
-constexpr auto rocprofiler_tool_lib_name_default =
-    "rocprofiler-sdk/librocprofiler-sdk-tool.so";
-constexpr auto rocprofiler_tool_attach_entrypoint = "rocprofv3_attach";
-constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofv3_detach";
-=======
 constexpr auto rocprofiler_tool_lib_name = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofiler_detach";
->>>>>>> 077fe29d16 (Formatting + attach/detach multiple times to the same pid)
 
 // Get the tool library name from environment variable or use default
 inline const char*
