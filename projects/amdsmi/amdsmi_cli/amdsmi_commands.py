@@ -767,6 +767,7 @@ class AMDSMICommands():
             if args.ras:
                 ras_dict = {"eeprom_version": "N/A",
                             "bad_page_threshold": "N/A",
+                            "bad_page_threshold_exceeded": "N/A",
                             "parity_schema" : "N/A",
                             "single_bit_schema" : "N/A",
                             "double_bit_schema" : "N/A",
@@ -794,6 +795,23 @@ class AMDSMICommands():
                     ras_dict["bad_page_threshold"] = amdsmi_interface.amdsmi_get_gpu_bad_page_threshold(args.gpu)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get bad page threshold count for gpu %s | %s", gpu_id, e.get_error_info())
+                try:
+                    bad_page_info = amdsmi_interface.amdsmi_get_gpu_bad_page_info(args.gpu)
+                    retired_pages = 0
+                    if bad_page_info:
+                        for bad_page in bad_page_info:
+                            if bad_page["status"] == amdsmi_interface.AmdSmiMemoryPageStatus.RESERVED:
+                                retired_pages += 1
+                    # default to N/A
+                    ras_dict["bad_page_threshold_exceeded"] = "N/A"
+                    # If this is an int, then default to False
+                    if isinstance(ras_dict["bad_page_threshold"], int):
+                        ras_dict["bad_page_threshold_exceeded"] = "False"
+                        if retired_pages > ras_dict["bad_page_threshold"]:
+                            # If there are more retired pages then set to True
+                            ras_dict["bad_page_threshold_exceeded"] = "True"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get retired pages count for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
                     ras_states = amdsmi_interface.amdsmi_get_gpu_ras_block_features_enabled(args.gpu)
