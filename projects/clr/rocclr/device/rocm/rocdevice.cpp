@@ -19,8 +19,6 @@
  THE SOFTWARE. */
 
 #include "cl.h"
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
@@ -62,7 +60,6 @@
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
 #include <sstream>
 #include <vector>
-#endif  // WITHOUT_HSA_BACKEND
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
 #define OPENCL_C_VERSION_STR XSTR(OPENCL_C_MAJOR) "." XSTR(OPENCL_C_MINOR)
@@ -78,7 +75,6 @@ static_assert(static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite) ==
                   static_cast<uint32_t>(HSA_ACCESS_PERMISSION_RW),
               "Vmm Access Flag Read Write mismatch with ROC-runtime!");
 
-#ifndef WITHOUT_HSA_BACKEND
 
 namespace amd::device {
 extern const char* HipExtraSourceCode;
@@ -238,12 +234,13 @@ Device::~Device() {
       hsa_queue_t* queue = qIter->first;
       auto& qInfo = qIter->second;
       if (qInfo.hostcallBuffer_) {
-        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hostcall buffer %p for hardware queue %p",
-                qInfo.hostcallBuffer_, qIter->first->base_address);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
+                "Deleting hostcall buffer %p for hardware queue %p", qInfo.hostcallBuffer_,
+                qIter->first->base_address);
         amd::disableHostcalls(qInfo.hostcallBuffer_);
         context().svmFree(qInfo.hostcallBuffer_);
       }
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
       hsa_queue_destroy(queue);
@@ -1991,11 +1988,11 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
       break;
     case kUncachedAtomics:
       if (agentInfo->ext_fine_grain_pool.handle != 0) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Using extended fine grained access system memory pool");
         segment = agentInfo->ext_fine_grain_pool;
       } else {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Falling through on fine grained access system memory pool");
         segment = agentInfo->fine_grain_pool;
       }
@@ -2009,10 +2006,15 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 }
 
 // ================================================================================================
-void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
+void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
+                        const AgentInfo* agentInfo) const {
   void* ptr = nullptr;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg);
-  hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, 0, &ptr);
+  uint32_t memFlags = 0;
+  if (mem_seg == kKernArg) {
+    memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+  }
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
+  hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, memFlags, &ptr);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Allocate hsa host memory %p, size 0x%zx,"
           " numa_node = %d, mem_seg = %d",
@@ -2033,31 +2035,10 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg) co
 }
 
 // ================================================================================================
-void* Device::hostAgentAlloc(size_t size, const AgentInfo& agentInfo, MemorySegment mem_seg) const {
-  void* ptr = nullptr;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &agentInfo);
-  hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, 0, &ptr);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Allocate hsa host memory %p, size 0x%zx", ptr, size);
-  if (stat != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Fail allocation host memory with err %d", stat);
-    return nullptr;
-  }
-
-  stat = hsa_amd_agents_allow_access(gpu_agents_.size(), &gpu_agents_[0], nullptr, ptr);
-  if (stat != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
-    hostFree(ptr, size);
-    return nullptr;
-  }
-
-  return ptr;
-}
-
-// ================================================================================================
 void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
   void* ptr = nullptr;
 #ifndef ROCCLR_SUPPORT_NUMA_POLICY
-  ptr = hostAlloc(size, alignment, mem_seg);
+  ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
 #else
   int mode = MPOL_DEFAULT;
   int maxNodes = numa_num_possible_nodes();
@@ -2069,7 +2050,7 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
     LogPrintfError("get_mempolicy failed with error %ld", res);
     return ptr;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
           "get_mempolicy() succeed with mode %d, nodeMask 0x%lx, cpuCount %zu", mode,
           *nodeMask->maskp, cpuCount);
 
@@ -2080,14 +2061,14 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
       // We only care about the first CPU node
       for (unsigned int i = 0; i < cpuCount; i++) {
         if ((1u << i) & *nodeMask->maskp) {
-          ptr = hostAgentAlloc(size, cpu_agents_[i], mem_seg);
+          ptr = hostAlloc(size, alignment, mem_seg, &cpu_agents_[i]);
           break;
         }
       }
       break;
     default:
       //  All other modes fall back to default mode
-      ptr = hostAlloc(size, alignment, mem_seg);
+      ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
   numa_free_cpumask(nodeMask);
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
@@ -2185,12 +2166,12 @@ void Device::releaseMemory(void* ptr, size_t size) const {
   }
 }
 
-void* Device::deviceLocalAlloc(size_t size, bool atomics, bool pseudo_fine_grain,
-                               bool contiguous) const {
+void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const {
   const hsa_amd_memory_pool_t& pool =
-      (pseudo_fine_grain && gpu_ext_fine_grained_segment_.handle) ? gpu_ext_fine_grained_segment_
-      : (atomics && gpu_fine_grained_segment_.handle)             ? gpu_fine_grained_segment_
-                                                                  : gpuvm_segment_;
+      (flags.pseudo_fine_grain_ && gpu_ext_fine_grained_segment_.handle)
+          ? gpu_ext_fine_grained_segment_
+      : (flags.atomics_ && gpu_fine_grained_segment_.handle) ? gpu_fine_grained_segment_
+                                                             : gpuvm_segment_;
 
   if (pool.handle == 0 || gpuvm_segment_max_alloc_ == 0) {
     DevLogPrintfError("Invalid argument, pool_handle: 0x%x , max_alloc: %u \n", pool.handle,
@@ -2199,8 +2180,11 @@ void* Device::deviceLocalAlloc(size_t size, bool atomics, bool pseudo_fine_grain
   }
 
   uint32_t hsa_mem_flags = 0;
-  if (contiguous) {
+  if (flags.contiguous_) {
     hsa_mem_flags = HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG;
+  }
+  if (flags.executable_) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
 
   void* ptr = nullptr;
@@ -2809,7 +2793,7 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   void* hw_event =
       (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
   if (hw_event == nullptr) {
-    ClPrint(amd::LOG_INFO, amd::LOG_SIG, "No HW event");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_SIG, "No HW event");
     return false;
   } else if (wait) {
     // hipEventBlockingSync
@@ -3622,4 +3606,3 @@ device::UriLocator* Device::createUriLocator() const { return new roc::UriLocato
 #endif
 #endif
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND

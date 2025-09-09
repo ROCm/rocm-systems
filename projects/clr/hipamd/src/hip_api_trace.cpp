@@ -2042,6 +2042,7 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipDrvLaunchKernelEx_fn, 475);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 12
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetHandleForAddressRange_fn, 476);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 13
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 14
 HIP_ENFORCE_ABI(HipDispatchTable, hipModuleGetFunctionCount_fn, 477);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemsetD2D8_fn, 478);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemsetD2D8Async_fn, 479);

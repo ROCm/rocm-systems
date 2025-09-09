@@ -1133,9 +1133,6 @@ def resetProfile(deviceList):
         ret = rocmsmi.rsmi_dev_power_profile_set(device, 0, profileString('BOOTUP DEFAULT'))
         if rsmi_ret_ok(ret, device, 'set_power_profile'):
             printLog(device, 'Successfully reset Power Profile', None)
-        ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(0))
-        if rsmi_ret_ok(ret, device, 'set_perf_level'):
-            printLog(device, 'Successfully reset Performance Level', None)
     printLogSpacer()
 
 
