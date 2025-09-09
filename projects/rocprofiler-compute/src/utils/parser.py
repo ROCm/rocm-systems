@@ -555,24 +555,25 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                 ):
                     # print(data_config["metric"])
                     new_metrics = {}
-                    # NB: support single placeholder for now!!
-                    p_range = data_config["metric"].pop("placeholder_range")
-                    metric, metric_expr = data_config["metric"].popitem()
-                    # print(len(data_config["metric"]))
-                    # data_config['metric'].clear()
-                    for p, r in p_range.items():
-                        # NB: We have to resolve placeholder range first if it
-                        #   is a build-in var. It will be too late to do it in
-                        #   eval_metric(). This is the only reason we need
-                        #   sys_info at this stage.
-                        var = calc_builtin_var(r, sys_info)
-                        for i in range(var):
-                            new_key = metric.replace(p, str(i))
-                            new_val = {}
-                            for k, v in metric_expr.items():
-                                new_val[k] = metric_expr[k].replace(p, str(i))
-                            # print(new_val)
-                            new_metrics[new_key] = new_val
+                    if sys_info is not None:
+                        # NB: support single placeholder for now!!
+                        p_range = data_config["metric"].pop("placeholder_range")
+                        metric, metric_expr = data_config["metric"].popitem()
+                        # print(len(data_config["metric"]))
+                        # data_config['metric'].clear()
+                        for p, r in p_range.items():
+                            # NB: We have to resolve placeholder range first if it
+                            #   is a build-in var. It will be too late to do it in
+                            #   eval_metric(). This is the only reason we need
+                            #   sys_info at this stage.
+                            var = calc_builtin_var(r, sys_info)
+                            for i in range(var):
+                                new_key = metric.replace(p, str(i))
+                                new_val = {}
+                                for k, v in metric_expr.items():
+                                    new_val[k] = metric_expr[k].replace(p, str(i))
+                                    # print(new_val)
+                                    new_metrics[new_key] = new_val
 
                     # print(p_range)
                     # print(new_metrics)
@@ -616,6 +617,16 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                     df = pd.DataFrame(columns=headers)
 
                     i = 0
+
+                    if not data_config["metric"]:
+                        data_source_idx = (
+                            str(data_config["id"] // 100)
+                            + "."
+                            + str(data_config["id"] % 100)
+                        )
+                        metric_idx = data_source_idx + "." + str(i)
+                        metric_list[data_source_idx] = data_config["title"]
+
                     for key, entries in data_config["metric"].items():
                         data_source_idx = (
                             str(data_config["id"] // 100)

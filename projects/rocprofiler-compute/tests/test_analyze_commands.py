@@ -120,6 +120,86 @@ def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.list_metrics
+def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-metrics",
+        "gfx908",
+        "--block",
+        "1",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-metrics",
+            "gfx908",
+            "--block",
+            "1",
+        ])
+        assert code == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-available-metrics",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-available-metrics",
+        ])
+        assert code == 0
+
+        # Test output
+        output = capsys.readouterr().out
+        assert "0. Top Stats" in output
+        assert "1. System Info" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_available_metrics_with_block(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-available-metrics",
+        "--block",
+        "1",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-available-metrics",
+            "--block",
+            "1",
+        ])
+        assert code == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.filter_block
 def test_filter_block_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:

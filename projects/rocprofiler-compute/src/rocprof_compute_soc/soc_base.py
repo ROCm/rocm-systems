@@ -417,6 +417,11 @@ class OmniSoC_Base:
             counters = counters - {
                 "SQ_INSTS_VALU_MFMA_F8",
                 "SQ_INSTS_VALU_MFMA_MOPS_F8",
+                "SQC_DCACHE_INFLIGHT_LEVEL",
+                "SQC_ICACHE_INFLIGHT_LEVEL",
+                "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
+                "SQ_VMEM_TA_ADDR_FIFO_FULL",
+                "SQ_VMEM_TA_CMD_FIFO_FULL",
             }
 
         # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)

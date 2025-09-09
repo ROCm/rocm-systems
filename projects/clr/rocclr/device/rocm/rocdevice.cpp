@@ -2006,10 +2006,15 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 }
 
 // ================================================================================================
-void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
+void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
+                        const AgentInfo* agentInfo) const {
   void* ptr = nullptr;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg);
-  hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, 0, &ptr);
+  uint32_t memFlags = 0;
+  if (mem_seg == kKernArg) {
+    memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+  }
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
+  hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, memFlags, &ptr);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Allocate hsa host memory %p, size 0x%zx,"
           " numa_node = %d, mem_seg = %d",
@@ -2030,31 +2035,10 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg) co
 }
 
 // ================================================================================================
-void* Device::hostAgentAlloc(size_t size, const AgentInfo& agentInfo, MemorySegment mem_seg) const {
-  void* ptr = nullptr;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &agentInfo);
-  hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, 0, &ptr);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Allocate hsa host memory %p, size 0x%zx", ptr, size);
-  if (stat != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Fail allocation host memory with err %d", stat);
-    return nullptr;
-  }
-
-  stat = hsa_amd_agents_allow_access(gpu_agents_.size(), &gpu_agents_[0], nullptr, ptr);
-  if (stat != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
-    hostFree(ptr, size);
-    return nullptr;
-  }
-
-  return ptr;
-}
-
-// ================================================================================================
 void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
   void* ptr = nullptr;
 #ifndef ROCCLR_SUPPORT_NUMA_POLICY
-  ptr = hostAlloc(size, alignment, mem_seg);
+  ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
 #else
   int mode = MPOL_DEFAULT;
   int maxNodes = numa_num_possible_nodes();
@@ -2077,14 +2061,14 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
       // We only care about the first CPU node
       for (unsigned int i = 0; i < cpuCount; i++) {
         if ((1u << i) & *nodeMask->maskp) {
-          ptr = hostAgentAlloc(size, cpu_agents_[i], mem_seg);
+          ptr = hostAlloc(size, alignment, mem_seg, &cpu_agents_[i]);
           break;
         }
       }
       break;
     default:
       //  All other modes fall back to default mode
-      ptr = hostAlloc(size, alignment, mem_seg);
+      ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
   numa_free_cpumask(nodeMask);
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
@@ -2182,12 +2166,12 @@ void Device::releaseMemory(void* ptr, size_t size) const {
   }
 }
 
-void* Device::deviceLocalAlloc(size_t size, bool atomics, bool pseudo_fine_grain,
-                               bool contiguous) const {
+void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const {
   const hsa_amd_memory_pool_t& pool =
-      (pseudo_fine_grain && gpu_ext_fine_grained_segment_.handle) ? gpu_ext_fine_grained_segment_
-      : (atomics && gpu_fine_grained_segment_.handle)             ? gpu_fine_grained_segment_
-                                                                  : gpuvm_segment_;
+      (flags.pseudo_fine_grain_ && gpu_ext_fine_grained_segment_.handle)
+          ? gpu_ext_fine_grained_segment_
+      : (flags.atomics_ && gpu_fine_grained_segment_.handle) ? gpu_fine_grained_segment_
+                                                             : gpuvm_segment_;
 
   if (pool.handle == 0 || gpuvm_segment_max_alloc_ == 0) {
     DevLogPrintfError("Invalid argument, pool_handle: 0x%x , max_alloc: %u \n", pool.handle,
@@ -2196,8 +2180,11 @@ void* Device::deviceLocalAlloc(size_t size, bool atomics, bool pseudo_fine_grain
   }
 
   uint32_t hsa_mem_flags = 0;
-  if (contiguous) {
+  if (flags.contiguous_) {
     hsa_mem_flags = HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG;
+  }
+  if (flags.executable_) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
 
   void* ptr = nullptr;

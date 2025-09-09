@@ -4,13 +4,13 @@ on:
   push:
     branches: [ develop ]
     paths:
-      - 'projects/rocprofiler-compute/coverage/coverage-latest.xml'
+      - 'projects/rocprofiler-compute/coverage/Coverage.xml'
   workflow_dispatch:
     inputs:
       coverage_file:
         description: 'Path to coverage XML file'
         required: false
-        default: 'projects/rocprofiler-compute/coverage/coverage-latest.xml'
+        default: 'projects/rocprofiler-compute/coverage/Coverage.xml'
 
 concurrency:
   group: rocprofiler-compute-cdash-${{ github.ref }}
@@ -35,7 +35,7 @@ jobs:
       - name: Check Coverage File Exists
         working-directory: projects/rocprofiler-compute
         run: |
-          COVERAGE_FILE="${{ github.event.inputs.coverage_file || 'coverage/coverage-latest.xml' }}"
+          COVERAGE_FILE="${{ github.event.inputs.coverage_file || 'coverage/Coverage.xml' }}"
           if [[ "$COVERAGE_FILE" == projects/rocprofiler-compute/* ]]; then
             COVERAGE_FILE="${COVERAGE_FILE#projects/rocprofiler-compute/}"
           fi
