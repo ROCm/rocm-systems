@@ -140,6 +140,18 @@ Example usage:
         help="Print the version information and exit",
     )
 
+    def add_required_args(_parser):
+        _required_params = _parser.add_argument_group("Required options")
+        _required_params.add_argument(
+            "-i",
+            "--input",
+            required=True,
+            type=output_config.check_file_exists,
+            nargs="+",
+            help=input_help_string,
+        )
+        return _required_params
+
     subparsers = parser.add_subparsers(dest="command")
     converter = subparsers.add_parser(
         "convert",
@@ -185,15 +197,7 @@ Example usage:
         return val.lower().replace("perfetto", "pftrace")
 
     # add required options for each subparser
-    converter_required_params = converter.add_argument_group("Required options")
-    converter_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help=input_help_string,
-    )
+    converter_required_params = add_required_args(converter)
     converter_required_params.add_argument(
         "-f",
         "--output-format",
@@ -205,45 +209,10 @@ Example usage:
         required=True,
     )
 
-    merger_required_params = merger.add_argument_group("Required options")
-    merger_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help=input_help_string,
-    )
-
-    packager_required_params = packager.add_argument_group("Required options")
-    packager_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help=input_help_string,
-    )
-
-    query_required_params = query_reporter.add_argument_group("Required options")
-    query_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help=input_help_string,
-    )
-
-    summary_required_params = generate_summary.add_argument_group("Required options")
-    summary_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help=input_help_string,
-    )
+    add_required_args(merger)
+    add_required_args(packager)
+    add_required_args(query_reporter)
+    add_required_args(generate_summary)
 
     # converter: add args from any sub-modules
     valid_out_config_args = output_config.add_args(converter)
@@ -284,19 +253,6 @@ Example usage:
         parser.print_help()
         return
 
-    # intentionaly skip auto_merge for merge & package modules, because if user is directly using these 2 modules, they probably don't want auto-merge
-    skip_auto_merge_list = ["merge", "package"]
-
-    # convert to real number of DB input files using flatten function
-    input_files = package.flatten_rocpd_yaml_input_file(
-        args.input, skip_auto_merge=(args.command in skip_auto_merge_list)
-    )
-
-    # error check for databases before trying to use the data
-    if not input_files:
-        print("Error, no databases found\n")
-        return
-
     # if the user requested converter, process the conversion
     if args.command == "convert":
         # process the args
@@ -310,7 +266,7 @@ Example usage:
         window_args = time_window.process_args(args, valid_time_window_args)
 
         # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(input_files)
+        importData = RocpdImportData(args.input)
 
         # adjust the time window view of the data
         if window_args is not None:
@@ -348,13 +304,13 @@ Example usage:
     elif args.command == "merge":
         # merge subparser args
         merge_args = merge.process_args(args, valid_merge_args)
-        merge.execute(input_files, **merge_args)
+        merge.execute(args.input, **merge_args)
 
     # if the user requested package module, package up the database
     elif args.command == "package":
         # merge subparser args
         package_args = package.process_args(args, valid_package_args)
-        package.execute(input_files, **package_args)
+        package.execute(args.input, **package_args)
 
     # if the user requested query module, execute the query
     elif args.command == "query":
@@ -366,7 +322,7 @@ Example usage:
         all_args = {**query_args, **out_cfg_args}
 
         query.execute(
-            input_files,
+            args.input,
             args,
             window_args=window_args,
             **all_args,
@@ -380,7 +336,7 @@ Example usage:
         window_args = time_window.process_args(args, valid_time_window_args)
 
         # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(input_files)
+        importData = RocpdImportData(args.input)
 
         # adjust the time window view of the data
         if window_args is not None:

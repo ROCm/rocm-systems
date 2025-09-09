@@ -28,6 +28,7 @@
 #
 
 import sys
+import os
 import sqlite3
 
 from .schema import RocpdSchema
@@ -36,9 +37,24 @@ from . import libpyrocpd
 __all__ = ["RocpdImportData", "execute_statement"]
 
 
+def internal_init(_input, _output, skip_auto_merge):
+    from . import package
+
+    _input = package.flatten_rocpd_yaml_input_file(_input, skip_auto_merge)
+    assert not os.path.isdir(_output), "Output database name must not be a directory"
+    assert _check_for_valid_dbs(
+        _input
+    ), "RocpdImportData error, invalid SQLite3 database provided"
+    _connection = libpyrocpd.connect(_output)
+    _connection.execute("PRAGMA foreign_keys = ON")
+    _table_info = _create_temp_views(_connection, _input)
+    _create_meta_views(_connection)
+    return (_connection, _input, _table_info)
+
+
 class RocpdImportData(libpyrocpd.RocpdImportData):
 
-    def __init__(self, input):
+    def __init__(self, input, skip_auto_merge=False, dbname=":memory:"):
         if isinstance(input, RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
@@ -48,19 +64,13 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 raise ValueError(
                     "RocpdImportData does not accept existing sqlite3 connections"
                 )
-            elif isinstance(input, str):
-                _connection = libpyrocpd.connect(input)
-                _filenames = [input]
-            elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
-                _connection = libpyrocpd.connect(":memory:")
-                _filenames = input[:]
-                _connection.execute("PRAGMA foreign_keys = ON")
-                if not _check_for_valid_dbs(input):
-                    raise ValueError(
-                        "RocpdImportData error, invalid SQLite3 database provided"
-                    )
-                self.table_info = _create_temp_views(_connection, input)
-                _create_meta_views(_connection)
+            elif isinstance(input, str) or (
+                isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
+            ):
+                _connection, _filenames, _table_info = internal_init(
+                    input, dbname, skip_auto_merge
+                )
+                self.table_info = _table_info
             else:
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"

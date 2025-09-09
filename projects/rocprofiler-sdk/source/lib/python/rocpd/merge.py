@@ -55,6 +55,15 @@ def prepare_output_file(output: str) -> None:
         output_path.unlink()
 
 
+def internal_init(_input, _output, skip_auto_merge):
+    from . import package
+
+    _input = package.flatten_rocpd_yaml_input_file(_input, skip_auto_merge)
+    assert not os.path.isdir(_output), "Output database name must not be a directory"
+
+    return _input
+
+
 class RocpdMerger:
 
     def __init__(self, input, output):
@@ -66,7 +75,7 @@ class RocpdMerger:
                 "RocpdMerger only accepts a list of filenames to merge, not a single filename"
             )
         elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
-            self._filenames = input[:]
+            self._filenames = internal_init(input, output, skip_auto_merge=True)
             self._output = output
             prepare_output_file(self._output)
             self._connection = sqlite3.connect(str(self._output))
@@ -266,24 +275,7 @@ def main(argv=None) -> int:
 
     merged_args = process_args(args, valid_args)
 
-    try:
-        from . import package
-
-        input_files = package.flatten_rocpd_yaml_input_file(
-            args.input, skip_auto_merge=True
-        )
-    except Exception as e:
-        print(
-            f"Warning: Could not import module to parse input package ({e}), using raw input list."
-        )
-        input_files = args.input
-
-    # error check for databases before trying to use the data
-    if not input_files:
-        print("Error, no databases found\n")
-        return
-
-    execute(input_files, **merged_args)
+    execute(args.input, **merged_args)
 
 
 if __name__ == "__main__":

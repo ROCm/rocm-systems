@@ -113,7 +113,8 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
                 # If no index.yaml, treat as a directory and look for *.db files
                 input_files.extend(glob.glob(os.path.join(item, "*.db")))
         elif item.endswith((".yaml", ".yml")):
-            input_files.extend(parse_yaml_file(item))
+            base_dir = os.path.dirname(item)
+            input_files.extend(parse_yaml_file(item, base_dir))
         else:
             # If a directory, check inside for *.db files
             if os.path.isdir(item):
@@ -240,7 +241,7 @@ def create_metadata_file(db_files, output_path=".", metadata_filename="index.yam
     # Compute relative paths
     rel_paths = [os.path.relpath(db_file, output_path) for db_file in db_files]
 
-    # Compose the YAML structure as requested
+    # Compose the YAML structure
     metadata = {
         "rocprofiler-sdk": {
             "rocpd": {
@@ -302,6 +303,7 @@ def process_args(args, valid_args):
 
 
 def execute(input_files, **kwargs):
+    import glob
 
     output_path_kw = kwargs.get("output_path", ".")
     consolidate = kwargs.get("consolidate", False)
@@ -309,11 +311,20 @@ def execute(input_files, **kwargs):
     output_path = create_output_folder(output_path_kw, consolidate)
     db_files = input_files
 
+    # check if a folder is provided, if so, search for *.db
+    expanded_files = []
+    for itr in input_files:
+        if os.path.isdir(itr):
+            expanded_files.extend(glob.glob(os.path.join(itr, "*.db")))
+        else:
+            expanded_files.append(itr)
+    db_files = expanded_files
+
     if consolidate:
         # Create a new folder with current date and time
         os.makedirs(output_path, exist_ok=True)
         copied_files = []
-        for db_file in input_files:
+        for db_file in expanded_files:
             dest_file = os.path.join(output_path, os.path.basename(db_file))
             # Only copy if source and destination are not the same file
             if os.path.abspath(db_file) != os.path.abspath(dest_file):
