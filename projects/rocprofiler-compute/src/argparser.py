@@ -232,7 +232,8 @@ Examples:
         help=(
             "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
             "(e.g. 12, 12.1, 12.1.1).\n"
-            "\t\t\tCan provide multiple space separated arguments."
+            "\t\t\tCan provide multiple space separated arguments.\n"
+            "\t\t\tCannot be used with --set or --roof-only"
         ),
     )
     profile_group.add_argument(
@@ -244,8 +245,12 @@ Examples:
         "--set",
         default=None,
         dest="set_selected",
-        help="\t\t\tProfile a set of metrics of topic of interest by collecting "
-        "counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
+        help=(
+            "\t\t\tProfile a set of metrics of topic of interest by collecting "
+            "counters in a single pass.\n"
+            "\t\t\tFor available sets, see --list-sets\n"
+            "\t\t\tCannot be used with --block or --roof-only"
+        ),
     )
 
     profile_group.add_argument(
@@ -345,7 +350,10 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help="\t\t\tProfile roofline data only.",
+        help=(
+            "\t\t\tProfile roofline data only.\n"
+            "\t\t\tCannot be used with --block or --set"
+        ),
     )
     roofline_group.add_argument(
         "--sort",
