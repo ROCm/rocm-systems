@@ -71,9 +71,9 @@ class OmniSoC_Base:
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
         self.__soc_params: dict[str, Any] = {}  # SoC specifications
-        self.__compatible_profilers: list[
-            str
-        ] = []  # Store profilers compatible with SoC
+        self.__compatible_profilers: list[str] = (
+            []
+        )  # Store profilers compatible with SoC
         self.populate_mspec()
         # Create roofline object if mode is provided; skip for --specs
         if hasattr(self.__args, "mode") and self.__args.mode:
@@ -381,10 +381,12 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union({
-                    f"{counter_name}[{i}]"
-                    for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
-                })
+                counters = counters.union(
+                    {
+                        f"{counter_name}[{i}]"
+                        for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
+                    }
+                )
 
         return counters, filter_blocks
 
@@ -646,15 +648,17 @@ class OmniSoC_Base:
         console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
 
         # TODO: rewrite the above logic for spatial_multiplexing later
-        if args.spatial_multiplexing:
+        if self.get_args().spatial_multiplexing:
             # TODO: more error checking
-            if len(args.spatial_multiplexing) != 3:
+            if len(self.get_args().spatial_multiplexing) != 3:
                 console_error(
                     "profiling",
                     "multiplexing need provide node_idx node_count and gpu_count",
                 )
 
-            node_idx, node_count, gpu_count = map(int, args.spatial_multiplexing)
+            node_idx, node_count, gpu_count = map(
+                int, self.get_args().spatial_multiplexing
+            )
 
             old_group_num = file_count + accu_file_count
             new_bucket_count = node_count * gpu_count
@@ -842,3 +846,4 @@ class CounterFile:
             block = "SQ"
 
         return self.blocks[block].add(counter)
+

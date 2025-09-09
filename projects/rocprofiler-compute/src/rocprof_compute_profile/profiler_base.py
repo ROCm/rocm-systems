@@ -106,8 +106,10 @@ class RocProfCompute_Base:
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         if args.remaining:
+            print (f"===== {args.remaining[0]}")
             # Ensure that command points to an executable
             if not shutil.which(args.remaining[0]):
+                print (f"----- {args.remaining[0]}")
                 console_error(
                     f"Your command {args.remaining[0]} doesn't point to a executable. "
                     "Please verify."
@@ -117,7 +119,7 @@ class RocProfCompute_Base:
             console_error(
                 "Profiling command required. Pass application executable after -- "
                 "at the end of options.\n"
-                "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                "\ti.e. rocprof-compute profile -n vcopy -- "
                 "./vcopy -n 1048576 -b 256"
             )
 
@@ -372,14 +374,6 @@ class RocProfCompute_Base:
                 f"{self._soc.get_arch()} is not enabled in {self.__profiler}. "
                 f"Available profilers include: {self._soc.get_compatible_profilers()}"
             )
-
-        # Ensure that command points to an executable
-        if not shutil.which(args.remaining[0]):
-            console_error(
-                f"Your command {args.remaining[0]} doesn't point to an executable."
-                "Please verify."
-            )
-        args.remaining = " ".join(args.remaining)
 
         gen_sysinfo(
             workload_name=args.name,
