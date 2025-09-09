@@ -570,7 +570,6 @@ hipError_t hipStreamQuery_spt(hipStream_t stream) {
 hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* userData) {
   getStreamPerThread(stream);
 
-  CHECK_SUPPORTED_DURING_CAPTURE();
   hip::Stream* hip_stream = hip::getStream(stream);
   amd::Command* last_command = hip_stream->getLastQueuedCommand(true);
   amd::Command::EventWaitList eventWaitList;

@@ -956,6 +956,9 @@ class GraphKernelNode : public GraphNode {
   ihipExtKernelEvents kernelEvents_;   //!< Events for Ext launch kernel
   bool hasHiddenHeap_;                 //!< Kernel has hidden heap(device side allocation)
   int coopKernel_;                     //!< Launch cooperative kernel
+  int globalWorkSizeX_remainder_;
+  int globalWorkSizeY_remainder_;
+  int globalWorkSizeZ_remainder_;
 
  public:
   bool HasHiddenHeap() const { return hasHiddenHeap_; }
@@ -1014,13 +1017,14 @@ class GraphKernelNode : public GraphNode {
     char buffer[4096];
     if (flag == hipGraphDebugDotFlagsVerbose) {
       sprintf(buffer,
-              "{\n%s\n| {ID | %d | %s\\<\\<\\<(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>}\n| {{node "
+              "{\n%s\n| {ID | %d | %s\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>}\n| {{node "
               "handle | func handle} | {%p | %p}}\n| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} | {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
               label_, GetID(), function->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z, kernelParams_.blockDim.x,
               kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+              globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
               kernelParams_.sharedMemBytes, this, kernelParams_.func,
               kernelAttr_.accessPolicyWindow.base_ptr, kernelAttr_.accessPolicyWindow.num_bytes,
               kernelAttr_.accessPolicyWindow.hitRatio, kernelAttr_.accessPolicyWindow.hitProp,
@@ -1042,11 +1046,12 @@ class GraphKernelNode : public GraphNode {
       label = buffer;
     }
     else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
-      sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
+      sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
               GetID(), function->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z,
-              kernelParams_.blockDim.x, kernelParams_.blockDim.y,
-              kernelParams_.blockDim.z, kernelParams_.sharedMemBytes);
+              kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+              globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+              kernelParams_.sharedMemBytes);
       label = buffer;
     }
     else {
@@ -1150,7 +1155,10 @@ class GraphKernelNode : public GraphNode {
   }
 
   GraphKernelNode(const hipKernelNodeParams* pNodeParams, const ihipExtKernelEvents* pEvents,
-                  int coopKernel = 0)
+                  int coopKernel = 0,
+                  int globalWorkSizeX_remainder = 0,
+                  int globalWorkSizeY_remainder = 0,
+                  int globalWorkSizeZ_remainder = 0)
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = { 0 };
     if (pEvents != nullptr) {
@@ -1163,6 +1171,9 @@ class GraphKernelNode : public GraphNode {
     kernelAttrInUse_ = 0;
     hasHiddenHeap_ = false;
     coopKernel_ = coopKernel;
+    globalWorkSizeX_remainder_ = globalWorkSizeX_remainder;
+    globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
+    globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
   }
 
   ~GraphKernelNode() { freeParams(); }
@@ -1193,6 +1204,9 @@ class GraphKernelNode : public GraphNode {
     kernelParams_ = rhs.kernelParams_;
     kernelEvents_ = rhs.kernelEvents_;
     coopKernel_ = rhs.coopKernel_;
+    globalWorkSizeX_remainder_ = rhs.globalWorkSizeX_remainder_;
+    globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
+    globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
@@ -1240,7 +1254,8 @@ class GraphKernelNode : public GraphNode {
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
                                        kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                       kernelParams_.sharedMemBytes);
+                                       kernelParams_.sharedMemBytes, globalWorkSizeX_remainder_,
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_);
 
     if (!launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
@@ -1379,13 +1394,14 @@ class GraphKernelNode : public GraphNode {
     return SetParams(&kernelNode->kernelParams_);
   }
 
-  static hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
-                                         hipFunction_t func, int devId) {
+  hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
+                                  hipFunction_t func, int devId) {
 
     amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                        pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                       pNodeParams->sharedMemBytes);
+                                       pNodeParams->sharedMemBytes, globalWorkSizeX_remainder_,
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);

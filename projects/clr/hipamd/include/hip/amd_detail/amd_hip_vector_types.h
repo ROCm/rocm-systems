@@ -658,7 +658,7 @@ get_native_pointer(const HIP_vector_base<T, n>& base_vec) {
     template<typename T, unsigned int n>
     __HOST_DEVICE__
     inline
-    #if __cplusplus >= 201402L
+    #if __cplusplus >= 201402L && !defined(__HIPCC_RTC__)
     constexpr
     #endif
     bool operator==(
