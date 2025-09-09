@@ -976,6 +976,20 @@ def get_args(cmd_args, inp_args):
     return patch_args(dotdict(data))
 
 
+def int_auto(num_str):
+    if isinstance(num_str, str):
+        if "0x" in num_str:
+            return int(num_str, 16)
+        else:
+            return int(num_str, 10)
+    elif isinstance(num_str, int):
+        return num_str
+    else:
+        raise ValueError(
+            f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
+        )
+
+
 def run(app_args, args, **kwargs):
 
     app_env = dict(os.environ)
@@ -1526,19 +1540,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
-        def int_auto(num_str):
-            if isinstance(num_str, str):
-                if "0x" in num_str:
-                    return int(num_str, 16)
-                else:
-                    return int(num_str, 10)
-            elif isinstance(num_str, int):
-                return num_str
-            else:
-                raise ValueError(
-                    f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
-                )
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
 

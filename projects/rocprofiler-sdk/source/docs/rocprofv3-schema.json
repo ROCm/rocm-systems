@@ -1155,10 +1155,75 @@
                                             }
                                         }
                                     }
-                                }
+                                },
+                               "streaming_performance_monitor":{
+                                "type": "array",
+                                "description": "Streaming Performance Monitor.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "dispatch_id": {
+                                                            "type": "integer",
+                                                            "description": "ID of the dispatch."
+                                                        },
+                                    "records": {
+                                            "type": "array",
+                                            "description": "Records.",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "counter_id": {
+                                                        "type": "object",
+                                                        "description": "Counter ID information.",
+                                                        "properties": {
+                                                            "handle": {
+                                                                "type": "integer",
+                                                                "description": "Handle of the counter."
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "handle"
+                                                        ]
+                                                    },
+                                                    "value": {
+                                                        "type": "number",
+                                                        "description": "Value of the counter."
+                                                    },
+                                                    "timestamp" : {
+                                                        "type": "number",
+                                                        "description": "timestamp of sample." 
+                                                    }
 
-                        }
-                    },
+    
+
+                                                },
+                                                "required": [
+                                                    "counter_id",
+                                                    "value",
+                                                    "timestamp",
+                                                    "agent_id"
+                                                ]
+                                            }
+                                        },
+                                         "agent_id": {
+                                                            "type": "object",
+                                                            "description": "Agent ID information.",
+                                                            "properties": {
+                                                                "handle": {
+                                                                    "type": "integer",
+                                                                    "description": "Handle of the agent."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "handle"
+                                                            ]
+                                                        }
+
+                                       }
+                                    }
+                                }
+                    }
+                },
                     "buffer_records": {
                         "type": "object",
                         "description": "Buffer record details.",
