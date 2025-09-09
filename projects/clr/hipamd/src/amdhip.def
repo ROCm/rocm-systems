@@ -516,3 +516,4 @@ hipLibraryLoadFromFile
 hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
+hipStreamCopyAttributes

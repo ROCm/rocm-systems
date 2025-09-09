@@ -1396,6 +1396,9 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
   return hip::GetHipDispatchTable()->hipStreamBeginCapture_fn(stream, mode);
 }
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  return hip::GetHipDispatchTable()->hipStreamCopyAttributes_fn(dst, src);
+}
 hipError_t hipStreamCreate(hipStream_t* stream) {
   return hip::GetHipDispatchTable()->hipStreamCreate_fn(stream);
 }
