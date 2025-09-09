@@ -472,6 +472,19 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 }  // namespace hip_impl
 
 namespace hip {
+hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                    int numBlocks, int blockSize){
+  HIP_INIT_API(hipOccupancyAvailableDynamicSMemPerBlock, dynamicSmemSize, f, numBlocks, blockSize);
+  if ((dynamicSmemSize == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // TO DO IMPLEMENTATION
+
+  hipError_t ret = hipSuccess;
+  HIP_RETURN(ret);
+}
+
 hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
                                              size_t dynSharedMemPerBlk, int blockSizeLimit) {
   HIP_INIT_API(hipOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);

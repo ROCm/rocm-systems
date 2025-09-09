@@ -8,6 +8,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `hipStreamCopyAttributes` Copies attributes from source stream to destination stream
+    - `hipOccupancyAvailableDynamicSMemPerBlock` Returns dynamic shared memory available per block when launching numBlocks blocks on CU.
 
 ## HIP 7.1 for ROCm 7.1
 
