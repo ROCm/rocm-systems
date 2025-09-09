@@ -8,16 +8,16 @@
 #   implemented. Only a subset of tests can be compiled.
 # ----------------------------------------------------------------------------------------#
 
-set(OMPVV_USE_TARGET_TESTS FALSE)
+set(OMPVV_USE_OFFLOAD_TESTS FALSE)
 if(ROCPROFSYS_DISABLE_EXAMPLES)
   if("openmp-vv" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
     return()
   endif()
-  if(NOT "openmp-vv-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-    set(OMPVV_USE_TARGET_TESTS TRUE)
+  if(NOT "openmp-vv-offload" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+    set(OMPVV_USE_OFFLOAD_TESTS TRUE)
   endif()
 else()
-  set(OMPVV_USE_TARGET_TESTS TRUE)
+  set(OMPVV_USE_OFFLOAD_TESTS TRUE)
 endif()
 
 rocprofiler_systems_message(STATUS "Configuring OMPVV...")
@@ -136,9 +136,9 @@ set(OMPVV_HOST_TESTS_TO_COMPILE
 
 # Set of offloading tests to be compiled (excluding reduction and simd_atomic
 # tests due to OMPVV test failure)
-set(OMPVV_TARGET_TESTS_TO_COMPILE "")
-if(OMPVV_USE_TARGET_TESTS)
-  set(OMPVV_TARGET_TESTS_TO_COMPILE
+set(OMPVV_OFFLOAD_TESTS_TO_COMPILE "")
+if(OMPVV_USE_OFFLOAD_TESTS)
+  set(OMPVV_OFFLOAD_TESTS_TO_COMPILE
       "${OMPVV_TDIR}/target_simd/test_target_simd_if.F90"
       "${OMPVV_TDIR}/target_teams_distribute_parallel_for/test_target_teams_distribute_parallel_for_collapse.F90"
   )
@@ -161,14 +161,14 @@ set(OMPVV_HOST_FOFFLOADING_FLAGS "-fopenmp --offload-host-only")
 update_make_def_foffloading("${OMPVV_HOST_FOFFLOADING_FLAGS}")
 compile_ompvv_tests(OMPVV_HOST_TESTS_TO_COMPILE)
 
-if(OMPVV_USE_TARGET_TESTS)
-  set(OMPVV_TARGET_FOFFLOADING_FLAGS "-fopenmp")
+if(OMPVV_USE_OFFLOAD_TESTS)
+  set(OMPVV_OFFLOAD_FOFFLOADING_FLAGS "-fopenmp")
   foreach(arch IN LISTS DEFAULT_GPU_TARGETS)
-    set(OMPVV_TARGET_FOFFLOADING_FLAGS
-        "${OMPVV_TARGET_FOFFLOADING_FLAGS} --offload-arch=${arch}")
+    set(OMPVV_OFFLOAD_FOFFLOADING_FLAGS
+        "${OMPVV_OFFLOAD_FOFFLOADING_FLAGS} --offload-arch=${arch}")
   endforeach()
-  update_make_def_foffloading("${OMPVV_TARGET_FOFFLOADING_FLAGS}")
-  compile_ompvv_tests(OMPVV_TARGET_TESTS_TO_COMPILE)
+  update_make_def_foffloading("${OMPVV_OFFLOAD_FOFFLOADING_FLAGS}")
+  compile_ompvv_tests(OMPVV_OFFLOAD_TESTS_TO_COMPILE)
 endif()
 
 # ---------------------------------------------------------------------------------------#
@@ -179,7 +179,7 @@ set(OMPVV_BIN_SOURCE "${PROJECT_SOURCE_DIR}/external/ompvv/bin")
 set(OMPVV_BIN_DEST "${CMAKE_BINARY_DIR}")
 
 set(ROCPROFSYS_OMPVV_HOST_TESTS "")
-set(ROCPROFSYS_OMPVV_TARGET_TESTS "")
+set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS "")
 
 file(GLOB OMPVV_BINARIES "${OMPVV_BIN_SOURCE}/*")
 
@@ -188,7 +188,7 @@ foreach(OMPVV_BIN ${OMPVV_BINARIES})
 
   # Determine type of test
   set(IS_HOST_TEST FALSE)
-  set(IS_TARGET_TEST FALSE)
+  set(IS_OFFLOAD_TEST FALSE)
   foreach(host_test IN LISTS OMPVV_HOST_TESTS_TO_COMPILE)
     get_filename_component(HOST_TEST_NAME ${host_test} NAME_WE)
     if(BIN_NAME STREQUAL HOST_TEST_NAME)
@@ -197,17 +197,17 @@ foreach(OMPVV_BIN ${OMPVV_BINARIES})
     endif()
   endforeach()
 
-  if(NOT IS_HOST_TEST AND OMPVV_USE_TARGET_TESTS)
-    foreach(target_test IN LISTS OMPVV_TARGET_TESTS_TO_COMPILE)
-      get_filename_component(TARGET_TEST_NAME ${target_test} NAME_WE)
-      if(BIN_NAME STREQUAL TARGET_TEST_NAME)
-        set(IS_TARGET_TEST TRUE)
+  if(NOT IS_HOST_TEST AND OMPVV_USE_OFFLOAD_TESTS)
+    foreach(offload_test IN LISTS OMPVV_OFFLOAD_TESTS_TO_COMPILE)
+      get_filename_component(OFFLOAD_TEST_NAME ${offload_test} NAME_WE)
+      if(BIN_NAME STREQUAL OFFLOAD_TEST_NAME)
+        set(IS_OFFLOAD_TEST TRUE)
         break()
       endif()
     endforeach()
   endif()
 
-  if(NOT IS_HOST_TEST AND NOT IS_TARGET_TEST)
+  if(NOT IS_HOST_TEST AND NOT IS_OFFLOAD_TEST)
     continue()
   endif()
 
@@ -220,9 +220,9 @@ foreach(OMPVV_BIN ${OMPVV_BINARIES})
   if(IS_HOST_TEST)
     set(TARGET_NAME "openmp-vv-host-${NEW_BIN_NAME}")
     list(APPEND ROCPROFSYS_OMPVV_HOST_TESTS ${TARGET_NAME})
-  elseif(IS_TARGET_TEST)
-    set(TARGET_NAME "openmp-vv-target-${NEW_BIN_NAME}")
-    list(APPEND ROCPROFSYS_OMPVV_TARGET_TESTS ${TARGET_NAME})
+  elseif(IS_OFFLOAD_TEST)
+    set(TARGET_NAME "openmp-vv-offload-${NEW_BIN_NAME}")
+    list(APPEND ROCPROFSYS_OMPVV_OFFLOAD_TESTS ${TARGET_NAME})
   endif()
 
   file(RENAME "${OMPVV_BIN_DEST}/${BIN_NAME}.F90.o"
@@ -238,9 +238,9 @@ set(ROCPROFSYS_OMPVV_HOST_TESTS
     "${ROCPROFSYS_OMPVV_HOST_TESTS}"
     CACHE STRING "Internal variable used to generate OMPVV Host CTests" FORCE)
 
-set(ROCPROFSYS_OMPVV_TARGET_TESTS
-    "${ROCPROFSYS_OMPVV_TARGET_TESTS}"
-    CACHE STRING "Internal variable used to generate OMPVV Target CTests" FORCE)
+set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
+    "${ROCPROFSYS_OMPVV_OFFLOAD_TESTS}"
+    CACHE STRING "Internal variable used to generate OMPVV Offload CTests" FORCE)
 
 rocprofiler_systems_message(STATUS
                             "Successfully built and compiled OMPVV tests")

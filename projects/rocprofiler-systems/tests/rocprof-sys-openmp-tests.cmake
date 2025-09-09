@@ -51,10 +51,10 @@ endif()
 
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
   set(_OMPT_PASS_REGEX "\\|_omp_")
-  set(_OMPVV_TARGET_PASS_REGEX "\\|_omp_target_")
+  set(_OMPVV_TARGET_PASS_REGEX "_+omp_offloading")
 else()
   set(_OMPT_PASS_REGEX "")
-  set(_OMPVV_TARGET_PASS_REGEX "")
+  set(_OMPVV_OFFLOAD_PASS_REGEX "")
 endif()
 
 rocprofiler_systems_add_test(
@@ -201,14 +201,14 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
   endforeach()
 endif()
 
-if(ROCPROFSYS_OMPVV_TARGET_TESTS)
-  foreach(TARGET_TEST_NAME ${ROCPROFSYS_OMPVV_TARGET_TESTS})
+if(ROCPROFSYS_OMPVV_OFFLOAD_TESTS)
+  foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
     rocprofiler_systems_add_test(
       SKIP_RUNTIME
       NAME
-      ${TARGET_TEST_NAME}
+      ${OFFLOAD_TEST_NAME}
       TARGET
-      ${TARGET_TEST_NAME}
+      ${OFFLOAD_TEST_NAME}
       GPU
       ON
       LABELS
@@ -220,7 +220,7 @@ if(ROCPROFSYS_OMPVV_TARGET_TESTS)
       ENVIRONMENT
       "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
       REWRITE_RUN_PASS_REGEX
-      "${_OMPVV_TARGET_PASS_REGEX}")
+      "${_OMPVV_OFFLOAD_PASS_REGEX}")
   endforeach()
 endif()
 
