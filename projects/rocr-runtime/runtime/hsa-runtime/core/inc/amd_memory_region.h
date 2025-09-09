@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -76,6 +76,17 @@ class MemoryRegion : public core::MemoryRegion {
   static __forceinline MemoryRegion* Convert(hsa_region_t region) {
     return reinterpret_cast<MemoryRegion*>(region.handle);
   }
+
+  static bool RegisterMemory(void* ptr, size_t size, const HsaMemFlags& MemFlags);
+
+  static void DeregisterMemory(void* ptr);
+
+  /// @brief Pin memory.
+  static bool MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* ptr,
+                                    size_t size, uint64_t* alternate_va, HsaMemMapFlags map_flag);
+
+  /// @brief Unpin memory.
+  static bool MakeKfdMemoryUnresident(const void* ptr);
 
   MemoryRegion(bool fine_grain, bool kernarg, bool full_profile, bool extended_scope_fine_grain,
                bool user_visible, core::Agent* owner, const HsaMemoryProperties& mem_props);

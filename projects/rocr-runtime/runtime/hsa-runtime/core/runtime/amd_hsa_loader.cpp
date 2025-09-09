@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -44,12 +44,16 @@
 #include "core/inc/runtime.h"
 
 #include <assert.h>
+
+#if defined(__linux__)
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/mman.h>
-#include <stdlib.h>
 #include <unistd.h>
-
+#else
+#include <cstdint>
+#endif
+#include <stdlib.h>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -92,7 +96,7 @@ std::string EncodePathname(const char *file_path) {
 }
 
 std::string GetUriFromMemoryAddress(const void *memory, size_t size) {
-  pid_t pid = getpid();
+  int pid = getpid();
   std::ostringstream uri_stream;
   uri_stream << "memory://" << pid
              << "#offset=0x" << std::hex << (uintptr_t)memory << std::dec
@@ -313,6 +317,8 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
   code_object_size = _code_object_size;
   is_mmap = true;
 #else
+  //@todo the code below is useless. It's unclear if we need this interface at all
+ #if 0
   if (__lseek__(_code_object_file_descriptor, 0, SEEK_SET) == (off_t)-1) {
     return HSA_STATUS_ERROR_INVALID_FILE;
   }
@@ -330,6 +336,7 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
   mmap_size = _code_object_size;
   code_object_memory = memory;
   code_object_size = _code_object_size;
+#endif
 #endif  // !defined(_WIN32) && !defined(_WIN64)
 
   uri = GetUriFromFile(_code_object_file_descriptor, _code_object_offset,

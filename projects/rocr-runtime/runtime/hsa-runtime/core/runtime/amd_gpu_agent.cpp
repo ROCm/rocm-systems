@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -427,6 +427,20 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
 
 void GpuAgent::ReleaseShader(void* code_buf, size_t code_buf_size) const {
   system_deallocator()(code_buf);
+}
+
+bool GpuAgent::IsBlitKernelCodeAddr(const void* addr) const {
+  for (auto& blit : blits_) {
+    if (!blit.empty()) {
+      if (!blit->isSDMA()) {
+        const BlitKernel* kernl = static_cast<const BlitKernel*>((*blit).get());
+        if (kernl->IsKernelCodeAddr(addr))
+          return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 void GpuAgent::InitRegionList() {
@@ -1026,8 +1040,8 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                                std::vector<core::Signal*>& dep_signals,
                                core::Signal& out_signal) {
   // Recommended SDMA engine copies only have gang factor 1
-  uint32_t rec_sdma_eng = ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
-
+  uint32_t rec_sdma_eng =
+    rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);

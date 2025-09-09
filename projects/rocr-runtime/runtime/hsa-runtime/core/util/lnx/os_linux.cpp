@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -294,7 +294,7 @@ void* GetExportAddress(LibHandle lib, std::string export_name) {
   return NULL;
 }
 
-void CloseLib(LibHandle lib) { dlclose(*(void**)&lib); }
+bool CloseLib(LibHandle lib) { return (dlclose(*(void**)&lib) == 0) ? true : false; }
 
 /*
  * @brief Look for a symbol called "HSA_AMD_TOOL_PRIORITY" across all loaded
@@ -815,6 +815,124 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
   return false;
 #endif
 }
+
+uint64_t TimeNanos() {
+  struct timespec tp;
+  ::clock_gettime(CLOCK_MONOTONIC, &tp);
+  return (uint64_t)tp.tv_sec * (1000ULL * 1000ULL * 1000ULL) + (uint64_t)tp.tv_nsec;
+}
+
+static inline int MemProtToOsProt(MemProt prot) {
+  switch (prot) {
+    case MEM_PROT_NONE:
+      return PROT_NONE;
+    case MEM_PROT_READ:
+      return PROT_READ;
+    case MEM_PROT_RW:
+      return PROT_READ | PROT_WRITE;
+    case MEM_PROT_RWX:
+      return PROT_READ | PROT_WRITE | PROT_EXEC;
+    default:
+      break;
+  }
+  return -1;
+}
+
+static size_t g_page_size_ = 0;  //!< The default os page size
+size_t PageSize() {
+  if (g_page_size_ != 0) {
+    g_page_size_ = (size_t)::sysconf(_SC_PAGESIZE);
+  }
+  return g_page_size_;
+}
+
+address ReserveMemory(address start, size_t size, size_t alignment, MemProt prot) {
+  size = alignUp(size, pageSize());
+  // check for invalid input size
+  if (size == 0) {
+    return NULL;
+  }
+  alignment = std::max(pageSize(), alignUp(alignment, pageSize()));
+  assert(IsPowerOfTwo(alignment) && "not a power of 2");
+
+  size_t requested = size + alignment - pageSize();
+  address mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
+                                MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
+
+  // check for out of memory
+  if (mem == MAP_FAILED) return NULL;
+
+  address aligned = alignUp(mem, alignment);
+
+  // return the unused leading pages to the free state
+  if (&aligned[0] != &mem[0]) {
+    assert(&aligned[0] > &mem[0] && "check this code");
+    if (::munmap(&mem[0], &aligned[0] - &mem[0]) != 0) {
+      assert(!"::munmap failed");
+    }
+  }
+  // return the unused trailing pages to the free state
+  if (&aligned[size] != &mem[requested]) {
+    assert(&aligned[size] < &mem[requested] && "check this code");
+    if (::munmap(&aligned[size], &mem[requested] - &aligned[size]) != 0) {
+      assert(!"::munmap failed");
+    }
+  }
+
+  // Hint to enable THP for large host allocations which can help in performance gain
+  constexpr size_t kLargePageSize = 2 * Mi;
+  if (size >= kLargePageSize) {
+    int status = madvise(aligned, size, MADV_HUGEPAGE);
+    if (status) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+              "madvise with advice MADV_HUGEPAGE"
+              " starting at address %p and page size 0x%zx, returned %d, errno: %s",
+              aligned, size, status, strerror(errno));
+    }
+  }
+
+  return aligned;
+}
+
+bool ReleaseMemory(void* addr, size_t size) {
+  assert(isMultipleOf(addr, pageSize()) && "not page aligned!");
+  size = alignUp(size, pageSize());
+
+  return 0 == ::munmap(addr, size);
+}
+
+bool CommitMemory(void* addr, size_t size, MemProt prot) {
+  assert(isMultipleOf(addr, pageSize()) && "not page aligned!");
+  size = alignUp(size, pageSize());
+
+  return ::mmap(addr, size, memProtToOsProt(prot), MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1,
+                0) != MAP_FAILED;
+}
+
+bool UncommitMemory(void* addr, size_t size) {
+  assert(isMultipleOf(addr, pageSize()) && "not page aligned!");
+  size = alignUp(size, pageSize());
+
+  return ::mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANONYMOUS, -1,
+                0) != MAP_FAILED;
+}
+
+uint64_t HostTotalPhysicalMemory() {
+  static uint64_t totalPhys = 0;
+
+  if (totalPhys != 0) {
+    return totalPhys;
+  }
+
+  totalPhys = sysconf(_SC_PAGESIZE) * sysconf(_SC_PHYS_PAGES);
+  return totalPhys;
+}
+
+int Ffs(int i) { return ffs(i); }
+
+int Ctz(uint64_t i) { return __builtin_ctz(i); } 
+
+char* DlError() { return dlerror(); }
 
 }   //  namespace os
 }   //  namespace rocr

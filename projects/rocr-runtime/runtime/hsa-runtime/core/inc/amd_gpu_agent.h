@@ -271,6 +271,9 @@ class GpuAgent : public GpuAgentInt {
   // @param [in] code_buf_size Size of code object buffer in bytes.
   void ReleaseShader(void* code_buf, size_t code_buf_size) const;
 
+  // @brief Check whether the addr is blit kernel code
+  bool IsBlitKernelCodeAddr(const void* addr) const;
+
   // @brief Override from core::Agent.
   hsa_status_t VisitRegion(bool include_peer,
                            hsa_status_t (*callback)(hsa_region_t region,

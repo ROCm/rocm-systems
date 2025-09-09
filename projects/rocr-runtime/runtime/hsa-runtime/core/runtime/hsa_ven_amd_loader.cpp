@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -42,8 +42,9 @@
 
 #include "core/inc/hsa_ven_amd_loader_impl.h"
 
-#include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/runtime.h"
+#include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_hsa_loader.hpp"
 
 namespace rocr {
 
@@ -74,6 +75,15 @@ hsa_status_t hsa_ven_amd_loader_query_host_address(
     if (nullptr == host_address) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
+#if defined(_WIN32)
+    for (auto agent: Runtime::runtime_singleton_->gpu_agents()) {
+      // Note:This logic is necessary to avoid a deadlock in the loader with the pm4 emulation path
+      if (reinterpret_cast<AMD::GpuAgent*>(agent)->IsBlitKernelCodeAddr(device_address)) {
+        *host_address = device_address;
+        return HSA_STATUS_SUCCESS;
+      }
+    }
+#endif
 
     uintptr_t udaddr = reinterpret_cast<uintptr_t>(device_address);
     uintptr_t uhaddr = Runtime::runtime_singleton_->loader()->FindHostAddress(udaddr);
