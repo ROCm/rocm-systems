@@ -758,7 +758,9 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
   // callback thread.
   device_ = device;
   if (device->info().largeBar_) {
-    graph_kernarg_base = reinterpret_cast<address>(device->deviceLocalAlloc(pool_size));
+    amd::Device::AllocationFlags flags = {};
+    flags.executable_ = true;
+    graph_kernarg_base = reinterpret_cast<address>(device->deviceLocalAlloc(pool_size, flags));
     device_kernarg_pool_ = true;
   } else {
     graph_kernarg_base = reinterpret_cast<address>(
