@@ -195,7 +195,7 @@ class OmniSoC_Base:
             # 100 Mhz -> 100
             self._mspec.max_mclk = amd_smi_mclk.split()[0]
 
-        console_debug("max mem clock is {}".format(self._mspec.max_mclk))
+        console_debug(f"max mem clock is {self._mspec.max_mclk}")
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -323,7 +323,7 @@ class OmniSoC_Base:
 
         if not args.filter_blocks:
             for filename in config_filename_dict.values():
-                with open(filename, "r") as stream:
+                with open(filename) as stream:
                     texts.append(stream.read())
 
         for block_id in args.filter_blocks:
@@ -332,13 +332,11 @@ class OmniSoC_Base:
             # File id filtering
             if file_id not in config_filename_dict:
                 console_warning(
-                    (
-                        f"Skipping {block_id}: file id {file_id} not found in "
-                        f"{config_root_dir}"
-                    )
+                    f"Skipping {block_id}: file id {file_id} not found in "
+                    f"{config_root_dir}"
                 )
                 continue
-            with open(config_filename_dict[file_id], "r") as stream:
+            with open(config_filename_dict[file_id]) as stream:
                 file_config = yaml.safe_load(stream)
             if panel_id is None:
                 # If no panel id level filtering, then read the whole file
@@ -406,7 +404,7 @@ class OmniSoC_Base:
         if roofline_perfmon_only:
             counters = set()
             for fname in glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt"):
-                lines = open(fname, "r").read().splitlines()
+                lines = open(fname).read().splitlines()
                 for line in lines:
                     # Strip all comments, skip empty lines
                     stext = line.split("#")[0].strip()
@@ -629,7 +627,7 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files: list["CounterFile"] = []
+        output_files: list[CounterFile] = []
         accu_file_count = 0
 
         # Create separate perfmon file for LEVEL counters without _sum suffix
@@ -657,7 +655,7 @@ class OmniSoC_Base:
 
         file_count = 0
         # Store all channels for a TCC channel counter in the same file
-        tcc_channel_counter_file_map: dict[str, "CounterFile"] = {}
+        tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
         for ctr in counters:
             # Store all channels for a TCC channel counter in the same file

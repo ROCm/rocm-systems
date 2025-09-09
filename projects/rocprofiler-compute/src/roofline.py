@@ -633,7 +633,7 @@ class Roofline:
                 go.Scatter(
                     x=self.__ceiling_data[cache_level.lower()][0],
                     y=self.__ceiling_data[cache_level.lower()][1],
-                    name="{}-{}".format(cache_level, dtype),
+                    name=f"{cache_level}-{dtype}",
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
@@ -654,7 +654,7 @@ class Roofline:
                 go.Scatter(
                     x=self.__ceiling_data["valu"][0],
                     y=self.__ceiling_data["valu"][1],
-                    name="Peak VALU-{}".format(dtype),
+                    name=f"Peak VALU-{dtype}",
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
@@ -678,7 +678,7 @@ class Roofline:
                 go.Scatter(
                     x=self.__ceiling_data["mfma"][0],
                     y=self.__ceiling_data["mfma"][1],
-                    name="Peak MFMA-{}".format(dtype),
+                    name=f"Peak MFMA-{dtype}",
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
@@ -923,7 +923,7 @@ class Roofline:
                 f"{self.__ceiling_data['mfma'][2]}",
             )
         else:
-            console_warning("No MFMA measurement available for {}".format(dtype))
+            console_warning(f"No MFMA measurement available for {dtype}")
 
         # Plot Application AI
         for cache_level in cache_hierarchy:

@@ -189,7 +189,7 @@ def get_version(rocprof_compute_home: Path) -> dict[str, str]:
     for directory in search_dirs:
         version_file = directory / "VERSION"
         try:
-            with open(version_file, "r") as file:
+            with open(version_file) as file:
                 VER = file.read().replace("\n", "")
                 found = True
                 version_dir = directory
@@ -213,7 +213,7 @@ def get_version(rocprof_compute_home: Path) -> dict[str, str]:
         except Exception:
             try:
                 sha_file = version_dir / "VERSION.sha"
-                with open(sha_file, "r") as file:
+                with open(sha_file) as file:
                     SHA = file.read().replace("\n", "")
                     MODE = "release"
             except Exception:
@@ -265,10 +265,8 @@ def detect_rocprof(args: argparse.Namespace) -> str:
         rocprof_path = shutil.which(rocprof_cmd)
         if not rocprof_path:
             console_error(
-                (
-                    "Please verify installation or set ROCPROF environment variable "
-                    "with full path."
-                )
+                "Please verify installation or set ROCPROF environment variable "
+                "with full path."
             )
     else:
         # Resolve any sym links in file path
@@ -423,7 +421,7 @@ def v3_json_get_dispatches(data: dict[str, Any]) -> dict[Any, Any]:
 
 
 def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
-    with open(json_file_path, "rt") as f:
+    with open(Path(json_file_path)) as f:
         data = json.load(f)
 
     dispatch_records = v3_json_get_dispatches(data)
@@ -675,7 +673,7 @@ def parse_text(text_file: str) -> list[str]:
         # remove tabs and duplicate spaces
         return _dedup(line.replace("pmc:", ""), ["\n", "\t", " "]).split(" ")
 
-    with open(text_file, "r") as file:
+    with open(Path(text_file)) as file:
         return [
             counter
             for litr in [process_line(itr) for itr in file.readlines()]
@@ -720,12 +718,11 @@ def run_prof(
             / "rocprof_compute_soc"
             / "profile_configs"
             / "counter_defs.yaml",
-            "r",
         ) as file:
             counter_defs = yaml.safe_load(file)
         # Extra counter definitions
         if fpath.with_suffix(".yaml").exists():
-            with open(fpath.with_suffix(".yaml"), "r") as file:
+            with open(fpath.with_suffix(".yaml")) as file:
                 counter_defs["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
@@ -739,10 +736,8 @@ def run_prof(
         # Set counter definitions
         new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
         console_debug(
-            (
-                "Adding env var for counter definitions: "
-                f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
-            )
+            "Adding env var for counter definitions: "
+            f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
         )
 
     # set required env var for >= mi300
@@ -813,10 +808,8 @@ def run_prof(
             return
         else:
             console_error(
-                (
-                    "rocpd output format is only supported with "
-                    "rocprofiler-sdk or rocprofv3."
-                )
+                "rocpd output format is only supported with "
+                "rocprofiler-sdk or rocprofv3."
             )
     elif rocprof_cmd.endswith("v2"):
         # rocprofv2 has separate csv files for each process
@@ -862,10 +855,8 @@ def run_prof(
             )
         else:
             console_warning(
-                (
-                    f"Cannot write results for {fbase}.csv due to no counter "
-                    "csv files generated."
-                )
+                f"Cannot write results for {fbase}.csv due to no counter "
+                "csv files generated."
             )
             return
 
@@ -1604,7 +1595,7 @@ def parse_sets_yaml(arch: str) -> dict[str, Any]:
         / "sets"
         / f"{arch}_sets.yaml"
     )
-    with open(filename, "r") as file:
+    with open(filename) as file:
         content = file.read()
     data = yaml.safe_load(content)
 

@@ -785,7 +785,7 @@ def construct_roof(
     else:
         base_dir = workload_dir
 
-    benchmark_results = str(Path(base_dir) / "roofline.csv")
+    benchmark_results = Path(base_dir) / "roofline.csv"
 
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
@@ -795,7 +795,7 @@ def construct_roof(
     headers: list[str] = []
 
     try:
-        with open(benchmark_results, "r") as csvfile:
+        with open(benchmark_results) as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
 

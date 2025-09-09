@@ -1,6 +1,7 @@
 import csv
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -41,14 +42,14 @@ def convert_db_to_csv(
     try:
         with closing(sqlite3.connect(db_path)) as conn:
             with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
-                with open(csv_file_path, "w", newline="") as csvfile:
+                with open(Path(csv_file_path), "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow([
-                        description[0] for description in cursor.description
-                    ])
+                    writer.writerow(
+                        [description[0] for description in cursor.description]
+                    )
                     for row in cursor:
                         writer.writerow(row)
-    except (sqlite3.DatabaseError, IOError) as e:
+    except OSError as e:
         console_error(f"Database error while converting to CSV: {e}")
     except Exception as e:
         console_error(f"Unexpected error converting database to CSV: {e}")
@@ -65,13 +66,15 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     data: list[dict[str, Any]] = []
 
     # Group by unique kernel and merge into a single row
-    for _, group_df in df.groupby([
-        "Dispatch_ID",
-        "Kernel_Name",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-    ]):
+    for _, group_df in df.groupby(
+        [
+            "Dispatch_ID",
+            "Kernel_Name",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+        ]
+    ):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],

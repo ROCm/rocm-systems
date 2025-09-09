@@ -1225,7 +1225,7 @@ def search_key_in_json(file_path: Path, search_key: str) -> Optional[Any]:
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
-    with open(file_path, "r") as file:
+    with open(file_path) as file:
         data = json.load(file)
         found = find_key_recursively(data, search_key)
         if found is None:
@@ -1385,10 +1385,10 @@ def load_pc_sampling_data_per_kernel(
                 break
 
     if not kernel_info:
-        console_warning("PC sampling: can not find the kernel %s " % kernel_name)
+        console_warning(f"PC sampling: can not find the kernel {kernel_name}")
         return pd.DataFrame()
     else:
-        console_debug("PC sampling: kernel %s " % kernel_info)
+        console_debug(f"PC sampling: kernel {kernel_info}")
 
     filtered_sorted_list = sorted(
         [

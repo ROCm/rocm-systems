@@ -191,7 +191,7 @@ def px_simple_bar(
     if "Metric" in df.columns and ("Count" in df.columns or "Value" in df.columns):
         detected_label = "Count" if "Count" in df.columns else "Value"
         df[detected_label] = [
-            x.astype(int) if x != "" else int(0) for x in df[detected_label]
+            x.astype(int) if x != "" else 0 for x in df[detected_label]
         ]
     else:
         raise NameError("simple_bar: No Metric or Count in df columns!")
@@ -240,7 +240,7 @@ def px_simple_multi_bar(
 
     # TODO: handle Nan and None properly
     if "Metric" in df.columns and "Avg" in df.columns:
-        df["Avg"] = [x.astype(int) if x != "" else int(0) for x in df["Avg"]]
+        df["Avg"] = [x.astype(int) if x != "" else 0 for x in df["Avg"]]
     else:
         raise NameError("simple_multi_bar: No Metric or Count in df columns!")
 

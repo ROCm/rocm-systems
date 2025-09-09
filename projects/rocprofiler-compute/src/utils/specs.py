@@ -239,7 +239,7 @@ def extract_machine_info() -> dict[str, Any]:
         result["cpu_memory"] = search(r"MemTotal:\s*(\S*)", meminfo)
         result["linux_distro"] = search(r'PRETTY_NAME="(.*?)"', os_release) or ""
 
-    except (OSError, IOError) as e:
+    except OSError as e:
         console_warning(f"Could not read system files: {e}")
     return result
 
@@ -884,7 +884,7 @@ def get_rocm_ver() -> str:
 
 def run(cmd: list[str], exit_on_error: bool = False) -> Optional[str]:
     try:
-        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.run(cmd, capture_output=True)
     except FileNotFoundError as e:
         console_error(
             f"Unable to parse specs. Can't find ROCm asset: {e.filename}\n"

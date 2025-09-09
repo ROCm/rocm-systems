@@ -153,11 +153,10 @@ Examples:
         metavar="",
         type=str,
         dest="path",
-        default=str(Path(os.getcwd()).joinpath("workloads")),
+        default=str(Path(os.getcwd()) / "workloads"),
         required=False,
         help=(
-            "\t\t\tSpecify path to save workload.\n\t\t\t"
-            "(DEFAULT: {}/workloads/<name>)".format(os.getcwd())
+            f"\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {os.getcwd()}/workloads/<name>)"  # noqa: E501
         ),
     )
     profile_group.add_argument(

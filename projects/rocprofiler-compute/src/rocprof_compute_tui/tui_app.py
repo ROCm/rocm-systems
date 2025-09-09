@@ -95,7 +95,7 @@ class RocprofTUIApp(App):
     def _load_recent_dirs(self) -> list[str]:
         recent_file = Path.home() / ".textual_browser_recent.json"
         if recent_file.exists():
-            with open(recent_file, "r") as f:
+            with open(recent_file) as f:
                 return json.load(f)
         return []
 

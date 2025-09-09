@@ -92,7 +92,7 @@ class RocProfCompute:
         elif self.__mode == "analyze":
             self.detect_analyze()
 
-        console_debug("Execution mode = %s" % self.__mode)
+        console_debug(f"Execution mode = {self.__mode}")
 
     def print_graphic(self) -> None:
         print(
@@ -128,8 +128,8 @@ class RocProfCompute:
             self.__profiler_mode = "rocprofiler-sdk"
         else:
             console_error(
-                "Incompatible profiler: %s. Supported profilers include: %s"
-                % (profiler_mode, get_submodules("rocprof_compute_profile"))
+                f"Incompatible profiler: {profiler_mode}. Supported profilers "
+                f"include: {get_submodules('rocprof_compute_profile')}"
             )
 
     def detect_analyze(self) -> None:
@@ -473,7 +473,7 @@ class RocProfCompute:
 
             analyzer = db_analysis(self.__args, self.__supported_archs)
         else:
-            console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
+            console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
 
         # -----------------------
         # run analysis workflow

@@ -89,10 +89,10 @@ class RocProfCompute_Base:
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = glob.glob(f"{args.path}/results_*.csv")
 
-            with open(output_file, "w", newline="") as outfile:
+            with open(Path(output_file), "w", newline="") as outfile:
                 writer = None
                 for file in result_files:
-                    with open(file, "r", newline="") as infile:
+                    with open(file, newline="") as infile:
                         reader = csv.reader(infile)
                         header = next(reader)
                         # Write header only once
