@@ -455,6 +455,7 @@ class Runtime {
   }
 
   const Flag& flag() const { return flag_; }
+  Flag& flag() { return flag_; }
 
   const ThunkLoader* thunkLoader() const { return thunkLoader_; }
 
@@ -479,6 +480,10 @@ class Runtime {
     if (version.KernelInterfaceMajorVersion == 1 &&
       version.KernelInterfaceMinorVersion >= 14)
       kfd_version.supports_event_age = true;
+
+    if (thunkLoader()->IsDXG()) {
+      kfd_version.supports_event_age = false;
+    }
   }
 
   void KfdVersion(bool exception_debugging, bool core_dump) {
