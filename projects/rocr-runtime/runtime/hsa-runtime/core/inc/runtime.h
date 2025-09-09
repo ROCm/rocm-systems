@@ -131,7 +131,6 @@ class Runtime {
     bool supports_exception_debugging;
     bool supports_event_age;
     bool supports_core_dump;
-    bool supports_sdmauserqueue = true;
   };
 
   /// @brief Open connection to kernel driver and increment reference count.
@@ -488,12 +487,6 @@ class Runtime {
     if (thunkLoader()->IsDXG()) {
       kfd_version.supports_event_age = false;
     }
-  }
-
-  void SetKfdVersionSupports() {
-    char *envvar;
-    kfd_version.supports_event_age = false;
-    kfd_version.supports_sdmauserqueue = false;
   }
 
   void KfdVersion(bool exception_debugging, bool core_dump) {
