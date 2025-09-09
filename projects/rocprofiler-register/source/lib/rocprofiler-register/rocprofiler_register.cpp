@@ -44,8 +44,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
-extern "C"
-{
+extern "C" {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
 #pragma weak rocprofiler_attach_set_api_table
@@ -86,7 +85,12 @@ extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 extern int
-rocprofiler_attach_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t, void(*)(uint64_t, void**, uint64_t));
+rocprofiler_attach_set_api_table(const char*,
+                                 uint64_t,
+                                 uint64_t,
+                                 void**,
+                                 uint64_t,
+                                 void (*)(uint64_t, void**, uint64_t));
 
 extern void
 rocprofv3_attach(void);
@@ -126,8 +130,7 @@ using rocprofiler_set_api_table_t        = decltype(::rocprofiler_set_api_table)
 using rocp_set_api_table_data_t          = std::tuple<void*, rocprofiler_set_api_table_t>;
 using rocprofv3_attach_t                 = decltype(::rocprofv3_attach)*;
 using rocprofv3_detach_t                 = decltype(::rocprofv3_detach)*;
-using rocprofiler_attach_set_api_table_t =
-    decltype(::rocprofiler_attach_set_api_table)*;
+using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api_table)*;
 
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
@@ -142,9 +145,19 @@ constexpr auto rocprofiler_attach_lib_name = "librocprofiler-sdk-attach.so";
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     "rocprofiler_attach_set_api_table";
 
-constexpr auto rocprofiler_tool_lib_name = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
+constexpr auto rocprofiler_tool_lib_name_default =
+    "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 constexpr auto rocprofiler_tool_attach_entrypoint = "rocprofv3_attach";
 constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofv3_detach";
+
+// Get the tool library name from environment variable or use default
+inline const char*
+get_rocprofiler_tool_lib_name()
+{
+    const char* env_lib_name = getenv("ROCPROFILER_REGISTER_ATTACHMENT_TOOL_LIB");
+    return (env_lib_name && *env_lib_name) ? env_lib_name
+                                           : rocprofiler_tool_lib_name_default;
+}
 
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
@@ -284,8 +297,7 @@ struct rocp_import
 };
 
 template <size_t... Idx>
-auto
-rocp_reg_get_imports(std::index_sequence<Idx...>)
+auto rocp_reg_get_imports(std::index_sequence<Idx...>)
 {
     auto _data        = std::vector<rocp_import>{};
     auto _import_scan = [&_data](auto _info) {
@@ -457,9 +469,9 @@ struct scoped_count
 
     ~scoped_count() { --global_count; }
 
-    scoped_count(const scoped_count&)                = delete;
-    scoped_count(scoped_count&&) noexcept            = delete;
-    scoped_count& operator=(const scoped_count&)     = delete;
+    scoped_count(const scoped_count&)     = delete;
+    scoped_count(scoped_count&&) noexcept = delete;
+    scoped_count& operator=(const scoped_count&) = delete;
     scoped_count& operator=(scoped_count&&) noexcept = delete;
 
     uint32_t value = 0;
@@ -559,8 +571,7 @@ load_environment_buffer(const char* environment_buffer)
     }
 }
 
-extern "C"
-{
+extern "C" {
 rocprofiler_register_error_code_t
 rocprofiler_register_library_api_table(
     const char*                                 common_name,
@@ -585,14 +596,15 @@ rocprofiler_register_library_api_table(
     if(_count.value > 1) return ROCP_REG_DEADLOCK;
 
     auto _scan_result = rocp_reg_scan_for_tools();
-    
+
     // rocprofiler library is dlopened and we have the functor to pass the API data
     auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
 
 #if defined ROCP_REG_ALWAYS_SUPPORT_ATTACH && ROCP_REG_ALWAYS_SUPPORT_ATTACH == 1
     auto _attachment_enabled = true;
 #else
-    auto _attachment_enabled = common::get_env<bool>("ROCPROFILER_REGISTER_ATTACHMENT_ENABLED", false);
+    auto _attachment_enabled =
+        common::get_env<bool>("ROCPROFILER_REGISTER_ATTACHMENT_ENABLED", false);
 #endif
 
     rocp_import* _import_match = nullptr;
@@ -656,8 +668,10 @@ rocprofiler_register_library_api_table(
     auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
     _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
 
-    // if attachment is enabled the HSA API table should be forwarded to the attachment library
-    if(!_activate_rocprofiler && _attachment_enabled && _import_match->library_idx == ROCP_REG_HSA)
+    // if attachment is enabled the HSA API table should be forwarded to the attachment
+    // library
+    if(!_activate_rocprofiler && _attachment_enabled &&
+       _import_match->library_idx == ROCP_REG_HSA)
     {
         void* attachlibrary = rocp_load_lib(rocprofiler_attach_lib_name);
         if(!attachlibrary)
@@ -681,14 +695,21 @@ rocprofiler_register_library_api_table(
             return ROCP_REG_NO_TOOLS;
         }
 
-        // Pass a functor to the attach library that it can use to pass back its own API table to us.
-        // This approach simplifies the interface and avoids having to modify the deadlock protection of this function.
-        auto register_functor = [](uint64_t lib_version, void** api_tables, uint64_t api_table_length){
-            rocp_add_registered_library_api_table("rocattach", nullptr, lib_version, api_tables, api_table_length, 0);
-        };
+        // Pass a functor to the attach library that it can use to pass back its own API
+        // table to us. This approach simplifies the interface and avoids having to modify
+        // the deadlock protection of this function.
+        auto register_functor =
+            [](uint64_t lib_version, void** api_tables, uint64_t api_table_length) {
+                rocp_add_registered_library_api_table(
+                    "rocattach", nullptr, lib_version, api_tables, api_table_length, 0);
+            };
 
-        auto _ret = rocprofiler_attach_set_api_table_fn(
-            common_name, lib_version, _instance_val, api_tables, api_table_length, register_functor);
+        auto _ret = rocprofiler_attach_set_api_table_fn(common_name,
+                                                        lib_version,
+                                                        _instance_val,
+                                                        api_tables,
+                                                        api_table_length,
+                                                        register_functor);
         if(_ret != 0)
         {
             LOG(ERROR) << "Proxy queues for attachment are enabled, but attach library "
@@ -700,7 +721,6 @@ rocprofiler_register_library_api_table(
         }
 
         LOG(INFO) << "Successfully registered for proxy queue creation";
-
     }
 
     auto* reginfo = rocp_add_registered_library_api_table(common_name,
@@ -802,7 +822,9 @@ rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer)
 {
     LOG(INFO) << "rocprofiler_register_attach started";
-    void* toollibrary = rocp_load_lib(rocprofiler_tool_lib_name);
+    const char* tool_lib_name = get_rocprofiler_tool_lib_name();
+    LOG(INFO) << "Loading tool library: " << tool_lib_name;
+    void* toollibrary = rocp_load_lib(tool_lib_name);
 
     if(!toollibrary)
     {
@@ -845,7 +867,9 @@ rocprofiler_register_error_code_t
 rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
-    void* toollibrary = rocp_load_lib(rocprofiler_tool_lib_name);
+    const char* tool_lib_name = get_rocprofiler_tool_lib_name();
+    LOG(INFO) << "Loading tool library: " << tool_lib_name;
+    void* toollibrary = rocp_load_lib(tool_lib_name);
 
     if(!toollibrary)
     {
