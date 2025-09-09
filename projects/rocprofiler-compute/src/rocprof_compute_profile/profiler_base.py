@@ -83,11 +83,13 @@ class RocProfCompute_Base:
         args = self.get_args()
 
         if (
-            sum((
-                bool(args.filter_blocks),
-                bool(args.set_selected),
-                bool(args.roof_only),
-            ))
+            sum(
+                (
+                    bool(args.filter_blocks),
+                    bool(args.set_selected),
+                    bool(args.roof_only),
+                )
+            )
             > 1
         ):
             console_error(
@@ -113,12 +115,10 @@ class RocProfCompute_Base:
             args.remaining = " ".join(args.remaining)
         else:
             console_error(
-                (
-                    "Profiling command required. Pass application executable after -- "
-                    "at the end of options.\n"
-                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
-                    "./vcopy -n 1048576 -b 256"
-                )
+                "Profiling command required. Pass application executable after -- "
+                "at the end of options.\n"
+                "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                "./vcopy -n 1048576 -b 256"
             )
 
     @demarcate
@@ -441,13 +441,15 @@ class RocProfCompute_Base:
 
             # Kernel filtering (in-place replacement)
             if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    fname,
-                ])
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -456,13 +458,15 @@ class RocProfCompute_Base:
 
             # Dispatch filtering (inplace replacement)
             if not args.dispatch == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    fname,
-                ])
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)

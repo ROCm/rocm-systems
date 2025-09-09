@@ -23,8 +23,7 @@
 
 ##############################################################################
 import argparse
-from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import demarcate
