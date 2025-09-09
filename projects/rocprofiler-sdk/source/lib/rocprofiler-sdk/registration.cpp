@@ -1091,8 +1091,8 @@ rocprofiler_set_api_table(const char* name,
 
         // unlike other APIs, we do not offer tracing for our own attach library
         // forward the table to the relevant code sections, then move on
-        rocprofiler::code_object::load_attach_code_objects(rocattach_api);
-        rocprofiler::hsa::queue_controller_load_attach_queues(rocattach_api);
+        rocprofiler::hsa::queue_controller_set_attach_table(rocattach_api);
+        rocprofiler::code_object::code_object_set_attach_table(rocattach_api);
     }
     else
     {

@@ -22,6 +22,7 @@
 
 #include "include/code_object_registration.h"
 #include "code_object_registration.hpp"
+#include "table.hpp"
 
 #include "lib/common/static_object.hpp"
 
@@ -59,8 +60,15 @@ executable_freeze(hsa_executable_t executable, const char* options)
         return status;
     }
     ROCP_TRACE << "adding code_object " << executable.handle;
-    std::lock_guard lg(registration->code_objects_mutex);
-    registration->code_objects.emplace_back(executable);
+    {
+        std::lock_guard lg(registration->code_objects_mutex);
+        registration->code_objects.emplace_back(executable);
+    }
+    auto attach_table = rocprofiler::attach::get_dispatch_table();
+    if (attach_table->rocprofiler_attach_notify_new_code_object)
+    {
+        attach_table->rocprofiler_attach_notify_new_code_object(executable, nullptr);
+    }
     return HSA_STATUS_SUCCESS;
 }
 
