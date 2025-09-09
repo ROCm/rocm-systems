@@ -1143,11 +1143,6 @@ def resetProfile(deviceList):
             printLog(device, 'Successfully reset Power Profile', None)
         else:
             printErrLog(device, 'Unable to reset Power Profile')
-        ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(0))
-        if rsmi_ret_ok(ret, device, 'set_perf_level'):
-            printLog(device, 'Successfully reset Performance Level', None)
-        else:
-            printErrLog(device, 'Unable to reset Performance Level')
     printLogSpacer()
 
 
