@@ -30,6 +30,8 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -87,6 +89,19 @@ struct dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+struct spm_dispatch_counter_collection_service
+{
+    // Contains a vector of SPM collection instances associated with this context.
+    // Each instance is assocated with an agent and a counter collection profile.
+    // Contains callback information along with other data needed to collect/process
+    // counters.
+    std::vector<std::shared_ptr<SPM::spm_counter_callback_info>> callbacks{};
+    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // to protect against multithreaded calls to enable a context (and enabling already enabled
+    // counters).
+    common::Synchronized<bool> enabled{false};
+};
+
 struct device_counting_service
 {
     std::unordered_set<uint64_t>                            conf_agents;
@@ -131,6 +146,7 @@ struct context
     std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
     std::unique_ptr<thread_trace::DeviceThreadTracer>   device_thread_trace   = {};
 
+    std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
 

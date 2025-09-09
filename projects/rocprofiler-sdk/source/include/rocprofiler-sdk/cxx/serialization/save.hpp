@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
@@ -521,6 +522,15 @@ save(ArchiveT& ar, rocprofiler_dispatch_counting_service_data_t data)
     ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_spm_dispatch_counting_service_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
 }
 

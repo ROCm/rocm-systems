@@ -189,7 +189,7 @@ parse_att_counters(std::string line)
 }
 
 std::set<std::string>
-parse_counters(std::string line)
+parse_counters(std::string line, const std::string& qualifier)
 {
     auto counters = std::set<std::string>{};
 
@@ -205,14 +205,13 @@ parse_counters(std::string line)
     // check to see if comment stripping + trim resulted in empty line
     if(line.empty()) return counters;
 
-    constexpr auto pmc_qualifier = std::string_view{"pmc:"};
-    auto           pos           = std::string::npos;
+    auto pos = std::string::npos;
 
     // should we handle an "pmc:" not being present? Seems like it should be a fatal error
-    if((pos = line.find(pmc_qualifier)) != std::string::npos)
+    if((pos = line.find(qualifier)) != std::string::npos)
     {
         // strip out pmc qualifier
-        line = line.substr(pos + pmc_qualifier.length());
+        line = line.substr(pos + qualifier.length());
 
         handle_special_chars(line);
 
@@ -223,7 +222,7 @@ parse_counters(std::string line)
             input_ss >> counter;
             if(counter.empty())
                 break;
-            else if(counter != pmc_qualifier && has_counter_format(counter))
+            else if(counter != qualifier && has_counter_format(counter))
                 counters.emplace(counter);
         }
     }
@@ -236,7 +235,7 @@ parse_counter_envs()
 {
     if(auto single_counter = get_env("ROCPROF_COUNTERS", std::string{}); !single_counter.empty())
     {
-        return {parse_counters(single_counter)};
+        return {parse_counters(single_counter, "pmc:")};
     }
 
     if(auto group_counters = get_env("ROCPROF_COUNTER_GROUPS", std::string{});
@@ -245,7 +244,7 @@ parse_counter_envs()
         auto counters = std::vector<std::set<std::string>>{};
         for(const auto& group : rocprofiler::sdk::parse::tokenize(group_counters, "\n"))
         {
-            counters.emplace_back(parse_counters(group));
+            counters.emplace_back(parse_counters(group, "pmc:"));
         }
         return counters;
     }
@@ -258,6 +257,7 @@ config::config()
 , kernel_filter_range{get_kernel_filter_range(
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counter_envs()}
+, spm_counters({parse_counters(get_env("ROCPROF_SPM_COUNTERS", std::string()), "spm:")})
 , att_param_perfcounters{
       parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
 {

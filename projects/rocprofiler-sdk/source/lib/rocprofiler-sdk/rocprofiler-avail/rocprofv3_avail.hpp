@@ -41,7 +41,8 @@ counter_info(uint64_t     counter_handle,
              const char** counter_name,
              const char** counter_description,
              uint8_t*     is_derived,
-             uint8_t*     is_hw_constant) ROCPROFILER_EXPORT;
+             uint8_t*     is_hw_constant,
+             uint8_t*     is_spm) ROCPROFILER_EXPORT;
 void
 counter_block(uint64_t counter_handle, const char** counter_block) ROCPROFILER_EXPORT;
 
