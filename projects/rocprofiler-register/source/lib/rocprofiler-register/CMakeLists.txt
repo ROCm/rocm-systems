@@ -30,6 +30,10 @@ set_target_properties(
                SOVERSION ${PROJECT_VERSION_MAJOR}
                VERSION ${PROJECT_VERSION})
 
+if (ROCPROFILER_REGISTER_ALWAYS_SUPPORT_ATTACH)
+    target_compile_definitions(rocprofiler-register PRIVATE ROCP_REG_ALWAYS_SUPPORT_ATTACH=1)
+endif()
+
 install(
     TARGETS rocprofiler-register
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
