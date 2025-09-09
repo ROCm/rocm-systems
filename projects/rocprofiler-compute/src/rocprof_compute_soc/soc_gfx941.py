@@ -22,35 +22,20 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
 import argparse
 from pathlib import Path
 from typing import Any
 
-import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from roofline import Roofline
-from utils.logger import console_log, console_warning, demarcate
+from utils.logger import demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
-from utils.utils import mibench
 
 
 class gfx941_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx941")
-
-        if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
-            self.set_perfmon_dir(
-                str(
-                    Path(config.rocprof_compute_home)
-                    / "rocprof_compute_soc"
-                    / "profile_configs"
-                    / "gfx940"
-                    / "roofline"
-                )
-            )
         self.set_compatible_profilers([
             "rocprofv1",
             "rocprofv2",
@@ -59,9 +44,6 @@ class gfx941_soc(OmniSoC_Base):
         ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx941"))
-        # Create roofline object if mode is provided; skip for --specs
-        if hasattr(self.get_args(), "mode") and self.get_args().mode:
-            self.roofline_obj = Roofline(args, self._mspec)
 
         # Set arch specific specs
         self._mspec.l2_banks = 16
@@ -76,37 +58,15 @@ class gfx941_soc(OmniSoC_Base):
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         # Performance counter filtering
-        self.perfmon_filter(self.get_args().roof_only)
+        filter_blocks = self.perfmon_filter()
+        return filter_blocks
 
     @demarcate
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
 
-        if self.get_args().no_roof:
-            console_log("roofline", "Skipping roofline")
-            return
-
-        pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
-        if not pmc_path.is_file():
-            console_warning(
-                f"Incomplete or missing profiling data {pmc_path}. Skipping roofline."
-            )
-            return
-
-        console_log("roofline", f"Checking for roofline.csv in {self.get_args().path}")
-        roofline_path = Path(self.get_args().path) / "roofline.csv"
-        if not roofline_path.is_file():
-            mibench(self.get_args(), self._mspec)
-
-        self.roofline_obj.post_processing()
-
     @demarcate
-    def analysis_setup(self, roofline_parameters: dict[str, Any]) -> None:
+    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:
         """Perform any SoC-specific setup prior to analysis."""
-        super().analysis_setup()
-        # configure roofline for analysis
-        if roofline_parameters:
-            self.roofline_obj = Roofline(
-                self.get_args(), self._mspec, roofline_parameters
-            )
+        super().analysis_setup(roofline_parameters=roofline_parameters)

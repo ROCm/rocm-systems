@@ -32,8 +32,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 import config
 from argparser import omniarg_parser
 from utils import file_io, parser, schema
@@ -219,19 +217,23 @@ class RocProfCompute:
             self.handle_analyze_args()
 
     def handle_profile_args(self) -> None:
-        """Handle profile-specific argument processing"""
-        # FIXME: Might want to get host name from detected spec
-        if self.__args.subpath == "node_name":
-            self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-        elif self.__args.subpath == "gpu_model":
-            self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+          # Add --name to workload path if --path is not given
+          if self.__args.path == str(Path(os.getcwd()) / "workloads"):
+              self.__args.path = str(Path(self.__args.path) / self.__args.name)
+          # Add node name to workload path
+          if self.__args.subpath == "node_name":
+              self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+          # Or, add gpu model name to workload path
+          elif self.__args.subpath == "gpu_model":
+              self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
 
-        p = Path(self.__args.path)
-        if not p.exists():
-            try:
-                p.mkdir(parents=True, exist_ok=False)
-            except FileExistsError:
-                console_error("Directory already exists.")
+          # Create workload directory if it does not exist
+          p = Path(self.__args.path)
+          if not p.exists():
+              try:
+                  p.mkdir(parents=True, exist_ok=False)
+              except FileExistsError:
+                  console_error("Directory already exists.")
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
@@ -260,8 +262,9 @@ class RocProfCompute:
         )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            config_dir = Path(self.__args.config_dir)
-            ac.panel_configs = file_io.load_panel_configs([config_dir.joinpath(arch)])
+            ac.panel_configs = file_io.load_panel_configs([
+                Path(self.__args.config_dir) / arch
+            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
@@ -359,7 +362,6 @@ class RocProfCompute:
             self.__args,
             self.__profiler_mode,
             self.__soc[self.__mspec.gpu_arch],
-            self.__supported_archs,
         )
 
     @demarcate
@@ -377,30 +379,14 @@ class RocProfCompute:
         if "/" in self.__args.name:
             console_error("'/' not permitted in profile name")
 
-        # FIXME:
-        #     Changing default path should be done at the end of arg parsing stage,
-        #     unless there is a specific reason to do here.
-
-        # Update default path
-        if self.__args.path == str(Path(os.getcwd()) / "workloads"):
-            self.__args.path = str(
-                Path(self.__args.path) / self.__args.name / self.__mspec.gpu_model
-            )
-
         # instantiate desired profiler
         profiler = self.create_profiler()
 
         # -----------------------
         # run profiling workflow
         # -----------------------
+        profiler.sanitize()
 
-        self.__soc[self.__mspec.gpu_arch].profiling_setup()
-
-        # Write profiling configuration as yaml file
-        with open(Path(self.__args.path) / "profiling_config.yaml", "w") as f:
-            args_dict = vars(self.__args)
-            args_dict["config_dir"] = str(args_dict["config_dir"])
-            yaml.dump(args_dict, f)
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)

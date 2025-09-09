@@ -54,7 +54,6 @@ from utils.roofline_calc import (
     calc_ai_profile,
     construct_roof,
 )
-from utils.utils import mibench
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
@@ -991,36 +990,6 @@ class Roofline:
             t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
         self.empirical_roofline(ret_df=t_df)
-
-    @abstractmethod
-    def profile(self) -> None:
-        args = self.get_args()
-
-        if args.roof_only:
-            # check for roofline benchmark
-            console_log("roofline", f"Checking for roofline.csv in {args.path}")
-            roof_path = Path(args.path).joinpath("roofline.csv")
-            if not roof_path.is_file():
-                mibench(args, self.__mspec)
-
-            # check for profiling data
-            console_log("roofline", f"Checking for pmc_perf.csv in {args.path}")
-            app_path = Path(args.path) / "pmc_perf.csv"
-            if not app_path.is_file():
-                console_log("roofline", "pmc_perf.csv not found. Generating...")
-                if not args.remaining:
-                    console_error(
-                        "profiling"
-                        "An <app_cmd> is required to run.\r"
-                        "rocprof-compute profile -n test -- <app_cmd>"
-                    )
-                # TODO: Add an equivelent of characterize_app() to run profiling
-                # directly out of this module
-
-        elif args.no_roof:
-            console_log("roofline", "Skipping roofline.")
-        else:
-            mibench(args, self.__mspec)
 
     # NB: Currently the post_prossesing() method is the only one being used by
     # rocprofiler-compute, we include pre_processing() and profile() methods for

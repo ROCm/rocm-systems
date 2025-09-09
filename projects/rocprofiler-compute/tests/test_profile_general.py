@@ -1923,6 +1923,10 @@ class TestSetsIntegration:
 
         assert test_utils.get_num_pmc_file(workload_dir) == 1
 
+        assert test_utils.check_file_pattern(
+            "- 11.2.3", f"{workload_dir}/profiling_config.yaml"
+        )
+
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     def test_compute_thruput_flops_set(self, binary_handler_profile_rocprof_compute):

@@ -22,7 +22,6 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
 import argparse
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -56,7 +55,8 @@ class gfx908_soc(OmniSoC_Base):
             console_error(f"{self.get_arch()} does not support roofline analysis")
 
         # Perfmon filtering
-        self.perfmon_filter(self.get_args().roof_only)
+        filter_blocks = self.perfmon_filter()
+        return filter_blocks
 
     @demarcate
     def post_profiling(self) -> None:
@@ -64,6 +64,6 @@ class gfx908_soc(OmniSoC_Base):
         super().post_profiling()
 
     @demarcate
-    def analysis_setup(self) -> None:
+    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]):
         """Perform any SoC-specific setup prior to analysis."""
-        super().analysis_setup()
+        super().analysis_setup(roofline_parameters=roofline_parameters)

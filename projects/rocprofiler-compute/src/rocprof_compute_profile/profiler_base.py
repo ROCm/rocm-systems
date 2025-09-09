@@ -37,6 +37,7 @@ from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from utils.logger import (
     console_debug,
@@ -61,11 +62,9 @@ class RocProfCompute_Base:
         args: argparse.Namespace,
         profiler_mode: str,
         soc: Any,
-        supported_archs: dict[str, Any],
     ) -> None:
         self.__args = args
         self.__profiler = profiler_mode
-        self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
 
     def get_args(self) -> argparse.Namespace:
@@ -77,6 +76,50 @@ class RocProfCompute_Base:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
         return []
+
+    @demarcate
+    def sanitize(self) -> None:
+        """Perform sanitization of inputs"""
+        args = self.get_args()
+
+        if (
+            sum((
+                bool(args.filter_blocks),
+                bool(args.set_selected),
+                bool(args.roof_only),
+            ))
+            > 1
+        ):
+            console_error(
+                "--block, --set, and --roof-only are mutually exclusive options. "
+                "Please use only one of them."
+            )
+
+        # verify not accessing parent directories
+        if ".." in str(args.path):
+            console_error(
+                "Access denied. Cannot access parent directories in path (i.e. ../)"
+            )
+
+        # verify correct formatting for application binary
+        args.remaining = args.remaining[1:]
+        if args.remaining:
+            # Ensure that command points to an executable
+            if not shutil.which(args.remaining[0]):
+                console_error(
+                    f"Your command {args.remaining[0]} doesn't point to a executable. "
+                    "Please verify."
+                )
+            args.remaining = " ".join(args.remaining)
+        else:
+            console_error(
+                (
+                    "Profiling command required. Pass application executable after -- "
+                    "at the end of options.\n"
+                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                    "./vcopy -n 1048576 -b 256"
+                )
+            )
 
     @demarcate
     def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -313,29 +356,21 @@ class RocProfCompute_Base:
         args = self.get_args()
         console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
 
+        self._filter_blocks = self._soc.profiling_setup()
+
+        # Write profiling configuration as yaml file
+        with open(Path(self.__args.path).joinpath("profiling_config.yaml"), "w") as f:
+            args_dict = vars(self.__args)
+            # Override filter_blocks when writing profiling config yaml
+            args_dict["filter_blocks"] = self._filter_blocks
+            args_dict["config_dir"] = str(args_dict["config_dir"])
+            yaml.dump(args_dict, f)
+
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
             console_error(
                 f"{self._soc.get_arch()} is not enabled in {self.__profiler}. "
                 f"Available profilers include: {self._soc.get_compatible_profilers()}"
-            )
-
-        # verify not accessing parent directories
-        if ".." in str(args.path):
-            console_error(
-                "Access denied. Cannot access parent directories in path (i.e. ../)"
-            )
-
-        # verify correct formatting for application binary
-        args.remaining = args.remaining[1:]
-
-        if not args.remaining:
-            console_error(
-                "profiling",
-                "Profiling command required. Pass application executable after -- "
-                "at the end of options.\n"
-                "\t\ti.e. rocprof-compute profile -n vcopy "
-                "-- ./vcopy -n 1048576 -b 256",
             )
 
         # Ensure that command points to an executable
@@ -371,14 +406,10 @@ class RocProfCompute_Base:
         console_log(f"Command: {args.remaining}")
         console_log(f"Kernel Selection: {args.kernel}")
         console_log(f"Dispatch Selection: {args.dispatch}")
-
-        if args.set_selected:
-            console_log(f"Set Selection: {self.__args.set_selected}")
-
-        if args.filter_blocks is None:
-            console_log("Report Sections: All")
+        if self._filter_blocks:
+            console_log(f"Filtered sections: {str(self._filter_blocks)}")
         else:
-            console_log(f"Report Sections: {args.filter_blocks}")
+            console_log("Filtered sections: All")
 
         msg = "Collecting Performance Counters"
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
@@ -505,6 +536,7 @@ class RocProfCompute_Base:
         console_debug(
             "profiling", f"performing post-processing using {self.__profiler} profiler"
         )
+        self._soc.post_profiling()
 
 
 def test_df_column_equality(df: pd.DataFrame) -> np.bool:

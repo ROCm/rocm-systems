@@ -2072,8 +2072,8 @@ def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -
     if isinstance(value, str):
         try:
             if "." in value:
-                # when dot is in the string, we know it's a float number
-                # and convert with "float"
+                # when dot is in the string, we know it's a
+                # float number and convert with "float"
                 value = float(value)
             else:
                 # without dot, we assume it's an integer and convert with "int"
