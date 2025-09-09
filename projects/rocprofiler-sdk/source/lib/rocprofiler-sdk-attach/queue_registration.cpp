@@ -148,7 +148,7 @@ create_queue(hsa_agent_t        agent,
     ROCP_INFO << "created attach queue for HSA agent handle " << agent.handle;
 
     auto attach_table = rocprofiler::attach::get_dispatch_table();
-    if (attach_table->rocprofiler_attach_notify_new_queue)
+    if(attach_table->rocprofiler_attach_notify_new_queue)
     {
         attach_table->rocprofiler_attach_notify_new_queue(new_queue, agent, nullptr);
     }

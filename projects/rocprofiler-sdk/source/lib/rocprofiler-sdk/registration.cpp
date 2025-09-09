@@ -345,9 +345,7 @@ find_clients()
                 ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
             }
 
-            get_detach_vector().emplace_back([handle](){
-                dlclose(handle);
-            });
+            get_detach_vector().emplace_back([handle]() { dlclose(handle); });
 
             for(const auto& ditr : data)
             {
@@ -415,9 +413,7 @@ find_clients()
 
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
-            get_detach_vector().emplace_back([handle](){
-                dlclose(handle);
-            });
+            get_detach_vector().emplace_back([handle]() { dlclose(handle); });
 
             auto* _sym = rocprofiler_configure_dlsym(handle);
 
@@ -699,15 +695,16 @@ stop_active_contexts()
         for(const auto& itr : *get_clients())
         {
             if(!itr) continue;
-            if (context::stop_client_contexts(itr->internal_client_id) != ROCPROFILER_STATUS_SUCCESS)
-                ROCP_ERROR << fmt::format("Failed to stop active contexts for client {}", (itr->mutable_client_id.name)
-                                        ? std::string_view{itr->mutable_client_id.name}
-                                        : std::string_view{"unspecified"});
+            if(context::stop_client_contexts(itr->internal_client_id) != ROCPROFILER_STATUS_SUCCESS)
+                ROCP_ERROR << fmt::format("Failed to stop active contexts for client {}",
+                                          (itr->mutable_client_id.name)
+                                              ? std::string_view{itr->mutable_client_id.name}
+                                              : std::string_view{"unspecified"});
 
             ROCP_WARNING << fmt::format("rocprofiler-sdk client '{}' stopping active contexts",
-                                    (itr->mutable_client_id.name)
-                                        ? std::string_view{itr->mutable_client_id.name}
-                                        : std::string_view{"unspecified"});
+                                        (itr->mutable_client_id.name)
+                                            ? std::string_view{itr->mutable_client_id.name}
+                                            : std::string_view{"unspecified"});
         }
     }
 }

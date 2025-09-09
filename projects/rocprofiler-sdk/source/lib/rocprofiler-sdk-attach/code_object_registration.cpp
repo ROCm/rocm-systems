@@ -66,7 +66,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
         registration->code_objects.emplace_back(executable);
     }
     auto attach_table = rocprofiler::attach::get_dispatch_table();
-    if (attach_table->rocprofiler_attach_notify_new_code_object)
+    if(attach_table->rocprofiler_attach_notify_new_code_object)
     {
         attach_table->rocprofiler_attach_notify_new_code_object(executable, nullptr);
     }

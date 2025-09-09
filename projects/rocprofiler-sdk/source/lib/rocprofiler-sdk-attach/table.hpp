@@ -31,9 +31,11 @@ constexpr size_t ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH = 6;
 RocAttachDispatchTable*
 get_dispatch_table();
 
-void** get_dispatch_registration_table();
+void**
+get_dispatch_registration_table();
 
-void dispatch_table_init();
+void
+dispatch_table_init();
 
 }  // namespace attach
 }  // namespace rocprofiler

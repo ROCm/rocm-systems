@@ -68,8 +68,10 @@ rocprofiler_attach_set_api_table(const char* name,
     if(register_functor)
     {
         auto callable = reinterpret_cast<rocprofiler_register_functor_t>(register_functor);
-        callable(rocprofiler_attach_get_version(), (void*)(rocprofiler::attach::get_dispatch_registration_table()), 1);
-    }    
+        callable(rocprofiler_attach_get_version(),
+                 (void*) (rocprofiler::attach::get_dispatch_registration_table()),
+                 1);
+    }
 
     // Initialize all registration services in attach
     rocprofiler::attach::queue_registration_init(hsa_api_table);

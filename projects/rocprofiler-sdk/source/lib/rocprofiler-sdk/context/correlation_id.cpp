@@ -36,7 +36,6 @@ namespace context
 {
 namespace
 {
-
 auto&
 get_remaining_correlation_ids()
 {
