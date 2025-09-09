@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import csv
 import glob
 import os
@@ -32,7 +33,7 @@ import shutil
 import time
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -56,20 +57,26 @@ from utils.utils import (
 
 class RocProfCompute_Base:
     def __init__(
-        self, args: Any, profiler_mode: str, soc: Any, supported_archs: dict[str, Any]
+        self,
+        args: argparse.Namespace,
+        profiler_mode: str,
+        soc: Any,
+        supported_archs: dict[str, Any],
     ) -> None:
         self.__args = args
         self.__profiler = profiler_mode
         self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
 
-    def get_args(self) -> Any:
+    def get_args(self) -> argparse.Namespace:
         return self.__args
 
-    def get_profiler_options(self, fname: str, soc: Any) -> Any:
+    def get_profiler_options(
+        self, fname: str, soc: Any
+    ) -> Union[list[str], dict[str, Any]]:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
-        return {}
+        return []
 
     @demarcate
     def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -403,13 +410,15 @@ class RocProfCompute_Base:
 
             # Kernel filtering (in-place replacement)
             if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    fname,
-                ])
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -418,13 +427,15 @@ class RocProfCompute_Base:
 
             # Dispatch filtering (inplace replacement)
             if not args.dispatch == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    fname,
-                ])
+                success, output = capture_subprocess_output(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
+                        fname,
+                    ]
+                )
                 # log output from profile filtering
                 if not success:
                     console_error(output)

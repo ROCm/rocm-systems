@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
 import os
@@ -36,7 +37,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
 from pathlib import Path as path
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 import pandas as pd
 
@@ -51,6 +52,8 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
+
+T = TypeVar("T")
 
 VERSION_LOC: list[str] = [
     "version",
@@ -99,17 +102,17 @@ def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
 
 
 # Custom decorator to mimic the behavior of kw_only found in Python 3.10
-def kw_only(cls):
-    def __init__(self, *args, **kwargs):
+def kw_only(cls: T) -> T:
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
         for name, value in kwargs.items():
             setattr(self, name, value)
 
-    cls.__init__ = __init__
+    cls.__init__ = __init__  # type: ignore
     return cls
 
 
 def generate_machine_specs(
-    args: Any, sysinfo: Optional[dict[str, Any]] = None
+    args: argparse.Namespace, sysinfo: Optional[dict[str, Any]] = None
 ) -> MachineSpecs:
     if sysinfo is not None:
         try:
@@ -879,7 +882,7 @@ def get_rocm_ver() -> str:
     return ""
 
 
-def run(cmd: list[str], exit_on_error: bool = False) -> Any:
+def run(cmd: list[str], exit_on_error: bool = False) -> Optional[str]:
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:

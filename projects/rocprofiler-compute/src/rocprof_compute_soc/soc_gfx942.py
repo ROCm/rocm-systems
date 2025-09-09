@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -35,7 +36,7 @@ from utils.utils import mibench
 
 
 class gfx942_soc(OmniSoC_Base):
-    def __init__(self, args: Any, mspec: Any) -> None:
+    def __init__(self, args: argparse.Namespace, mspec: Any) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx942")
 
@@ -50,12 +51,14 @@ class gfx942_soc(OmniSoC_Base):
                 )
             )
 
-        self.set_compatible_profilers([
-            "rocprofv1",
-            "rocprofv2",
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ])
+        self.set_compatible_profilers(
+            [
+                "rocprofv1",
+                "rocprofv2",
+                "rocprofv3",
+                "rocprofiler-sdk",
+            ]
+        )
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx942"))
 
@@ -102,7 +105,7 @@ class gfx942_soc(OmniSoC_Base):
         self.roofline_obj.post_processing()
 
     @demarcate
-    def analysis_setup(self, roofline_parameters: Optional[Any] = None) -> None:
+    def analysis_setup(self, roofline_parameters: dict[str, Any]) -> None:
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()
         # configure roofline for analysis

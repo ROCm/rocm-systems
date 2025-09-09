@@ -38,7 +38,10 @@ def print_avail_arch(avail_arch: list[str]) -> str:
 
 
 def add_general_group(
-    parser: argparse.ArgumentParser, rocprof_compute_version: dict[str, Any]
+    parser: argparse.ArgumentParser,
+    rocprof_compute_home: Path,
+    supported_archs: list[str],
+    rocprof_compute_version: dict[str, Any],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -63,7 +66,7 @@ def add_general_group(
         dest="list_metrics",
         metavar="",
         choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
+        help=print_avail_arch(list(supported_archs.keys())),
     )
     general_group.add_argument(
         "--config-dir",
@@ -92,7 +95,7 @@ def omniarg_parser(
     ## General Command Line Options
     ## ----------------------------
     add_general_group(
-        parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -128,7 +131,7 @@ Examples:
     profile_parser._optionals.title = "Help"
 
     add_general_group(
-        profile_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        profile_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
@@ -210,7 +213,7 @@ Examples:
         help="\t\t\tDispatch ID filtering.",
     )
 
-    def validate_block(value):
+    def validate_block(value: str) -> str:
         # Metric id is of the form I or I.I or I.I.I where I is two digit number.
         if re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$").match(value):
             return value
@@ -236,15 +239,6 @@ Examples:
             "(e.g. 12, 12.1, 12.1.1).\n"
             "\t\t\tCan provide multiple space separated arguments."
         ),
-    )
-    profile_group.add_argument(
-        "--list-metrics",
-        metavar="",
-        nargs="?",
-        const="",
-        # Argument to --list-metrics is optional
-        choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
     )
     profile_group.add_argument(
         "--list-sets",
@@ -479,7 +473,7 @@ Examples:
     db_parser._optionals.title = "Help"
 
     add_general_group(
-        db_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        db_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
@@ -580,7 +574,7 @@ Examples:
     analyze_parser._optionals.title = "Help"
 
     add_general_group(
-        analyze_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        analyze_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")

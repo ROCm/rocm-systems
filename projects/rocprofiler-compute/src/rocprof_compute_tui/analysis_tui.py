@@ -23,9 +23,10 @@
 
 ##############################################################################
 
+import argparse
 import copy
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Hashable, Optional
 
 import pandas as pd
 
@@ -40,7 +41,9 @@ from utils.logger import console_error, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
-    def __init__(self, args: Any, supported_archs: dict[str, Any], path: Path) -> None:
+    def __init__(
+        self, args: argparse.Namespace, supported_archs: dict[str, Any], path: Path
+    ) -> None:
         super().__init__(args, supported_archs)
         self.path = str(path)
         self.args = self.get_args()
@@ -153,5 +156,5 @@ class tui_analysis(OmniAnalyze_Base):
             for kernel_name, df in self.raw_dfs.items()
         }
 
-    def run_top_kernel(self) -> Any:
+    def run_top_kernel(self) -> Optional[list[dict[Hashable, Any]]]:
         return get_top_kernels_and_dispatch_ids(self._runs)

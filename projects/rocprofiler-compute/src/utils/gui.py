@@ -100,14 +100,16 @@ def discrete_background_color_bins(
             filter_query = f"{{{column}}} >= {min_bound}" + (
                 f" && {{{column}}} < {max_bound}" if i < len(bounds) - 1 else ""
             )
-            styles.append({
-                "if": {
-                    "filter_query": filter_query,
-                    "column_id": column,
-                },
-                "backgroundColor": background_color,
-                "color": color,
-            })
+            styles.append(
+                {
+                    "if": {
+                        "filter_query": filter_query,
+                        "column_id": column,
+                    },
+                    "backgroundColor": background_color,
+                    "color": color,
+                }
+            )
 
         legend.append(
             html.Div(
@@ -247,7 +249,11 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
     return charts
 
 
-def build_bar_chart(display_df, table_config, barchart_elements) -> list:
+def build_bar_chart(
+    display_df: pd.DataFrame,
+    table_config: dict[str, Any],
+    barchart_elements: dict[str, Any],
+) -> list:
     """
     Read data into a bar chart. ID will determine which subtype of barchart.
     """
@@ -287,9 +293,9 @@ def build_bar_chart(display_df, table_config, barchart_elements) -> list:
     return charts
 
 
-def get_dark_mode_styles() -> tuple[
-    dict[str, Any], dict[str, Any], list[dict[str, Any]]
-]:
+def get_dark_mode_styles() -> (
+    tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]
+):
     if not IS_DARK:
         return {}, {}, []
 
@@ -331,19 +337,23 @@ def build_table_chart(
     for col in display_df.columns:
         col_lower = str(col).lower()
         if col_lower in {"pct", "pop", "percentage"}:
-            formatted_columns.append({
-                "id": col,
-                "name": col,
-                "type": "numeric",
-                "format": {"specifier": f".{decimal}f"},
-            })
+            formatted_columns.append(
+                {
+                    "id": col,
+                    "name": col,
+                    "type": "numeric",
+                    "format": {"specifier": f".{decimal}f"},
+                }
+            )
         elif col in comparable_columns:
-            formatted_columns.append({
-                "id": col,
-                "name": col,
-                "type": "numeric",
-                "format": {"specifier": f".{decimal}f"},
-            })
+            formatted_columns.append(
+                {
+                    "id": col,
+                    "name": col,
+                    "type": "numeric",
+                    "format": {"specifier": f".{decimal}f"},
+                }
+            )
         else:
             formatted_columns.append({"id": col, "name": col, "type": "text"})
 

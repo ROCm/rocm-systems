@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import shlex
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ from utils.logger import console_error, console_log, demarcate
 class rocprof_v3_profiler(RocProfCompute_Base):
     def __init__(
         self,
-        profiling_args: Any,
+        profiling_args: argparse.Namespace,
         profiler_mode: str,
         soc: Any,
         supported_archs: dict[str, Any],
@@ -89,10 +90,12 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                     # 4 -> 5
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
-            profiling_options.extend([
-                "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
-            ])
+            profiling_options.extend(
+                [
+                    "--kernel-iteration-range",
+                    f"[{','.join(dispatch)}]",
+                ]
+            )
 
         profiling_options.append("--")
         profiling_options.extend(app_cmd)

@@ -982,18 +982,20 @@ class HBM(RectFrame):
 
 # Memory chart pannel for 1 instance
 class MemChart:
-    def __init__(self, x_min, y_min, x_max, y_max):
+    def __init__(self, x_min: float, y_min: float, x_max: float, y_max: float) -> None:
         self.x_min = x_min
         self.x_max = x_max
         self.y_min = y_min
         self.y_max = y_max
 
-    def draw(self, canvas, normal_unit, metric_dict) -> None:
+    def draw(
+        self, canvas: Canvas, normal_unit: str, metric_dict: dict[str, Any]
+    ) -> None:
         # ----------------------------------------
         # Overall rect and title
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(
-            self.x_min + 2.0, self.y_max - 2.0, "(Normalization: " + normal_unit + ")"
+            self.x_min + 2.0, self.y_max - 2.0, f"(Normalization: {normal_unit})"
         )
 
         # FIXME: this is temp solution to filter out non-numeric string

@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import copy
 import random
 from pathlib import Path
@@ -42,7 +43,9 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 
 
 class webui_analysis(OmniAnalyze_Base):
-    def __init__(self, args: Any, supported_archs: dict[str, Any]) -> None:
+    def __init__(
+        self, args: argparse.Namespace, supported_archs: dict[str, Any]
+    ) -> None:
         super().__init__(args, supported_archs)
         self.app = dash.Dash(
             __name__, title=PROJECT_NAME, external_stylesheets=[dbc.themes.CYBORG]
@@ -68,7 +71,9 @@ class webui_analysis(OmniAnalyze_Base):
         self.__roofline_data_type = args.roofline_data_type
 
     @demarcate
-    def build_layout(self, input_filters: dict[str, Any], arch_configs: Any) -> None:
+    def build_layout(
+        self, input_filters: dict[str, Any], arch_configs: dict[str, Any]
+    ) -> None:
         """
         Build gui layout
         """
@@ -112,14 +117,14 @@ class webui_analysis(OmniAnalyze_Base):
             [State("container", "children")],
         )
         def generate_from_filter(
-            disp_filt: Any,
-            kernel_filter: Any,
-            gcd_filter: Any,
+            disp_filt: str,
+            kernel_filter: str,
+            gcd_filter: str,
             norm_filt: str,
-            top_n_filt: Any,
-            div_children: list[Any],
+            top_n_filt: str,
+            div_children: list[html.Section],
         ) -> list[Any]:
-            console_debug("analysis", "gui normalization is %s" % norm_filt)
+            console_debug("analysis", f"gui normalization is {norm_filt}")
 
             # Re-initalizes everything
             base_data = self.initalize_runs(normalization_filter=norm_filt)
@@ -422,9 +427,9 @@ def determine_chart_type(
             content.append(html.Div(className="float-container", children=temp_obj))
         # Normal formatting if < 2 graphs
         else:
-            content.extend([
-                dcc.Graph(figure=fig, style={"margin": "2%"}) for fig in d_figs
-            ])
+            content.extend(
+                [dcc.Graph(figure=fig, style={"margin": "2%"}) for fig in d_figs]
+            )
 
     # b) Tablechart
     else:

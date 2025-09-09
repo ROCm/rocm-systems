@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import shlex
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ from utils.logger import console_error, console_log, demarcate
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
     def __init__(
         self,
-        profiling_args: Any,
+        profiling_args: argparse.Namespace,
         profiler_mode: str,
         soc: Any,
         supported_archs: dict[str, Any],
@@ -46,7 +47,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname: str, soc: Any) -> Any:
+    def get_profiler_options(self, fname: str, soc: Any) -> dict[str, Any]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 

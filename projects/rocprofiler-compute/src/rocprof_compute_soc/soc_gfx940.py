@@ -23,19 +23,21 @@
 
 ##############################################################################
 
+import argparse
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline import Roofline
 from utils.logger import console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import MachineSpecs
 from utils.utils import mibench
 
 
 class gfx940_soc(OmniSoC_Base):
-    def __init__(self, args: Any, mspec: Any) -> None:
+    def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx940")
 
@@ -50,12 +52,14 @@ class gfx940_soc(OmniSoC_Base):
                 )
             )
 
-        self.set_compatible_profilers([
-            "rocprofv1",
-            "rocprofv2",
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ])
+        self.set_compatible_profilers(
+            [
+                "rocprofv1",
+                "rocprofv2",
+                "rocprofv3",
+                "rocprofiler-sdk",
+            ]
+        )
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx940"))
 
@@ -102,7 +106,7 @@ class gfx940_soc(OmniSoC_Base):
         self.roofline_obj.post_processing()
 
     @demarcate
-    def analysis_setup(self, roofline_parameters: Optional[Any] = None) -> None:
+    def analysis_setup(self, roofline_parameters: dict[str, Any]) -> None:
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()
         # configure roofline for analysis

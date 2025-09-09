@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import glob
 import io
 import json
@@ -37,7 +38,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import pandas as pd
 import yaml
@@ -52,6 +53,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import MachineSpecs
 
 rocprof_cmd = ""
 rocprof_args = ""
@@ -230,7 +232,7 @@ def get_version_display(version: str, sha: str, mode: str) -> str:
     return buf.getvalue()
 
 
-def detect_rocprof(args: Any) -> str:
+def detect_rocprof(args: argparse.Namespace) -> str:
     """Detect loaded rocprof version. Resolve path and set cmd globally."""
     global rocprof_cmd
 
@@ -277,7 +279,8 @@ def detect_rocprof(args: Any) -> str:
     return rocprof_cmd
 
 
-def store_app_cmd(args: Any) -> None:
+# TODO: v1/v2 function, to be removed
+def store_app_cmd(args: argparse.Namespace) -> None:
     global rocprof_args
     rocprof_args = args
 
@@ -314,7 +317,7 @@ def capture_subprocess_output(
     # Create callback function for process output
     buf = io.StringIO()
 
-    def handle_output(stream, _mask) -> None:
+    def handle_output(stream: io.TextIOWrapper, _mask) -> None:
         try:
             # Because the process' output is line buffered, there's only ever one
             # line to read when this function is called
@@ -517,7 +520,7 @@ def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
 
 
 def v3_counter_csv_to_v2_csv(
-    counter_file, agent_info_filepath, converted_csv_file
+    counter_file: str, agent_info_filepath: str, converted_csv_file: str
 ) -> None:
     """
     Convert the counter file of csv output for a certain csv from rocprofv3 format
@@ -558,10 +561,9 @@ def v3_counter_csv_to_v2_csv(
     # NB: Agent_Id is int in older rocporfv3, now switched to string with prefix
     # "Agent ". We need to make sure handle both cases.
     console_debug(
-        "The type of Agent ID from counter csv file is {}".format(
-            result["Agent_Id"].dtype
-        )
+        f"The type of Agent ID from counter csv file is {result['Agent_Id'].dtype}"
     )
+
     if result["Agent_Id"].dtype == "object":
         # Apply the function to the 'Agent_Id' column and store it as int64
         try:
@@ -572,10 +574,8 @@ def v3_counter_csv_to_v2_csv(
             )
         except Exception as e:
             console_error(
-                (
-                    'Parsing rocprofv3 csv output: Error of getting "Agent_Id", '
-                    'the error message "{}"'
-                ).format(e)
+                f'Parsing rocprofv3 csv output: Error getting "Agent_Id", '
+                f'the error message "{e}"'
             )
 
     # Grab the Wave_Front_Size column from agent info
@@ -586,22 +586,16 @@ def v3_counter_csv_to_v2_csv(
         how="left",
     )
 
-    # Map agent ID (Node_Id) to GPU_ID
-    gpu_id_map = {}
-    gpu_id = 0
-    for idx, row in pd_agent_info.iterrows():
-        if row["Agent_Type"] == "GPU":
-            agent_id = row["Node_Id"]
-            gpu_id_map[agent_id] = gpu_id
-            gpu_id = gpu_id + 1
+    # Create GPU ID mapping from agent info
+    gpu_agents = pd_agent_info[pd_agent_info["Agent_Type"] == "GPU"].copy()
+    gpu_agents = gpu_agents.reset_index(drop=True)
+    gpu_id_map = dict(zip(gpu_agents["Node_Id"], gpu_agents.index))
 
-    # Update Agent_Id for each record to match GPU ID
-    for idx, row in result["Agent_Id"].items():
-        agent_id = result.at[idx, "Agent_Id"]
-        result.at[idx, "Agent_Id"] = gpu_id_map[agent_id]
+    # Map Agent_Id to GPU_ID using vectorized operation
+    result["Agent_Id"] = result["Agent_Id"].map(gpu_id_map)
 
-    # Drop the 'Node_Id' column if you don't need it in the final DataFrame
-    result.drop(columns="Node_Id", inplace=True)
+    # Drop the temporary Node_Id column
+    result = result.drop(columns="Node_Id")
 
     name_mapping = {
         "Dispatch_Id": "Dispatch_ID",
@@ -650,10 +644,12 @@ def v3_counter_csv_to_v2_csv(
     index = index + remaining_column_names
     result = result.reindex(columns=index)
 
-    # Rename the accumulate counter to SQ_ACCUM_PREV_HIRES.
-    for col in result.columns:
-        if col.endswith("_ACCUM"):
-            result.rename(columns={col: "SQ_ACCUM_PREV_HIRES"}, inplace=True)
+    # Rename accumulate counters to standard format
+    accum_columns = {
+        col: "SQ_ACCUM_PREV_HIRES" for col in result.columns if col.endswith("_ACCUM")
+    }
+    if accum_columns:
+        result = result.rename(columns=accum_columns)
 
     result.to_csv(converted_csv_file, index=False)
 
@@ -689,7 +685,7 @@ def parse_text(text_file: str) -> list[str]:
 
 def run_prof(
     fname: str,
-    profiler_options: Any,
+    profiler_options: Union[list[str], dict[str, Any]],
     workload_dir: str,
     mspec: Any,
     loglevel: int,
@@ -704,7 +700,7 @@ def run_prof(
     if rocprof_cmd == "rocprofiler-sdk":
         options: Any = profiler_options
         options["ROCPROF_COUNTER_COLLECTION"] = "1"
-        options["ROCPROF_COUNTERS"] = "pmc: " + " ".join(parse_text(fname))
+        options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fname))}"
     else:
         default_options = ["-i", fname]
         options = default_options + profiler_options
@@ -1141,7 +1137,7 @@ def replace_timestamps(workload_dir: str) -> None:
 def gen_sysinfo(
     workload_name: str,
     workload_dir: str,
-    app_cmd: Any,
+    app_cmd: str,
     skip_roof: bool,
     mspec: Any,
     soc: Any,
@@ -1225,7 +1221,7 @@ def detect_roofline(mspec: Any) -> dict[str, Any]:
     return target_binary
 
 
-def mibench(args, mspec) -> None:
+def mibench(args: argparse.Namespace, mspec: MachineSpecs) -> None:
     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
     console_log("roofline", "No roofline data found. Generating...")
 

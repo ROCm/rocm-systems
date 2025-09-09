@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import os
 import textwrap
 import time
@@ -37,7 +38,7 @@ import plotext as plt
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from utils import file_io, rocpd_data
+from utils import file_io, rocpd_data, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -58,7 +59,7 @@ from utils.utils import mibench
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
 
-def wrap_text(text: Union[str, Any], width: int = 92) -> str:
+def wrap_text(text: str, width: int = 92) -> str:
     """
     Wraps text using textwrap and joins lines with <br> for Plotly.
     """
@@ -78,7 +79,10 @@ def to_int(value: Any) -> Union[int, float]:
 
 class Roofline:
     def __init__(
-        self, args: Any, mspec: Any, run_parameters: Optional[dict[str, Any]] = None
+        self,
+        args: argparse.Namespace,
+        mspec: Any,
+        run_parameters: Optional[dict[str, Any]] = None,
     ) -> None:
         self.__args = args
         self.__mspec = mspec
@@ -119,7 +123,7 @@ class Roofline:
             self.__run_parameters["kernel_filter"] = True
         self.validate_parameters()
 
-    def get_args(self) -> Any:
+    def get_args(self) -> argparse.Namespace:
         return self.__args
 
     def validate_parameters(self) -> None:
@@ -186,7 +190,7 @@ class Roofline:
         Path(final_dir).mkdir(parents=True, exist_ok=True)
 
     def apply_profile_kernel_filter(
-        self, df: dict[str, pd.DataFrame], args: Any
+        self, df: dict[str, pd.DataFrame], args: argparse.Namespace
     ) -> dict[str, pd.DataFrame]:
         """Apply kernel filter for profile mode."""
         df_pmc = df["pmc_perf"]
@@ -214,7 +218,7 @@ class Roofline:
         return df
 
     def apply_analyze_kernel_filter(
-        self, df: dict[str, pd.DataFrame], path: Optional[str], args: Any
+        self, df: dict[str, pd.DataFrame], path: Optional[str], args: argparse.Namespace
     ) -> dict[str, pd.DataFrame]:
         """Apply kernel filter for analyze mode."""
         top_kernels_csv = Path(path) / "pmc_kernel_top.csv"
@@ -700,9 +704,9 @@ class Roofline:
     def cli_generate_plot(
         self,
         dtype: str,
-        workload: Optional[Any] = None,
-        config: Optional[Any] = None,
-        arch_config: Optional[Any] = None,
+        workload: schema.Workload,
+        config: dict[str, Any],
+        arch_config: schema.ArchConfig,
     ) -> Optional[str]:
         """
         Plot CLI mode roofline analysis in terminal using plotext

@@ -1,6 +1,8 @@
+import argparse
 import logging
 from datetime import datetime
 from enum import Enum
+from typing import Any, Hashable, Optional
 
 import pandas as pd
 
@@ -15,11 +17,11 @@ class LogLevel(str, Enum):
 
 
 class Logger:
-    def __init__(self, output_area=None):
+    def __init__(self, output_area: Optional[Any] = None) -> None:
         self.output_area = output_area
         self._setup_logger()
 
-    def _setup_logger(self):
+    def _setup_logger(self) -> None:
         self.logger = logging.getLogger("app")
         self.logger.setLevel(logging.INFO)
 
@@ -31,21 +33,23 @@ class Logger:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-    def set_output_area(self, output_area):
+    def set_output_area(self, output_area: Any) -> None:
         self.output_area = output_area
 
-    def log(self, message, level="INFO", update_ui=True):
+    def log(
+        self, message: str, log_level: str = "INFO", update_ui: bool = True
+    ) -> None:
         level_map = {
             "INFO": logging.INFO,
             "SUCCESS": logging.INFO,
             "WARNING": logging.WARNING,
             "ERROR": logging.ERROR,
         }
-        self.logger.log(level_map[level], message)
+        self.logger.log(level_map[log_level], message)
 
         if update_ui and self.output_area and hasattr(self.output_area, "text"):
             timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted_msg = f"[{timestamp}] [{level}] {message}"
+            formatted_msg = f"[{timestamp}] [{log_level}] {message}"
             self.output_area.text = (
                 f"{self.output_area.text}\n{formatted_msg}"
                 if self.output_area.text
@@ -53,20 +57,22 @@ class Logger:
             )
             self.output_area.cursor_location = (999999, 0)
 
-    def info(self, message, update_ui=True):
+    def info(self, message: str, update_ui: bool = True) -> None:
         self.log(message, "INFO", update_ui)
 
-    def success(self, message, update_ui=True):
+    def success(self, message: str, update_ui: bool = True) -> None:
         self.log(message, "SUCCESS", update_ui)
 
-    def warning(self, message, update_ui=True):
+    def warning(self, message: str, update_ui: bool = True) -> None:
         self.log(message, "WARNING", update_ui)
 
-    def error(self, message, update_ui=True):
+    def error(self, message: str, update_ui: bool = True) -> None:
         self.log(message, "ERROR", update_ui)
 
 
-def get_top_kernels_and_dispatch_ids(runs):
+def get_top_kernels_and_dispatch_ids(
+    runs: dict[str, Any],
+) -> Optional[list[dict[Hashable, Any]]]:
     if not runs:
         return None
 
@@ -88,7 +94,12 @@ def get_top_kernels_and_dispatch_ids(runs):
     return merged_df.to_dict("records")
 
 
-def process_panels_to_dataframes(args, kernel_df, arch_configs, roof_plot=None):
+def process_panels_to_dataframes(
+    args: argparse.Namespace,
+    kernel_df: dict[int, pd.DataFrame],
+    arch_configs: dict[str, Any],
+    roof_plot: Optional[str] = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
     """
     Process panel data into pandas DataFrames.
     Returns a nested dictionary structure with DataFrames and tui_style information.
@@ -148,7 +159,7 @@ def process_panels_to_dataframes(args, kernel_df, arch_configs, roof_plot=None):
                     f"{table_config['id'] // 100}.{table_config['id'] % 100}"
                 )
                 if table_config.get("title"):
-                    subsection_name += " " + table_config["title"]
+                    subsection_name += f" {table_config['title']}"
 
                 section_data[subsection_name] = {
                     "df": df,
@@ -165,7 +176,7 @@ def process_panels_to_dataframes(args, kernel_df, arch_configs, roof_plot=None):
     return result_structure
 
 
-def apply_rounding_logic(df, decimal_precision):
+def apply_rounding_logic(df: pd.DataFrame, decimal_precision: int) -> pd.DataFrame:
     if df.empty:
         return df
 
@@ -175,8 +186,8 @@ def apply_rounding_logic(df, decimal_precision):
     if len(float_cols) > 0:
         df_rounded[float_cols] = df_rounded[float_cols].round(decimal_precision)
 
-    other_cols = df_rounded.select_dtypes(exclude=["float"]).columns
-    for col in other_cols:
+    non_float_cols = df_rounded.select_dtypes(exclude=["float"]).columns
+    for col in non_float_cols:
         numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
         if numeric_series.notna().any():
             df_rounded[col] = numeric_series.round(decimal_precision)

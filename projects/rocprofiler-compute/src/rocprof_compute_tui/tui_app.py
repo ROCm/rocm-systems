@@ -27,13 +27,14 @@ ROCm Compute Profiler TUI - Main Application with Analysis Methods
 ----------------------------------------------------------------
 """
 
+import argparse
 import importlib
 import json
 from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any, Optional
 
 from textual import on, work
-from textual.app import App
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Button, Footer, Header
 from textual_fspicker import SelectDirectory
@@ -63,7 +64,7 @@ class RocprofTUIApp(App):
 
     def __init__(
         self,
-        args: Optional[Any] = None,
+        args: argparse.Namespace,
         supported_archs: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__()
@@ -76,7 +77,7 @@ class RocprofTUIApp(App):
         self.soc: dict[str, Any] = {}
         self.mspec: Optional[Any] = None
 
-    def compose(self) -> Generator[Any]:
+    def compose(self) -> ComposeResult:
         yield Header()
         yield self.main_view
         yield Footer()
@@ -129,7 +130,7 @@ class RocprofTUIApp(App):
 
 
 def run_tui(
-    args: Optional[Any] = None, supported_archs: Optional[dict[str, Any]] = None
+    args: argparse.Namespace, supported_archs: Optional[dict[str, Any]] = None
 ) -> None:
     """Run the TUI application."""
     app = RocprofTUIApp(args, supported_archs)

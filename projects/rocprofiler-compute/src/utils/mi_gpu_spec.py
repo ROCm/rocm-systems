@@ -210,7 +210,7 @@ class MIGPUSpecs:
     @classmethod
     def get_gpu_model(
         cls, gpu_arch: Optional[str], chip_id: Optional[str] = None
-    ) -> Any:
+    ) -> Optional[str]:
         if not gpu_arch and not chip_id:
             return None
 

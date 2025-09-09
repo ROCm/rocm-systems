@@ -22,7 +22,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
+import argparse
 import ast
 import json
 import re
@@ -310,7 +310,7 @@ class MetricEvaluator:
         raw_pmc_df: Union[pd.DataFrame, dict],
         sys_vars: dict[str, Any],
         empirical_peaks: dict[str, Any],
-    ):
+    ) -> None:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
@@ -587,7 +587,7 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
     return visited, counters
 
 
-def calc_builtin_var(var: Union[int, str], sys_info: Any) -> Optional[int]:
+def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> Optional[int]:
     """
     Calculate build-in variable based on sys_info:
     """
@@ -601,7 +601,9 @@ def calc_builtin_var(var: Union[int, str], sys_info: Any) -> Optional[int]:
 
 @demarcate
 def build_dfs(
-    arch_configs: Any, filter_metrics: Optional[list[str]], sys_info: Any
+    arch_configs: schema.ArchConfig,
+    filter_metrics: Optional[list[str]],
+    sys_info: pd.Series,
 ) -> None:
     """
     - Build dataframe for each type of data source within each panel.
@@ -1075,7 +1077,7 @@ def debug_evaluate_metrics(
 
 @demarcate
 def apply_filters(
-    workload: Any, dir_path: str, is_gui: bool, debug: bool
+    workload: schema.Workload, dir_path: str, is_gui: bool, debug: bool
 ) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
@@ -1174,7 +1176,7 @@ def apply_kernel_filter(
     return df
 
 
-def apply_dispatch_filter(df: pd.DataFrame, workload: Any) -> pd.DataFrame:
+def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply dispatch ID filters."""
     # NB: support ignoring the 1st n dispatched execution by '> n'
     #     The better way may be parsing python slice string
@@ -1500,7 +1502,7 @@ def load_pc_sampling_data_per_kernel(
 
 @demarcate
 def load_pc_sampling_data(
-    workload: Any, dir_path: str, file_prefix: str, sorting_type: str
+    workload: schema.Workload, dir_path: str, file_prefix: str, sorting_type: str
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data, filter and sort it by specified conditions,
@@ -1584,7 +1586,9 @@ def load_pc_sampling_data(
 
 
 @demarcate
-def load_non_mertrics_table(workload: Any, dir_path: str, args: Any) -> None:
+def load_non_mertrics_table(
+    workload: schema.Workload, dir_path: str, args: argparse.Namespace
+) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
     #     kernel names.
@@ -1597,7 +1601,7 @@ def load_non_mertrics_table(workload: Any, dir_path: str, args: Any) -> None:
     tmp = {}
     for df_id, df in workload.dfs.items():
         if "from_csv" in df.columns:
-            csv_file = Path(dir_path) / df.loc[0, "from_csv"]
+            csv_file = Path(dir_path) / str(df.loc[0, "from_csv"])
             if csv_file.exists():
                 tmp[df_id] = pd.read_csv(str(csv_file))
             else:
@@ -1640,10 +1644,10 @@ def load_non_mertrics_table(workload: Any, dir_path: str, args: Any) -> None:
 
 @demarcate
 def load_table_data(
-    workload: Any,
+    workload: schema.Workload,
     dir_path: str,
     is_gui: bool,
-    args: Any,
+    args: argparse.Namespace,
     config: dict,
     skip_kernel_top: bool = False,
 ) -> None:

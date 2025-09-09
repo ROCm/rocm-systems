@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import glob
 import json
 import math
@@ -46,6 +47,7 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
+from utils.specs import MachineSpecs
 from utils.utils import (
     add_counter_extra_config_input_yaml,
     capture_subprocess_output,
@@ -59,7 +61,7 @@ from utils.utils import (
 
 
 class OmniSoC_Base:
-    def __init__(self, args: Any, mspec: Any) -> None:
+    def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         # new info field will contain rocminfo or sysinfo to populate properties
         console_debug("[omnisoc init]")
         self.__args = args
@@ -69,9 +71,9 @@ class OmniSoC_Base:
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
         self.__soc_params: dict[str, Any] = {}  # SoC specifications
-        self.__compatible_profilers: list[
-            str
-        ] = []  # Store profilers compatible with SoC
+        self.__compatible_profilers: list[str] = (
+            []
+        )  # Store profilers compatible with SoC
         self.populate_mspec()
 
     def __hash__(self) -> int:
@@ -100,7 +102,7 @@ class OmniSoC_Base:
     def get_arch(self) -> Optional[str]:
         return self.__arch
 
-    def get_args(self) -> Any:
+    def get_args(self) -> argparse.Namespace:
         return self.__args
 
     def get_compatible_profilers(self) -> list[str]:
@@ -383,10 +385,12 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union({
-                    f"{counter_name}[{i}]"
-                    for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
-                })
+                counters = counters.union(
+                    {
+                        f"{counter_name}[{i}]"
+                        for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
+                    }
+                )
 
         return counters
 

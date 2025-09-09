@@ -23,16 +23,17 @@
 
 ##############################################################################
 
+import argparse
 import copy
 import textwrap
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TextIO
 
 import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser
+from utils import mem_chart, parser, schema
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info, get_uuid
@@ -125,9 +126,9 @@ def has_time_data(df: pd.DataFrame) -> bool:
 
 
 def is_roofline_shown(
-    args: Any,
+    args: argparse.Namespace,
     runs: dict[str, Any],
-    output: Any,
+    output: Optional[TextIO],
     panel: dict[str, Any],
     roof_plot: Optional[str],
     hidden_cols: list[str],
@@ -224,7 +225,7 @@ def is_roofline_shown(
 
 
 def process_table_data(
-    args: Any,
+    args: argparse.Namespace,
     runs: dict[str, Any],
     table_config: dict[str, Any],
     table_type: str,
@@ -348,7 +349,7 @@ def process_table_data(
 
 
 def format_table_output(
-    args: Any,
+    args: argparse.Namespace,
     table_config: dict[str, Any],
     df: pd.DataFrame,
     table_type: str,
@@ -421,10 +422,10 @@ def format_table_output(
 
 
 def show_all(
-    args: Any,
+    args: argparse.Namespace,
     runs: dict[str, Any],
-    arch_configs: Any,
-    output: Any,
+    arch_configs: schema.ArchConfig,
+    output: Optional[TextIO],
     profiling_config: dict[str, Any],
     roof_plot: Optional[str] = None,
 ) -> None:
@@ -563,7 +564,10 @@ def show_roof_plot(roof_plot: str) -> None:
 
 
 def show_kernel_stats(
-    args: Any, runs: dict[str, Any], arch_configs: Any, output: Any
+    args: argparse.Namespace,
+    runs: dict[str, Any],
+    arch_configs: schema.ArchConfig,
+    output: Optional[TextIO],
 ) -> None:
     """
     Show the kernels and dispatches from "Top Stats" section.

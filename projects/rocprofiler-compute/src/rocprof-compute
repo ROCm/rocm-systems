@@ -128,7 +128,7 @@ def verify_deps() -> None:
             return
 
 
-def main():
+def main() -> None:
     """Main function for rocprofiler-compute"""
 
     # verify required python dependencies

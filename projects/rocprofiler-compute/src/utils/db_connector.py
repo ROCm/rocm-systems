@@ -27,10 +27,9 @@ import getpass
 import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
-from pymongo import MongoClient  # type: ignore
+from pymongo import MongoClient
 from tqdm import tqdm
 
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -59,16 +58,15 @@ class DatabaseConnector:
             "workload": self.args.workload,
             "db": None,
         }
-        self.interaction_type: Optional[str] = None
+        self.interaction_type: str = (
+            None  # set to 'import' or 'remove' based on user arguments
+        )
         self.client: MongoClient = None
 
     @demarcate
     def prep_import(self):
         # Extract SoC and workload name from sysinfo.csv
-        name = str()
-        soc = str()
-        sys_info = str(Path(self.connection_info["workload"]) / "sysinfo.csv")
-
+        sys_info = str(Path(self.connection_info["workload"]).joinpath("sysinfo.csv"))
         if Path(sys_info).is_file():
             sys_info = pd.read_csv(sys_info)
             try:
@@ -85,7 +83,12 @@ class DatabaseConnector:
             )
 
         self.connection_info["db"] = (
-            f"rocprofiler-compute_{self.args.team}_{name}_{soc}"
+            "rocprofiler-compute_"
+            + str(self.args.team)
+            + "_"
+            + str(name)
+            + "_"
+            + str(soc)
         )
 
     @demarcate

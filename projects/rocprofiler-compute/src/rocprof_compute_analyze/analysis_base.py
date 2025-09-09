@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import copy
 import re
 import sys
@@ -46,32 +47,36 @@ from utils.logger import (
 from utils.utils import get_uuid, is_workload_empty, merge_counters_spatial_multiplex
 
 # the build-in config to list kernel names purpose only
-TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
-    (
-        0,
-        {
-            "id": 0,
-            "title": "Top Kernels",
-            "data source": [
-                {"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}
-            ],
-        },
-    ),
-    (
-        1,
-        {
-            "id": 1,
-            "title": "Dispatch List",
-            "data source": [
-                {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
-            ],
-        },
-    ),
-])
+TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict(
+    [
+        (
+            0,
+            {
+                "id": 0,
+                "title": "Top Kernels",
+                "data source": [
+                    {"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}
+                ],
+            },
+        ),
+        (
+            1,
+            {
+                "id": 1,
+                "title": "Dispatch List",
+                "data source": [
+                    {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
+                ],
+            },
+        ),
+    ]
+)
 
 
 class OmniAnalyze_Base:
-    def __init__(self, args: Any, supported_archs: dict[str, Any]) -> None:
+    def __init__(
+        self, args: argparse.Namespace, supported_archs: dict[str, Any]
+    ) -> None:
         self.__args = args
         self._runs: OrderedDict[str, Any] = OrderedDict()
         self._arch_configs: dict[str, Any] = {}
@@ -80,7 +85,7 @@ class OmniAnalyze_Base:
         self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, Any]] = None  # available OmniSoC objs
 
-    def get_args(self) -> Any:
+    def get_args(self) -> argparse.Namespace:
         return self.__args
 
     def set_soc(self, omni_socs: dict[str, Any]) -> None:
@@ -99,7 +104,7 @@ class OmniAnalyze_Base:
         arch: str,
         config_dir: str,
         list_stats: bool,
-        filter_metrics: Any,
+        filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
     ) -> dict[str, Any]:
         single_panel_config = file_io.is_single_panel_config(
@@ -172,7 +177,7 @@ class OmniAnalyze_Base:
         sys.exit(0)
 
     @demarcate
-    def load_options(self, normalization_filter: Optional[Any]) -> None:
+    def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
         target_filter = normalization_filter or args.normal_unit
 
@@ -195,13 +200,13 @@ class OmniAnalyze_Base:
 
     @demarcate
     def initalize_runs(
-        self, normalization_filter: Optional[Any] = None
+        self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, Any]:
         args = self.get_args()
         if args.list_metrics:
             self.list_metrics()
 
-        def get_sysinfo_path(self, data_path: str) -> Optional[str]:
+        def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (
                 data_path
                 if args.nodes is None and not args.spatial_multiplexing
@@ -292,11 +297,13 @@ class OmniAnalyze_Base:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
 
-            if not any([
-                args.nodes,
-                args.list_nodes,
-                args.spatial_multiplexing,
-            ]):
+            if not any(
+                [
+                    args.nodes,
+                    args.list_nodes,
+                    args.spatial_multiplexing,
+                ]
+            ):
                 is_workload_empty(dir_info[0])
 
         # FIXME:

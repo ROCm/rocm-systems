@@ -106,7 +106,7 @@ class RocProfCompute:
 """
         )
 
-    def get_mode(self):
+    def get_mode(self) -> Optional[str]:
         return self.__mode
 
     def set_version(self) -> None:
@@ -142,7 +142,7 @@ class RocProfCompute:
         else:
             self.__analyze_mode = "cli"
 
-    def sanitize(self):
+    def sanitize(self) -> None:
         block = False
         if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
             hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks

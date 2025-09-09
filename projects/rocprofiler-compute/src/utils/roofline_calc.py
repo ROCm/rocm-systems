@@ -31,6 +31,7 @@ from typing import Any, Union
 
 import pandas as pd
 
+from utils import schema
 from utils.logger import console_debug, console_warning
 from utils.parser import apply_filters, eval_metric
 
@@ -291,11 +292,13 @@ def calc_ceilings(
         x0_mfma = min(x2_mfma, XMAX) if x2_mfma < XMAX else XMAX
 
         console_debug(f"MFMA ROOF [{x0_mfma}, {XMAX}], [{peak_mfma},{peak_mfma}]")
-        graph_points["mfma"].extend([
-            [x0_mfma, XMAX],
-            [peak_mfma, peak_mfma],
-            peak_mfma,
-        ])
+        graph_points["mfma"].extend(
+            [
+                [x0_mfma, XMAX],
+                [peak_mfma, peak_mfma],
+                peak_mfma,
+            ]
+        )
 
     return graph_points
 
@@ -305,7 +308,11 @@ def calc_ceilings(
 # -------------------------------------------------------------------------------------
 # Calculate relevant metrics for ai calculation
 def calc_ai_analyze(
-    workload: Any, mspec: Any, sort_type: str, config: Any, arch_config: Any
+    workload: schema.Workload,
+    mspec: Any,
+    sort_type: str,
+    config: dict[str, Any],
+    arch_config: schema.ArchConfig,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """
     Calculate per-kernel metrics and AI points with Roofline yamls using eval_metric.
