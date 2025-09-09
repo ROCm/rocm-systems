@@ -78,7 +78,7 @@ def main(argv=None) -> None:
         "projects/roctracer": 331,
         "projects/clr": 335,
         "projects/hip": 335,
-        "prjects/hipother": 335
+        "projects/hipother": 335
     }
 
     args = parse_arguments(argv)
