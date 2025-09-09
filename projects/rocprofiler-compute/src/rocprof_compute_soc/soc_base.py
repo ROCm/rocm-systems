@@ -28,7 +28,6 @@ import json
 import math
 import os
 import re
-import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
@@ -36,6 +35,7 @@ from pathlib import Path
 import yaml
 
 import config
+from roofline import Roofline
 from utils.logger import (
     console_debug,
     console_error,
@@ -52,6 +52,7 @@ from utils.utils import (
     detect_rocprof,
     get_submodules,
     is_tcc_channel_counter,
+    mibench,
     parse_sets_yaml,
     using_v3,
 )
@@ -65,12 +66,14 @@ class OmniSoC_Base:
         self.__args = args
         self.__arch = None
         self._mspec = mspec
-        self.__perfmon_dir = None
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config = {}
         self.__soc_params = {}  # SoC specifications
         self.__compatible_profilers = []  # Store profilers compatible with SoC
         self.populate_mspec()
+        # Create roofline object if mode is provided; skip for --specs
+        if hasattr(self.__args, "mode") and self.__args.mode:
+            self.roofline_obj = Roofline(args, self._mspec)
 
     def __hash__(self):
         return hash(self.__arch)
@@ -79,9 +82,6 @@ class OmniSoC_Base:
         if not isinstance(other, type(self)):
             return NotImplemented
         return self.__arch == other.get_soc()
-
-    def set_perfmon_dir(self, path: str):
-        self.__perfmon_dir = path
 
     def set_perfmon_config(self, config: dict):
         self.__perfmon_config = config
@@ -280,40 +280,37 @@ class OmniSoC_Base:
         Parse analysis report configuration files based on the selected report
         sections to be filtered.
         """
-        # Read the analysis config files and filter
-        config_root_dir = f"{self.get_args().config_dir}/{self.__arch}"
+        args = self.get_args()
+
         # File id dict
+        config_root_dir = f"{args.config_dir}/{self.__arch}"
         config_filename_dict = {
             Path(filename).name.split("_")[0]: filename
             for filename in glob.glob(f"{config_root_dir}/*.yaml")
         }
 
-        texts = list()
-
-        set_selected = self.get_args().set_selected
-
-        if set_selected:
-            # NOTE: --blocks and --set are mutually exclusive
-            if self.get_args().filter_blocks:
-                console_error("--block and --set are exclusive options.")
-
+        filter_blocks = args.filter_blocks
+        if args.set_selected:
             sets_info = parse_sets_yaml(self.__arch)
-            if set_selected not in set(sets_info.keys()):
+            if args.set_selected not in set(sets_info.keys()):
                 console_error(
-                    f"argument --set: invalid choice: '{set_selected}' "
+                    f"argument --set: invalid choice: '{args.set_selected}' "
                     f"(choose from {sets_info.keys()})"
                 )
-            self.__args.filter_blocks = [
+            filter_blocks = [
                 next(iter(metric.keys()))
-                for metric in sets_info[set_selected]["metric"]
+                for metric in sets_info[args.set_selected]["metric"]
             ]
+        elif args.roof_only:
+            filter_blocks = ["4"]
 
-        if not self.get_args().filter_blocks:
+        texts = list()
+        if not filter_blocks:
+            # Select all sections by default
             for filename in config_filename_dict.values():
                 with open(filename, "r") as stream:
                     texts.append(stream.read())
-
-        for block_id in self.get_args().filter_blocks:
+        for block_id in filter_blocks:
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
             # File id filtering
@@ -349,6 +346,7 @@ class OmniSoC_Base:
             if metric_id is None:
                 # If no metric id level filtering, then read the whole panel
                 texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
+                continue
 
             # Metric id filtering
             metric_dict = {
@@ -383,34 +381,12 @@ class OmniSoC_Base:
                     for i in range(num_xcd_for_pmc_file * int(self._mspec._l2_banks))
                 })
 
-        return counters
+        return counters, filter_blocks
 
     @demarcate
-    def perfmon_filter(self, roofline_perfmon_only: bool):
+    def perfmon_filter(self):
         """Filter default performance counter set based on user arguments"""
-        if (
-            roofline_perfmon_only
-            and Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
-        ):
-            return
-
-        if roofline_perfmon_only:
-            counters = set()
-            for fname in glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt"):
-                lines = open(fname, "r").read().splitlines()
-                for line in lines:
-                    # Strip all comments, skip empty lines
-                    stext = line.split("#")[0].strip()
-                    if not stext:
-                        continue
-                    # all pmc counters start with  "pmc:"
-                    m = re.match(r"^pmc:(.*)", stext)
-                    if m is None:
-                        continue
-                    # de-duplicate counters
-                    counters = counters.union(set(m.group(1).split()))
-        else:
-            counters = self.detect_counters()
+        counters, filter_blocks = self.detect_counters()
 
         if not using_v3():
             # Counters not supported in rocprof v1 / v2
@@ -433,6 +409,8 @@ class OmniSoC_Base:
 
         # Coalesce and writeback workload specific perfmon
         self.perfmon_coalesce(counters)
+
+        return filter_blocks
 
     @demarcate
     def parse_counters(self, config_text):
@@ -586,29 +564,8 @@ class OmniSoC_Base:
         Sort and bucket all related performance counters to minimize required
         application passes
         """
-
-        # Create workload directory
-        # In some cases (i.e. --specs) path will not be given
-        if hasattr(self.get_args(), "path"):
-            if self.get_args().path == str(Path(os.getcwd()).joinpath("workloads")):
-                workload_dir = str(
-                    Path(self.get_args().path).joinpath(
-                        self.get_args().name, self._mspec.gpu_model
-                    )
-                )
-            else:
-                workload_dir = self.get_args().path
-
-        # Initialize directories
-        if not Path(workload_dir).is_dir():
-            os.makedirs(workload_dir)
-        elif not Path(workload_dir).is_symlink():
-            shutil.rmtree(workload_dir)
-        else:
-            os.unlink(workload_dir)
-
-        workload_perfmon_dir = workload_dir + "/perfmon"
-        os.makedirs(workload_perfmon_dir)
+        workload_perfmon_dir = self.get_args().path + "/perfmon"
+        Path(workload_perfmon_dir).mkdir(parents=True, exist_ok=True)
 
         # Sanity check whether counters are supported by underlying rocprof tool
         rocprof_counters = self.get_rocprof_supported_counters()
@@ -845,11 +802,40 @@ class OmniSoC_Base:
     def post_profiling(self):
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", "perform SoC post processing for %s" % self.__arch)
+        # Roofline can be skipped via --no-roof
+        # Roofline not supported on MI 100
+        # If --filter-blocks is provided, roofline block (block 4) should be mentioned
+        if (
+            self.get_args().no_roof
+            or self.__arch == "gfx908"
+            or (
+                self.get_args().filter_blocks
+                and "4" not in self.get_args().filter_blocks
+            )
+        ):
+            console_log("roofline", "Skipping roofline")
+        else:
+            pmc_path = str(Path(self.get_args().path).joinpath("pmc_perf.csv"))
+            if not Path(pmc_path).is_file():
+                console_warning(
+                    "Incomplete or missing profiling data. Skipping roofline."
+                )
+                return
+            console_log(
+                "roofline", "Checking for roofline.csv in " + str(self.get_args().path)
+            )
+            if not Path(self.get_args().path).joinpath("roofline.csv").is_file():
+                mibench(self.get_args(), self._mspec)
+            self.roofline_obj.post_processing()
 
     @abstractmethod
-    def analysis_setup(self):
+    def analysis_setup(self, roofline_parameters=None):
         """Perform any SoC-specific setup prior to analysis."""
         console_debug("analysis", "perform SoC analysis setup for %s" % self.__arch)
+        if roofline_parameters:
+            self.roofline_obj = Roofline(
+                self.get_args(), self._mspec, roofline_parameters
+            )
 
 
 # Set with limited size

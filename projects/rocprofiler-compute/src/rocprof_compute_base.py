@@ -31,8 +31,6 @@ import sys
 import time
 from pathlib import Path
 
-import yaml
-
 import config
 from argparser import omniarg_parser
 from utils import file_io, parser, schema
@@ -221,17 +219,17 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
         elif self.__args.mode == "profile":
-            # FIXME:
-            #     Might want to get host name from detected spec
+            # Add --name to workload path if --path is not given
+            if self.__args.path == str(Path(os.getcwd()) / "workloads"):
+                self.__args.path = str(Path(self.__args.path) / self.__args.name)
+            # Add node name to workload path
             if self.__args.subpath == "node_name":
-                self.__args.path = str(
-                    Path(self.__args.path).joinpath(socket.gethostname())
-                )
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # Or, add gpu model name to workload path
             elif self.__args.subpath == "gpu_model":
-                self.__args.path = str(
-                    Path(self.__args.path).joinpath(self.__mspec.gpu_model)
-                )
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
 
+            # Create workload directory if it does not exist
             p = Path(self.__args.path)
             if not p.exists():
                 try:
@@ -267,8 +265,9 @@ class RocProfCompute:
         )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            config_dir = Path(self.__args.config_dir)
-            ac.panel_configs = file_io.load_panel_configs([config_dir.joinpath(arch)])
+            ac.panel_configs = file_io.load_panel_configs([
+                Path(self.__args.config_dir) / arch
+            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
@@ -350,18 +349,6 @@ class RocProfCompute:
         if self.__args.name.find("/") != -1:
             console_error("'/' not permitted in profile name")
 
-        # FIXME:
-        #     Changing default path should be done at the end of arg parsing stage,
-        #     unless there is a specific reason to do here.
-
-        # Update default path
-        if self.__args.path == str(Path(os.getcwd()).joinpath("workloads")):
-            self.__args.path = str(
-                Path(self.__args.path).joinpath(
-                    self.__args.name, self.__mspec.gpu_model
-                )
-            )
-
         # instantiate desired profiler
         if self.__profiler_mode == "rocprofv1":
             from rocprof_compute_profile.profiler_rocprof_v1 import rocprof_v1_profiler
@@ -370,7 +357,6 @@ class RocProfCompute:
                 self.__args,
                 self.__profiler_mode,
                 self.__soc[self.__mspec.gpu_arch],
-                self.__supported_archs,
             )
         elif self.__profiler_mode == "rocprofv2":
             from rocprof_compute_profile.profiler_rocprof_v2 import rocprof_v2_profiler
@@ -379,7 +365,6 @@ class RocProfCompute:
                 self.__args,
                 self.__profiler_mode,
                 self.__soc[self.__mspec.gpu_arch],
-                self.__supported_archs,
             )
         elif self.__profiler_mode == "rocprofv3":
             from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -388,7 +373,6 @@ class RocProfCompute:
                 self.__args,
                 self.__profiler_mode,
                 self.__soc[self.__mspec.gpu_arch],
-                self.__supported_archs,
             )
         elif self.__profiler_mode == "rocprofiler-sdk":
             from rocprof_compute_profile.profiler_rocprofiler_sdk import (
@@ -399,7 +383,6 @@ class RocProfCompute:
                 self.__args,
                 self.__profiler_mode,
                 self.__soc[self.__mspec.gpu_arch],
-                self.__supported_archs,
             )
         else:
             console_error("Unsupported profiler")
@@ -408,12 +391,8 @@ class RocProfCompute:
         # run profiling workflow
         # -----------------------
 
-        self.__soc[self.__mspec.gpu_arch].profiling_setup()
-        # Write profiling configuration as yaml file
-        with open(Path(self.__args.path).joinpath("profiling_config.yaml"), "w") as f:
-            args_dict = vars(self.__args)
-            args_dict["config_dir"] = str(args_dict["config_dir"])
-            yaml.dump(args_dict, f)
+        profiler.sanitize()
+
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)
 
@@ -438,9 +417,6 @@ class RocProfCompute:
                 int(time_end_post - time_end_prof)
             )
         )
-        self.__soc[self.__mspec.gpu_arch].post_profiling()
-
-        return
 
     @demarcate
     def update_db(self):
@@ -508,7 +484,7 @@ class RocProfCompute:
                 and analyzer.get_args().spatial_multiplexing is not True
                 else file_io.find_1st_sub_dir(d[0])
             )
-            sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
+            sys_info = file_io.load_sys_info(sysinfo_path / "sysinfo.csv")
 
             sys_info = sys_info.to_dict("list")
             sys_info = {key: value[0] for key, value in sys_info.items()}
