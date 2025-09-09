@@ -236,11 +236,11 @@ def write_kernel_csv(importData, config) -> None:
         "stack_id AS Correlation_Id",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
-        "lds_size AS LDS_Block_Size",
+        "lds_size AS Lds_Block_Size",
         "scratch_size",
-        "vgpr_count AS VGPR_Count",
-        "accum_vgpr_count AS Accum_VGPR_Count",
-        "sgpr_count AS SGPR_Count",
+        "vgpr_count",
+        "accum_vgpr_count",
+        "sgpr_count",
         "workgroup_x AS Workgroup_Size_X",
         "workgroup_y AS Workgroup_Size_Y",
         "workgroup_z AS Workgroup_Size_Z",
@@ -272,10 +272,10 @@ def write_memory_copy_csv(importData, config) -> None:
 
     query = f"""
         SELECT
-            guid AS Guid,
+            guid,
             'MEMORY_COPY' AS Kind,
             name AS Direction,
-            stream_id AS Stream_Id,
+            stream_id,
             {src_agent_id} AS Source_Agent_Id,
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
@@ -294,7 +294,7 @@ def write_memory_allocation_csv(importData, config) -> None:
 
     query = f"""
         SELECT
-            guid AS Guid,
+            guid,
             'MEMORY_ALLOCATION' AS Kind,
             CASE
                 WHEN type = 'ALLOC'
@@ -334,11 +334,11 @@ def write_counters_csv(importData, config) -> None:
         "kernel_id",
         "kernel_name",
         "workgroup_size",
-        "lds_block_size AS LDS_Block_Size",
+        "lds_block_size AS Lds_Block_Size",
         "scratch_size",
-        "vgpr_count AS VGPR_Count",
-        "accum_vgpr_count AS Accum_VGPR_Count",
-        "sgpr_count AS SGPR_Count",
+        "vgpr_count",
+        "accum_vgpr_count",
+        "sgpr_count",
         "counter_name",
         "value AS Counter_Value",
         "start AS Start_Timestamp",
@@ -367,13 +367,13 @@ def write_scratch_memory_csv(importData, config) -> None:
 
     query = f"""
         SELECT
-            guid AS Guid,
+            guid,
             'SCRATCH_MEMORY' AS Kind,
             'SCRATCH_MEMORY_' || operation AS Operation,
             {agent_id} AS Agent_Id,
-            queue_id AS Queue_Id,
+            queue_id,
             tid AS Thread_Id,
-            alloc_flags AS Alloc_Flags,
+            alloc_flags,
             start AS Start_Timestamp,
             end AS End_Timestamp
         FROM "scratch_memory"
@@ -387,7 +387,7 @@ def write_region_csv(importData, config) -> None:
 
     query = """
         SELECT
-            guid AS Guid,
+            guid,
             category AS Domain,
             name AS Function,
             pid AS Process_Id,
