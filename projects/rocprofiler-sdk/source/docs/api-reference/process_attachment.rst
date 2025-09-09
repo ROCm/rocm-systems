@@ -215,6 +215,10 @@ Complete Tool Example
        
        // Set up profiling environment variables before attachment
        setenv("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", "1", 1);
+       
+       // Optional: Use custom tool library (defaults to rocprofiler-sdk/librocprofiler-sdk-tool.so)
+       // setenv("ROCPROFILER_REGISTER_ATTACHMENT_TOOL_LIB", "/opt/rocm/lib/rocprofiler-sdk/libmy-custom-tool.so", 1);
+       
        setenv("ROCPROF_HIP_API_TRACE", "1", 1);
        setenv("ROCPROF_KERNEL_TRACE", "1", 1);
        setenv("ROCPROF_MEMORY_COPY_TRACE", "1", 1);
@@ -249,6 +253,15 @@ Required Variables
 
    // Essential for attachment functionality
    setenv("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", "1", 1);
+
+Tool Library Configuration
+--------------------------
+
+.. code-block:: cpp
+
+   // Optional: Override the default tool library used for attachment
+   // Default: "rocprofiler-sdk/librocprofiler-sdk-tool.so"
+   setenv("ROCPROFILER_REGISTER_ATTACHMENT_TOOL_LIB", "/path/to/custom/tool.so", 1);
 
 Tracing Options
 --------------
