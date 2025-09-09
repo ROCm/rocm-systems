@@ -65,6 +65,7 @@ target_include_directories(aqlprofile-test
 target_link_libraries(
     aqlprofile-test
     PRIVATE
+            aqlprofile::aqlprofile-lib
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main

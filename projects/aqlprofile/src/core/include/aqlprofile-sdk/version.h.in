@@ -38,6 +38,11 @@
  * by the preprocessor.
  * @addtogroup VERSIONING_GROUP
  *
+ * @def AQLPROFILE_VERSION_NPI
+ * @brief The NPI version of the interface as a macro so it can be used
+ * by the preprocessor.
+ * @addtogroup VERSIONING_GROUP
+ *
  * @def AQLPROFILE_VERSION
  * @brief Numerically increasing version number encoding major, minor, and patch via
           computing `((10000 * <MAJOR>) + (100 * <MINOR>) + <PATCH>)`.
@@ -89,6 +94,7 @@
 #define AQLPROFILE_VERSION_MAJOR   @BUILD_VERSION_MAJOR@
 #define AQLPROFILE_VERSION_MINOR   @BUILD_VERSION_MINOR@
 #define AQLPROFILE_VERSION_PATCH   @BUILD_VERSION_PATCH@
+#define AQLPROFILE_VERSION_NPI     @BUILD_VERSION_NPI@
 #define AQLPROFILE_SOVERSION       @BUILD_VERSION_MAJOR@
 #define AQLPROFILE_VERSION_STRING "@VERSION_STRING@"
 #define AQLPROFILE_GIT_REVISION   "@AQLPROFILE_GIT_REVISION@"
@@ -104,12 +110,12 @@
 #define AQLPROFILE_COMPILER_VERSION "@CMAKE_CXX_COMPILER_VERSION@"
 // clang-format on
 
-#define AQLPROFILE_COMPUTE_VERSION_VALUE(MAX_VERSION_VALUE, MAJOR, MINOR, PATCH)              \
-    (((MAX_VERSION_VALUE * MAX_VERSION_VALUE) * MAJOR) + (MAX_VERSION_VALUE * MINOR) + (PATCH))
+#define AQLPROFILE_COMPUTE_VERSION_VALUE(MAX_VERSION_VALUE, MAJOR, MINOR, PATCH) \
+  (((MAX_VERSION_VALUE * MAX_VERSION_VALUE) * MAJOR) + (MAX_VERSION_VALUE * MINOR) + (PATCH))
 
-#define AQLPROFILE_COMPUTE_VERSION(MAJOR, MINOR, PATCH)                                       \
-    AQLPROFILE_COMPUTE_VERSION_VALUE(100, MAJOR, MINOR, PATCH)
+#define AQLPROFILE_COMPUTE_VERSION(MAJOR, MINOR, PATCH) \
+  AQLPROFILE_COMPUTE_VERSION_VALUE(100, MAJOR, MINOR, PATCH)
 
-#define AQLPROFILE_VERSION                                                                    \
-    AQLPROFILE_COMPUTE_VERSION(                                                               \
-        AQLPROFILE_VERSION_MAJOR, AQLPROFILE_VERSION_MINOR, AQLPROFILE_VERSION_PATCH)
+#define AQLPROFILE_VERSION                                                       \
+  AQLPROFILE_COMPUTE_VERSION(AQLPROFILE_VERSION_MAJOR, AQLPROFILE_VERSION_MINOR, \
+                             AQLPROFILE_VERSION_PATCH)

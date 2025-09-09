@@ -203,6 +203,17 @@ typedef struct {
 } aqlprofile_agent_handle_t;
 
 /**
+ * @brief Query the version of aqlprofile library.
+ * @param[out] major aqlprofile major version is stored if non-NULL
+ * @param[out] minor aqlprofile minor version is stored if non-NULL
+ * @param[out] patch aqlprofile patch version is stored if non-NULL
+ * @param[out] 0 if not aqlprofile-NPI build
+ * @retval HSA_STATUS_SUCCESS Always returned
+ */
+hsa_status_t
+aqlprofile_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch, uint32_t* npi);
+
+/**
  * @brief Registers an agent to be used with AQL profile.
  * @param[out] agent_id Handle to newly registered agent
  * @param[in] agent_info Info to register a new agent with AQL Profiler

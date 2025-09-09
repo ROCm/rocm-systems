@@ -25,6 +25,8 @@
 
 #include "core/aql_profile.hpp"
 #include "core/pm4_factory.h"
+#include "aqlprofile-sdk/version.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 // header for memcpy
 #include <cstring>
 
@@ -171,7 +173,7 @@ TEST_F(CountersVecTest, RegularEvents) {
   pm4_factory->GetBlockInfo(profile->events);
   bool is_gfx9 = pm4_factory->IsGFX9();
   EXPECT_TRUE(is_gfx9);
- 
+
 }
 
 // Test fixture for the DefaultTracedataCallback function
@@ -242,4 +244,30 @@ TEST_F(DefaultTracedataCallbackTest, NonTraceInfoType) {
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(callback_data.trace_data.ptr, original_ptr);
   EXPECT_EQ(callback_data.trace_data.size, original_size);
+}
+
+TEST(aqlprofile, version) {
+  auto correct_version = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>(
+      AQLPROFILE_VERSION_MAJOR, AQLPROFILE_VERSION_MINOR, AQLPROFILE_VERSION_PATCH,
+      AQLPROFILE_VERSION_NPI);
+  auto query_version = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>(0, 0, 0, 0);
+  auto query_version_copy = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>(0, 0, 0, 0);
+
+  auto ret0 = aqlprofile_get_version(&std::get<0>(query_version), nullptr, nullptr, nullptr);
+  auto ret1 = aqlprofile_get_version(nullptr, &std::get<1>(query_version), nullptr, nullptr);
+  auto ret2 = aqlprofile_get_version(nullptr, nullptr, &std::get<2>(query_version), nullptr);
+  auto ret3 = aqlprofile_get_version(nullptr, nullptr, nullptr, &std::get<3>(query_version));
+
+  EXPECT_EQ(ret0, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(ret1, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(ret2, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(ret3, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(query_version, correct_version);
+
+  auto reta =
+      aqlprofile_get_version(&std::get<0>(query_version_copy), &std::get<1>(query_version_copy),
+                             &std::get<2>(query_version_copy), &std::get<3>(query_version_copy));
+  EXPECT_EQ(reta, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(query_version_copy, correct_version);
+  EXPECT_EQ(query_version_copy, query_version);
 }
