@@ -29,6 +29,8 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -78,14 +80,16 @@ get_constants(uint64_t starting_id)
     rocprofiler::agent::get_agents();
     for(const auto& prop : rocprofiler::agent::get_agent_available_properties())
     {
-        constants.emplace_back("constant",
-                               prop,
-                               "",
-                               "",
-                               fmt::format("Constant value {} from agent properties", prop),
-                               "",
-                               "yes",
-                               starting_id);
+        auto& metric =
+            constants.emplace_back("constant",
+                                   prop,
+                                   "",
+                                   "",
+                                   fmt::format("Constant value {} from agent properties", prop),
+                                   "",
+                                   "yes",
+                                   starting_id);
+        metric.setSpm(false);
         starting_id++;
     }
     return constants;
@@ -177,7 +181,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     metricVec.insert(metricVec.end(), constants.begin(), constants.end());
                     current_id += constants.size();
                 }
-                metricVec.emplace_back(
+                auto& metric = metricVec.emplace_back(
                     arch.as<std::string>(),
                     counter_name,
                     (definition["block"] ? definition["block"].as<std::string>() : ""),
@@ -186,6 +190,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     (definition["expression"] ? definition["expression"].as<std::string>() : ""),
                     "",
                     current_id);
+                metric.setSpm(isSupportSpm(arch.as<std::string>(), metric));
                 current_id++;
             }
         }
@@ -210,6 +215,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                                 add_metric->second.expression(),
                                 "",
                                 current_id);
+        with_id.setSpm(isSupportSpm(add_metric->first, with_id));
         added_metrics.emplace(add_metric->first, std::vector<Metric>{})
             .first->second.push_back(with_id);
         ret.emplace(add_metric->first, std::vector<Metric>{}).first->second.push_back(with_id);
@@ -405,6 +411,27 @@ checkValidMetric(const std::string& agent, const Metric& metric)
                                                   : metric.id();
 
     return agent_map != nullptr && agent_map->count(base_metric_id) > 0;
+}
+
+bool
+isSupportSpm(const std::string& agent_name, const Metric& metric)
+{
+    auto agents = rocprofiler::agent::get_agents();
+
+    const auto it = std::find_if(agents.begin(), agents.end(), [&agent_name](const auto* agent) {
+        return agent->name == agent_name;
+    });
+    if(it == agents.end()) return false;
+    if(metric.event().empty()) return false;
+    auto sym = SPM::Dlsym{};
+    if(!sym.valid()) return false;
+    auto aql_agent   = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent((*it)->id));
+    auto query_info  = rocprofiler::aql::get_query_info((*it)->id, metric);
+    auto event       = aqlprofile_pmc_event_t{};
+    event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+    event.event_id   = static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr));
+    if(sym.is_supported_fn(aql_agent, event)) return true;
+    return false;
 }
 
 bool

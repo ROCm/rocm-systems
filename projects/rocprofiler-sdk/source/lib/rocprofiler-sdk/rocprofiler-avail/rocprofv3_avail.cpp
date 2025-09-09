@@ -169,7 +169,8 @@ counter_info(uint64_t     counter_handle,
              const char** counter_name,
              const char** counter_description,
              uint8_t*     is_derived,
-             uint8_t*     is_hw_constant)
+             uint8_t*     is_hw_constant,
+             uint8_t*     is_spm)
 {
     const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
 
@@ -177,6 +178,7 @@ counter_info(uint64_t     counter_handle,
     *counter_description = counter_info->description;
     *is_derived          = counter_info->is_derived;
     *is_hw_constant      = counter_info->is_constant;
+    *is_spm              = counter_info->spm_support;
 }
 
 void

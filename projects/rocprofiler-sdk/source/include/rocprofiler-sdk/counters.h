@@ -122,6 +122,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v1_t
     const char*              expression;       ///< Counter expression (derived counters only)
     uint8_t                  is_constant : 1;  ///< If this counter is HW constant
     uint8_t                  is_derived  : 1;  ///< If this counter is a derived counter
+    uint8_t                  spm_support : 1;  ///< If this counter supports SPM
 
     uint64_t                                                     dimensions_count;
     const rocprofiler_counter_record_dimension_info_t**          dimensions;

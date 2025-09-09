@@ -21,6 +21,8 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+
 #include <fmt/core.h>
 #include <cstdlib>
 #include <iostream>
@@ -242,5 +244,136 @@ CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool
     clear();
 }
 
+SPMMemoryPool::SPMMemoryPool(const AgentCache& agent, const AmdExtTable& ext, copy_fn_t copy_fn)
+{
+    allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
+    allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
+    free_fn         = ext.hsa_amd_memory_pool_free_fn;
+    fill_fn         = ext.hsa_amd_memory_fill_fn;
+    api_copy_fn     = copy_fn;
+
+    gpu_agent     = agent.get_hsa_agent();
+    cpu_pool_     = agent.cpu_pool();
+    gpu_pool_     = agent.gpu_pool();
+    kernarg_pool_ = agent.kernarg_pool();
+}
+
+void
+SPMMemoryPool::Free(void* ptr, void* data)
+{
+    if(ptr == nullptr) return;
+    auto* pool = reinterpret_cast<SPMMemoryPool*>(data);
+
+    ROCP_FATAL_IF(!pool || !pool->free_fn) << "Unable to deallocate from HSA memory pool";
+    pool->free_fn(ptr);
+}
+
+hsa_status_t
+SPMMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
+{
+    if(size == 0) return HSA_STATUS_SUCCESS;
+    auto* pool = reinterpret_cast<SPMMemoryPool*>(data);
+    ROCP_FATAL_IF(!pool || !pool->api_copy_fn) << "Unable to copy HSA memory";
+
+    return pool->api_copy_fn(dst, src, size);
+}
+
+hsa_status_t
+SPMMemoryPool::Alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t flags, void* data)
+{
+    hsa_status_t status = HSA_STATUS_ERROR;
+
+    if(size == 0)
+    {
+        if(ptr != nullptr) *ptr = nullptr;
+        return HSA_STATUS_SUCCESS;
+    }
+    if(!data) return HSA_STATUS_ERROR;
+
+    auto& pool = *reinterpret_cast<SPMMemoryPool*>(data);
+    if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
+
+    if(flags.host_access)
+        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+    else
+        status =
+            pool.allocate_fn(pool.kernarg_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+
+    if(status == HSA_STATUS_SUCCESS)
+        status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+    if(status == HSA_STATUS_SUCCESS) status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
+
+    return status;
+}
+
+SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile_t profile)
+: agent(aql_agent)
+, sym()
+{
+    ROCP_FATAL_IF(!sym.valid()) << "Failed to load aqlprofile SPM library";
+    auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
+
+    if(status != HSA_STATUS_SUCCESS) return;
+
+    packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
+    packets.stop_packet.header             = VENDOR_BIT | BARRIER_BIT;
+    packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
+    packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
+
+    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE, &spm_desc.seg_size);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM seg_size";
+    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC, &spm_desc.buffer_num);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM buffer_num";
+
+    is_valid = true;
+    empty    = false;
+}
+
+void
+SPMPacket::populate_before()
+{
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+    barrier.header |= BARRIER_BIT;
+
+    before_krn_barrier_pkt.push_back(barrier);
+    before_krn_barrier_pkt.push_back(barrier);
+    before_krn_pkt.push_back(packets.start_packet);
+};
+
+void
+SPMPacket::populate_after()
+{
+    after_krn_pkt.push_back(packets.stop_packet);
+};
+
+void
+SPMPacket::kfd_start()
+{
+    ROCP_FATAL_IF(!handle.handle) << "Attempt at starting SPM with unitialized packet!";
+
+    if(running.exchange(true))
+    {
+        ROCP_ERROR << "Double call to KFD start!";
+        return;
+    }
+
+    auto status = sym.spm_start_fn(this->handle, SPM::aql_data_callback, this);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Unable to acquire KFD thread";
+}
+
+void
+SPMPacket::kfd_stop()
+{
+    if(running.exchange(false))
+        sym.spm_stop_fn(this->handle);
+    else
+        ROCP_WARNING << "Double call to KFD stop!";
+}
+
+SPMPacket::~SPMPacket()
+{
+    if(running.exchange(false) && sym.valid()) sym.spm_stop_fn(this->handle);
+}
 }  // namespace hsa
 }  // namespace rocprofiler
