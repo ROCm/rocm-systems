@@ -144,6 +144,8 @@ constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table"
 constexpr auto rocprofiler_attach_lib_name = "librocprofiler-sdk-attach.so";
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     "rocprofiler_attach_set_api_table";
+constexpr auto rocprofiler_tool_lib_name_default =
+    "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 
 constexpr auto rocprofiler_tool_lib_name = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofiler_detach";
