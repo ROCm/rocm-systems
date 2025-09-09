@@ -85,8 +85,9 @@ TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/t
 
 ## Gardener Rotation
 
-Week | North America | Europe / India / APAC
----- | ------- | ---------
+Week        | North America | Europe / India / APAC
+----------  | --------------| ---------
+Sep 09/2025 | idass1990     | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 
@@ -101,4 +102,4 @@ You can see current list of [gardener known bugs](https://github.com/ROCm/rocm-s
 
 Date | Library | Issue overview | Link to details | Resolved?
 ---- | ------- | -------------- | --------------- | ---------
-6/30 | | | | ✅
+
