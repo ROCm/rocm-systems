@@ -240,7 +240,8 @@ set(ROCPROFSYS_OMPVV_HOST_TESTS
 
 set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
     "${ROCPROFSYS_OMPVV_OFFLOAD_TESTS}"
-    CACHE STRING "Internal variable used to generate OMPVV Offload CTests" FORCE)
+    CACHE STRING "Internal variable used to generate OMPVV Offload CTests"
+          FORCE)
 
 rocprofiler_systems_message(STATUS
                             "Successfully built and compiled OMPVV tests")

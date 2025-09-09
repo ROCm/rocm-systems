@@ -86,7 +86,15 @@ set(DEFAULT_GPU_TARGETS
 set(GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"
     CACHE STRING "GPU targets to compile for")
-add_subdirectory(external)
+
+if(ROCPROFSYS_USE_ROCM)
+  add_subdirectory(external)
+else()
+  rocprofiler_systems_message(
+    WARNING
+    "ROCPROFSYS OMPVV CTests requires ROCm to be installed. Disabling OMPVV CTests..."
+  )
+endif()
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
   if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
