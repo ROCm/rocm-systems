@@ -240,7 +240,13 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
     // defer packet insertion. Always make sure there is a free slot available
     // for the retry barrier packet if there is not already one present.
     else if (free_slots < submitted_count + (pending_retry_point ? 0 : 1)) {
-      submitted_count = 0;
+      // If we're in overflow processing (retry mechanism) and still can't fit all packets,
+      // submit as many as possible to make progress and avoid infinite retry loops
+      if (!overflow_.empty() && free_slots > (pending_retry_point ? 1 : 2)) {
+        submitted_count = free_slots - (pending_retry_point ? 0 : 1);
+      } else {
+        submitted_count = 0;
+      }
     }
 
     // If we are not submitting all the packets, we need to ensure there is a
