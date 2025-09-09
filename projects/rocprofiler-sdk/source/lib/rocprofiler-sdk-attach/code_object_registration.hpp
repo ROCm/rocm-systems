@@ -33,7 +33,6 @@ namespace rocprofiler
 {
 namespace attach
 {
-
 void
 code_object_registration_init(HsaApiTable* table);
 

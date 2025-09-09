@@ -184,6 +184,9 @@ update_table(TableT* _orig, uint64_t _tbl_instance);
 
 int
 get_hsa_ref_count();
+
+void
+reset_copy_func();
 }  // namespace hsa
 }  // namespace rocprofiler
 

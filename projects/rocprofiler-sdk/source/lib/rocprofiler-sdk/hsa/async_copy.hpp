@@ -41,6 +41,9 @@ get_names();
 
 std::vector<uint32_t>
 get_ids();
+
+void
+reset_copy_func();
 }  // namespace async_copy
 
 void

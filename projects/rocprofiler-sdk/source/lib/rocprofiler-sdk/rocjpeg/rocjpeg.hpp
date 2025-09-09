@@ -110,5 +110,8 @@ template <typename TableT>
 void
 update_table(TableT* _orig);
 
+void
+reset_copy_func();
+
 }  // namespace rocjpeg
 }  // namespace rocprofiler

@@ -28,13 +28,13 @@
 
 #include <mutex>
 
-namespace {
-
+namespace
+{
 using callback_t = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
 
 struct queue_entry_t
 {
-    hsa_agent_t         agent = hsa_agent_t{};
+    hsa_agent_t         agent                       = hsa_agent_t{};
     write_interceptor_t user_write_interceptor_func = nullptr;
     void*               user_write_interceptor_data = nullptr;
 };
@@ -44,26 +44,29 @@ using queue_collection_t = std::unordered_map<hsa_queue_t*, queue_entry_t>;
 struct queue_registration_t
 {
     // guards access to both queues collection
-    std::mutex queues_mutex;
+    std::mutex         queues_mutex;
     queue_collection_t queues;
-    
-    decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) hsa_amd_queue_intercept_create_fn = nullptr;
-    decltype(AmdExtTable::hsa_amd_profiling_set_profiler_enabled_fn) hsa_amd_profiling_set_profiler_enabled_fn = nullptr;
-    decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn) hsa_amd_queue_intercept_register_fn = nullptr;
+
+    decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) hsa_amd_queue_intercept_create_fn =
+        nullptr;
+    decltype(AmdExtTable::hsa_amd_profiling_set_profiler_enabled_fn)
+        hsa_amd_profiling_set_profiler_enabled_fn = nullptr;
+    decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn) hsa_amd_queue_intercept_register_fn =
+        nullptr;
 };
 
 queue_registration_t*
 get_queue_registration()
 {
-    static auto*& registration = rocprofiler::common::static_object<queue_registration_t>::construct();
+    static auto*& registration =
+        rocprofiler::common::static_object<queue_registration_t>::construct();
     return registration;
 }
 
-
 // This is the attach library's WriteInterceptor that is provided to HSA.
-// Since the interceptor function cannot be changed later, this shim is provided immediately upon queue creation.
-// This shim's user data is a reference to the queue_entry_t for this queue, which will then by cast and used to
-// call the user write interceptor if it is non-null.
+// Since the interceptor function cannot be changed later, this shim is provided immediately upon
+// queue creation. This shim's user data is a reference to the queue_entry_t for this queue, which
+// will then by cast and used to call the user write interceptor if it is non-null.
 void
 write_interceptor(const void*                             packets,
                   uint64_t                                pkt_count,
@@ -85,7 +88,6 @@ write_interceptor(const void*                             packets,
     }
 }
 
-
 // HSA Intercept Functions (create_queue/destroy_queue)
 hsa_status_t
 create_queue(hsa_agent_t        agent,
@@ -101,32 +103,44 @@ create_queue(hsa_agent_t        agent,
 
     // Create new queue in HSA
     hsa_queue_t* new_queue = nullptr;
-    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn) << "Queue registration was not initialized before create queue was called!";
-    ROCP_HSA_TABLE_CALL(
-        FATAL,
-        registration->hsa_amd_queue_intercept_create_fn(
-            agent, size, type, callback, data, private_segment_size, group_segment_size, &new_queue))
+    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn)
+        << "Queue registration was not initialized before create queue was called!";
+    ROCP_HSA_TABLE_CALL(FATAL,
+                        registration->hsa_amd_queue_intercept_create_fn(agent,
+                                                                        size,
+                                                                        type,
+                                                                        callback,
+                                                                        data,
+                                                                        private_segment_size,
+                                                                        group_segment_size,
+                                                                        &new_queue))
         << "Could not create intercept queue";
 
-    ROCP_FATAL_IF(!registration->hsa_amd_profiling_set_profiler_enabled_fn) << "Queue registration was not initialized before create queue was called!";
-    ROCP_HSA_TABLE_CALL(FATAL, registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
+    ROCP_FATAL_IF(!registration->hsa_amd_profiling_set_profiler_enabled_fn)
+        << "Queue registration was not initialized before create queue was called!";
+    ROCP_HSA_TABLE_CALL(FATAL,
+                        registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
         << "Could not setup intercept profiler";
 
-    // Create and insert our queue's data entry now, as we need to provide a reference to it for the write_interceptor
+    // Create and insert our queue's data entry now, as we need to provide a reference to it for the
+    // write_interceptor
     queue_entry_t entry{};
     entry.agent = agent;
 
     {
         std::lock_guard lg(registration->queues_mutex);
-        ROCP_FATAL_IF(registration->queues.count(new_queue) > 0) << "Queue registration already contains an entry for new queue handle " << new_queue;
+        ROCP_FATAL_IF(registration->queues.count(new_queue) > 0)
+            << "Queue registration already contains an entry for new queue handle " << new_queue;
         registration->queues.insert({new_queue, entry});
     }
     auto* write_interceptor_data = &(registration->queues.at(new_queue));
 
     // Pass queue_entry_t* as user data, used to directly call the user's write interceptor
-    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_register_fn) << "Queue registration was not initialized before create queue was called!";
-    ROCP_HSA_TABLE_CALL(
-        FATAL, registration->hsa_amd_queue_intercept_register_fn(new_queue, write_interceptor, write_interceptor_data))
+    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_register_fn)
+        << "Queue registration was not initialized before create queue was called!";
+    ROCP_HSA_TABLE_CALL(FATAL,
+                        registration->hsa_amd_queue_intercept_register_fn(
+                            new_queue, write_interceptor, write_interceptor_data))
         << "Could not register interceptor";
 
     *queue = new_queue;
@@ -149,13 +163,15 @@ destroy_queue(hsa_queue_t* hsa_queue)
     if(registration)
     {
         std::lock_guard lg(registration->queues_mutex);
-        size_t erase_count = registration->queues.erase(hsa_queue);
-        ROCP_WARNING_IF(erase_count == 0) << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
+        size_t          erase_count = registration->queues.erase(hsa_queue);
+        ROCP_WARNING_IF(erase_count == 0)
+            << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
     }
     return HSA_STATUS_SUCCESS;
 }
 
-int iterate_all_queues(rocprof_attach_queue_iterator_t func, void* user_data)
+int
+iterate_all_queues(rocprof_attach_queue_iterator_t func, void* user_data)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
@@ -172,7 +188,7 @@ int
 set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
-    auto  qr_pair = registration->queues.find(queue);
+    auto  qr_pair      = registration->queues.find(queue);
     if(qr_pair == registration->queues.end())
     {
         ROCP_ERROR << "couldn't find registration to set write interceptor for queue " << queue;
@@ -183,13 +199,12 @@ set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
     return 0;
 }
 
-}
+}  // namespace
 
 namespace rocprofiler
 {
 namespace attach
 {
-
 void
 queue_registration_init(HsaApiTable* table)
 {
@@ -198,12 +213,15 @@ queue_registration_init(HsaApiTable* table)
 
     CoreApiTable& core_table = *table->core_;
 
-    core_table.hsa_queue_create_fn = create_queue;
+    core_table.hsa_queue_create_fn  = create_queue;
     core_table.hsa_queue_destroy_fn = destroy_queue;
 
-    registration->hsa_amd_queue_intercept_create_fn = *table->amd_ext_->hsa_amd_queue_intercept_create_fn;
-    registration->hsa_amd_profiling_set_profiler_enabled_fn = *table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn;
-    registration->hsa_amd_queue_intercept_register_fn = *table->amd_ext_->hsa_amd_queue_intercept_register_fn;
+    registration->hsa_amd_queue_intercept_create_fn =
+        *table->amd_ext_->hsa_amd_queue_intercept_create_fn;
+    registration->hsa_amd_profiling_set_profiler_enabled_fn =
+        *table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn;
+    registration->hsa_amd_queue_intercept_register_fn =
+        *table->amd_ext_->hsa_amd_queue_intercept_register_fn;
 }
 
 }  // namespace attach

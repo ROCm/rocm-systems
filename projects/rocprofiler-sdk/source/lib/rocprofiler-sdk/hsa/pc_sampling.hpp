@@ -48,6 +48,8 @@ copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
 void
 update_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
 
+void
+reset_copy_func();
 #endif
 }  // namespace pc_sampling
 }  // namespace hsa

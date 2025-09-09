@@ -36,6 +36,14 @@ namespace context
 {
 namespace
 {
+
+auto&
+get_remaining_correlation_ids()
+{
+    static auto correlation_ids_remaining = std::atomic<size_t>{0};
+    return correlation_ids_remaining;
+}
+
 auto*&
 get_correlation_id_map()
 {
@@ -117,6 +125,7 @@ correlation_id::sub_ref_count()
                     << fmt::format("failed to emplace correlation id retirement for {}", internal);
             }
         }
+        --get_remaining_correlation_ids();
     }
 
     return _ret;
@@ -150,6 +159,7 @@ correlation_tracing_service::construct(uint32_t _init_ref_count)
         ret->ancestor = prev_api_corr_id->internal;
 
     get_latest_correlation_id_impl().emplace_back(ret.get());
+    ++get_remaining_correlation_ids();
 
     return ret.get();
 }
@@ -237,6 +247,13 @@ correlation_id_finalize()
         }
         ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
     });
+}
+
+void
+wait_for_correlation_id_retirement()
+{
+    while(get_remaining_correlation_ids().load() != 0)
+        std::this_thread::sleep_for(std::chrono::microseconds{10});
 }
 }  // namespace context
 }  // namespace rocprofiler

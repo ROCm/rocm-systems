@@ -55,6 +55,13 @@ namespace
 struct null_type
 {};
 
+auto&
+get_reset_vector()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
+
 template <typename DataT, typename Tp>
 void
 set_data_retval(DataT& _data, Tp _val)
@@ -582,6 +589,9 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
+        get_reset_vector().emplace_back(
+            [&_copy_func, original_copy_func = _copy_func]() { _copy_func = original_copy_func; });
+
         ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
             << " despite this being the first instance of the library being copies";
@@ -845,6 +855,15 @@ get_hsa_ref_count()
     auto _val = hsa_reference_count_value.load();
     ROCP_TRACE << "hsa reference count: " << _val;
     return _val;
+}
+
+void
+reset_copy_func()
+{
+    auto& reset_vec = get_reset_vector();
+    for(auto& reset_func : reset_vec)
+        reset_func();
+    reset_vec.clear();
 }
 }  // namespace hsa
 }  // namespace rocprofiler

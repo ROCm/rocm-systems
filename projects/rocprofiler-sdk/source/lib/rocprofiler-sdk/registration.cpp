@@ -38,6 +38,7 @@
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
+#include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
@@ -105,6 +106,13 @@ namespace registration
 namespace
 {
 namespace fs = ::rocprofiler::common::filesystem;
+
+auto&
+get_detach_vector()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
 
 bool
 resolved_exists(std::string_view fname)
@@ -337,6 +345,10 @@ find_clients()
                 ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
             }
 
+            get_detach_vector().emplace_back([handle](){
+                dlclose(handle);
+            });
+
             for(const auto& ditr : data)
             {
                 if(ditr->dlhandle && ditr->dlhandle == handle)
@@ -403,6 +415,9 @@ find_clients()
 
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
+            get_detach_vector().emplace_back([handle](){
+                dlclose(handle);
+            });
 
             auto* _sym = rocprofiler_configure_dlsym(handle);
 
@@ -667,6 +682,45 @@ set_fini_status(int v)
     if(get_status()) get_status()->second.store(v, std::memory_order_release);
 }
 
+template <typename Tp>
+void
+copy_table(Tp* original_table, Tp* table_copy)
+{
+    *original_table = *table_copy;
+    delete table_copy;
+    table_copy = nullptr;
+}
+
+void
+stop_active_contexts()
+{
+    if(get_num_clients() > 0)
+    {
+        for(const auto& itr : *get_clients())
+        {
+            if(!itr) continue;
+            if (context::stop_client_contexts(itr->internal_client_id) != ROCPROFILER_STATUS_SUCCESS)
+                ROCP_ERROR << fmt::format("Failed to stop active contexts for client {}", (itr->mutable_client_id.name)
+                                        ? std::string_view{itr->mutable_client_id.name}
+                                        : std::string_view{"unspecified"});
+
+            ROCP_WARNING << fmt::format("rocprofiler-sdk client '{}' stopping active contexts",
+                                    (itr->mutable_client_id.name)
+                                        ? std::string_view{itr->mutable_client_id.name}
+                                        : std::string_view{"unspecified"});
+        }
+    }
+}
+
+void
+detach()
+{
+    auto& detach_vector = get_detach_vector();
+    for(const auto& detach_func : detach_vector)
+        detach_func();
+    detach_vector.clear();
+}
+
 void
 initialize()
 {
@@ -782,6 +836,27 @@ finalize()
 }  // namespace registration
 }  // namespace rocprofiler
 
+template <typename Tp, typename F>
+void
+store_original_table(Tp* table, F reset_function)
+{
+    Tp* table_copy = new Tp{*table};
+    rocprofiler::registration::get_detach_vector().emplace_back(
+        [table, table_copy, reset_function]() {
+            *table = *table_copy;
+            delete table_copy;
+            reset_function();
+        });
+}
+
+template <typename F>
+void
+store_reset_func(F reset_function)
+{
+    rocprofiler::registration::get_detach_vector().emplace_back(
+        [reset_function]() { reset_function(); });
+}
+
 extern "C" {
 rocprofiler_status_t
 rocprofiler_is_initialized(int* status)
@@ -849,8 +924,8 @@ rocprofiler_set_api_table(const char* name,
         // pass to hip init
         ROCP_ERROR_IF(num_tables > 1) << "rocprofiler expected HIP library to pass 1 API table for "
                                       << name << ", not " << num_tables;
-
         auto* hip_runtime_api_table = static_cast<HipDispatchTable*>(*tables);
+        store_original_table(hip_runtime_api_table, rocprofiler::hip::reset_copy_func);
 
         // any internal modifications to the HipDispatchTable need to be done before we make the
         // copy or else those modifications will be lost when HIP API tracing is enabled
@@ -881,6 +956,7 @@ rocprofiler_set_api_table(const char* name,
                                       << name << ", not " << num_tables;
 
         auto* hip_compiler_api_table = static_cast<HipCompilerDispatchTable*>(*tables);
+        store_original_table(hip_compiler_api_table, rocprofiler::hip::reset_copy_func);
 
         // any internal modifications to the HipCompilerDispatchTable need to be done before we make
         // the copy or else those modifications will be lost when HIP API tracing is enabled because
@@ -918,6 +994,19 @@ rocprofiler_set_api_table(const char* name,
             (offsetof(::HsaApiTable, pc_sampling_ext_) < hsa_api_table_size);
 #endif
 
+        store_original_table(hsa_api_table->core_, rocprofiler::hsa::reset_copy_func);
+        store_original_table(hsa_api_table->amd_ext_, rocprofiler::hsa::reset_copy_func);
+        store_original_table(hsa_api_table->image_ext_, rocprofiler::hsa::reset_copy_func);
+        store_original_table(hsa_api_table->finalizer_ext_, rocprofiler::hsa::reset_copy_func);
+        store_original_table(hsa_api_table->tools_, rocprofiler::hsa::reset_copy_func);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        if(runtime_pc_sampling_table)
+            store_original_table(hsa_api_table->pc_sampling_ext_,
+                                 rocprofiler::hsa::pc_sampling::reset_copy_func);
+#endif
+
+        store_reset_func(rocprofiler::hsa::async_copy::reset_copy_func);
+        store_reset_func(rocprofiler::hsa::memory_allocation::reset_copy_func);
         // store a reference of the HsaApiTable implementations for invoking these functions
         // without going through tracing wrappers
         rocprofiler::hsa::copy_table(hsa_api_table->core_, lib_instance);
@@ -980,6 +1069,10 @@ rocprofiler_set_api_table(const char* name,
         auto* roctx_ctrl = static_cast<roctxControlApiTable_t*>(tables[1]);
         auto* roctx_name = static_cast<roctxNameApiTable_t*>(tables[2]);
 
+        store_original_table(roctx_core, rocprofiler::marker::reset_copy_func);
+        store_original_table(roctx_ctrl, rocprofiler::marker::reset_copy_func);
+        store_original_table(roctx_name, rocprofiler::marker::reset_copy_func);
+
         // any internal modifications to the roctxApiTable_t need to be done before we make
         // the copy or else those modifications will be lost when ROCTx tracing is enabled because
         // the ROCTx tracing invokes the function pointers from the copy below
@@ -1018,6 +1111,7 @@ rocprofiler_set_api_table(const char* name,
             << "rocprofiler expected RCCL library to pass 1 API table, not " << num_tables;
 
         auto* rccl_api = static_cast<rcclApiFuncTable*>(tables[0]);
+        store_original_table(rccl_api, rocprofiler::rccl::reset_copy_func);
 
         // any internal modifications to the rcclApiFuncTable need to be done before we make the
         // copy or else those modifications will be lost when RCCL API tracing is enabled
@@ -1042,6 +1136,7 @@ rocprofiler_set_api_table(const char* name,
             << "rocprofiler expected ROCDecode library to pass 1 API table, not " << num_tables;
 
         auto* rocdecode_api = static_cast<RocDecodeDispatchTable*>(tables[0]);
+        store_original_table(rocdecode_api, rocprofiler::rocdecode::reset_copy_func);
 
         // any internal modifications to the rocdecodeApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when ROCDecode API tracing is enabled
@@ -1065,6 +1160,7 @@ rocprofiler_set_api_table(const char* name,
             << "rocprofiler expected rocJPEG library to pass 1 API table, not " << num_tables;
 
         auto* rocjpeg_api = static_cast<RocJpegDispatchTable*>(tables[0]);
+        store_original_table(rocjpeg_api, rocprofiler::rocjpeg::reset_copy_func);
 
         // any internal modifications to the rocjpegApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when rocJPEG API tracing is enabled
@@ -1085,9 +1181,15 @@ rocprofiler_set_api_table(const char* name,
     else if(std::string_view{name} == "rocattach")
     {
         ROCP_ERROR_IF(num_tables > 1)
-            << "rocprofiler expected rocprofiler attach library to pass 1 API table, not " << num_tables;
+            << "rocprofiler expected rocprofiler attach library to pass 1 API table, not "
+            << num_tables;
 
         auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
+        auto* table_copy    = new RocAttachDispatchTable{*rocattach_api};
+        rocprofiler::registration::get_detach_vector().emplace_back([rocattach_api, table_copy]() {
+            *rocattach_api = *table_copy;
+            delete table_copy;
+        });
 
         // unlike other APIs, we do not offer tracing for our own attach library
         // forward the table to the relevant code sections, then move on

@@ -53,6 +53,13 @@ namespace
 struct null_type
 {};
 
+auto&
+get_reset_vector()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
+
 template <typename Tp>
 auto
 get_default_retval()
@@ -388,6 +395,9 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         auto& _copy_table = _info.get_table(*get_table<TableIdx>());
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
+        get_reset_vector().emplace_back(
+            [&_copy_func, original_copy_func = _copy_func]() { _copy_func = original_copy_func; });
+
         ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
             << " despite this being the first instance of the library being copies";
@@ -527,6 +537,15 @@ update_table(TableT* _orig)
     if(_orig)
         update_table<TableIdx>(_orig,
                                std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
+}
+
+void
+reset_copy_func()
+{
+    auto& reset_vec = get_reset_vector();
+    for(auto& reset_func : reset_vec)
+        reset_func();
+    reset_vec.clear();
 }
 
 using iterate_args_data_t = rocprofiler_callback_tracing_marker_api_data_t;

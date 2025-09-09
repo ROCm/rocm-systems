@@ -49,8 +49,8 @@ def main(
 
     if duration is None:
         sys.stdout.write("Press Enter to detach...")
-        sys.stdout.flush() # Force the prompt to appear immediately
-        input()            # Now wait for input
+        sys.stdout.flush()  # Force the prompt to appear immediately
+        input()  # Now wait for input
     else:
         time.sleep(int(duration) / 1000)
 

@@ -93,6 +93,9 @@ dump_correlation_stack(const char*);
 void
 correlation_id_finalize();
 
+void
+wait_for_correlation_id_retirement();
+
 /// permits tools opportunity to modify the correlation id based on the domain, op, and
 /// the rocprofiler generated correlation id
 struct correlation_tracing_service

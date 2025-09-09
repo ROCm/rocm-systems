@@ -48,6 +48,13 @@ namespace registration
 void
 init_logging();
 
+void
+stop_active_contexts();
+
+// detach the rocprofiler
+void
+detach();
+
 // initialize the clients
 void
 initialize();

@@ -23,17 +23,18 @@
 #pragma once
 
 #include "attach.h"
-#include "queue_registration.h"
 #include "code_object_registration.h"
+#include "queue_registration.h"
 
 #define ROCATTACH_API_TABLE_VERSION_MAJOR 0
 
 ROCPROFILER_EXTERN_C_INIT
 
-typedef int  (*rocprofiler_attach_get_version_t)();
-typedef int  (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_iterator_t, void*);
-typedef int  (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
-typedef int  (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t, void*);
+typedef int (*rocprofiler_attach_get_version_t)();
+typedef int (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_iterator_t, void*);
+typedef int (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
+typedef int (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t,
+                                                             void*);
 typedef void (*rocprofiler_attach_notify_new_queue_t)(hsa_queue_t*, hsa_agent_t, void*);
 typedef void (*rocprofiler_attach_notify_new_code_object_t)(hsa_executable_t, void*);
 

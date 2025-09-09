@@ -85,6 +85,13 @@ SPECIALIZE_ASYNC_COPY_INFO(DEVICE_TO_DEVICE)
 
 #undef SPECIALIZE_ASYNC_COPY_INFO
 
+auto&
+get_reset_vector()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
+
 template <size_t Idx, size_t... IdxTail>
 const char*
 name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
@@ -765,6 +772,9 @@ async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
     // table with copy function
     auto& _copy_func = get_next_dispatch<TableIdx, OpIdx>();
 
+    get_reset_vector().emplace_back(
+        [&_copy_func, original_copy_func = _copy_func]() { _copy_func = original_copy_func; });
+
     ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
         << _meta.name << " has non-null function pointer " << _copy_func
         << " despite this being the first instance of the library being copies";
@@ -853,6 +863,15 @@ get_names()
     _data.reserve(ROCPROFILER_MEMORY_COPY_LAST);
     get_names(_data, std::make_index_sequence<ROCPROFILER_MEMORY_COPY_LAST>{});
     return _data;
+}
+
+void
+reset_copy_func()
+{
+    auto& reset_vec = get_reset_vector();
+    for(auto& reset_func : reset_vec)
+        reset_func();
+    reset_vec.clear();
 }
 }  // namespace async_copy
 

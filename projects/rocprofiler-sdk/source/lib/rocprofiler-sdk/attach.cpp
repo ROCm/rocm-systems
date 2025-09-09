@@ -9,46 +9,30 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
-#pragma once
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include <rocprofiler-sdk/attach.h>
+#include <rocprofiler-sdk/fwd.h>
 
-namespace rocprofiler
+rocprofiler_status_t
+rocprofiler_detach()
 {
-namespace hsa
-{
-namespace memory_allocation
-{
-const char*
-name_by_id(uint32_t id);
+    rocprofiler::registration::stop_active_contexts();
+    rocprofiler::context::wait_for_correlation_id_retirement();
+    rocprofiler::registration::finalize();
+    rocprofiler::registration::detach();
 
-uint32_t
-id_by_name(const char* name);
-
-std::vector<const char*>
-get_names();
-
-std::vector<uint32_t>
-get_ids();
-
-void
-reset_copy_func();
-}  // namespace memory_allocation
-
-template <typename TableT>
-void
-memory_allocation_init(TableT* _orig, uint64_t _tbl_instance);
-
-}  // namespace hsa
-}  // namespace rocprofiler
+    return ROCPROFILER_STATUS_SUCCESS;
+}

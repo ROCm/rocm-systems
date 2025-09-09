@@ -28,8 +28,8 @@
 
 #include <mutex>
 
-namespace {
-
+namespace
+{
 using hsa_executable_freeze_t  = decltype(CoreApiTable::hsa_executable_freeze_fn);
 using hsa_executable_destroy_t = decltype(CoreApiTable::hsa_executable_destroy_fn);
 using code_object_collection_t = std::vector<hsa_executable_t>;
@@ -37,16 +37,17 @@ using code_object_collection_t = std::vector<hsa_executable_t>;
 struct code_object_registration_t
 {
     // gates access to code_objects collection
-    std::mutex code_objects_mutex;
+    std::mutex               code_objects_mutex;
     code_object_collection_t code_objects;
-    hsa_executable_freeze_t  hsa_executable_freeze_fn = nullptr;
-    hsa_executable_destroy_t hsa_executable_destroy_fn  = nullptr;
+    hsa_executable_freeze_t  hsa_executable_freeze_fn  = nullptr;
+    hsa_executable_destroy_t hsa_executable_destroy_fn = nullptr;
 };
 
 code_object_registration_t*
 get_code_object_registration()
 {
-    static auto*& registration = rocprofiler::common::static_object<code_object_registration_t>::construct();
+    static auto*& registration =
+        rocprofiler::common::static_object<code_object_registration_t>::construct();
     return registration;
 }
 
@@ -54,7 +55,7 @@ hsa_status_t
 executable_freeze(hsa_executable_t executable, const char* options)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
-    auto status = registration->hsa_executable_freeze_fn(executable, options);
+    auto  status       = registration->hsa_executable_freeze_fn(executable, options);
     if(status)
     {
         return status;
@@ -80,7 +81,8 @@ executable_destroy(hsa_executable_t executable)
     {
         std::lock_guard lg(registration->code_objects_mutex);
         auto pred = [&](const hsa_executable_t& a) { return a.handle == executable.handle; };
-        auto itr  = std::find_if(registration->code_objects.begin(), registration->code_objects.end(), pred);
+        auto itr  = std::find_if(
+            registration->code_objects.begin(), registration->code_objects.end(), pred);
         if(itr == registration->code_objects.end())
         {
             ROCP_WARNING << "remove code_object could not find " << executable.handle;
@@ -95,11 +97,12 @@ executable_destroy(hsa_executable_t executable)
     return HSA_STATUS_SUCCESS;
 }
 
-int iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
+int
+iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
 
-    for (const auto &code_object : registration->code_objects)
+    for(const auto& code_object : registration->code_objects)
     {
         func(code_object, data);
     }
@@ -107,20 +110,22 @@ int iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* d
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-}
+}  // namespace
 
 namespace rocprofiler
 {
 namespace attach
 {
-
-void code_object_registration_init(HsaApiTable* table) //CoreApiTable& core_table, AmdExtTable& ext_table)
+void
+code_object_registration_init(
+    HsaApiTable* table)  // CoreApiTable& core_table, AmdExtTable& ext_table)
 {
     ROCP_TRACE << "Initializing Code Object Registration";
-    auto* registration = CHECK_NOTNULL(get_code_object_registration());
-    CoreApiTable& core_table = *table->core_;
+    auto*         registration = CHECK_NOTNULL(get_code_object_registration());
+    CoreApiTable& core_table   = *table->core_;
 
-    // route executable freeze and destroy to us, but also save the original entrypoint so we can call it
+    // route executable freeze and destroy to us, but also save the original entrypoint so we can
+    // call it
     registration->hsa_executable_freeze_fn  = core_table.hsa_executable_freeze_fn;
     core_table.hsa_executable_freeze_fn     = executable_freeze;
     registration->hsa_executable_destroy_fn = core_table.hsa_executable_destroy_fn;

@@ -155,6 +155,13 @@ SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_AMD_VMEM_FREE,
                                   memory_free_impl)
 #undef SPECIALIZE_MEMORY_ALLOCATION_INFO
 
+auto&
+get_reset_vector()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
+
 // Map rocprofiler_memory_allocation_operation_t to respective name
 template <size_t OpIdx>
 struct memory_allocation_name;
@@ -746,6 +753,10 @@ memory_allocation_save(Tp* _orig, uint64_t _tbl_instance, std::integral_constant
         // table with copy function
         auto& _allocate_func = get_next_dispatch<TableIdx, OpIdx>();
 
+        get_reset_vector().emplace_back([&_allocate_func, original_copy_func = _allocate_func]() {
+            _allocate_func = original_copy_func;
+        });
+
         ROCP_FATAL_IF(_allocate_func && _tbl_instance == 0)
             << _meta.name << " has non-null function pointer " << _allocate_func
             << " despite this being the first instance of the library being copies";
@@ -821,6 +832,15 @@ memory_allocation_wrap(TableT* _orig)
         memory_allocation_wrap<TableIdx>(
             _orig, memory_allocation_seq<TableIdx>::memory_allocation_index_seq_t);
     }
+}
+
+void
+reset_copy_func()
+{
+    auto& reset_vec = get_reset_vector();
+    for(auto& reset_func : reset_vec)
+        reset_func();
+    reset_vec.clear();
 }
 
 }  // namespace memory_allocation

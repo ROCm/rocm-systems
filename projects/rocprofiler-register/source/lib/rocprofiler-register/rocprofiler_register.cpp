@@ -145,10 +145,15 @@ constexpr auto rocprofiler_attach_lib_name = "librocprofiler-sdk-attach.so";
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     "rocprofiler_attach_set_api_table";
 
+<<<<<<< HEAD
 constexpr auto rocprofiler_tool_lib_name_default =
     "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 constexpr auto rocprofiler_tool_attach_entrypoint = "rocprofv3_attach";
 constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofv3_detach";
+=======
+constexpr auto rocprofiler_tool_lib_name = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
+constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofiler_detach";
+>>>>>>> 077fe29d16 (Formatting + attach/detach multiple times to the same pid)
 
 // Get the tool library name from environment variable or use default
 inline const char*
@@ -161,6 +166,20 @@ get_rocprofiler_tool_lib_name()
 
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
+
+void**
+get_sdk_handle()
+{
+    static void* _v = nullptr;
+    return &_v;
+}
+
+auto&
+get_detach_vector()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
 
 enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
 {
@@ -397,6 +416,13 @@ rocp_load_lib(std::string _rocp_reg_lib)
         _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
         rocprofiler_lib_handle =
             dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+    if(!rocprofiler_lib_handle)
+    {
+        LOG(ERROR) << "IAN HERE";
+        *get_sdk_handle() = rocprofiler_lib_handle;
+        get_detach_vector().emplace_back(
+            [rocprofiler_lib_handle]() { dlclose(rocprofiler_lib_handle); });
     }
 
     LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
@@ -822,31 +848,7 @@ rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer)
 {
     LOG(INFO) << "rocprofiler_register_attach started";
-    const char* tool_lib_name = get_rocprofiler_tool_lib_name();
-    LOG(INFO) << "Loading tool library: " << tool_lib_name;
-    void* toollibrary = rocp_load_lib(tool_lib_name);
-
-    if(!toollibrary)
-    {
-        LOG(ERROR) << "couldn't dlopen tool library. reason: " << dlerror();
-        return ROCP_REG_NO_TOOLS;
-    }
-    // TODO: should save old environment variables if they get overwritten and restore
-    // them on detach
     load_environment_buffer(environment_buffer);
-
-    rocprofv3_attach_t rocprofv3_attach_fn;
-    *(void**) (&rocprofv3_attach_fn) =
-        dlsym(toollibrary, rocprofiler_tool_attach_entrypoint);
-
-    if(!rocprofv3_attach_fn)
-    {
-        LOG(ERROR) << "attach entry point is NULL";
-        return ROCP_REG_NO_TOOLS;
-    }
-
-    LOG(INFO) << "attachment starting";
-    rocprofv3_attach_fn();
 
     auto status = rocprofiler_register_invoke_all_registrations();
     if(status)
@@ -867,18 +869,10 @@ rocprofiler_register_error_code_t
 rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
-    const char* tool_lib_name = get_rocprofiler_tool_lib_name();
-    LOG(INFO) << "Loading tool library: " << tool_lib_name;
-    void* toollibrary = rocp_load_lib(tool_lib_name);
-
-    if(!toollibrary)
-    {
-        LOG(ERROR) << "couldn't dlopen tool library. reason: " << dlerror();
-    }
 
     rocprofv3_detach_t rocprofv3_detach_fn;
     *(void**) (&rocprofv3_detach_fn) =
-        dlsym(toollibrary, rocprofiler_tool_detach_entrypoint);
+        dlsym(*get_sdk_handle(), rocprofiler_tool_detach_entrypoint);
 
     if(rocprofv3_detach_fn)
     {
@@ -890,6 +884,11 @@ rocprofiler_register_detach()
         LOG(ERROR) << "detach entry point is NULL";
     }
 
+    auto& reset_vec = get_detach_vector();
+    for(auto& func : reset_vec)
+    {
+        func();
+    }
     return ROCP_REG_SUCCESS;
 }
 }

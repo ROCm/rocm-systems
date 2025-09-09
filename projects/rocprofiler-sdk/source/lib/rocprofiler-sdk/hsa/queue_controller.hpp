@@ -22,9 +22,9 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk-attach/include/table.h"
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk-attach/include/table.h"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
