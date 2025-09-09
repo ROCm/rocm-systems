@@ -208,7 +208,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     merge_sha = client.get_squash_merge_commit(args.repo, args.pr)
     logger.debug(f"Merge commit for PR #{args.pr} in {args.repo}: {merge_sha}")
     for entry in relevant_subtrees:
-        prefix = f"{entry.category}/{entry.name}"
+        prefix = f"{entry.category}/{entry.name}/"
         logger.debug(f"Processing subtree {prefix}")
         with tempfile.TemporaryDirectory() as tmpdir:
             patch_file = Path(tmpdir) / f"{entry.name}.patch"

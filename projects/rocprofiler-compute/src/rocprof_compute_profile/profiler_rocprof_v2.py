@@ -23,8 +23,6 @@
 
 ##############################################################################
 
-
-import os
 import shlex
 from pathlib import Path
 
@@ -44,7 +42,6 @@ class rocprof_v2_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        fbase = Path(fname).stem
         app_cmd = shlex.split(self.get_args().remaining)
 
         args = []

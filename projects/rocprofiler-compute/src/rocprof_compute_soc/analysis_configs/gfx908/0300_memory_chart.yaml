@@ -224,6 +224,7 @@ Panel Config:
         IL1 Lat:
           value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
             != 0) else None)) * 100), 0)
+          coll_level: SQC_ICACHE_INFLIGHT_LEVEL
         IL1_L2 Rd:
           value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
         L2 Rd:

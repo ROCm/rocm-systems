@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 do_update_alternatives(){
     # skip update if program doesn't exist
