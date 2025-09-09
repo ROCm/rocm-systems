@@ -283,6 +283,18 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
       if (core::Runtime::runtime_singleton_->flag().enable_dtif())
         core::g_use_interrupt_wait = false;
 
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        core::g_use_interrupt_wait = false;
+        core::Runtime::runtime_singleton_->flag().set_sdma(false, false);
+        core::Runtime::runtime_singleton_->flag().disable_scratch();
+        core::Runtime::runtime_singleton_->flag().disable_image(true);
+        core::Runtime::runtime_singleton_->flag().disable_xnack();
+        core::Runtime::runtime_singleton_->flag().disable_fine_grain_pcie();
+        core::Runtime::runtime_singleton_->flag().set_ipc_mode_legacy(false);
+        core::Runtime::runtime_singleton_->flag().disable_dev_mem_queue_buf();
+        core::Runtime::runtime_singleton_->flag().disable_sdma_hdp_flush();
+      }
+
       // Instantiate a Gpu device. The IO links
       // of this node have already been registered
       assert((node_prop.NumFComputeCores != 0) && "Improper node used for GPU device discovery.");
