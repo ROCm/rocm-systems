@@ -309,11 +309,11 @@ def execute(input_files, **kwargs):
     consolidate = kwargs.get("consolidate", False)
 
     output_path = create_output_folder(output_path_kw, consolidate)
-    db_files = input_files
+    db_files = output_config.sanitize_input_list(input_files)
 
     # check if a folder is provided, if so, search for *.db
     expanded_files = []
-    for itr in input_files:
+    for itr in db_files:
         if os.path.isdir(itr):
             expanded_files.extend(glob.glob(os.path.join(itr, "*.db")))
         else:
@@ -324,7 +324,7 @@ def execute(input_files, **kwargs):
         # Create a new folder with current date and time
         os.makedirs(output_path, exist_ok=True)
         copied_files = []
-        for db_file in expanded_files:
+        for db_file in db_files:
             dest_file = os.path.join(output_path, os.path.basename(db_file))
             # Only copy if source and destination are not the same file
             if os.path.abspath(db_file) != os.path.abspath(dest_file):
