@@ -189,7 +189,7 @@ Building and installing ROCm Systems Profiler
 ---------------------------------------------
 
 ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
-``ROCPROFSYS_USE_MPI_HEADERS``),ROCm tracing and sampling (``ROCPROFSYS_USE_ROCM``),
+``ROCPROFSYS_USE_MPI_HEADERS``), ROCm tracing and sampling (``ROCPROFSYS_USE_ROCM``),
 OpenMP-Tools (``ROCPROFSYS_USE_OMPT``), hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``),
 among other features.
 Various additional features can be enabled via the
