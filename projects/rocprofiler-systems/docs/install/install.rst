@@ -203,7 +203,7 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
 
 .. code-block:: shell
 
-   git clone git@github.com:ROCm/rocm-systems
+   git clone https://github.com/ROCm/rocm-systems.git
    cmake                                                 \
        -B rocprof-sys-build                              \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
