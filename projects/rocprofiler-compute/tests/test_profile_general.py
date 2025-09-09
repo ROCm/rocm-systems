@@ -1706,11 +1706,58 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 
 @pytest.mark.section
 def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics"]
+    options = ["--list-metrics", "gfx90a"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
+    options = ["--list-metrics", "gfx90a", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-metrics
+    assert code == 1
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
+    options = ["--list-available-metrics"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "0 -> Top Stats" in output
+    assert "1 -> System Info" in output
+
+
+@pytest.mark.section
+def test_list_available_metrics_with_block(
+    binary_handler_profile_rocprof_compute, capsys
+):
+    options = ["--list-available-metrics", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-available-metrics
+    assert code == 1
     # workload dir should be empty
     assert not os.listdir(workload_dir)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

@@ -535,7 +535,8 @@ class Device : public NullDevice {
   ) const;
 
   //! host memory alloc
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const;
+  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const;
 
   //! SVM allocation
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,

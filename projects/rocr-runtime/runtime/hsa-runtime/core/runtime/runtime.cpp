@@ -2336,7 +2336,9 @@ void Runtime::CheckVirtualMemApiSupport() {
     char* error;
 
     fn_amdgpu_device_get_fd =
-        (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(RTLD_DEFAULT, "amdgpu_device_get_fd");
+        (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(
+          thunkLoader()->IsDXG() ?  thunkLoader()->ThunkHandle() : RTLD_DEFAULT,
+          "amdgpu_device_get_fd");
     if ((error = dlerror()) != NULL) {
       debug_warning("amdgpu_device_get_fd not available. Please update version of libdrm");
       fn_amdgpu_device_get_fd = &fn_amdgpu_device_get_fd_nosupport;
@@ -2360,7 +2362,9 @@ void Runtime::InitIPCDmaBufSupport() {
 
   char* error;
   fn_amdgpu_device_get_fd =
-      (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(RTLD_DEFAULT, "amdgpu_device_get_fd");
+      (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(
+          thunkLoader()->IsDXG() ?  thunkLoader()->ThunkHandle() : RTLD_DEFAULT,
+          "amdgpu_device_get_fd");
   if ((error = dlerror()) != NULL) {
     debug_warning("amdgpu_device_get_fd not available. Please update version of libdrm");
     fn_amdgpu_device_get_fd = &fn_amdgpu_device_get_fd_nosupport;
