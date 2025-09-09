@@ -44,6 +44,10 @@ subtrees:
   - file: reference/changelog.md
     title: Changelog
 
+- caption: Conceptual
+  entries:
+  - file: conceptual/ras.md
+
 - caption: Tutorials
   entries:
   - url: https://github.com/ROCm/amdsmi/tree/amd-staging/example
