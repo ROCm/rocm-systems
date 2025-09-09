@@ -274,7 +274,7 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   HIP_CHECK(hipHostMalloc(&group_dim_host, num_dim3_bytes));
 
   // Launch Kernel
-  void* params[4];
+  void* params[5];
   params[0] = &size_dev;
   params[1] = &thd_rank_dev;
   params[2] = &is_valid_dev;
@@ -312,7 +312,7 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   HIP_CHECK(hipHostFree(thd_rank_host));
   HIP_CHECK(hipHostFree(is_valid_host));
   HIP_CHECK(hipHostFree(sync_host));
-    HIP_CHECK(hipFree(group_dim_host));
+  HIP_CHECK(hipHostFree(group_dim_host));
 }
 
 TEST_CASE("Unit_hipCGGridGroupType_Basic") {
