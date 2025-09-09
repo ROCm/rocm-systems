@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2025, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,52 +42,10 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCRTST_SUITES_FUNCTIONAL_MEMORY_ACCESS_H_
-#define ROCRTST_SUITES_FUNCTIONAL_MEMORY_ACCESS_H_
 
-
-#include "common/base_rocr.h"
-#include "hsa/hsa.h"
-#include "suites/test_common/test_base.h"
-
-class MemoryAccessTest : public TestBase {
- public:
-    MemoryAccessTest();
-
-  // @Brief: Destructor for test case of MemoryTest
-  virtual ~MemoryAccessTest();
-
-  // @Brief: Setup the environment for measurement
-  virtual void SetUp();
-
-  // @Brief: Core measurement execution
-  virtual void Run();
-
-  // @Brief: Clean up and retrive the resource
-  virtual void Close();
-
-  // @Brief: Display  results
-  virtual void DisplayResults() const;
-
-  // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
-
-
-  // @Brief: This test verify that CPU is able to Read & write GPU memory
-  void CPUAccessToGPUMemoryTest(void);
-
-  // @Brief: This test verify that GPU is able to Read & write CPU memory
-  void GPUAccessToCPUMemoryTest(void);
-
-  // @Brief: This test verifies that memory accessed on the GPU after a copy is coherent
-  void MemoryAccessCoherentTest(void);
-
-
- private:
-  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
-                                                   hsa_agent_t gpuAgent,
-                                                   hsa_amd_memory_pool_t pool);
-  void GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
-};
-
-#endif  // ROCRTST_SUITES_FUNCTIONAL_MEMORY_ACCESS_H_
+__kernel void vector_copy(__global const int * a,
+                           __global int * b, __global int * c) {
+  int i = get_global_id(0);
+  // Reading the device buffer and writing to separate device buffer
+  b[i] = a[i];  // both a[i] and b[i] point to device memory.
+}

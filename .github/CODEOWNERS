@@ -15,9 +15,9 @@
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
-/projects/rdc/                                                        @dmitrii-galantsev @bill-shuzhou-liu
+/projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
-/projects/rocm-smi-lib/                                               @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
+/projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler/                                                @ammarwa @bgopesh
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
@@ -78,18 +78,18 @@
 /projects/hip/docs/                                                   @ROCm/hip-reviewers @ROCm/lrt-docs-reviewers
 /projects/hip/include/                                                @ROCm/hip-reviewers @ROCm/lrt-docs-reviewers
 
-/projects/rdc/**/*.md                                                 @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
-/projects/rdc/**/*.rst                                                @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
-/projects/rdc/**/.readthedocs.yaml                                    @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
-/projects/rdc/docs/                                                   @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
+/projects/rdc/**/*.md                                                 @ROCm/rdc-reviewers @ROCm/rocm-documentation
+/projects/rdc/**/*.rst                                                @ROCm/rdc-reviewers @ROCm/rocm-documentation
+/projects/rdc/**/.readthedocs.yaml                                    @ROCm/rdc-reviewers @ROCm/rocm-documentation
+/projects/rdc/docs/                                                   @ROCm/rdc-reviewers @ROCm/rocm-documentation
 
 /projects/rocm-core/**/*.md                                           @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @ROCm/rocm-documentation
 /projects/rocm-core/**/*.rst                                          @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @ROCm/rocm-documentation
 
-/projects/rocm-smi-lib/**/*.md                                        @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan @ROCm/rocm-documentation
-/projects/rocm-smi-lib/**/*.rst                                       @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan @ROCm/rocm-documentation
-/projects/rocm-smi-lib/**/.readthedocs.yaml                           @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan @ROCm/rocm-documentation
-/projects/rocm-smi-lib/docs/                                          @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan @ROCm/rocm-documentation
+/projects/rocm-smi-lib/**/*.md                                        @ROCm/smi-reviewers @ROCm/rocm-documentation
+/projects/rocm-smi-lib/**/*.rst                                       @ROCm/smi-reviewers @ROCm/rocm-documentation
+/projects/rocm-smi-lib/**/.readthedocs.yaml                           @ROCm/smi-reviewers @ROCm/rocm-documentation
+/projects/rocm-smi-lib/docs/                                          @ROCm/smi-reviewers @ROCm/rocm-documentation
 
 /projects/rocminfo/**/*.md                                            @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 /projects/rocminfo/**/*.rst                                           @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
