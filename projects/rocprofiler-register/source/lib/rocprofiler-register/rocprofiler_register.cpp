@@ -419,7 +419,6 @@ rocp_load_lib(std::string _rocp_reg_lib)
     }
     if(!rocprofiler_lib_handle)
     {
-        LOG(ERROR) << "IAN HERE";
         *get_sdk_handle() = rocprofiler_lib_handle;
         get_detach_vector().emplace_back(
             [rocprofiler_lib_handle]() { dlclose(rocprofiler_lib_handle); });
