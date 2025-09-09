@@ -10,7 +10,6 @@
 **/library/include/                                                   @ROCm/rocm-documentation
 
 # Project-specific ownership
-/projects/aqlprofile/                                                 @ammarwa @bgopesh
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
@@ -19,9 +18,7 @@
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
-/projects/rocprofiler/                                                @ammarwa @bgopesh
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
-/projects/rocprofiler-register/                                       @ammarwa @bgopesh
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
@@ -47,8 +44,6 @@
 /projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd
 
 # Documentation-specific ownership by project
-/projects/aqlprofile/**/*.md                                          @ammarwa @bgopesh @ROCm/rocm-documentation
-/projects/aqlprofile/**/*.rst                                         @ammarwa @bgopesh @ROCm/rocm-documentation
 
 /projects/clr/**/*.md                                                 @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
 /projects/clr/**/*.rst                                                @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
@@ -79,17 +74,10 @@
 /projects/rocminfo/**/.readthedocs.yaml                               @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 /projects/rocminfo/docs/                                              @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 
-/projects/rocprofiler/**/*.md                                         @ammarwa @bgopesh @ROCm/rocm-documentation
-/projects/rocprofiler/**/*.rst                                        @ammarwa @bgopesh @ROCm/rocm-documentation
-/projects/rocprofiler/doc/                                            @ammarwa @bgopesh @ROCm/rocm-documentation
-
 /projects/rocprofiler-compute/**/*.md                                 @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/**/*.rst                                @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/**/.readthedocs.yaml                    @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/docs/                                   @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
-
-/projects/rocprofiler-register/**/*.md                                @ammarwa @bgopesh @ROCm/rocm-documentation
-/projects/rocprofiler-register/**/*.rst                               @ammarwa @bgopesh @ROCm/rocm-documentation
 
 /projects/rocprofiler-systems/**/*.md                                 @ROCm/rocprof-sys @jrmadsen @ROCm/rocm-documentation
 /projects/rocprofiler-systems/**/*.rst                                @ROCm/rocprof-sys @jrmadsen @ROCm/rocm-documentation
@@ -100,6 +88,3 @@
 /projects/rocr-runtime/**/*.rst                                       @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
-/projects/roctracer/**/*.md                                           @ammarwa @bgopesh @ROCm/rocm-documentation
-/projects/roctracer/**/*.rst                                          @ammarwa @bgopesh @ROCm/rocm-documentation
-/projects/roctracer/doc/                                              @ammarwa @bgopesh @ROCm/rocm-documentation
