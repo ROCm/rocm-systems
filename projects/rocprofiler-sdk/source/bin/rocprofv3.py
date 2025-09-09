@@ -224,6 +224,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
     $ mpirun -n 4 rocprofv3 --hip-trace -- ./mympiapp
 
+For attachment profiling of running processes:
+
+    $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
+    $ rocprofv3 --attach 1234 --attach-duration 10 --hsa-trace
+
 """
 
     # Create the parser
@@ -718,6 +723,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     advanced_options.add_argument(
         "-p",
         "--pid",
+        "--attach",
         help="""Attach to a target process by pid and execute as a tool from within said process.""",
         type=int,
         default=None,
