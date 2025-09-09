@@ -27,32 +27,25 @@ import os
 import sys
 import time
 
-ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
-ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
+ROCPROFV3_ATTACH_DIR = os.path.dirname(os.path.realpath(__file__))
+ROCM_DIR = os.path.dirname(ROCPROFV3_ATTACH_DIR)
 ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-attach.so"
 
-MAX_STR = 256
-libname = os.environ.get("ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY)
-c_lib = ctypes.CDLL(libname)
-
-if c_lib is None:
-    fatal_error(f"Error opening {libname}")
-
-c_lib.attach.argtypes = [ctypes.c_uint]
-
-if __name__ == "__main__":
-    # Load the shared library into ctypes
-
-    pid = os.environ.get("ROCPROF_ATTACH_PID", None)
-
+def main(
+    pid=os.environ.get("ROCPROF_ATTACH_PID", None),
+    attach_library=os.environ.get("ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY),
+    duration=os.environ.get("ROCPROF_ATTACH_DURATION", None)):
     if pid is None:
         raise RuntimeError(
-            "rocprofv3_attach called without PID environment variable set (ROCPROF_ATTACH_PID)"
+            "rocprofv3_attach called with no PID specified"
         )
 
+    # Load the shared library into ctypes
+    MAX_STR = 256
+    c_lib = ctypes.CDLL(attach_library)
+    
+    c_lib.attach.argtypes = [ctypes.c_uint]
     c_lib.attach(int(pid))
-
-    duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
 
     if duration is None:
         sys.stdout.write("Press Enter to detach...")
@@ -62,3 +55,7 @@ if __name__ == "__main__":
         time.sleep(int(duration) / 1000)
 
     c_lib.detach()
+
+if __name__ == "__main__":
+    main()
+
