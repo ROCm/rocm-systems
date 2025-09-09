@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -130,6 +131,9 @@ struct context
 
     std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
     std::unique_ptr<thread_trace::DeviceThreadTracer>   device_thread_trace   = {};
+
+    std::unique_ptr<SPM::SPMAgentManager>    agent_spm    = {};
+    std::unique_ptr<SPM::SPMDispatchManager> dispatch_spm = {};
 
     template <typename KindT>
     bool is_tracing(KindT _kind) const;

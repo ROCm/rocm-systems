@@ -933,6 +933,7 @@ rocprofiler_set_api_table(const char* name,
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::thread_trace::initialize(hsa_api_table);
+        rocprofiler::SPM::initialize(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         // Process agent ctx's that were started prior to HSA init
         rocprofiler::counters::device_counting_service_hsa_registration();
