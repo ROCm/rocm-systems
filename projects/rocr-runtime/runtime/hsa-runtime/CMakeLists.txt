@@ -276,12 +276,15 @@ if(${IMAGE_SUPPORT})
                    image/blit_object_gfx8xx.cpp
                    image/blit_object_gfx9xx.cpp
                    image/blit_kernel.cpp
+                   image/hsa_amd_mipmap.cpp
                    ${CMAKE_CURRENT_BINARY_DIR}/image/blit_src/opencl_blit_objects.cpp )
 
   set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/image/blit_src/opencl_blit_objects.cpp PROPERTIES GENERATED TRUE)
 
   target_include_directories( ${CORE_RUNTIME_TARGET}
     PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/addrlib/inc
     ${CMAKE_CURRENT_SOURCE_DIR}/image
     ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/
     ${CMAKE_CURRENT_SOURCE_DIR}/image/addrlib/inc

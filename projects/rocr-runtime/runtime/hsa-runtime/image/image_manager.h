@@ -48,6 +48,7 @@
 #include "inc/hsa_ext_image.h"
 #include "resource.h"
 #include "util.h"
+#include "image/addrlib/inc/addrinterface.h"
 
 namespace rocr {
 namespace image {
@@ -119,6 +120,9 @@ class ImageManager {
   /// @brief Fill image backing storage using host copy.
   virtual hsa_status_t FillImage(const Image& image, const void* pattern,
                                  const hsa_ext_image_region_t& region);
+
+  /// @brief Get the address library handle
+  virtual ADDR_HANDLE GetAddrLib() const = 0;
 
  protected:
   static uint16_t FloatToHalf(float in);

@@ -131,7 +131,17 @@ endif()
 #
 
 # Required Defines first:
-find_package(hsa-runtime64 REQUIRED)
+# Use local HSA runtime instead of system package
+set(HSA_RUNTIME_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../hsa-runtime")
+set(HSA_RUNTIME_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../build")
+
+# Check for alternative build directory locations
+if(NOT EXISTS "${HSA_RUNTIME_BUILD_DIR}")
+    set(HSA_RUNTIME_BUILD_DIR "${HSA_RUNTIME_LOCAL_DIR}/build")
+endif()
+if(NOT EXISTS "${HSA_RUNTIME_BUILD_DIR}")
+    set(HSA_RUNTIME_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../hsa-runtime-build")
+endif()
 find_package(amd_smi REQUIRED)
 
 set (ONLY64STR "64")
@@ -285,7 +295,60 @@ aux_source_directory(${ROCRTST_ROOT}/common common_srcs)
 #
 # Extend the list of libraries to be used for linking ROC Perf Apps
 #
-set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64::hsa-runtime64)
+# Link against local HSA runtime build
+link_directories(${HSA_RUNTIME_BUILD_DIR})
+#############################################
+# HSA Runtime library discovery enhancements #
+#############################################
+# Allow user to explicitly specify directory containing libhsa-runtime64.so
+set(HSA_RUNTIME_LIB_DIR "" CACHE PATH "Directory containing libhsa-runtime64.so (optional)" )
+
+if(HSA_RUNTIME_LIB_DIR)
+  # Honor explicit directory first
+  list(APPEND CMAKE_PREFIX_PATH ${HSA_RUNTIME_LIB_DIR})
+  link_directories(${HSA_RUNTIME_LIB_DIR})
+endif()
+
+# Legacy / existing build dir variable support
+if(DEFINED HSA_RUNTIME_BUILD_DIR)
+  link_directories(${HSA_RUNTIME_BUILD_DIR} ${HSA_RUNTIME_BUILD_DIR}/lib)
+endif()
+
+set(_HSA_RUNTIME_SEARCH_PATHS
+  ${HSA_RUNTIME_LIB_DIR}
+  ${HSA_RUNTIME_BUILD_DIR}
+  ${HSA_RUNTIME_BUILD_DIR}/lib
+)
+
+list(REMOVE_ITEM _HSA_RUNTIME_SEARCH_PATHS "")
+list(REMOVE_DUPLICATES _HSA_RUNTIME_SEARCH_PATHS)
+
+find_library(HSA_RUNTIME_LIB
+  NAMES hsa-runtime64 libhsa-runtime64.so libhsa-runtime64.a
+  PATHS ${_HSA_RUNTIME_SEARCH_PATHS}
+  NO_DEFAULT_PATH)
+
+if(HSA_RUNTIME_LIB)
+  message(STATUS "Found HSA runtime library: ${HSA_RUNTIME_LIB}")
+  set(ROCRTST_LIBS ${ROCRTST_LIBS} ${HSA_RUNTIME_LIB})
+else()
+  # Fallback 1: sibling build directory pattern (../rocr/rocr/lib) when building inside unified tree
+  set(_SIBLING_ROCR_LIB_DIR "${CMAKE_BINARY_DIR}/../rocr/rocr/lib")
+  if(EXISTS "${_SIBLING_ROCR_LIB_DIR}/libhsa-runtime64.so")
+    message(STATUS "Auto-detected HSA runtime in sibling dir: ${_SIBLING_ROCR_LIB_DIR}")
+    link_directories(${_SIBLING_ROCR_LIB_DIR})
+    list(APPEND _HSA_RUNTIME_SEARCH_PATHS ${_SIBLING_ROCR_LIB_DIR})
+  endif()
+  if(NOT HSA_RUNTIME_LIB AND EXISTS "${_SIBLING_ROCR_LIB_DIR}/libhsa-runtime64.so")
+    set(HSA_RUNTIME_LIB "${_SIBLING_ROCR_LIB_DIR}/libhsa-runtime64.so")
+    set(ROCRTST_LIBS ${ROCRTST_LIBS} ${HSA_RUNTIME_LIB})
+    message(STATUS "Using sibling HSA runtime library: ${HSA_RUNTIME_LIB}")
+  else()
+  message(WARNING "Could NOT locate explicit libhsa-runtime64; falling back to linker default search path")
+  set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64)
+  endif()
+endif()
+
 set(ROCRTST_LIBS ${ROCRTST_LIBS} amd_smi)
 
 
@@ -300,6 +363,11 @@ aux_source_directory(${ROCRTST_ROOT}/suites/performance performanceSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/functional functionalSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
+aux_source_directory(${ROCRTST_ROOT}/suites/image imagesSources)
+# Core mipmap implementation (now the only TU providing MipmapArrayTest methods)
+list(APPEND imagesSources ${ROCRTST_ROOT}/suites/image/mipmap_array.cc)
+# GoogleTest wrappers invoking the mipmap tests
+list(APPEND imagesSources ${ROCRTST_ROOT}/suites/image/mipmap_gtests.cc)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
 # Header file include path
@@ -307,6 +375,7 @@ aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 include_directories(${ROCRTST_ROOT})
 include_directories(${ROCRTST_ROOT}/gtest/include)
 include_directories(${ROCRTST_ROOT}/thirdparty/include/)
+include_directories(${HSA_RUNTIME_LOCAL_DIR}/inc)
 
 # Custom command set for code objects.
 set (HSACO_TARG_LIST "")
@@ -411,7 +480,7 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 
 # Build rules
 add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeSources} ${stressSources}
-                                           ${common_srcs} ${testCommonSources})
+                                           ${common_srcs} ${imagesSources} ${testCommonSources})
 
 target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt numa ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so.5)
 

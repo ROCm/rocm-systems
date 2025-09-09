@@ -78,7 +78,13 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/image/mipmap_array.h"
 #include "amd_smi/amdsmi.h"
+
+using rocrtst::MipmapArrayTest;
+using rocrtst::Mipmap1DArrayTest;
+//using rocrtst::Mipmap2DArrayTest;
+//using rocrtst::Mipmap3DArrayTest;
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -98,9 +104,30 @@ static void RunCustomTestProlog(TestBase *test) {
   test->Run();
   return;
 }
+
+// Overloaded versions for BaseRocR (used by mipmap tests)
+static void RunCustomTestProlog(rocrtst::BaseRocR *test) {
+  // BaseRocR setup - these methods don't exist in BaseRocR
+  // Just setup agents and pools
+  hsa_status_t err = rocrtst::SetDefaultAgents(test);
+  if (err != HSA_STATUS_SUCCESS) {
+    std::cerr << "Failed to set default agents" << std::endl;
+  }
+  err = rocrtst::SetPoolsTypical(test);
+  if (err != HSA_STATUS_SUCCESS) {
+    std::cerr << "Failed to set typical pools" << std::endl;
+  }
+  return;
+}
+
 static void RunCustomTestEpilog(TestBase *test) {
   test->DisplayResults();
   test->Close();
+  return;
+}
+
+static void RunCustomTestEpilog(rocrtst::BaseRocR *test) {
+  // BaseRocR cleanup - no specific cleanup needed
   return;
 }
 
@@ -506,6 +533,225 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
   Qw.QueueLoadStoreWriteIndexAtomic();
   RunCustomTestEpilog(&Qw);
 }
+
+// Image Tests
+TEST(rocrtstImages, Mipmap_1DArray_Create_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapCreate1DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+
+TEST(rocrtstImages, Mipmap_1DArray_Destroy_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapDestroy1DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+
+TEST(rocrtstImages, Mipmap_1DArray_Get_Level_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapGetLevel1DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+TEST(rocrtstImages, Mipmap_2DArray_Create_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapCreate2DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+
+#if 0
+TEST(rocrtstImages, Mipmap_2DArray_Destroy_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapDestroy2DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+
+TEST(rocrtstImages, Mipmap_2DArray_Get_Level_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapGetLevel2DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+TEST(rocrtstImages, Mipmap_3DArray_Create_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapCreate3DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+
+TEST(rocrtstImages, Mipmap_3DArray_Destroy_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapDestroy3DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+
+TEST(rocrtstImages, Mipmap_3DArray_Get_Level_Test) {
+  MipmapArrayTest mat;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&mat));
+  mat.MipmapGetLevel3DArrayTest();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&mat));
+}
+TEST(rocrtstImages, Mipmap_1D_Element_Type_ReadMode_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestElementTypeReadMode1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+#endif
+
+TEST(rocrtstImages, Mipmap_1D_Normalized_Float_ReadMode_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestNormalizedFloatReadMode1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+
+TEST(rocrtstImages, Mipmap_1D_Linear_Filtering_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestLinearFiltering1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+
+TEST(rocrtstImages, Mipmap_1D_Address_Modes_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestAddressModes1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+
+TEST(rocrtstImages, Mipmap_1D_Various_Dimensions_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestVariousDimensions1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+
+TEST(rocrtstImages, Mipmap_1D_Error_Conditions_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestErrorConditions1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+
+TEST(rocrtstImages, Mipmap_1D_Memory_Integrity_Test) {
+  Mipmap1DArrayTest test1D;
+  RunCustomTestProlog(static_cast<rocrtst::BaseRocR*>(&test1D));
+  test1D.TestMemoryIntegrity1D();
+  RunCustomTestEpilog(static_cast<rocrtst::BaseRocR*>(&test1D));
+}
+
+#if 0
+TEST(rocrtstImages, Mipmap_2D_Element_Type_ReadMode_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestElementTypeReadMode2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Normalized_Float_ReadMode_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestNormalizedFloatReadMode2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Linear_Filtering_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestLinearFiltering2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Address_Modes_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestAddressModes2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Square_And_Rectangular_Images_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestSquareAndRectangularImages();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Various_Dimensions_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestVariousDimensions2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Error_Conditions_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestErrorConditions2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_2D_Memory_Integrity_Test) {
+  Mipmap2DArrayTest test2D;
+  RunCustomTestProlog(&test2D);
+  test2D.TestMemoryIntegrity2D();
+  RunCustomTestEpilog(&test2D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Element_Type_ReadMode_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestElementTypeReadMode3D();
+  RunCustomTestEpilog(&test3D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Normalized_Float_ReadMode_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestNormalizedFloatReadMode3D();
+  RunCustomTestEpilog(&test3D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Linear_Filtering_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestLinearFiltering3D();
+  RunCustomTestEpilog(&test3D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Address_Modes_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestAddressModes3D();
+  RunCustomTestEpilog(&test3D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Various_Dimensions_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestVariousDimensions3D();
+  RunCustomTestEpilog(&test3D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Error_Conditions_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestErrorConditions3D();
+  RunCustomTestEpilog(&test3D);
+}
+
+TEST(rocrtstImages, Mipmap_3D_Memory_Integrity_Test) {
+  Mipmap3DArrayTest test3D;
+  RunCustomTestProlog(&test3D);
+  test3D.TestMemoryIntegrity3D();
+  RunCustomTestEpilog(&test3D);
+}
+#endif
 
 TEST(rocrtstPerf, Memory_Async_Copy) {
   MemoryAsyncCopy mac;
