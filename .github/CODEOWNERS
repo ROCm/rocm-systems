@@ -22,7 +22,6 @@
 /projects/rocprofiler/                                                @ammarwa @bgopesh
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-register/                                       @ammarwa @bgopesh
-/projects/rocprofiler-sdk/                                            @jrmadsen @t-tye
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
@@ -36,22 +35,6 @@
 /projects/hipother/**/CMakeLists.txt                                  @ROCm/hipother-reviewers @ROCm/lrt-build-infra
 /projects/hip-tests/**/*.cmake                                        @ROCm/hip-tests-reviewers @ROCm/lrt-build-infra
 /projects/hip-tests/**/CMakeLists.txt                                 @ROCm/hip-tests-reviewers @ROCm/lrt-build-infra
-
-# rocprofiler-sdk section-specific code owners
-/projects/rocprofiler-sdk/source/docs                                 @bgopesh
-/projects/rocprofiler-sdk/source/include                              @jrmadsen      @bwelton     @ammarwa
-/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/rccl         @MythreyaK
-/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/kfd          @MythreyaK
-/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/cxx/codeobj  @ApoKalipse-V
-/projects/rocprofiler-sdk/source/bin                                  @SrirakshaNag  @bgopesh
-/projects/rocprofiler-sdk/source/libexec                              @SrirakshaNag
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/counters         @bwelton
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/pc_sampling      @vlaindic
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/thread_trace     @ApoKalipse-V
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/rccl             @MythreyaK
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kfd              @MythreyaK
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-tool             @SrirakshaNag
-/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-codeobj          @ApoKalipse-V
 
 # rocr-runtime section-specific code owners
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd
