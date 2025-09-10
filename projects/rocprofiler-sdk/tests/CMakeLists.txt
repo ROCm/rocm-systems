@@ -47,6 +47,7 @@ endif()
 
 # needed for validation
 find_package(Python3 REQUIRED)
+find_package(Pytest REQUIRED)
 
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)
@@ -59,6 +60,9 @@ add_subdirectory(pytest-packages)
 
 # common utilities
 add_subdirectory(common)
+
+# unit-test subdirectory only exists in rocprofiler-sdk-tests package
+add_subdirectory(unit-tests)
 
 # tool libraries used for data collection during integration tests
 add_subdirectory(tools)
