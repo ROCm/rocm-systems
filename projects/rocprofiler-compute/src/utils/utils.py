@@ -571,8 +571,8 @@ def v3_counter_csv_to_v2_csv(
             )
         except Exception as e:
             console_error(
-                f'Parsing rocprofv3 csv output: Error getting "Agent_Id", '
-                f'the error message "{e}"'
+                "v3_counter_csv_to_v2_csv",
+                f'Error getting "Agent_Id": {e}',
             )
 
     # Grab the Wave_Front_Size column from agent info

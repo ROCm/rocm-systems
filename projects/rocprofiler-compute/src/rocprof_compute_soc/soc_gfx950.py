@@ -61,6 +61,8 @@ class gfx950_soc(OmniSoC_Base):
         super().post_profiling()
 
     @demarcate
-    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:
+    def analysis_setup(
+        self, roofline_parameters: Optional[dict[str, Any]] = None
+    ) -> None:
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup(roofline_parameters=roofline_parameters)

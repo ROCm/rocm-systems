@@ -173,9 +173,9 @@ def get_num_pmc_file(output_dir):
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
-    ])
+    return len(
+        [f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"]
+    )
 
 
 # =============================================================================
@@ -2711,11 +2711,13 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
-    mock_df = pd.DataFrame({
-        "Dispatch_ID": [0],
-        "Start_Timestamp": [100],
-        "End_Timestamp": [200],
-    })
+    mock_df = pd.DataFrame(
+        {
+            "Dispatch_ID": [0],
+            "Start_Timestamp": [100],
+            "End_Timestamp": [200],
+        }
+    )
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -2795,14 +2797,16 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
-    old_headers_df = pd.DataFrame({
-        "KernelName": ["test_kernel"],
-        "Index": [0],
-        "grd": [64],
-        "gpu-id": [0],
-        "BeginNs": [100],
-        "EndNs": [200],
-    })
+    old_headers_df = pd.DataFrame(
+        {
+            "KernelName": ["test_kernel"],
+            "Index": [0],
+            "grd": [64],
+            "gpu-id": [0],
+            "BeginNs": [100],
+            "EndNs": [200],
+        }
+    )
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
     monkeypatch.setattr(
@@ -2873,11 +2877,13 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     def mock_flatten_tcc_info_across_xcds(file, xcds, l2_banks):
         nonlocal flatten_called
         flatten_called = True
-        return pd.DataFrame({
-            "Dispatch_ID": [0],
-            "TCC_HIT[0]": [100],
-            "TCC_HIT[16]": [200],
-        })
+        return pd.DataFrame(
+            {
+                "Dispatch_ID": [0],
+                "TCC_HIT[0]": [100],
+                "TCC_HIT[16]": [200],
+            }
+        )
 
     # Mock functions
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
@@ -3009,12 +3015,12 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         format_rocprof_output,
     )
 
-    assert capture_subprocess_called_with_env is not None, (
-        "new_env should have been created"
-    )
-    assert "EXISTING_VAR" in capture_subprocess_called_with_env, (
-        "new_env should be a copy of os.environ"
-    )
+    assert (
+        capture_subprocess_called_with_env is not None
+    ), "new_env should have been created"
+    assert (
+        "EXISTING_VAR" in capture_subprocess_called_with_env
+    ), "new_env should be a copy of os.environ"
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
     assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
     assert "APP_CMD" not in capture_subprocess_called_with_env
@@ -3611,9 +3617,9 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "kokkos_malloc" in df["marker_name"].values
     assert "kokkos_parallel_reduce" in df["marker_name"].values
@@ -4081,9 +4087,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "hipMalloc" in df["api_name"].values
     assert "hipLaunchKernel" in df["api_name"].values
@@ -4091,9 +4097,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
     assert copied_file.exists(), "The copied output file was not created."
     df_copy = pd.read_csv(copied_file)
-    assert df.equals(df_copy), (
-        "The copied file content does not match the primary output."
-    )
+    assert df.equals(
+        df_copy
+    ), "The copied file content does not match the primary output."
 
 
 def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
@@ -7515,9 +7521,9 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
                     utils_mod.set_locale_encoding()
 
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
+                    assert (
+                        len(console_error_calls) == scenario["expected_errors"]
+                    ), f"Failed scenario: {scenario['name']}"
 
 
 # =============================================================================
@@ -8746,9 +8752,9 @@ def test_store_app_cmd_sets_global_rocprof_args():
     else:
         pass
     utils.store_app_cmd(sample_args_object)
-    assert utils.rocprof_args is sample_args_object, (
-        "Global rocprof_args should be the same object as the passed args"
-    )
+    assert (
+        utils.rocprof_args is sample_args_object
+    ), "Global rocprof_args should be the same object as the passed args"
 
 
 # =============================================================================
@@ -8769,35 +8775,39 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     Tests Line 1: Successful parsing of 'Agent Id' string.
     Tests Line 2: Error during parsing of 'Agent Id' string, triggering console_error.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0, 1],
-        "Agent_Type": ["CPU", "GPU"],
-        "Wave_Front_Size": [0, 64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0, 1],
+            "Agent_Type": ["CPU", "GPU"],
+            "Wave_Front_Size": [0, 64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted.csv"
-    counter_content_success = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": ["Agent 1"],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content_success = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": ["Agent 1"],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath_success = tmp_path / "counter_success.csv"
     counter_filepath_success.write_text(counter_content_success)
 
@@ -8815,27 +8825,29 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
 
     mock_console_error.reset_mock()
 
-    counter_content_error = create_csv_string({
-        "Correlation_Id": [2],
-        "Dispatch_Id": [20],
-        "Agent_Id": ["Malformed Agent X"],
-        "Queue_Id": [200],
-        "Process_Id": [2000],
-        "Thread_Id": [20000],
-        "Grid_Size": [512],
-        "Kernel_Id": [2],
-        "Kernel_Name": ["kernelB"],
-        "Workgroup_Size": [128],
-        "LDS_Block_Size": [64],
-        "Scratch_Size": [0],
-        "VGPR_Count": [32],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [64],
-        "Start_Timestamp": [200000],
-        "End_Timestamp": [200200],
-        "Counter_Name": ["Instructions"],
-        "Counter_Value": [10000],
-    })
+    counter_content_error = create_csv_string(
+        {
+            "Correlation_Id": [2],
+            "Dispatch_Id": [20],
+            "Agent_Id": ["Malformed Agent X"],
+            "Queue_Id": [200],
+            "Process_Id": [2000],
+            "Thread_Id": [20000],
+            "Grid_Size": [512],
+            "Kernel_Id": [2],
+            "Kernel_Name": ["kernelB"],
+            "Workgroup_Size": [128],
+            "LDS_Block_Size": [64],
+            "Scratch_Size": [0],
+            "VGPR_Count": [32],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [64],
+            "Start_Timestamp": [200000],
+            "End_Timestamp": [200200],
+            "Counter_Name": ["Instructions"],
+            "Counter_Value": [10000],
+        }
+    )
     counter_filepath_error = tmp_path / "counter_error.csv"
     counter_filepath_error.write_text(counter_content_error)
 
@@ -8849,11 +8861,12 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
         pass
 
     mock_console_error.assert_called_once()
-    call_args = mock_console_error.call_args[0][0]
-    assert 'Parsing rocprofv3 csv output: Error of getting "Agent_Id"' in call_args
+    call_args = mock_console_error.call_args[0]
+    assert "v3_counter_csv_to_v2_csv" in call_args[0]
+    assert 'Error getting "Agent_Id"' in call_args[1]
     assert (
-        "AttributeError" in call_args
-        or "'NoneType' object has no attribute 'group'" in call_args
+        "AttributeError" in call_args[1]
+        or "'NoneType' object has no attribute 'group'" in call_args[1]
     )
 
 
@@ -8863,11 +8876,13 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
     """
     # --- Setup ---
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_accum.csv"
@@ -8914,35 +8929,39 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_no_accum_vgpr.csv"
 
-    counter_content = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": [0],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": [0],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"
     counter_filepath.write_text(counter_content)
 

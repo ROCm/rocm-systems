@@ -219,7 +219,7 @@ class RocProfCompute:
     def handle_profile_args(self) -> None:
         # Add --name to workload path if --path is not given
         if self.__args.path == str(Path(os.getcwd()) / "workloads"):
-            if not hasattr(self.__args, 'name') or not self.__args.name:
+            if not hasattr(self.__args, "name") or not self.__args.name:
                 console_error("-n/--name is required")
             self.__args.path = str(Path(self.__args.path) / self.__args.name)
         # Add node name to workload path
@@ -264,13 +264,13 @@ class RocProfCompute:
         )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                Path(self.__args.config_dir) / arch
-            ])
+            ac.panel_configs = file_io.load_panel_configs(
+                [Path(self.__args.config_dir) / arch]
+            )
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
-            parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
                 prefix = ""
                 if "." not in str(key):
@@ -388,7 +388,6 @@ class RocProfCompute:
         # run profiling workflow
         # -----------------------
         profiler.sanitize()
-
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)

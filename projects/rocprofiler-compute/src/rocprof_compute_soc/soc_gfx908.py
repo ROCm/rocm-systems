@@ -23,6 +23,7 @@
 
 ##############################################################################
 import argparse
+from typing import Any, Optional
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, demarcate
@@ -64,6 +65,6 @@ class gfx908_soc(OmniSoC_Base):
         super().post_profiling()
 
     @demarcate
-    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]):
+    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]] = None):
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup(roofline_parameters=roofline_parameters)

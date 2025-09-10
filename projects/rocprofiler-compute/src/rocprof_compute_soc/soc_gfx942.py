@@ -34,14 +34,12 @@ class gfx942_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: Any) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx942")
-        self.set_compatible_profilers(
-            [
+        self.set_compatible_profilers([
                 "rocprofv1",
                 "rocprofv2",
                 "rocprofv3",
                 "rocprofiler-sdk",
-            ]
-        )
+        ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx942"))
 
@@ -67,6 +65,8 @@ class gfx942_soc(OmniSoC_Base):
         super().post_profiling()
 
     @demarcate
-    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:
+    def analysis_setup(
+        self, roofline_parameters: Optional[dict[str, Any]] = None
+    ) -> None:
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup(roofline_parameters=roofline_parameters)

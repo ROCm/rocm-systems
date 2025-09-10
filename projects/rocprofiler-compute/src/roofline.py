@@ -703,9 +703,9 @@ class Roofline:
     def cli_generate_plot(
         self,
         dtype: str,
-        workload: schema.Workload,
-        config: dict[str, Any],
-        arch_config: schema.ArchConfig,
+        workload: Optional[schema.Workload] = None,
+        config: Optional[dict[str, Any]] = None,
+        arch_config: Optional[schema.ArchConfig] = None,
     ) -> Optional[str]:
         """
         Plot CLI mode roofline analysis in terminal using plotext

@@ -213,7 +213,7 @@ class OmniAnalyze_Base:
 
         # load required configs
         for path_info in args.path:
-            sysinfo_path = get_sysinfo_path(self, path_info[0])
+            sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
                 sys_info = file_io.load_sys_info(
                     str(Path(sysinfo_path) / "sysinfo.csv")
@@ -235,7 +235,7 @@ class OmniAnalyze_Base:
             #    For multi-node, either the default "all", or specified some,
             #    pick up the one in the 1st sub_dir. We could fix it properly later.
             w = schema.Workload()
-            sysinfo_path = get_sysinfo_path(self, path_info[0])
+            sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
                 w.sys_info = file_io.load_sys_info(
                     str(Path(sysinfo_path) / "sysinfo.csv")
