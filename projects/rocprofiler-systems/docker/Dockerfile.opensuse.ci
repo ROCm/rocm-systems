@@ -53,24 +53,28 @@ ARG THEROCK_GFX110X=""
 ARG THEROCK_GFX120X=""
 
 # Set up dependencies
-RUN if [ -n "$THEROCK_GFX94X" ] || [ -n "$THEROCK_GFX110X" ] || [ -n "$THEROCK_GFX120X" ]; then \
+RUN set -euo pipefail; \
+    if [ -n "$THEROCK_GFX94X" ] || [ -n "$THEROCK_GFX110X" ] || [ -n "$THEROCK_GFX120X" ]; then \
         python3 -m pip install -U awscli; \
     fi
 
 # gfx94X
-RUN if [ -n "$THEROCK_GFX94X" ]; then \
+RUN set -euo pipefail; \
+    if [ -n "$THEROCK_GFX94X" ]; then \
         aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX94X}" rocm-gfx94X.tar.gz --no-sign-request; \
         mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz; \
     fi
 
 # gfx110X
-RUN if [ -n "$THEROCK_GFX110X" ]; then \
+RUN set -euo pipefail; \
+    if [ -n "$THEROCK_GFX110X" ]; then \
         aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX110X}" rocm-gfx110X.tar.gz --no-sign-request; \
         mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz; \
     fi
 
 # gfx120X
-RUN if [ -n "$THEROCK_GFX120X" ]; then \
+RUN set -euo pipefail; \
+    if [ -n "$THEROCK_GFX120X" ]; then \
         aws s3 cp "s3://therock-nightly-tarball/${THEROCK_GFX120X}" rocm-gfx120X.tar.gz --no-sign-request; \
         mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz; \
     fi
