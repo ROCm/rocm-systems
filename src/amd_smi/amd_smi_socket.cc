@@ -20,12 +20,10 @@
  * THE SOFTWARE.
  */
 
-#include <functional>
 #include "amd_smi/impl/amd_smi_socket.h"
 
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 AMDSmiSocket::~AMDSmiSocket() {
     for (uint32_t i = 0; i < processors_.size(); i++) {
@@ -67,6 +65,6 @@ amdsmi_status_t AMDSmiSocket::get_processor_count(processor_type_t type, uint32_
     return ret;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
+
 

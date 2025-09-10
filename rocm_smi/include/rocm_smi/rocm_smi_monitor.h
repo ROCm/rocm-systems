@@ -30,8 +30,7 @@
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 enum MonitorTypes {
   kMonName,
@@ -148,7 +147,6 @@ class Monitor {
     std::map<uint64_t, rsmi_voltage_type_t> index_volt_type_map_;
 };
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_

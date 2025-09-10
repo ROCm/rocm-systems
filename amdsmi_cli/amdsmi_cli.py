@@ -167,8 +167,38 @@ if __name__ == "__main__":
     valid_commands = amd_smi_parser.possible_commands
     valid_commands += ['--help', '-h']
 
-    sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
-                else arg for arg in sys.argv]
+    # Convert arguments to lowercase, but preserve case for folder path values
+    processed_argv = []
+    # Arguments that should preserve case
+    case_sensitive_args = ['--folder', '--file', '--gpu', '--cpu', '--core', '--profile']
+    case_sensitive_prefixes = ['--folder=', '--file=', '--gpu=', '--cpu=', '--core=', '--profile=']
+
+    preserve_case_for_next = False
+    for i, arg in enumerate(sys.argv):
+        if preserve_case_for_next:
+            # Preserve case for the next argument value
+            processed_argv.append(arg)
+            preserve_case_for_next = False
+        elif arg in case_sensitive_args:
+            # Convert flag to lowercase but preserve next value
+            processed_argv.append(arg.lower())
+            preserve_case_for_next = True
+        elif any(arg.startswith(prefix) for prefix in case_sensitive_prefixes):
+            # Handle --arg=value format, preserve case for the value part
+            for prefix in case_sensitive_prefixes:
+                if arg.startswith(prefix):
+                    flag = prefix.rstrip('=')
+                    value = arg[len(prefix):]
+                    processed_argv.append(flag.lower() + '=' + value)
+                    break
+        elif arg.startswith('--') or not arg.startswith('-'):
+            # Convert other long options and positional arguments to lowercase
+            processed_argv.append(arg.lower())
+        else:
+            # Preserve case for short options
+            processed_argv.append(arg)
+    sys.argv = processed_argv
+    
     if len(sys.argv) == 1:
         args = amd_smi_parser.parse_args(args=['default'])
     elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):

@@ -23,6 +23,8 @@
 #ifndef __FDINFO__
 #define __FDINFO__
 
+#include <vector>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -32,9 +32,7 @@
 
 #include "rocm_smi/rocm_smi.h"
 
-namespace amd {
-namespace smi {
-namespace evt {
+namespace amd::smi::evt {
 
 class RSMIEventGrpHashFunction {
  public:
@@ -94,9 +92,7 @@ class Event {
 };
 
 
-}  // namespace evt
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi::evt
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_COUNTERS_H_
 

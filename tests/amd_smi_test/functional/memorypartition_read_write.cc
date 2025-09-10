@@ -20,8 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <cstdint>
 #include <iostream>
@@ -459,8 +458,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << orig_memory_partition << std::endl;
     }
 
-    if ((orig_memory_partition == nullptr) ||
-       (orig_memory_partition[0] == '\0')) {
+    if (orig_memory_partition[0] == '\0') {
       std::cout << "***System memory partition value is not defined or received"
                   " unexpected data. Skip memory partition test." << std::endl;
       continue;

@@ -33,8 +33,7 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_io_link.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 class KFDNode {
  public:
@@ -117,7 +116,6 @@ int read_node_properties(uint32_t node, std::string property_name,
                          uint64_t *val);
 int get_gpu_id(uint32_t node, uint64_t *gpu_id);
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_

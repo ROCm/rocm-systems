@@ -28,8 +28,7 @@
 
 #include "rocm_smi/rocm_smi_common.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 enum PowerMonTypes {
   kPowerMaxGPUPower,
@@ -52,7 +51,6 @@ class PowerMon {
     uint32_t dev_index_;
 };
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_

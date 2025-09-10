@@ -23,17 +23,17 @@ THE SOFTWARE.
 */
 
 #include "shared_mutex.h"  // NOLINT(build/include)
-#include <errno.h>  // errno, ENOENT
+#include <cerrno>
 #include <fcntl.h>  // O_RDWR, O_CREATE
 #include <linux/limits.h>  // NAME_MAX
 #include <sys/mman.h>  // shm_open, shm_unlink, mmap, munmap,
                       // PROT_READ, PROT_WRITE, MAP_SHARED, MAP_FAILED
 #include <unistd.h>  // ftruncate, close
-#include <stdio.h>  // perror
-#include <stdlib.h>  // malloc, free
-#include <string.h>  // strcpy
-#include <time.h>   // clock_gettime
-#include <assert.h>
+#include <cstdio>  // perror
+#include <cstdlib>  // malloc, free
+#include <cstring>  // strcpy
+#include <ctime>   // clock_gettime
+#include <cassert>
 
 #include <sys/types.h>
 #include <dirent.h>

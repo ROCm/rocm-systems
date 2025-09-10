@@ -36,8 +36,7 @@
 #include "amd_smi/impl/xf86drm.h"
 #include "amd_smi/impl/scoped_fd.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 class AMDSmiDrm {
  public:
@@ -64,7 +63,6 @@ class AMDSmiDrm {
 };
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_IMPL_AMD_SMI_DRM_H_

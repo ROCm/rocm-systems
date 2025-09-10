@@ -20,15 +20,13 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "overdrive_read_write.h"
-#include "../test_common.h"
 
 TestOverdriveReadWrite::TestOverdriveReadWrite() : TestBase() {
   set_title("AMDSMI Overdrive Read/Write Test");

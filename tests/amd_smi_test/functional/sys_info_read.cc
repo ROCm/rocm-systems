@@ -30,8 +30,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "sys_info_read.h"
-#include "../test_common.h"
-#include "../test_utils.h"
 
 TestSysInfoRead::TestSysInfoRead() : TestBase() {
   set_title("AMDSMI System Info Read Test");

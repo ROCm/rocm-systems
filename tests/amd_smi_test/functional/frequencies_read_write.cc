@@ -20,11 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
-#include <map>
 #include <bitset>
 #include <string>
 #include <algorithm>

@@ -21,11 +21,10 @@
  */
 
 #include <pwd.h>
-#include <inttypes.h>
+#include <cinttypes>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <cstring>

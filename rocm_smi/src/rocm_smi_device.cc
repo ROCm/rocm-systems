@@ -32,13 +32,11 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "rocm_smi/rocm_smi_main.h"
@@ -49,8 +47,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "shared_mutex.h"  // NOLINT
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 // Debug root file path
 static const char *kPathDebugRootFName = "/sys/kernel/debug/dri/";
@@ -1800,7 +1797,7 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   if ((success == true) && (!out.empty())) {
     isSystemAMDGPUModuleLive = containsString(out, "live");
   }
-  if (isAMDGPUModuleLive) {
+  if (*isAMDGPUModuleLive) {
     deviceRestartInProgress = false;
   }
   *isRestartInProgress = deviceRestartInProgress;
@@ -1869,7 +1866,7 @@ rsmi_status_t storeParameter<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
 template <>
 rsmi_status_t storeParameter<rsmi_memory_partition_type_t>(uint32_t dv_ind) {
   rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
-  uint32_t kDatalength = 128;
+  const uint32_t kDatalength = 128;
   char data[kDatalength];
   bool doesFileExist;
   std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",
@@ -1994,5 +1991,4 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
 
 
 #undef RET_IF_NONZERO
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

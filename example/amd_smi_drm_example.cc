@@ -23,9 +23,8 @@
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <inttypes.h>
+#include <cinttypes>
 
-#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <cstring>

@@ -1299,64 +1299,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 Example:
 
 ```python
-from amdsmi import *
-
-amdsmi_init()
-
-def get_severity_mask(severity):
-    severity_mask = 0
-    if severity == "all":
-        # Set bits for NON_FATAL_UNCORRECTED (0), FATAL (1), and NON_FATAL_CORRECTED (2)
-        severity_mask |= ((1 << 0) | (1 << 1) | (1 << 2))
-    elif severity == "fatal":
-        # Set bit corresponding to AMDSMI_CPER_SEV_FATAL (which is 1)
-        severity_mask |= (1 << 1)
-    elif severity in ("nonfatal", "nonfatal-uncorrected"):
-        # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED (which is 0)
-        severity_mask |= (1 << 0)
-    elif severity in ("nonfatal-corrected", "corrected"):
-        # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
-        severity_mask |= (1 << 2)
-    return severity_mask
-
-def gpuid(device):
-    for gpu_index, device_handle in enumerate(amdsmi_interface.amdsmi_get_processor_handles()):
-        if device.value == device_handle.value:
-            return gpu_index
-
-try:
-    devices = amdsmi_interface.amdsmi_get_processor_handles()
-    buffer_size = 1024*100
-    initial_cursor = 0
-    severity = "all"
-    for device in devices:
+    try:
         entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(
-            device, get_severity_mask(severity), buffer_size, initial_cursor)
-        gpu_id = gpuid(device)
-        print(f"cper entries for '{severity}' severity on gpu #{gpu_id}:")
-        for key, entry in entries.items():
-            print("Entry", key)
-            print("   Error Severity:", entry.get("error_severity", "Unknown"))
-            print("   Notify Type:", entry.get("notify_type", "Unknown"))
-            print("   Timestamp:", entry.get("timestamp", ""))
-except AmdSmiException as e:
-    print(e)
+            device, severity_mask, buffer_size, initial_cursor)
+    except AmdSmiException as e:
+        print(e)
 ```
 
-Output:
-
-```shell
-cper entries for 'nonfatal-corrected' severity on gpu #0:
-cper entries for 'nonfatal-corrected' severity on gpu #1:
-Entry 0
-   Error Severity: non_fatal_corrected
-   Notify Type: CMC
-   Timestamp: 2025/08/13 19:28:31
-Entry 1
-   Error Severity: non_fatal_corrected
-   Notify Type: CMC
-   Timestamp: 2025/08/13 19:36:38
-```
+Refer to amd_smi_cper_example.py for a complete example
 
 ### amdsmi_get_afids_from_cper
 
@@ -1386,108 +1336,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 Example:
 
 ```python
-from amdsmi import *
-import os
-
-amdsmi_init()
-
-def get_severity_mask(severity):
-    severity_mask = 0
-    if severity == "all":
-        # Set bits for NON_FATAL_UNCORRECTED (0), FATAL (1), and NON_FATAL_CORRECTED (2)
-        severity_mask |= ((1 << 0) | (1 << 1) | (1 << 2))
-    elif severity == "fatal":
-        # Set bit corresponding to AMDSMI_CPER_SEV_FATAL (which is 1)
-        severity_mask |= (1 << 1)
-    elif severity in ("nonfatal", "nonfatal-uncorrected"):
-        # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED (which is 0)
-        severity_mask |= (1 << 0)
-    elif severity in ("nonfatal-corrected", "corrected"):
-        # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
-        severity_mask |= (1 << 2)
-    return severity_mask
-
-def gpuid(device):
-    for gpu_index, device_handle in enumerate(amdsmi_interface.amdsmi_get_processor_handles()):
-        if device.value == device_handle.value:
-            return gpu_index
-
-def dump_cper_entry(entry, cper_data, key):
     try:
-        os.mkdir("/tmp/cper_dump", mode=0o777, dir_fd=None)
-    except FileExistsError:
-        pass
-    cper_file = f"/tmp/cper_dump/cper_entry_{key}.bin"
-    with open(cper_file, "wb") as file:
-        size = cper_data[key]["size"]
-        data = cper_data[key]["bytes"]
-        data = bytes(x % 256 for x in data[:size])
-        file.write(data)
-        print(f"   Wrote cper data to file: {cper_file}")
-    json_file = f"/tmp/cper_dump/cper_entry_{key}.json"
-    with open(json_file, "wt") as file:
-        file.write(str(entry))
-
-def get_gpu_cper_entries():
-    try:
-        devices = amdsmi_interface.amdsmi_get_processor_handles()
-        buffer_size = 1024*100
-        initial_cursor = 0
-        severity = "all"
-        for device in devices:
-            entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(
-                device, get_severity_mask(severity), buffer_size, initial_cursor)
-            gpu_id = gpuid(device)
-            print("###################")
-            print(f"cper entries for '{severity}' severity on gpu #{gpu_id}:")
-            for key, entry in entries.items():
-                print("----------------")
-                print("Entry", key)
-                print("   Error Severity:", entry.get("error_severity", "Unknown"))
-                print("   Notify Type:", entry.get("notify_type", "Unknown"))
-                print("   Timestamp:", entry.get("timestamp", ""))
-                print(f"   Cper entry metadata: {entry}")
-                dump_cper_entry(entry, cper_data, key)
+        with open(cper_file.path, "rb") as file:
+            afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(file.read())
     except AmdSmiException as e:
         print(e)
-
-get_gpu_cper_entries()
 ```
 
-Output:
+Refer to amd_smi_afid_example.py for a complete example
 
-``` shell
-###################
-cper entries for 'all' severity on gpu #0:
-###################
-cper entries for 'all' severity on gpu #1:
-###################
-cper entries for 'all' severity on gpu #2:
-###################
-cper entries for 'all' severity on gpu #3:
-###################
-cper entries for 'all' severity on gpu #4:
-###################
-cper entries for 'all' severity on gpu #5:
-###################
-cper entries for 'all' severity on gpu #6:
-###################
-cper entries for 'all' severity on gpu #7:
-----------------
-Entry 0
-   Error Severity: non_fatal_corrected
-   Notify Type: CMC
-   Timestamp: 2025/08/13 20:07:56
-   Cper entry metadata: {'error_severity': 'non_fatal_corrected', 'notify_type': 'CMC', 'timestamp': '2025/08/13 20:07:56', 'signature': b'CPER', 'revision': 256, 'signature_end': '0xffffffff', 'sec_cnt': 1, 'record_length': 472, 'platform_id': b'0xcafe:0xbeef', 'creator_id': b'amdgpu', 'record_id': b'0:1', 'flags': 0, 'persistence_info': 0}
-   Wrote cper data to file: /tmp/cper_dump/cper_entry_0.bin
-----------------
-Entry 1
-   Error Severity: non_fatal_corrected
-   Notify Type: CMC
-   Timestamp: 2025/08/13 20:14:58
-   Cper entry metadata: {'error_severity': 'non_fatal_corrected', 'notify_type': 'CMC', 'timestamp': '2025/08/13 20:14:58', 'signature': b'CPER', 'revision': 256, 'signature_end': '0xffffffff', 'sec_cnt': 1, 'record_length': 472, 'platform_id': b'0xcafe:0xbeef', 'creator_id': b'amdgpu', 'record_id': b'0:2', 'flags': 0, 'persistence_info': 0}
-   Wrote cper data to file: /tmp/cper_dump/cper_entry_1.bin
-```
 
 ### amdsmi_get_gpu_ras_feature_info
 
