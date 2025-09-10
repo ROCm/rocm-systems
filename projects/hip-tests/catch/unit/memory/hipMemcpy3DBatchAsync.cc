@@ -18,6 +18,7 @@
  */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include<vector>
 /**
  * @addtogroup hipMemcpy3DBatchAsync hipMemcpy3DBatchAsync
  * @{
@@ -28,20 +29,17 @@
  */
 // Helper to check array content
 void checkArrayContent(hipArray_t array, size_t width, size_t height, size_t depth, char expected) {
-  char* hostBuf = (char*)malloc(width * height * depth);
+  std::vector<char>hostBuf(width * height * depth);
   hipMemcpy3DParms copyParms{};
   copyParms.srcArray = array;
-  copyParms.dstPtr = make_hipPitchedPtr(hostBuf, width, width, height);
+  copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), width, width, height);
   copyParms.extent = make_hipExtent(width, height, depth);
   copyParms.kind = hipMemcpyDeviceToHost;
   HIP_CHECK(hipMemcpy3D(&copyParms));
   for (size_t i = 0; i < width * height * depth; ++i) {
-    if (hostBuf[i] != expected) {
-      INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
-      REQUIRE(false);
-    }
+    INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
+    REQUIRE(hostBuf[i] == expected);
   }
-  free(hostBuf);
 }
 /**
  * Test Description
@@ -85,15 +83,14 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
   HIP_CHECK(hipMalloc3DArray(&dstArray1, &channelDesc, extent, 0));
 
   // Fill srcArray1 with 'b'
-  char* tmpHost = (char*)malloc(volume);
-  memset(tmpHost, 'b', volume);
+  std::vector<char>tmpHost(volume);
+  memset(tmpHost.data(), 'b', volume);
   hipMemcpy3DParms fillParms{};
-  fillParms.srcPtr = make_hipPitchedPtr(tmpHost, extent.width, extent.width, extent.height);
+  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width, extent.width, extent.height);
   fillParms.dstArray = srcArray1;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
   HIP_CHECK(hipMemcpy3D(&fillParms));
-  free(tmpHost);
 
   // Prepare batch ops array
   hipMemcpy3DBatchOp ops[numOps];
@@ -133,16 +130,12 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
   HIP_CHECK(hipStreamSynchronize(stream));
 
   //  Validate pointer-ptr copy (op 0)
-  char* hostBuf = (char*)malloc(volume);
-  HIP_CHECK(hipMemcpy(hostBuf, dstPtr0, volume, hipMemcpyDeviceToHost));
+  std::vector<char>hostBuf(volume);
+  HIP_CHECK(hipMemcpy(hostBuf.data(), dstPtr0, volume, hipMemcpyDeviceToHost));
   for (size_t i = 0; i < volume; ++i) {
-    if (hostBuf[i] != 'a') {
-      INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
-      REQUIRE(false);
-    }
+    INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
+    REQUIRE(hostBuf[i] == 'a');
   }
-  free(hostBuf);
-
   // Validate array-array copy (op 1)
   checkArrayContent(dstArray1, extent.width, extent.height, extent.depth, 'b');
 

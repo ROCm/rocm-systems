@@ -74,10 +74,8 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipMemcpy(hostPtr[i], dstPtr[i], size, hipMemcpyDeviceToHost));
     for (int j = 0; j < size; j++) {
-      if(hostPtr[i][j] != 'b') {
-        INFO("Array FAILURE at Index: "<< i << " "<< j << "\nval : " << hostPtr[i][j]);
-        REQUIRE(false);
-      }
+      INFO("Array FAILURE at Index: "<< i << " "<< j << "\nval : " << hostPtr[i][j]);
+      REQUIRE(hostPtr[i][j] == 'b');
     }
   }
 
@@ -112,7 +110,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts") {
   size_t numAttrs = 0;
   size_t sizes[2];
   size_t attrsIdxs[1];
-  size_t size = 4096 * sizeof(char);
+  const size_t size = 4096 * sizeof(char);
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));
   void *srcPtr[count], *dstPtr[count];
