@@ -1814,13 +1814,27 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::hostAlloc
    */
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const {
+  virtual void* hostAlloc(size_t size, size_t alignment,
+                          MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const {
     ShouldNotCallThis();
     return NULL;
   }
 
-  virtual void* deviceLocalAlloc(size_t size, bool atomics = false, bool pseudo_fine_grain = false,
-                                 bool contiguous = false) const {
+  //! Flags for deviceLocalAlloc method
+  typedef union {
+    struct {
+      uint32_t atomics_ : 1;           //!< True if atomics support is required
+      uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
+      uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
+      uint32_t executable_ : 1;        //!< True if executable memory is required
+      uint32_t reserved_ : 28;         //!< Reserved for future use
+    };
+    uint32_t data_;
+  } AllocationFlags;
+
+  virtual void* deviceLocalAlloc(
+      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
     ShouldNotCallThis();
     return NULL;
   }
