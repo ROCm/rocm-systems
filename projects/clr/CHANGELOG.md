@@ -2,6 +2,13 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.2 for ROCm 7.2
+
+### Added
+
+* New HIP APIs
+    - `hipStreamCopyAttributes` Copies attributes from source stream to destination stream
+
 ## HIP 7.1 for ROCm 7.1
 
 ### Added

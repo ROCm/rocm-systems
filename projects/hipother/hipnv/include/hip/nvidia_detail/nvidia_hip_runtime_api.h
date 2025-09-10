@@ -3344,6 +3344,10 @@ inline static hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttr
   return hipCUDAErrorTohipError(cudaStreamGetAttribute(stream, attr, value_out));
 }
 
+inline static hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  return hipCUDAErrorTohipError(cudaStreamCopyAttributes(dst, src));
+}
+
 inline static hipError_t hipDriverGetVersion(int* driverVersion) {
   return hipCUDAErrorTohipError(cudaDriverGetVersion(driverVersion));
 }
