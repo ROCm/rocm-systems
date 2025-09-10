@@ -21,7 +21,7 @@ trigger:
     - docs
     - '.*.y*ml'
     - '*.md'
-    - LICENSE
+    - LICENSE.md
     - VERSION
     - .wordlist.txt
 
@@ -37,7 +37,7 @@ pr:
     - docs
     - '.*.y*ml'
     - '*.md'
-    - LICENSE
+    - LICENSE.md
     - VERSION
     - .wordlist.txt
   drafts: false
