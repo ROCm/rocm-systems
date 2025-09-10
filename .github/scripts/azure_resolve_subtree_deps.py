@@ -81,7 +81,8 @@ def main(argv=None) -> None:
         "projects/hipother": 335,
         "projects/rocprofiler-compute": 344,
         "projects/rocm-core": 349,
-        "projects/rocminfo": 356
+        "projects/rocminfo": 356,
+        "projects/rocm-smi-lib": 358,
     }
 
     args = parse_arguments(argv)
