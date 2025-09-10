@@ -218,12 +218,17 @@ class Roofline:
         return df
 
     def apply_analyze_kernel_filter(
-        self, df: dict[str, pd.DataFrame], path: Optional[str], args: argparse.Namespace
+        self, df: dict[str, pd.DataFrame],
+        path_str: Optional[str],
+        args: argparse.Namespace
     ) -> dict[str, pd.DataFrame]:
         """Apply kernel filter for analyze mode."""
-        top_kernels_csv = Path(path) / "pmc_kernel_top.csv"
+        if not path_str:
+            console_error("roofline", "cannot locate pmc_kernel_top.csv")
+
+        top_kernels_csv = Path(path_str) / "pmc_kernel_top.csv"
         if not top_kernels_csv.is_file():
-            console_error("roofline", f"{top_kernels_csv} does not exist")
+            console_error("roofline", f"{str(top_kernels_csv)} does not exist")
 
         k_df = pd.read_csv(top_kernels_csv)
         k_df = k_df.loc[args.gpu_kernel[0], "Kernel_Name"]
@@ -232,7 +237,7 @@ class Roofline:
         return df
 
     def validate_apply_kernel_filter(
-        self, df: dict[str, pd.DataFrame], path: Optional[str] = None
+        self, df: dict[str, pd.DataFrame], path_str: Optional[str] = None
     ) -> dict[str, pd.DataFrame]:
         if not self.__run_parameters["kernel_filter"]:
             return df
@@ -241,7 +246,7 @@ class Roofline:
         if args.mode == "profile":
             return self.apply_profile_kernel_filter(df, args)
         elif args.mode == "analyze":
-            return self.apply_analyze_kernel_filter(df, path, args)
+            return self.apply_analyze_kernel_filter(df, path_str, args)
 
         return df
 
@@ -263,7 +268,7 @@ class Roofline:
 
         # Verify kernels have been profiled and filter the df
         ret_df = self.validate_apply_kernel_filter(
-            df=ret_df, path=self.__run_parameters.get("workload_dir")
+            df=ret_df, path_str=self.__run_parameters.get("workload_dir")
         )
 
         self.__ai_data = calc_ai_profile(
@@ -785,7 +790,7 @@ class Roofline:
             if profiling_config.get("format_rocprof_output") == "rocpd":
                 t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
-            t_df = self.validate_apply_kernel_filter(df=t_df, path=str(base_path))
+            t_df = self.validate_apply_kernel_filter(df=t_df, path_str=str(base_path))
             self.__ai_data = calc_ai_profile(
                 self.__mspec, self.__run_parameters["sort_type"], t_df
             )

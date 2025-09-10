@@ -122,7 +122,7 @@ def has_time_data(df: pd.DataFrame) -> bool:
     if "Unit" not in df.columns:
         return False
     # NOTE: "ns" / "NS" / "nS" / "Ns" are reserved for Nanosec time unit
-    return df["Unit"].str.lower().str.contains("ns", na=False).any()
+    return bool(df["Unit"].str.lower().str.contains("ns", na=False).any())
 
 
 def is_roofline_shown(
@@ -376,7 +376,7 @@ def format_table_output(
     if "title" in table_config and table_config["title"]:
         content += f"{table_id_str} {table_config['title']}\n"
 
-    if args.output_format == "csv" and csv_dir.is_dir():
+    if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
         if "title" in table_config and table_config["title"]:
             table_id_str += f"_{table_config['title']}"
 

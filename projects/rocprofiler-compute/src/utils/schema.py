@@ -30,7 +30,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -41,7 +41,7 @@ class ArchConfig:
     panel_configs: OrderedDict[int, Any] = field(default_factory=OrderedDict)
 
     # [id: df] pairs
-    dfs: Dict[int, pd.DataFrame] = field(default_factory=dict)
+    dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
 
     # NB:
     #  dfs_type should be a meta info embeded into df.
@@ -49,28 +49,30 @@ class ArchConfig:
     #  So do it as below for now.
 
     # [id: df_type] pairs
-    dfs_type: Dict[int, str] = field(default_factory=dict)
+    dfs_type: dict[int, str] = field(default_factory=dict)
 
     # [Index: Metric name] pairs
-    metric_list: Dict[str, str] = field(default_factory=dict)
+    metric_list: dict[str, str] = field(default_factory=dict)
 
     # [Metric name: Counters] pairs
-    metric_counters: Dict[str, list] = field(default_factory=dict)
+    metric_counters: dict[str, list] = field(default_factory=dict)
 
 
 @dataclass
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
-    raw_pmc: Optional[pd.DataFrame] = None
-    dfs: Dict[int, pd.DataFrame] = field(default_factory=dict)
-    dfs_type: Dict[int, str] = field(default_factory=dict)
-    filter_kernel_ids: List[int] = field(default_factory=list)
-    filter_gpu_ids: List[int] = field(default_factory=list)
-    filter_dispatch_ids: List[int] = field(default_factory=list)
-    filter_nodes: List[str] = field(default_factory=list)
-    avail_ips: List[int] = field(default_factory=list)
+    raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
+    dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
+    dfs_type: dict[int, str] = field(default_factory=dict)
+    filter_kernel_ids: list[int] = field(default_factory=list)
+    filter_gpu_ids: list[int] = field(default_factory=list)
+    filter_dispatch_ids: list[int] = field(default_factory=list)
+    filter_nodes: list[str] = field(default_factory=list)
+    avail_ips: list[int] = field(default_factory=list)
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
-
+    roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
+    path: str = field(default_factory=str)
+    filter_top_n: str = field(default_factory=str)
 
 # Metrics will be calculated ONLY when the header(key) is in below list
 SUPPORTED_FIELD = [

@@ -467,7 +467,11 @@ def calc_ai_profile(
     kernel_name = ""
     my_list: list[AI_Data] = []
 
-    supported_dt = SUPPORTED_DATATYPES[mspec.gpu_arch]
+    supported_dt = (
+        SUPPORTED_DATATYPES[mspec.gpu_arch]
+        if mspec.gpu_arch in SUPPORTED_DATATYPES
+        else None
+    )
 
     for idx in df.index:
         # CASE: Top kernels

@@ -165,11 +165,12 @@ class OmniSoC_Base:
                 self._mspec.max_waves_per_cu = key
                 break
 
-        self._mspec.sqc_per_gpu = str(
-            total_sqc(
-                self._mspec.gpu_arch, self._mspec.cu_per_gpu, self._mspec.se_per_gpu
+        if self._mspec.gpu_arch and self._mspec.cu_per_gpu and self._mspec.se_per_gpu:
+            self._mspec.sqc_per_gpu = str(
+                total_sqc(
+                    self._mspec.gpu_arch, self._mspec.cu_per_gpu, self._mspec.se_per_gpu
+                )
             )
-        )
 
         # Parse json from amd-smi static --clock
         static_data = json.loads(
@@ -200,7 +201,8 @@ class OmniSoC_Base:
         self._mspec.cur_sclk = self._mspec.max_sclk
         self._mspec.cur_mclk = self._mspec.max_mclk
 
-        self._mspec.gpu_series = mi_gpu_specs.get_gpu_series(self._mspec.gpu_arch)
+        if self._mspec.gpu_arch:
+            self._mspec.gpu_series = mi_gpu_specs.get_gpu_series(self._mspec.gpu_arch)
         # specify gpu model name for gfx942 hardware
         self._mspec.gpu_model = mi_gpu_specs.get_gpu_model(
             self._mspec.gpu_arch, self._mspec.gpu_chip_id
@@ -284,7 +286,7 @@ class OmniSoC_Base:
         return gpu_model
 
     @demarcate
-    def detect_counters(self) -> tuple[list[str], list[str]]:
+    def detect_counters(self) -> tuple[set[str], list[str]]:
         """
         Create a set of counters required for the selected report sections.
         Parse analysis report configuration files based on the selected report
@@ -300,7 +302,7 @@ class OmniSoC_Base:
         }
 
         filter_blocks = args.filter_blocks
-        if args.set_selected:
+        if args.set_selected and self.__arch:
             sets_info = parse_sets_yaml(self.__arch)
             if args.set_selected not in set(sets_info.keys()):
                 console_error(
@@ -387,7 +389,7 @@ class OmniSoC_Base:
         return counters, filter_blocks
 
     @demarcate
-    def perfmon_filter(self) -> None:
+    def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
 
@@ -758,7 +760,7 @@ class OmniSoC_Base:
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
     @abstractmethod
-    def profiling_setup(self) -> None:
+    def profiling_setup(self) -> Optional[list[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         console_debug("profiling", f"perform SoC profiling setup for {self.__arch}")
 

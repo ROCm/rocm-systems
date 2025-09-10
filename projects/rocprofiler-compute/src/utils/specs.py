@@ -112,7 +112,7 @@ def kw_only(cls: T) -> T:
 
 
 def generate_machine_specs(
-    args: argparse.Namespace, sysinfo: Optional[dict[str, Any]] = None
+    args: Optional[argparse.Namespace], sysinfo: Optional[dict[str, Any]] = None
 ) -> MachineSpecs:
     if sysinfo is not None:
         try:
@@ -882,7 +882,7 @@ def get_rocm_ver() -> str:
     return ""
 
 
-def run(cmd: list[str], exit_on_error: bool = False) -> Optional[str]:
+def run(cmd: list[str], exit_on_error: bool = False) -> str:
     try:
         p = subprocess.run(cmd, capture_output=True)
     except FileNotFoundError as e:
@@ -931,7 +931,7 @@ def totall2_banks(
 
 
 if __name__ == "__main__":
-    specs = generate_machine_specs(None)
+    specs = generate_machine_specs(None, None)
     if specs:
         print(specs)
     else:

@@ -585,7 +585,7 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
     return visited, counters
 
 
-def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> Optional[int]:
+def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> int:  # type: ignore[return]
     """
     Calculate build-in variable based on sys_info:
     """
@@ -1225,7 +1225,9 @@ def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, No
         return found
 
 
-def search_pc_sampling_record(records: list[dict]) -> Optional[list[tuple]]:
+def search_pc_sampling_record(
+    records: Union[list[dict], dict]
+) -> Optional[list[tuple]]:
     """
     Search PC sampling records, and group and sort them
     """
@@ -1409,6 +1411,10 @@ def load_pc_sampling_data_per_kernel(
         else search_key_in_json(file_name, "pc_sample_stochastic")
     )
 
+    if not pc_sample_key_loc:
+        console_warning("PC sampling: can not find pc sample.")
+        return pd.DataFrame()
+
     df = pd.DataFrame(
         search_pc_sampling_record(pc_sample_key_loc),
         columns=[
@@ -1441,18 +1447,24 @@ def load_pc_sampling_data_per_kernel(
 
     # Add instruction and source line information
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
-    df["instruction"] = df["inst_index"].apply(
-        lambda x: pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
-    )
+    if pc_sample_instructions:
+        df["instruction"] = df["inst_index"].apply(
+            lambda x: (
+                pc_sample_instructions[x]
+                if x < len(pc_sample_instructions)
+                else None
+            )
+        )
 
     pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
-    df["source_line"] = df["inst_index"].apply(
-        lambda x: (
-            ".../" + Path(pc_sample_comments[x]).name
-            if x < len(pc_sample_instructions)
-            else None
+    if pc_sample_comments:
+        df["source_line"] = df["inst_index"].apply(
+            lambda x: (
+                f".../{Path(pc_sample_comments[x]).name}"
+                if x < len(pc_sample_comments)
+                else None
+            )
         )
-    )
 
     # Return sorted data based on sorting type
     if sorting_type == "offset":
@@ -1684,7 +1696,7 @@ def build_comparable_columns(time_unit: str) -> list[str]:
 
 def correct_sys_info(
     mspec: MachineSpecs, specs_correction: str
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame:
     """
     Correct system spec items manually based on user-provided corrections.
     """

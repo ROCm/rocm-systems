@@ -151,7 +151,7 @@ def test_num_xcds_spec_class(monkeypatch):
     num_xcds = get_num_xcds()
 
     # 2. load machine specs
-    machine_spec = generate_machine_specs(None)
+    machine_spec = generate_machine_specs(None, None)
 
     # 3. check results are expected
     assert machine_spec.compute_partition is not None

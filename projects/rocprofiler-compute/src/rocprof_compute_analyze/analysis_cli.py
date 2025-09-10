@@ -108,19 +108,21 @@ class cli_analysis(OmniAnalyze_Base):
             # Generate roofline plot for single-path, compatible architectures
             if (len(args.path)) == 1:
                 if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
-                    roof_obj = self.get_socs()[gpu_arch].roofline_obj
+                    soc = self.get_socs()
+                    if soc and gpu_arch in soc:
+                        roof_obj = soc[gpu_arch].roofline_obj
 
-                    if roof_obj:
-                        # store path in workload for calc_ai_analyze
-                        workload.path = workload_path
+                        if roof_obj:
+                            # store path in workload for calc_ai_analyze
+                            workload.path = workload_path
 
-                        # NOTE: using default data type
-                        roof_plot = roof_obj.cli_generate_plot(
-                            dtype=roof_obj.get_dtype()[0],
-                            workload=workload,
-                            config=self._profiling_config,
-                            arch_config=arch_config,
-                        )
+                            # NOTE: using default data type
+                            roof_plot = roof_obj.cli_generate_plot(
+                                dtype=roof_obj.get_dtype()[0],
+                                workload=workload,
+                                config=self._profiling_config,
+                                arch_config=arch_config,
+                            )
 
             tty.show_all(
                 args,

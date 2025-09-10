@@ -37,7 +37,7 @@ from dash.dependencies import Input, Output, State
 
 from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import file_io, parser
+from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.logger import console_debug, console_error, console_warning, demarcate
 
@@ -72,7 +72,7 @@ class webui_analysis(OmniAnalyze_Base):
 
     @demarcate
     def build_layout(
-        self, input_filters: dict[str, Any], arch_configs: dict[str, Any]
+        self, input_filters: dict[str, Any], arch_configs: schema.ArchConfig
     ) -> None:
         """
         Build gui layout
@@ -85,10 +85,10 @@ class webui_analysis(OmniAnalyze_Base):
         self.app.layout = html.Div(style={"backgroundColor": "rgb(50, 50, 50)"})
 
         # get filtered kernel names from kernel ids
-        filt_kernel_names = []
+        filt_kernel_names: list[str] = []
         kernel_top_df = base_data.dfs[1]
         for kernel_id in base_data.filter_kernel_ids:
-            filt_kernel_names.append(kernel_top_df.loc[kernel_id, "Kernel_Name"])
+            filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
 
         # setup app layout
         from utils.gui_components.header import get_header
@@ -151,9 +151,9 @@ class webui_analysis(OmniAnalyze_Base):
             console_debug("analysis", f"gui gpu filter is {gcd_filter}")
             console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
-            base_data[base_run].filter_kernel_ids = kernel_filter
-            base_data[base_run].filter_gpu_ids = gcd_filter
-            base_data[base_run].filter_dispatch_ids = disp_filt
+            base_data[base_run].filter_kernel_ids = [int(kernel_filter)]
+            base_data[base_run].filter_gpu_ids = [int(gcd_filter)]
+            base_data[base_run].filter_dispatch_ids = [int(disp_filt)]
             base_data[base_run].filter_top_n = top_n_filt
 
             # Reload the pmc_kernel_top.csv for Top Stats panel
@@ -208,31 +208,33 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
             has_roofline = (Path(self.dest_dir) / "roofline.csv").is_file()
-            if has_roofline and hasattr(self.get_socs()[self.arch], "roofline_obj"):
-                # update roofline for visualization in GUI
-                self.get_socs()[self.arch].analysis_setup(
-                    roofline_parameters={
-                        "workload_dir": self.dest_dir,
-                        "device_id": 0,
-                        "sort_type": "kernels",
-                        "mem_level": "ALL",
-                        "include_kernel_names": False,
-                        "is_standalone": False,
-                        "roofline_data_type": self.__roofline_data_type,
-                        "kernel_filter": False,
-                    }
-                )
-                roof_obj = self.get_socs()[self.arch].roofline_obj
-                div_children.append(
-                    roof_obj.empirical_roofline(
-                        ret_df=parser.apply_filters(
-                            workload=base_data[base_run],
-                            dir=self.dest_dir,
-                            is_gui=True,
-                            debug=args.debug,
+            soc = self.get_socs()
+            if soc and self.arch in soc:
+                if has_roofline and hasattr(soc[self.arch], "roofline_obj"):
+                    # update roofline for visualization in GUI
+                    soc[self.arch].analysis_setup(
+                        roofline_parameters={
+                            "workload_dir": self.dest_dir,
+                            "device_id": 0,
+                            "sort_type": "kernels",
+                            "mem_level": "ALL",
+                            "include_kernel_names": False,
+                            "is_standalone": False,
+                            "roofline_data_type": self.__roofline_data_type,
+                            "kernel_filter": False,
+                        }
+                    )
+                    roof_obj = soc[self.arch].roofline_obj
+                    div_children.append(
+                        roof_obj.empirical_roofline(
+                            ret_df=parser.apply_filters(
+                                workload=base_data[base_run],
+                                dir=self.dest_dir,
+                                is_gui=True,
+                                debug=args.debug,
+                            )
                         )
                     )
-                )
 
             # Iterate over each section as defined in panel configs
             for panel_id, panel in panel_configs.items():
@@ -379,10 +381,11 @@ class webui_analysis(OmniAnalyze_Base):
             "top_n": args.max_stat_num,
         }
 
-        self.build_layout(
-            input_filters,
-            self._arch_configs[self.arch],
-        )
+        if self.arch and self.arch in self._arch_configs:
+            self.build_layout(
+                input_filters,
+                self._arch_configs[self.arch],
+            )
 
         port = random.randint(1024, 49151) if args.random_port else args.gui
         self.app.run(debug=False, host="0.0.0.0", port=port)

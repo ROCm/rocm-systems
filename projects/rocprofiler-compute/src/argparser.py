@@ -40,7 +40,7 @@ def print_avail_arch(avail_arch: list[str]) -> str:
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: list[str],
+    supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Any],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
@@ -85,7 +85,7 @@ def add_general_group(
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: list[str],
+    supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Any],
 ) -> None:
     # -----------------------------------------

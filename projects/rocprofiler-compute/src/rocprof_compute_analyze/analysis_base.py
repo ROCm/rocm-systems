@@ -36,6 +36,7 @@ from typing import Any, Optional, TextIO
 import pandas as pd
 
 import config
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
@@ -76,20 +77,20 @@ class OmniAnalyze_Base:
         self, args: argparse.Namespace, supported_archs: dict[str, Any]
     ) -> None:
         self.__args = args
-        self._runs: OrderedDict[str, Any] = OrderedDict()
-        self._arch_configs: dict[str, Any] = {}
+        self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
+        self._arch_configs: dict[str, schema.ArchConfig] = {}
         self._profiling_config: dict[str, Any] = {}
         self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
-        self.__socs: Optional[dict[str, Any]] = None  # available OmniSoC objs
+        self.__socs: Optional[dict[str, OmniSoC_Base]] = None
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
 
-    def set_soc(self, omni_socs: dict[str, Any]) -> None:
+    def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
 
-    def get_socs(self) -> Optional[dict[str, Any]]:
+    def get_socs(self) -> Optional[dict[str, OmniSoC_Base]]:
         return self.__socs
 
     @demarcate
@@ -251,9 +252,14 @@ class OmniAnalyze_Base:
                     w.roofline_peaks = pd.DataFrame()
 
                 arch = w.sys_info.iloc[0]["gpu_arch"]
-                mspec = self.get_socs()[arch]._mspec
-                if args.specs_correction:
-                    w.sys_info = parser.correct_sys_info(mspec, args.specs_correction)
+                socs = self.get_socs()
+                if socs and arch in socs:
+                    mspec = socs[arch]._mspec
+                    if args.specs_correction:
+                        w.sys_info = parser.correct_sys_info(
+                            mspec,
+                            args.specs_correction
+                        )
                 w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
                 w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
                 w.dfs_type = self._arch_configs[arch].dfs_type

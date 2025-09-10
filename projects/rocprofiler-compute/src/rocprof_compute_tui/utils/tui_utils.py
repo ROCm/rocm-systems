@@ -32,6 +32,7 @@ import pandas as pd
 from textual.widgets import TextArea
 
 import config
+from utils import schema
 
 
 class LogLevel(str, Enum):
@@ -122,7 +123,7 @@ def get_top_kernels_and_dispatch_ids(
 def process_panels_to_dataframes(
     args: argparse.Namespace,
     kernel_df: dict[int, pd.DataFrame],
-    arch_configs: dict[str, Any],
+    arch_configs: schema.ArchConfig,
     roof_plot: Optional[str] = None,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     """

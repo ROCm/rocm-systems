@@ -770,7 +770,7 @@ def run_prof(
 
     time_2 = time.time()
     console_debug(
-        f"Finishing subprocess of fname {fname}, the time it takes was "
+        f"Finishing subprocess of fname {fname}, the time taken is "
         f"{int((time_2 - time_1) / 60)} m {str((time_2 - time_1) % 60)} sec "
     )
 
@@ -790,19 +790,19 @@ def run_prof(
         if rocprof_cmd == "rocprofiler-sdk" or rocprof_cmd.endswith("v3"):
             # Write results_fbase.csv
             rocpd_data.convert_db_to_csv(
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                workload_dir + f"/results_{fbase}.csv",
+                glob.glob(f"{workload_dir}/out/pmc_1/*/*.db")[0],
+                f"{workload_dir}/results_{fbase}.csv",
             )
             if retain_rocpd_output:
                 shutil.copyfile(
-                    glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                    workload_dir + "/" + fbase + ".db",
+                    glob.glob(f"{workload_dir}/out/pmc_1/*/*.db")[0],
+                    "f{workload_dir}/{fbase}.db",
                 )
                 console_warning(
                     f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
                 )
             # Remove temp directory
-            shutil.rmtree(workload_dir + "/" + "out")
+            shutil.rmtree(f"{workload_dir}/out")
             return
         else:
             console_error(
@@ -811,7 +811,7 @@ def run_prof(
             )
     elif rocprof_cmd.endswith("v2"):
         # rocprofv2 has separate csv files for each process
-        results_files = glob.glob(workload_dir + "/out/pmc_1/results_*.csv")
+        results_files = glob.glob(f"{workload_dir}/out/pmc_1/results_*.csv")
 
         if len(results_files) == 0:
             return
@@ -825,7 +825,7 @@ def run_prof(
         combined_results["Dispatch_ID"] = range(0, len(combined_results))
 
         combined_results.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
+            f"{workload_dir}/out/pmc_1/results_{fbase}.csv", index=False
         )
     elif rocprof_cmd.endswith("v3") or rocprof_cmd == "rocprofiler-sdk":
         # rocprofv3 requires additional processing for each process
@@ -862,26 +862,26 @@ def run_prof(
         combined_results["Dispatch_ID"] = range(0, len(combined_results))
 
         combined_results.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
+            f"{workload_dir}/out/pmc_1/results_{fbase}.csv", index=False
         )
 
     if not using_v3() and not using_v1():
         # flatten tcc for applicable mi300 input
-        f = Path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
+        f = f"{workload_dir}/out/pmc_1/results_{fbase}.csv"
         xcds = mi_gpu_specs.get_num_xcds(
             mspec.gpu_arch, mspec.gpu_model, mspec.compute_partition
         )
         df = flatten_tcc_info_across_xcds(f, xcds, int(mspec.l2_banks))
         df.to_csv(f, index=False)
 
-    if Path(workload_dir + "/out").exists():
+    if Path(f"{workload_dir}/out").exists():
         # copy and remove out directory if needed
         shutil.copyfile(
-            workload_dir + "/out/pmc_1/results_" + fbase + ".csv",
-            workload_dir + "/" + fbase + ".csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
+            f"{workload_dir}/{fbase}.csv",
         )
         # Remove temp directory
-        shutil.rmtree(workload_dir + "/" + "out")
+        shutil.rmtree(f"{workload_dir}/out")
 
     # Standardize rocprof headers via overwrite
     # {<key to remove>: <key to replace>}
@@ -906,9 +906,10 @@ def run_prof(
         "SCR": "Scratch_Per_Workitem",
         "ACCUM_VGPR": "Accum_VGPR",
     }
-    df = pd.read_csv(workload_dir + "/" + fbase + ".csv")
+    csv_path = Path(workload_dir) / f"{fbase}.csv"
+    df = pd.read_csv(csv_path)
     df.rename(columns=output_headers, inplace=True)
-    df.to_csv(workload_dir + "/" + fbase + ".csv", index=False)
+    df.to_csv(csv_path, index=False)
 
 
 def pc_sampling_prof(
@@ -929,7 +930,7 @@ def pc_sampling_prof(
     if rocprof_cmd == "rocprofiler-sdk":
         rocm_libdir = str(Path(rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(
-            Path(rocm_libdir).joinpath("rocprofiler-sdk/librocprofiler-sdk-tool.so")
+            Path(rocm_libdir) / "rocprofiler-sdk/librocprofiler-sdk-tool.so"
         )
         ld_preload = [
             rocprofiler_sdk_tool_path,
@@ -1375,10 +1376,8 @@ def set_locale_encoding() -> None:
                 locale.setlocale(locale.LC_ALL, current_locale[0])
             except locale.Error as e:
                 console_error(
-                    "Failed to set locale to the current UTF-8-based locale.",
-                    exit=False,
+                    f"Failed to set locale to the current UTF-8-based locale: {e}"
                 )
-                console_error(e)
         else:
             console_error(
                 "Please ensure that a UTF-8-based locale is available on your system.",
@@ -1520,7 +1519,7 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
 
 def convert_metric_id_to_panel_info(
     metric_id: str,
-) -> Optional[tuple[str, Optional[int], Optional[int]]]:
+) -> tuple[str, Optional[int], Optional[int]]:
     """
     Convert metric id into panel information.
     Output is a tuples of the form (file_id, panel_id, metric_id).

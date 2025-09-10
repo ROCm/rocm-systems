@@ -821,7 +821,7 @@ def test_roofline_workload_dir_not_set_error():
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": None,
@@ -1090,7 +1090,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1144,7 +1144,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),

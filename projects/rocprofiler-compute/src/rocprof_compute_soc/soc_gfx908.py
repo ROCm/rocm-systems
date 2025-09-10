@@ -49,7 +49,7 @@ class gfx908_soc(OmniSoC_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def profiling_setup(self) -> None:
+    def profiling_setup(self) -> Optional[list[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         if self.get_args().roof_only:

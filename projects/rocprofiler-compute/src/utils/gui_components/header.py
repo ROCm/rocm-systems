@@ -26,6 +26,7 @@
 from typing import Any, Union
 
 import dash_bootstrap_components as dbc
+import pandas as pd
 from dash import dcc, html
 
 from utils import schema
@@ -50,7 +51,7 @@ def create_span(input_value: str) -> dict[str, Union[html.Span, str]]:
 
 
 def get_header(
-    raw_pmc: dict[str, Any], input_filters: dict[str, Any], kernel_names: list[str]
+    raw_pmc: pd.DataFrame, input_filters: dict[str, Any], kernel_names: list[str]
 ) -> html.Header:
     pmc_data = raw_pmc[schema.PMC_PERF_FILE_PREFIX]
     kernel_names = [str(name).strip() for name in pmc_data["Kernel_Name"]]
