@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "platform/memory.hpp"
 #include "utils/debug.hpp"
@@ -271,4 +269,4 @@ class Image : public roc::Memory {
   std::vector<amd::Image*> view_cache_;  //!< Cache of views for fast access
 };
 }  // namespace amd::roc
-#endif
+

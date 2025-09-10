@@ -43,6 +43,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_THUNK_LOADER_H
 #define HSA_RUNTIME_CORE_INC_THUNK_LOADER_H
 
+#include <string>
 #include <amdgpu.h>
 #include "hsakmt/hsakmttypes.h"
 
@@ -363,6 +364,10 @@ class ThunkLoader {
     void LoadThunkApiTable();
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
+    bool IsDXG() const { return is_dxg_; }
+    bool IsDTIF() const { return is_dtif_; }
+    bool IsSharedLibraryLoaded() const { return is_loaded_; }
+    void* ThunkHandle() const { return thunk_handle; }
 
     HSAKMT_DEF(hsaKmtOpenKFD)* HSAKMT_PFN(hsaKmtOpenKFD);
     HSAKMT_DEF(hsaKmtCloseKFD)* HSAKMT_PFN(hsaKmtCloseKFD);
@@ -468,7 +473,12 @@ class ThunkLoader {
     DRM_DEF(drmCommandWriteRead)* DRM_PFN(drmCommandWriteRead);
 
   private:
-    void *dtif_handle;
+    std::string whoami();
+    void *thunk_handle;
+    std::string library_name;
+    bool is_dxg_;
+    bool is_dtif_;
+    bool is_loaded_;
 };
 
 }   //  namespace core

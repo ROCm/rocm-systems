@@ -60,18 +60,7 @@ static void checkData(void* ptr, unsigned int size, char value) {
 
 static bool hipPerfBufferCopySpeed_test(int p_tests) {
   int testIdx = 0;
-  unsigned int bufSize_;
   unsigned int numIter;
-  bool hostMalloc[2] = {false};
-  bool hostRegister[2] = {false};
-  bool unpinnedMalloc[2] = {false};
-  bool deviceMallocUncached[2] = {false};
-  void* memptr[2] = {NULL};
-  void* alignedmemptr[2] = {NULL};
-  void* srcBuffer = NULL;
-  void* dstBuffer = NULL;
-  int numTests = (p_tests == -1) ? (NUM_SIZES * NUM_SUBTESTS * 2 - 1) : p_tests;
-  // int test = (p_tests == -1) ? 0 : p_tests;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   int test = 0;
@@ -90,7 +79,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
       hipError_t errMemset = hipMemset(srcBuffer, 0xd0, bufSize_);
       if (errMemset != hipSuccess) {
-        hipFree(srcBuffer);
+        HIP_CHECK(hipFree(srcBuffer));
         continue;
       }
       HIP_CHECK(hipSetDevice(1));
@@ -100,9 +89,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer10, 1, 0));
       if (!canAccessPeer01 || !canAccessPeer10) {
         HIP_CHECK(hipSetDevice(0));
-        hipDeviceDisablePeerAccess(1);
+        HIP_CHECK(hipDeviceDisablePeerAccess(1));
         HIP_CHECK(hipSetDevice(1));
-        hipDeviceDisablePeerAccess(0);
+        HIP_CHECK(hipDeviceDisablePeerAccess(0));
         HIP_CHECK(hipSetDevice(0));
         HIP_CHECK(hipFree(srcBuffer));
         HIP_CHECK(hipSetDevice(1));
@@ -155,9 +144,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       checkData(chkBuf, bufSize_, 0xd0);
       free(temp);
       HIP_CHECK(hipSetDevice(0));
-      hipDeviceDisablePeerAccess(1);
+      HIP_CHECK(hipDeviceDisablePeerAccess(1));
       HIP_CHECK(hipSetDevice(1));
-      hipDeviceDisablePeerAccess(0);
+      HIP_CHECK(hipDeviceDisablePeerAccess(0));
       HIP_CHECK(hipSetDevice(0));
       HIP_CHECK(hipFree(srcBuffer));
       HIP_CHECK(hipSetDevice(1));
@@ -166,8 +155,6 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       ++testIdx;
     }
   }
-  int dstTest = 0;
-  int srcTest = 0;
   // 2. Run all NoCU (intra) for all sizes
   for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
     if (p_tests != -1 && testIdx != p_tests) {

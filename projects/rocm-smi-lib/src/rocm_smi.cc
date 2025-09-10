@@ -1301,10 +1301,6 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_POWER_PROFILES);
   if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.empty()) {
-    // Guest may not have power related information.
-    if (amd::smi::is_vm_guest()) {
-      return RSMI_STATUS_NOT_SUPPORTED;
-    }
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
   // -1 for the header line, below
