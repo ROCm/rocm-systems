@@ -46,8 +46,9 @@ if(ENABLE_TESTS)
     if(UNIX)
         # Detect AMD GPU architecture using rocminfo
         execute_process(
-            COMMAND bash -c
-                    "rocminfo | grep 'Name:' | grep -E 'gfx[0-9]+' | head -n 1 | awk '{print $2}'"
+            COMMAND
+                bash -c
+                "rocminfo | grep 'Name:' | grep -E 'gfx[0-9]+' | head -n 1 | awk '{print $2}'"
             OUTPUT_VARIABLE GPU_NAME
             OUTPUT_STRIP_TRAILING_WHITESPACE)
 
@@ -55,18 +56,19 @@ if(ENABLE_TESTS)
             string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
             set(ENABLE_KOKKOS ON)
             message(STATUS "Detected AMD GPU architecture: ${KOKKOS_ARCH}")
-            file(WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake"
+            file(
+                WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake"
                 "set(MAKEFILE_PATH \"${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile\")\n"
                 "if(EXISTS \${MAKEFILE_PATH})\n"
                 "    file(READ \${MAKEFILE_PATH} MAKEFILE_CONTENT)\n"
-                "    string(REGEX REPLACE \"ifeq.*\nendif\n\" \"\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"            
-                "    string(REGEX REPLACE \"KOKKOS_PATH[^\\n]*=[^\\n]*\" \"KOKKOS_PATH = ${CMAKE_BINARY_DIR}/kokkos\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"            
+                "    string(REGEX REPLACE \"ifeq.*\nendif\n\" \"\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
+                "    string(REGEX REPLACE \"KOKKOS_PATH[^\\n]*=[^\\n]*\" \"KOKKOS_PATH = ${CMAKE_BINARY_DIR}/kokkos\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
                 "    string(REGEX REPLACE \"KOKKOS_DEVICES[^\\n]*=[^\\n]*\" \"KOKKOS_DEVICES = HIP\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_ARCH[^\\n]*=[^\\n]*\" \"KOKKOS_ARCH = AMD_${KOKKOS_ARCH}\nGPU_ARCH := ${GPU_NAME}\nCXX = amdclang++\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"            
+                "    string(REGEX REPLACE \"KOKKOS_ARCH[^\\n]*=[^\\n]*\" \"KOKKOS_ARCH = AMD_${KOKKOS_ARCH}\nGPU_ARCH := ${GPU_NAME}\nCXX = amdclang++\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
                 "    string(REGEX REPLACE \"KOKKOS_CUDA_OPTIONS[^\\n]*=[^\\n]*\" \"KOKKOS_CUDA_OPTIONS = enable_lambda\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"CXX[ \t]*=[^\\n]*\" \"CXX = amdclang++\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"            
+                "    string(REGEX REPLACE \"CXX[ \t]*=[^\\n]*\" \"CXX = amdclang++\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
                 "    string(REGEX REPLACE \"CXXFLAGS[ \t]*=[^\\n]*\" \"CXXFLAGS = -g -O3 -DUSE_OMP=1 -DUSE_MPI=0 -DRAJA_USE_GETTIME -I./includes -I./ -I/opt/rocm/include/hip -I/opt/rocm-7.1.0/include -x hip --offload-arch=$(GPU_ARCH)\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"LINKFLAGS[ \t]*=[^\\n]*\" \"LINKFLAGS = -lamdhip64 -L/opt/rocm-7.1.0/lib\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"            
+                "    string(REGEX REPLACE \"LINKFLAGS[ \t]*=[^\\n]*\" \"LINKFLAGS = -lamdhip64 -L/opt/rocm-7.1.0/lib\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
                 "    file(WRITE \${MAKEFILE_PATH} \"\${MAKEFILE_CONTENT}\")\n"
                 "else()\n"
                 "    message(WARNING \"Makefile not found: ${MAKEFILE_PATH}\")\n"
@@ -74,7 +76,8 @@ if(ENABLE_TESTS)
 
         else()
             message(
-                WARNING "Could not detect AMD GPU architecture, using default: ${KOKKOS_ARCH}"
+                WARNING
+                    "Could not detect AMD GPU architecture, using default: ${KOKKOS_ARCH}"
                 )
         endif()
     elseif(WIN32)
@@ -83,13 +86,13 @@ if(ENABLE_TESTS)
             OUTPUT_VARIABLE GPU_NAME
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_VARIABLE WMIC_ERROR
-            RESULT_VARIABLE WMIC_RESULT
-        )
+            RESULT_VARIABLE WMIC_RESULT)
         if(WMIC_RESULT EQUAL 0 AND NOT "${GPU_NAME}" STREQUAL "")
             string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
             set(ENABLE_KOKKOS ON)
             message(STATUS "Detected GPU: ${KOKKOS_ARCH}")
-            file(WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake"
+            file(
+                WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake"
                 "set(MAKEFILE_PATH \"${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile\")\n"
                 "if(EXISTS \${MAKEFILE_PATH})\n"
                 "    file(READ \${MAKEFILE_PATH} MAKEFILE_CONTENT)\n"
@@ -105,15 +108,19 @@ if(ENABLE_TESTS)
                 "    file(WRITE \${MAKEFILE_PATH} \"\${MAKEFILE_CONTENT}\")\n"
                 "else()\n"
                 "    message(WARNING \"Makefile not found: ${MAKEFILE_PATH}\")\n"
-                "endif()\n")        
+                "endif()\n")
         else()
-            message(WARNING "Could not detect GPU via WMIC. Disabling Kokkos Test. Error: ${WMIC_ERROR}")
+            message(
+                WARNING
+                    "Could not detect GPU via WMIC. Disabling Kokkos Test. Error: ${WMIC_ERROR}"
+                )
         endif()
     endif()
 endif()
 
 if(ENABLE_KOKKOS)
-    file(WRITE "${CMAKE_BINARY_DIR}/create_lulesh_cmakelists.cmake"
+    file(
+        WRITE "${CMAKE_BINARY_DIR}/create_lulesh_cmakelists.cmake"
         "set(CMAKELISTS_PATH \"${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/CMakeLists.txt\")\n"
         "if(UNIX)\n"
         "   file(WRITE \${CMAKELISTS_PATH}\n"
@@ -123,8 +130,8 @@ if(ENABLE_KOKKOS)
         "       \"execute_process(COMMAND bash -c \\\"rocminfo | grep 'Name:' | grep -E 'gfx[0-9]+' | head -n 1 | awk '{print $2}'\\\" OUTPUT_VARIABLE GPU_NAME OUTPUT_STRIP_TRAILING_WHITESPACE)\\n\"\n"
         "       \"set(HIP_INCLUDE_DIR \\\"/opt/rocm/include/hip\\\")\\n\"\n"
         "       \"set(HIP_LIB_DIR \\\"/opt/rocm-7.1.0/lib\\\")\\n\"\n"
-        "       \"set(HIP_EXTRA_INCLUDE \\\"/opt/rocm-7.1.0/include\\\")\\n\"\n"    
-        "       \"set(HIP_LIB amdhip64)\\n\"\n"    
+        "       \"set(HIP_EXTRA_INCLUDE \\\"/opt/rocm-7.1.0/include\\\")\\n\"\n"
+        "       \"set(HIP_LIB amdhip64)\\n\"\n"
         "       \"set(KOKKOS_DIR \\\"${CMAKE_BINARY_DIR}/kokkos\\\")\\n\"\n"
         "       \"set(KOKKOS_BUILD \\\"${CMAKE_BINARY_DIR}/kokkos-build\\\")\\n\"\n"
         "       \"find_package(Kokkos REQUIRED PATHS \\\"\\\${KOKKOS_BUILD}\\\")\\n\"\n"
@@ -153,19 +160,18 @@ if(ENABLE_KOKKOS)
         GIT_TAG caea1f54557acb408fe994c7d5b2574e4847454e
         SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos
         BINARY_DIR ${CMAKE_BINARY_DIR}/kokkos-build
-        CMAKE_ARGS
-            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/kokkos-build
-            -DKokkos_ENABLE_HIP=ON
-            -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
-            -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
-            -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so
-            -DCMAKE_PREFIX_PATH=/opt/rocm
-            -DKokkos_ENABLE_ROCTHRUST=OFF
-            -DKokkos_ENABLE_CUDA=OFF
-            -DCMAKE_CXX_COMPILER=amdclang++
-            -DKokkos_ENABLE_OPENMP=ON
-            -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
-            -DKokkos_ENABLE_DEPRECATED_CODE_4=ON
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/kokkos-build
+                   -DKokkos_ENABLE_HIP=ON
+                   -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
+                   -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
+                   -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so
+                   -DCMAKE_PREFIX_PATH=/opt/rocm
+                   -DKokkos_ENABLE_ROCTHRUST=OFF
+                   -DKokkos_ENABLE_CUDA=OFF
+                   -DCMAKE_CXX_COMPILER=amdclang++
+                   -DKokkos_ENABLE_OPENMP=ON
+                   -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
+                   -DKokkos_ENABLE_DEPRECATED_CODE_4=ON
         BUILD_COMMAND ${CMAKE_COMMAND} --build . --target install
         UPDATE_COMMAND "")
 
@@ -189,22 +195,24 @@ if(ENABLE_KOKKOS)
 
     externalproject_add_step(
         kokkos_miniapps build_lulesh
-        COMMAND ${CMAKE_COMMAND} -S ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm -B ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
-        COMMAND ${CMAKE_COMMAND} -E env KOKKOS_USE_DEPRECATED_MAKEFILES=1 ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+        COMMAND
+            ${CMAKE_COMMAND} -S
+            ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm -B
+            ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+        COMMAND ${CMAKE_COMMAND} -E env KOKKOS_USE_DEPRECATED_MAKEFILES=1 ${CMAKE_COMMAND}
+                --build ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm
         DEPENDEES create_lulesh_cmakelists)
 
-#    externalproject_add_step(
-#        kokkos_miniapps patch_lulesh_makefile
-#        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake
-#        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm
-#        DEPENDEES create_lulesh_cmakelists)
+    # externalproject_add_step( kokkos_miniapps patch_lulesh_makefile COMMAND
+    # ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake
+    # WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm
+    # DEPENDEES create_lulesh_cmakelists)
 
-#    externalproject_add_step(
-#        kokkos_miniapps build_lulesh
-#        COMMAND ${CMAKE_COMMAND} -E env KOKKOS_USE_DEPRECATED_MAKEFILES=1 make
-#        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm
-#        DEPENDEES patch_lulesh_makefile)
+    # externalproject_add_step( kokkos_miniapps build_lulesh COMMAND ${CMAKE_COMMAND} -E
+    # env KOKKOS_USE_DEPRECATED_MAKEFILES=1 make WORKING_DIRECTORY
+    # ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm DEPENDEES
+    # patch_lulesh_makefile)
 
 endif()
 
