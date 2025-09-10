@@ -86,7 +86,7 @@ def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]]
+    rocprof_compute_version: dict[str, Optional[str]],
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)

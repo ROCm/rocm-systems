@@ -252,7 +252,7 @@ class OmniSoC_Base:
             detected_name = gpu_data.get(section, {}).get(field, "").lower()
             for model in mi_gpu_specs.get_all_gpu_models():
                 if model in detected_name:
-                    console_log(f"GPU model '{model}' detected using {section}.{field}")
+                    console_log(f'GPU model "{model}" detected using {section}.{field}')
                     gpu_model = model
                     break
 
@@ -263,7 +263,7 @@ class OmniSoC_Base:
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
 
         if gpu_model.lower() not in mi_gpu_specs.get_num_xcds_dict().keys():
-            console_warning(f"Unknown GPU model detected: '{gpu_model}'.")
+            console_warning(f'Unknown GPU model detected: "{gpu_model}".')
             return
 
         return gpu_model.upper()
@@ -302,7 +302,7 @@ class OmniSoC_Base:
             sets_info = parse_sets_yaml(self.__arch)
             if args.set_selected not in set(sets_info.keys()):
                 console_error(
-                    f"argument --set: invalid choice: '{args.set_selected}' "
+                    f'argument --set: invalid choice: "{args.set_selected}" '
                     f"(choose from {sets_info.keys()})"
                 )
             filter_blocks = [

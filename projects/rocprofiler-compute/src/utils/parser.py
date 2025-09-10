@@ -330,7 +330,7 @@ class MetricEvaluator:
                 f"raw_pmc_df_{key}": self.raw_pmc_df[key] for key in raw_pmc_df_keys
             }
         else:
-            raise ValueError(f"Unknown `raw_pmc_df` type '{type(self.raw_pmc_df)}'.")
+            raise ValueError(f'Unknown `raw_pmc_df` type: "{type(self.raw_pmc_df)}".')
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
@@ -1221,12 +1221,12 @@ def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, No
         data = json.load(file)
         found = find_key_recursively(data, search_key)
         if found is None:
-            console_error(f"Key '{search_key}' not found in the JSON file.")
+            console_error(f'Key "{search_key}" not found in the JSON file.')
         return found
 
 
 def search_pc_sampling_record(
-    records: Union[list[dict], dict]
+    records: Union[list[dict], dict],
 ) -> Optional[list[tuple]]:
     """
     Search PC sampling records, and group and sort them
@@ -1450,9 +1450,7 @@ def load_pc_sampling_data_per_kernel(
     if pc_sample_instructions:
         df["instruction"] = df["inst_index"].apply(
             lambda x: (
-                pc_sample_instructions[x]
-                if x < len(pc_sample_instructions)
-                else None
+                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
             )
         )
 
@@ -1694,9 +1692,7 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     return comparable_columns
 
 
-def correct_sys_info(
-    mspec: MachineSpecs, specs_correction: str
-) -> pd.DataFrame:
+def correct_sys_info( mspec: MachineSpecs, specs_correction: str) -> pd.DataFrame:
     """
     Correct system spec items manually based on user-provided corrections.
     """

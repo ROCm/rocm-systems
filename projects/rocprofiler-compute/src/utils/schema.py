@@ -74,6 +74,7 @@ class Workload:
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
 
+
 # Metrics will be calculated ONLY when the header(key) is in below list
 SUPPORTED_FIELD = [
     "Value",

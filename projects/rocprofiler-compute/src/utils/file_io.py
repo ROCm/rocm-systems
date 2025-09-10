@@ -359,4 +359,4 @@ def find_1st_sub_dir(directory: str) -> Optional[str]:
                 return str(entry)
         return None
     except FileNotFoundError:
-        console_error(f"The directory '{directory}' does not exist.", exit=False)
+        console_error(f'The directory "{directory}" does not exist.', exit=False)

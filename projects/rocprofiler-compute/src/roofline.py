@@ -218,9 +218,10 @@ class Roofline:
         return df
 
     def apply_analyze_kernel_filter(
-        self, df: dict[str, pd.DataFrame],
+        self,
+        df: dict[str, pd.DataFrame],
         path_str: Optional[str],
-        args: argparse.Namespace
+        args: argparse.Namespace,
     ) -> dict[str, pd.DataFrame]:
         """Apply kernel filter for analyze mode."""
         if not path_str:

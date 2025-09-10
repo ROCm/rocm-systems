@@ -269,8 +269,8 @@ class MIGPUSpecs:
         DEFAULT_NUM_XCD = 8
         console_warning(
             "Unable to determine xcd count from:\n\t"
-            f"GPU arch: '{gpu_arch}', model: '{gpu_model}',\n\t"
-            f"partition: '{compute_partition}'"
+            f'GPU arch: "{gpu_arch}", model: "{gpu_model}",\n\t'
+            f'partition: "{compute_partition}"'
         )
         console_warning(
             f"Applying default gfx942 settings:\n"
@@ -321,7 +321,7 @@ class MIGPUSpecs:
             else:
                 console_warning(
                     f"No compute partition data found for "
-                    f"architecture '{gpu_arch.upper() if gpu_arch else 'None'}'"
+                    f"architecture: {gpu_arch.upper() if gpu_arch else None}"
                 )
 
         # 3. Fall back to model + partition-based lookup
@@ -345,9 +345,8 @@ class MIGPUSpecs:
                     )
                 elif partition_norm not in model_dict:
                     console_warning(
-                        f"Unknown compute partition "
-                        f"'{compute_partition}' for model "
-                        f"'{gpu_model}'"
+                        f"Unknown compute partition: "
+                        f"{compute_partition} for model: {gpu_model}"
                     )
                 else:
                     num_xcds = model_dict[partition_norm]
