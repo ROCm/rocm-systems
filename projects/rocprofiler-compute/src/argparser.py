@@ -800,10 +800,10 @@ Examples:
         metavar="",
         nargs="+",
         help=(
-            '\t\tSpecify which hidden column names should be included in cli output.\n'
+            "\t\tSpecify which hidden column names should be included in cli output.\n"
             '\t\tFor example, to show "Description" column which is hidden by '
-            'default in cli output,\n'
-            '\t\tuse the option --include-cols Description.'
+            "default in cli output,\n"
+            "\t\tuse the option --include-cols Description."
         ),
     )
     analyze_advanced_group.add_argument(
@@ -831,7 +831,7 @@ Examples:
         "--specs-correction",
         type=str,
         metavar="",
-        help='\t\tSpecify the specs to correct. e.g. '
+        help="\t\tSpecify the specs to correct. e.g. "
         '--specs-correction="specname1:specvalue1,specname2:specvalue2"',
     )
     analyze_advanced_group.add_argument(

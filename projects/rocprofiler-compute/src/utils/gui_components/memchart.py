@@ -526,7 +526,9 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload
     )
 
 
-def get_memchart(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> html.Section:
+def get_memchart(
+    mem_data: list[dict[str, Any]], base_data: schema.Workload
+) -> html.Section:
     return html.Section(
         id="memchart",
         children=[
@@ -2044,7 +2046,7 @@ def get_memchart(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> 
     )
 
 
-def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str: # noqa: ANN401
+def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str:  # noqa: ANN401
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 

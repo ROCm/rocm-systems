@@ -244,7 +244,7 @@ def to_mod(
         return a % b
 
 
-def to_concat(a: Any, b: Any) -> str: # noqa: ANN401
+def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
 
 
@@ -1197,7 +1197,9 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     return df
 
 
-def find_key_recursively(data: Union[dict, list], search_key: str) -> Union[list, dict, None]:
+def find_key_recursively(
+    data: Union[dict, list], search_key: str
+) -> Union[list, dict, None]:
     """
     Recursively search for the search_key in the given data
     (which can be a dict or list).
@@ -1688,7 +1690,9 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     return comparable_columns
 
 
-def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> Optional[pd.DataFrame]:
+def correct_sys_info(
+    mspec: MachineSpecs, specs_correction: str
+) -> Optional[pd.DataFrame]:
     """
     Correct system spec items manually based on user-provided corrections.
     """
@@ -1704,5 +1708,7 @@ def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> Optional[pd.
         if hasattr(mspec, key):
             setattr(mspec, key, value)
         else:
-            console_error("analyze", f"Invalid spec '{key}'. Use --specs to see valid options")
+            console_error(
+                "analyze", f"Invalid spec '{key}'. Use --specs to see valid options"
+            )
     return mspec.get_class_members()

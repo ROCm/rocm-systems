@@ -47,7 +47,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname: str, soc: OmniSoC_Base) -> dict[str, Union[str, list[str]]]:
+    def get_profiler_options(
+        self, fname: str, soc: OmniSoC_Base
+    ) -> dict[str, Union[str, list[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 

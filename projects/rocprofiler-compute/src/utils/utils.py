@@ -681,7 +681,7 @@ def parse_text(text_file: str) -> list[str]:
 
 def run_prof(
     fname: str,
-    profiler_options: Union[list[str],  dict[str, Union[str, list[str]]]],
+    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     workload_dir: str,
     mspec: Any,  # noqa: ANN401
     loglevel: int,

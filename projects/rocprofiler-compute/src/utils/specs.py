@@ -103,7 +103,7 @@ def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
 
 # Custom decorator to mimic the behavior of kw_only found in Python 3.10
 def kw_only(cls: T) -> T:
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         for name, value in kwargs.items():
             setattr(self, name, value)
 
