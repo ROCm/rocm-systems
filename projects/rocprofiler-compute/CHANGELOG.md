@@ -23,6 +23,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
 
+* Roofline support for Debian 12 (and newer) and Azure Linux 3.0
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release
