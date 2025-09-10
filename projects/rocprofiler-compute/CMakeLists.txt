@@ -52,34 +52,17 @@ if(ENABLE_TESTS)
                 bash -c
                 "rocminfo | grep 'Name:' | grep -E 'gfx[0-9]+' | head -n 1 | awk '{print $2}'"
             OUTPUT_VARIABLE GPU_NAME
+            ERROR_VARIABLE ROCMINFO_ERROR
             OUTPUT_STRIP_TRAILING_WHITESPACE)
 
         if(GPU_NAME)
             string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
             set(ENABLE_KOKKOS ON)
             message(STATUS "Detected AMD GPU architecture: ${KOKKOS_ARCH}")
-            file(
-                WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake"
-                "set(MAKEFILE_PATH \"${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile\")\n"
-                "if(EXISTS \${MAKEFILE_PATH})\n"
-                "    file(READ \${MAKEFILE_PATH} MAKEFILE_CONTENT)\n"
-                "    string(REGEX REPLACE \"ifeq.*\nendif\n\" \"\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_PATH[^\\n]*=[^\\n]*\" \"KOKKOS_PATH = ${CMAKE_BINARY_DIR}/kokkos\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_DEVICES[^\\n]*=[^\\n]*\" \"KOKKOS_DEVICES = HIP\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_ARCH[^\\n]*=[^\\n]*\" \"KOKKOS_ARCH = AMD_${KOKKOS_ARCH}\nGPU_ARCH := ${GPU_NAME}\nCXX = amdclang++\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_CUDA_OPTIONS[^\\n]*=[^\\n]*\" \"KOKKOS_CUDA_OPTIONS = enable_lambda\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"CXX[ \t]*=[^\\n]*\" \"CXX = amdclang++\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"CXXFLAGS[ \t]*=[^\\n]*\" \"CXXFLAGS = -g -O3 -DUSE_OMP=1 -DUSE_MPI=0 -DRAJA_USE_GETTIME -I./includes -I./ -I/opt/rocm/include/hip -I/opt/rocm-7.1.0/include -x hip --offload-arch=$(GPU_ARCH)\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"LINKFLAGS[ \t]*=[^\\n]*\" \"LINKFLAGS = -lamdhip64 -L/opt/rocm-7.1.0/lib\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    file(WRITE \${MAKEFILE_PATH} \"\${MAKEFILE_CONTENT}\")\n"
-                "else()\n"
-                "    message(WARNING \"Makefile not found: ${MAKEFILE_PATH}\")\n"
-                "endif()\n")
-
         else()
             message(
                 WARNING
-                    "Could not detect AMD GPU architecture, using default: ${KOKKOS_ARCH}"
+                    "Could not detect AMD GPU architecture, Kokkos Test. Error: ${ROCMINFO_ERROR}"
                 )
         endif()
     elseif(WIN32)
@@ -93,24 +76,6 @@ if(ENABLE_TESTS)
             string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
             set(ENABLE_KOKKOS ON)
             message(STATUS "Detected GPU: ${KOKKOS_ARCH}")
-            file(
-                WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_makefile.cmake"
-                "set(MAKEFILE_PATH \"${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/Makefile\")\n"
-                "if(EXISTS \${MAKEFILE_PATH})\n"
-                "    file(READ \${MAKEFILE_PATH} MAKEFILE_CONTENT)\n"
-                "    string(REGEX REPLACE \"ifeq.*\nendif\n\" \"\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_PATH[^\\n]*=[^\\n]*\" \"KOKKOS_PATH = ${CMAKE_BINARY_DIR}/kokkos\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_DEVICES[^\\n]*=[^\\n]*\" \"KOKKOS_DEVICES = HIP\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_ARCH[^\\n]*=[^\\n]*\" \"KOKKOS_ARCH = AMD_${KOKKOS_ARCH}\nGPU_ARCH := ${GPU_NAME}\nCXX = clang-cl\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"KOKKOS_CUDA_OPTIONS[^\\n]*=[^\\n]*\" \"KOKKOS_CUDA_OPTIONS = enable_lambda\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"CXX[ \t]*=[^\\n]*\" \"CXX = clang-cl\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"CXXFLAGS[ \t]*=[^\\n]*\" \"CXXFLAGS = /O2 /DUSE_OMP=1 /DUSE_MPI=0 /DRAJA_USE_GETTIME /Iincludes /I. /I<C:/hip/include>\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"LINKFLAGS[ \t]*=[^\\n]*\" \"LINKFLAGS = /LIBPATH:C:/hip/lib amdhip64.lib\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    string(REGEX REPLACE \"rm -f \\*\\.o\" \"del /Q *.o\" MAKEFILE_CONTENT \"\${MAKEFILE_CONTENT}\")\n"
-                "    file(WRITE \${MAKEFILE_PATH} \"\${MAKEFILE_CONTENT}\")\n"
-                "else()\n"
-                "    message(WARNING \"Makefile not found: ${MAKEFILE_PATH}\")\n"
-                "endif()\n")
         else()
             message(
                 WARNING
