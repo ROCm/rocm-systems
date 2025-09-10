@@ -36,7 +36,7 @@ init_logging()
 // ensure that logging is always initialized when library is loaded
 bool init_logging_at_load = (init_logging(), true);
 
-using rocprofiler_register_functor_t = void(*)(uint64_t, void*, uint64_t);
+using rocprofiler_register_functor_t = void (*)(uint64_t, void*, uint64_t);
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -65,11 +65,13 @@ rocprofiler_attach_set_api_table(const char* name,
 
     rocprofiler::attach::dispatch_table_init();
 
-    if (register_functor)
+    if(register_functor)
     {
         auto callable = reinterpret_cast<rocprofiler_register_functor_t>(register_functor);
-        callable(rocprofiler_attach_get_version(), (void*)(rocprofiler::attach::get_dispatch_registration_table()), 1);
-    }    
+        callable(rocprofiler_attach_get_version(),
+                 (void*) (rocprofiler::attach::get_dispatch_registration_table()),
+                 1);
+    }
 
     // Initialize all registration services in attach
     rocprofiler::attach::queue_registration_init(hsa_api_table);

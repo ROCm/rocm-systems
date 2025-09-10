@@ -49,7 +49,6 @@ static_assert(false);
 
 namespace
 {
-
 /* Copied from glibc's elf.h.  */
 typedef struct
 {
