@@ -22,6 +22,7 @@
 
 cmake_minimum_required(VERSION 3.18.0)
 
+set( CORE_TARGET "roctracer" )
 project(roctracer VERSION 4.1.0)
 
 if(${ROCM_PATCH_VERSION})
@@ -80,6 +81,9 @@ message("-----------Dest-name: ${DEST_NAME}")
 message("------Install-prefix: ${CMAKE_INSTALL_PREFIX}")
 message("-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 
+set(PKG_MAINTAINER_NM  "ROCm Profiler Support")
+set(PKG_MAINTAINER_EMAIL  "dl.ROCm-Profiler.support@amd.com")
+
 ## Packaging directives
 set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
 set(ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
@@ -89,7 +93,7 @@ set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-set(CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCTRACER library")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
@@ -122,6 +126,10 @@ set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${PROJECT_NAME}-dev")
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
 set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${PROJECT_NAME}-tests")
 set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${PROJECT_NAME}-dev")
+
+# Debian specific packaging configuration
+configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+
 # Debian package specific variable for ASAN
 set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${PROJECT_NAME}-asan" )
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "rocm-core-asan" )
@@ -180,8 +188,10 @@ endif()
 if(ENABLE_ASAN_PACKAGING)
   # ASAN Package requires asan component with only libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
+  set( COMP_TYPE "CORE_ASAN" )
 else()
   set(CPACK_COMPONENTS_ALL runtime dev tests)
+  set( COMP_TYPE "CORE_RUNTIME" )
 endif()
 
 include(CPack)
