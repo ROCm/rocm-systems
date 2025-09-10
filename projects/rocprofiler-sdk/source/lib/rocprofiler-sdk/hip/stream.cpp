@@ -92,6 +92,13 @@ add_stream(hipStream_t stream)
             if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
             {
                 idx_offset += 1;
+                // Handle special hipStreamPerThread case where each thread has it's own implicit
+                // stream ID. No need to update map since hipStreamPerThread is defined as 0x02
+                if(_stream == hipStreamPerThread)
+                {
+                    return rocprofiler_stream_id_t{.handle = idx};
+                }
+                idx            = _data.size() + idx_offset;
                 auto _existing = _data.at(_stream);
                 ROCP_INFO << "existing hipStream_t ("
                           << sdk::utility::as_hex(static_cast<void*>(_stream))
@@ -99,7 +106,6 @@ add_stream(hipStream_t stream)
                           << "} -> rocprofiler_stream_id_t{.handle = " << idx << "}";
                 _data.at(_stream) = rocprofiler_stream_id_t{.handle = idx};
             }
-
             return _data.at(_stream);
         },
         stream);
@@ -108,10 +114,26 @@ add_stream(hipStream_t stream)
 auto
 get_stream_id(hipStream_t stream)
 {
+    // Handle special case where stream is hipStreamLegacy (0x01). Changes sync behavior of
+    // null stream, so the stream is assigned the value of the null stream
+    if(stream == hipStreamLegacy)
+    {
+        stream = nullptr;
+    }
+    // Handle special case where stream is hipStreamPerThread (0x02). Assigns implicit stream id to
+    // each thread
+    else if(stream == hipStreamPerThread)
+    {
+        static thread_local auto thr_stream_id = rocprofiler_stream_id_t{.handle = 0};
+        if(thr_stream_id.handle == 0) thr_stream_id = add_stream(stream);
+        return thr_stream_id;
+    }
     return get_stream_map()->rlock(
         [](const stream_map_t& _data, hipStream_t _stream) {
             ROCP_ERROR_IF(_data.count(_stream) == 0)
-                << "failed to retrieve stream ID in " << __FILE__;
+                << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
+                               sdk::utility::as_hex(static_cast<void*>(_stream)),
+                               __FILE__);
             return _data.at(_stream);
         },
         stream);

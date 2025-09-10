@@ -505,4 +505,213 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(void) {
   }
 }
 
+
+void MemoryAccessTest::MemoryAccessCoherentTest(void) {
+  hsa_status_t err;
+  
+  PrintMemorySubtestHeader("MemoryAccessCoherentTest in Memory Pools");
+
+  // find all cpu agents
+  std::vector<hsa_agent_t> cpus;
+  err = hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  // find all gpu agents
+  std::vector<hsa_agent_t> gpus;
+  err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // - allocate queue
+  hsa_queue_t *queue = NULL;
+  uint32_t queue_size = 0;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(gpus[0], HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+
+  err = hsa_queue_create(gpus[0], queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0, &queue);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  
+  int* host_buffer_src = nullptr;
+  int* host_buffer_dst = nullptr;
+
+  //getting the host memory pool
+  hsa_amd_memory_pool_t host_memory_pool;
+  err = hsa_amd_agent_iterate_memory_pools(cpus[0], rocrtst::GetGlobalMemoryPool, &host_memory_pool);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  //getting the device memory pool
+  hsa_amd_memory_pool_t device_pool;
+  err = hsa_amd_agent_iterate_memory_pools(gpus[0], rocrtst::GetGlobalMemoryPool, &device_pool);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+
+  // - allocate buffer in host memory
+  err = hsa_amd_memory_pool_allocate(host_memory_pool, kMemoryAllocSize*sizeof(int), 0, reinterpret_cast<void **>(&host_buffer_src));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_amd_memory_pool_allocate(host_memory_pool, kMemoryAllocSize*sizeof(int), 0, reinterpret_cast<void **>(&host_buffer_dst));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // - fill host-buffer-src with increasing integers pattern
+  int* src = static_cast<int*>(host_buffer_src);
+  int* dst = static_cast<int*>(host_buffer_dst);
+  for (int j = 0; j < kMemoryAllocSize; ++j) 
+    host_buffer_src[j] = j;
+  
+  // - memset host-buffer-dst with a different pattern 
+  memset(host_buffer_dst, 0xA5, kMemoryAllocSize * sizeof(int));
+
+  // - Allocate a buffer in Device Memory
+  int* device_buffer_src = nullptr;
+  int* device_buffer_dst = nullptr;
+
+  err = hsa_amd_memory_pool_allocate(device_pool, kMemoryAllocSize * sizeof(int), 0, reinterpret_cast<void**>(&device_buffer_src));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_memory_pool_allocate(device_pool, kMemoryAllocSize * sizeof(int), 0, reinterpret_cast<void**>(&device_buffer_dst));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // - Allow GPU access to host memory
+  err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, host_buffer_src);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, host_buffer_dst);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, device_buffer_src);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, device_buffer_dst);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(1, &cpus[0], NULL, device_buffer_src);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(1, &cpus[0], NULL, device_buffer_dst);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+
+  // - Create new signals
+  hsa_signal_t signal_shader_start = {0};  // start signal
+  err = hsa_signal_create(1, 0, NULL, &signal_shader_start);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  hsa_signal_t signal_shader_end = {0};  // completion signal
+  err = hsa_signal_create(1, 0, NULL, &signal_shader_end);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  hsa_signal_t signal_test_end = {0};  // test end signal
+  err = hsa_signal_create(1, 0, NULL, &signal_test_end);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // - handle kernel args
+  args* k_Args = NULL;
+
+  // Find a memory pool that supports kernel args
+  hsa_amd_memory_pool_t kernarg_pool;
+  err = hsa_amd_agent_iterate_memory_pools(cpus[0],
+                                            rocrtst::GetKernArgMemoryPool,
+                                            &kernarg_pool);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // Allocate the kernel argument buffer from the kernarg_pool.
+  err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+                                      reinterpret_cast<void **>(&k_Args));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);  
+
+  err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, k_Args);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // vector_copy kernel args
+  k_Args->a = device_buffer_src;
+  k_Args->b = device_buffer_dst;
+  k_Args->c = nullptr;
+
+
+  // - Place a Barrier-Value packet into the queue
+  // that waits on signal-shader-start to change from 1 to 0.
+  hsa_barrier_and_packet_t barrier_pkt;
+  memset(&barrier_pkt, 0, sizeof(barrier_pkt));
+  barrier_pkt.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier_pkt.completion_signal = {0};
+
+  // Set signal dependency
+  barrier_pkt.dep_signal[0] = signal_shader_start;
+  for (int i = 1; i < 5; ++i) {
+      barrier_pkt.dep_signal[i] = {0};
+  }
+
+  uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+  hsa_queue_store_write_index_relaxed(queue, index + 1);
+  reinterpret_cast<hsa_barrier_and_packet_t*>(queue->base_address)[index % queue->size] = barrier_pkt;
+
+  // - Place Dispatch packet into the queue
+  hsa_kernel_dispatch_packet_t dispatch_pkt;
+  memset(&dispatch_pkt, 0, sizeof(dispatch_pkt));
+
+  // - create kernel object for dispatch
+  set_kernel_file_name("vector_copy_kernels.hsaco");
+  set_kernel_name("vector_copy");
+  err = rocrtst::LoadKernelFromObjFile(this, &gpus[0]);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // initialize aql packet
+  dispatch_pkt.workgroup_size_x = 256;
+  dispatch_pkt.workgroup_size_y = 1;
+  dispatch_pkt.workgroup_size_z = 1;
+  dispatch_pkt.grid_size_x = kMemoryAllocSize;
+  dispatch_pkt.grid_size_y = 1;
+  dispatch_pkt.grid_size_z = 1;
+  dispatch_pkt.private_segment_size = 0;
+  dispatch_pkt.grid_size_x = kMemoryAllocSize;
+  dispatch_pkt.kernel_object = kernel_object(); // Assumes kernel loaded
+  dispatch_pkt.kernarg_address = k_Args;
+  dispatch_pkt.completion_signal = signal_shader_end;
+
+  const uint32_t queue_mask = queue->size - 1;
+
+  index = hsa_queue_load_write_index_relaxed(queue);
+  hsa_queue_store_write_index_relaxed(queue, index + 1);
+
+  rocrtst::WriteAQLToQueueLoc(queue, index, &dispatch_pkt);
+
+  hsa_kernel_dispatch_packet_t *q_base_addr =
+      reinterpret_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
+  rocrtst::AtomicSetPacketHeader(
+      (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+          (1 << HSA_PACKET_HEADER_BARRIER) |
+        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
+                (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+      reinterpret_cast<hsa_kernel_dispatch_packet_t *>
+                                        (&q_base_addr[index & queue_mask]));
+
+
+  err = hsa_amd_memory_async_copy(device_buffer_src, gpus[0], host_buffer_src, cpus[0],
+                                  kMemoryAllocSize * sizeof(int), 0, NULL, signal_shader_start);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  hsa_signal_t dep_signals[1] = { signal_shader_end };
+  err = hsa_amd_memory_async_copy(host_buffer_dst, cpus[0], device_buffer_dst, gpus[0],
+                                  kMemoryAllocSize * sizeof(int), 1, dep_signals, signal_test_end);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // - Ring the doorbell to start the queue
+  index = hsa_queue_load_write_index_relaxed(queue);
+  hsa_signal_store_relaxed(queue->doorbell_signal, index);
+
+
+  // - Wait for the signal-test-end to change from 1 to 0.
+  while (hsa_signal_wait_scacquire(signal_test_end,
+      HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) {}
+
+  // - Verify that host-buffer-src and host-buffer-dst have equal values.
+  for (int i = 0; i < kMemoryAllocSize; ++i) {
+    ASSERT_EQ(host_buffer_src[i], host_buffer_dst[i]);
+  }
+
+  //clean up allocated handles
+  if(host_buffer_src) { hsa_amd_memory_pool_free(host_buffer_src); }
+  if(host_buffer_dst) { hsa_amd_memory_pool_free(host_buffer_dst); }
+  if(device_buffer_src) { hsa_amd_memory_pool_free(device_buffer_src); }
+  if(device_buffer_dst) { hsa_amd_memory_pool_free(device_buffer_dst); }
+  if (signal_shader_start.handle) { hsa_signal_destroy(signal_shader_start); }
+  if (signal_shader_end.handle) { hsa_signal_destroy(signal_shader_end); }
+  if (signal_test_end.handle) { hsa_signal_destroy(signal_test_end); }
+  if (k_Args) { hsa_amd_memory_pool_free(k_Args); }
+  if (queue) { hsa_queue_destroy(queue); }
+
+}
+
 #undef RET_IF_HSA_ERR

@@ -1,0 +1,14 @@
+.*
+!.gitignore
+*.d
+*.o
+*.obj
+*.gch
+*.pch
+*.so
+*.dll
+*.a
+*.lib
+*.exe
+*.out
+build

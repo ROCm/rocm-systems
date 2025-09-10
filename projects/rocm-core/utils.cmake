@@ -174,6 +174,7 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
     # Check If Debian Platform
     find_file (DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
+      set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" FORCE )
       set_debian_pkg_cmake_flags( ${PACKAGE_NAME_T} ${PACKAGE_VERSION_T}
                                   ${MAINTAINER_NM_T} ${MAINTAINER_EMAIL_T} )
 
@@ -199,11 +200,36 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
         @ONLY
       )
 
+      if( BUILD_ENABLE_LINTIAN_OVERRIDES )
+	if(NOT BUILD_SHARED_LIBS)
+	  string(FIND ${DEB_OVERRIDES_INSTALL_FILENM} "static" OUT_VAR1)
+	  if(OUT_VAR1 EQUAL -1)
+	    set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-static" )
+          endif()
+	else()
+          if(ENABLE_ASAN_PACKAGING)
+	    string( FIND ${DEB_OVERRIDES_INSTALL_FILENM} "asan" OUT_VAR2)
+	    if(OUT_VAR2 EQUAL -1)
+	      set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-asan" )
+	    endif()
+          endif()
+	endif()
+	set( DEB_OVERRIDES_INSTALL_FILENM
+		"${DEB_OVERRIDES_INSTALL_FILENM}" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
+        # Configure the changelog file
+        configure_file(
+          "${CMAKE_SOURCE_DIR}/DEBIAN/overrides.in"
+          "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+	   FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+          @ONLY
+        )
+      endif()
+
       # Install Change Log 
       find_program ( DEB_GZIP_EXEC gzip )
       if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
         execute_process(
-          COMMAND ${DEB_GZIP_EXEC} -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+          COMMAND ${DEB_GZIP_EXEC} -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
           WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
           RESULT_VARIABLE result
           OUTPUT_VARIABLE output
@@ -217,7 +243,10 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
                   COMPONENT ${COMPONENT_NAME_T})
       endif()
     else()
-      message( STATUS "Ignore Configuring Debian Specific Packaging Configuration" )
+        # License file
+        install ( FILES ${LICENSE_FILE}
+            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
+            COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 
@@ -232,6 +261,11 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
     set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
     set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" ) 
+
+    if( BUILD_ENABLE_LINTIAN_OVERRIDES )
+      set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_PACKAGE_NAME}" CACHE STRING "Debian Package Lintian Override File Name" )
+      set( DEB_OVERRIDES_INSTALL_PATH   "/usr/share/lintian/overrides/" CACHE STRING "Deb Pkg Lintian Override Install Loc" )
+    endif()
 
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )

@@ -1,10 +1,36 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 import csv
 import sqlite3
 from contextlib import closing
 
 from utils.logger import console_error
 
-# From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql in rocprofiler-sdk repository
+# From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
+# in rocprofiler-sdk repository
 COUNTERS_COLLECTION_QUERY = """
 SELECT
     agent_id as GPU_ID,
@@ -39,9 +65,9 @@ def convert_db_to_csv(
             with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
                 with open(csv_file_path, "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow(
-                        [description[0] for description in cursor.description]
-                    )
+                    writer.writerow([
+                        description[0] for description in cursor.description
+                    ])
                     for row in cursor:
                         writer.writerow(row)
     except (sqlite3.DatabaseError, IOError) as e:
@@ -50,22 +76,21 @@ def convert_db_to_csv(
 
 def process_rocpd_csv(df):
     """
-    Merge counters across unique dispatches from the input dataframe and return processed dataframe.
+    Merge counters across unique dispatches from the
+    input dataframe and return processed dataframe.
     """
     # Only import pandas if needed
     import pandas as pd
 
     data = list()
     # Group by unique kernel and merge into a single row
-    for _, group_df in df.groupby(
-        [
-            "Dispatch_ID",
-            "Kernel_Name",
-            "Grid_Size",
-            "Workgroup_Size",
-            "LDS_Per_Workgroup",
-        ]
-    ):
+    for _, group_df in df.groupby([
+        "Dispatch_ID",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+    ]):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],
@@ -80,7 +105,8 @@ def process_rocpd_csv(df):
         }
         # Each counter will become its own column
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
-        # Replace end timestamp with median of durations of group, start timestamp is set to 0
+        # Replace end timestamp with median of durations of group,
+        # start timestamp is set to 0
         row["End_Timestamp"] = (
             group_df["End_Timestamp"] - group_df["Start_Timestamp"]
         ).median()

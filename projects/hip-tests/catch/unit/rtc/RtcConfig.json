@@ -1,0 +1,175 @@
+[  {
+      "block_name" : "all_compier_options",
+      "single_CO" : ["architecture", "rdc", "no_denormals",
+                     "denormals", "off_ffp_contract",
+                     "on_ffp_contract", "fast_ffp_contract",
+                     "no_fast_math", "fast_math",
+                     "no_slp_vectorize", "slp_vectorize",
+                     "macro", "undef_macro",
+                     "header_dir", "warning", "Rpass_inline",
+                     "conversion_error", "conversion_no_error",
+                     "conversion_no_warning", "conversion_warning",
+                     "max_thread", "no_unsafe_atomic", "unsafe_atomic",
+                     "no_infinite_num", "infinite_num",
+                     "no_NAN_num", "NAN_num",
+                     "no_finite_math", "finite_math",
+                     "no_associative_math",  "associative_math",
+                     "no_signed_zeros","signed_zeros",
+                     "no_trapping_math", "trapping_math"
+                     ],
+      "Combi_CO" : ["header_dir:no_denormals:undef_macro:slp_vectorize:warning:conversion_no_warning:no_associative_math",
+                    "max_thread:warning:architecture:macro:conversion_no_error:associative_math",
+                    "denormals:macro:warning:header_dir:conversion_no_warning:unsafe_atomic:no_slp_vectorize",
+                    "macro:warning:header_dir:undef_macro:architecture:on_ffp_contract:max_thread",
+                    "no_NAN_num:max_thread:undef_macro:header_dir:warning",
+                    "no_unsafe_atomic:fast_ffp_contract:undef_macro:fast_math",
+                    "warning:max_thread:denormals:header_dir:no_infinite_num",
+                    "no_denormals:header_dir:conversion_warning:off_ffp_contract",
+                    "max_thread:fast_math:macro:no_denormals:no_unsafe_atomic",
+                    "Rpass_inline:no_finite_math:NAN_num:warning:no_fast_math",
+                    "no_infinite_num:no_trapping_math:conversion_no_error",
+                    "infinite_num:no_trapping_math:undef_macro:header_dir",
+                    "infinite_num:NAN_num:no_finite_math:max_thread:NAN_num",
+                    "undef_macro:warning:header_dir:no_denormals:finite_math:associative_math",
+                    "header_dir:Rpass_inline:no_fast_math:infinite_num:NAN_num:no_finite_math",
+                    "denormals:no_unsafe_atomic:fast_ffp_contract",
+                    "fast_math:no_infinite_num:no_NAN_num:finite_math:associative_math:no_signed_zeros:no_trapping_math:fast_ffp_contract",
+                    "no_fast_math:infinite_num:NAN_num:no_finite_math:no_associative_math:signed_zeros:trapping_math:on_ffp_contract"
+                    ]
+   },
+  {
+      "block_name" : "architecture",
+      "compiler_option" : "--gpu-architecture=",
+      "kernel_name" : "max_thread"
+    },
+  {
+      "block_name" : "rdc",
+      "compiler_option" : "-fgpu-rdc",
+      "kernel_name" : "rdc"
+    },
+  {
+      "block_name" : "denormals",
+      "compiler_option" : "-fgpu-flush-denormals-to-zero",
+      "reverse_compiler_option" : "-fno-gpu-flush-denormals-to-zero",
+      "Input_Vals" : [2, -125, 2, -126, 2, -149, 2, -150, 2, -1000, 2, -2000, 2, -128],
+      "Expected_Results" : [1, 0, 0, 0, 0, 0, 0 ],
+      "Expected_Results_for_no" : [1, 1, 1, 0, 0, 0, 1 ],
+      "kernel_name" : "denormals"
+    },
+  {
+      "block_name" : "max_thread",
+      "compiler_option" : "--gpu-max-threads-per-block=",
+      "Target_Vals" : [10, 100],
+      "Input_Vals" : [ 1, 2, 3, 50, 30, 50, 100, 110],
+      "Expected_Results" : [1, 1, 1, 0, 1, 1, 1, 0 ],
+      "ready_compiler_option" : "--gpu-max-threads-per-block=1000",
+      "kernel_name" : "max_thread"
+    },
+  {
+      "block_name" : "fp32_div_sqrt",
+      "compiler_option" : "-fhip-fp32-correctly-rounded-divide-sqrt",
+      "reverse_compiler_option" : "-fno-hip-fp32-correctly-rounded-divide-sqrt",
+      "kernel_name" : "fp32_div_sqrt"
+    },
+  {
+      "block_name" : "ffp_contract",
+      "compiler_option" : ["-ffp-contract=off", "-ffp-contract=on", "-ffp-contract=fast", "-ffp-contract=fast-honor-pragmas"],
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "fast_math",
+      "compiler_option" : "-ffast-math",
+      "reverse_compiler_option" : "-fno-fast-math",
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "warning",
+      "compiler_option" : "-w",
+      "kernel_name" : "warning"
+    },
+  {
+      "block_name" : "error",
+      "compiler_option" : ["-Werror=conversion", "-Wno-error=conversion", "-Wconversion", "-Wno-conversion"],
+      "kernel_name" : "error"
+    },
+  {
+      "block_name" : "Rpass_inline",
+      "compiler_option" : "-Rpass=inline",
+      "kernel_name" : "max_thread"
+    },
+  {
+      "block_name" : "macro",
+      "compiler_option" : "-DPI=50",
+      "Expected_Results" : [50],
+      "kernel_name" : "macro"
+    },
+  {
+      "block_name" : "undef_macro",
+      "compiler_option" : ["-DZ=10", "-UZ"],
+      "kernel_name" : "undef_macro"
+    },
+  {
+      "block_name" : "header_dir",
+      "compiler_option" : "-I",
+      "depending_comp_optn" : ["-includefact.h"],
+  	  "Headers" : ["RtcFact.h"],
+      "Src_headers" : ["__device__ int fact(int num) {int fact =1; for (int i=1 ; i<= num ; i++){fact*=i;}return fact;}"],
+    	"Input_Vals" : [5, 10],
+     	"Expected_Results" : [120, 3628800],
+      "kernel_name" : "header_dir"
+    },
+  {
+      "block_name" : "amdgpu_ieee",
+      "compiler_option" : ["-mamdgpu-ieee"],
+      "reverse_compiler_option" : ["-mno-amdgpu-ieee", "-fno-honor-nans"],
+      "kernel_name" : "amdgpu_ieee"
+    },
+  {
+      "block_name" : "slp_vectorize",
+      "compiler_option" : "-fslp-vectorize",
+      "reverse_compiler_option" : "-fno-slp-vectorize",
+      "kernel_name" : "slp_vectorize"
+    },
+  {
+      "block_name" : "unsafe_atomic",
+      "compiler_option" : "-munsafe-fp-atomics",
+      "reverse_compiler_option" : "-mno-unsafe-fp-atomics",
+      "kernel_name" : "unsafe_atomic"
+    },
+  {
+      "block_name" : "infinite_num",
+      "compiler_option" : "-fhonor-infinities",
+      "reverse_compiler_option" : "-fno-honor-infinities",
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "NAN_num",
+      "compiler_option" : "-fhonor-nans",
+      "reverse_compiler_option" : "-fno-honor-nans",
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "finite_math",
+      "compiler_option" : "-ffinite-math-only",
+      "reverse_compiler_option" : "-fno-finite-math-only",
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "associative_math",
+      "compiler_option" : "-fassociative-math",
+      "reverse_compiler_option" : "-fno-associative-math",
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "signed_zeros",
+      "compiler_option" : "-fsigned-zeros",
+      "reverse_compiler_option" : "-fno-signed-zeros",
+      "kernel_name" : "ffp_contract"
+    },
+  {
+      "block_name" : "trapping_math",
+      "compiler_option" : "-ftrapping-math",
+      "reverse_compiler_option" : "-fno-trapping-math",
+      "kernel_name" : "ffp_contract"
+  }
+]

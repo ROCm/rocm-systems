@@ -25,11 +25,43 @@
 
 import argparse
 import os
+import math
 
 from typing import Any, List, Tuple
 from .importer import RocpdImportData, execute_statement
 from .query import export_sqlite_query
 from . import output_config
+
+
+def check_function_availability(connection, function_name):
+    """
+    Checks if a given function exists in the SQLite database.
+
+    Args:
+        connection (sqlite3 db connection): The SQLite database connection handler.
+        function_name (str): The name of the function to check.
+
+    Returns:
+        bool: True if the function exists, False otherwise.
+    """
+    cursor = connection.cursor()
+
+    try:
+        # Try the modern approach first (SQLite 3.30.0+)
+        cursor.execute(
+            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?)",
+            (function_name,),
+        )
+        result = cursor.fetchone()[0]
+        return bool(result)
+    except Exception:
+        # Fallback for older SQLite versions (Workaround for RHEL 8)
+        # Try to execute a simple query using the function to see if it exists
+        try:
+            cursor.execute(f"SELECT {function_name}(1)")
+            return True
+        except Exception:
+            return False
 
 
 def get_temp_view_names(connection: RocpdImportData) -> List[str]:
@@ -373,6 +405,17 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     output_path = kwargs.get("output_path", "./rocpd-output-data")
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
+
+    if not check_function_availability(connection, "sqrt"):
+        connection.create_function(
+            "sqrt",
+            1,
+            lambda x: (
+                math.sqrt(x)
+                if x is not None and isinstance(x, (int, float)) and x >= 0
+                else None
+            ),
+        )
 
     # create the temporary summary views
     create_summary_views(connection, by_rank)

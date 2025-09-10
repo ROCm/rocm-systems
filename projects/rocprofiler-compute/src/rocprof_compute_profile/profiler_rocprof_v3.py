@@ -23,19 +23,16 @@
 
 ##############################################################################
 
-
-import os
 import shlex
 from pathlib import Path
 
-import config
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from utils.logger import console_error, console_log, demarcate
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
-    def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
-        super().__init__(profiling_args, profiler_mode, soc, supported_archs)
+    def __init__(self, profiling_args, profiler_mode, soc):
+        super().__init__(profiling_args, profiler_mode, soc)
         self.ready_to_profile = (
             self.get_args().roof_only
             and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
@@ -49,7 +46,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             trace_option = "--kokkos-trace"
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
             console_error(
-                "The option '--kokkos-trace' is not supported in the current version of rocprof-compute. This functionality is planned for a future release. Please adjust your profiling options accordingly."
+                "The option '--kokkos-trace' is not supported in the current "
+                "version of rocprof-compute. This functionality is planned for a "
+                "future release. Please adjust your profiling options accordingly."
             )
         if self.get_args().hip_trace:
             trace_option = "--hip-trace"
@@ -107,10 +106,10 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     @demarcate
     def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
-        super().post_processing()
-
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
-            # Replace timestamp data to solve a known rocprof bug
-            # replace_timestamps(self.get_args().path)
+            # Run roofline microbenchmark
+            super().post_processing()
+        else:
+            console_log("roofline", "Detected existing pmc_perf.csv")

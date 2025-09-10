@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 do_update_alternatives(){
     # skip update if program doesn't exist
@@ -40,7 +41,7 @@ do_update_alternatives(){
         update-alternatives --install "/opt/rocm" "rocm" "@CPACK_PACKAGING_INSTALL_PREFIX@" "$altscore"
     fi
 
-    for loc in "/usr/share/modules/modulefiles" "/usr/local/Modules/modulefiles" "/usr/share/Modules/modulefiles"
+    for loc in "/usr/share/modules/modulefiles" "/usr/local/Modules/modulefiles" "/usr/share/Modules/modulefiles" "/usr/share/Modules/3.2.10/modulefiles"
     do
        if [ -d "$loc" ]
        then

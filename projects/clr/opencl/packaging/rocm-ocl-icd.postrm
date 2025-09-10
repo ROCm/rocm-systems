@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -e
+
+rm_ldconfig() {
+  ldconfig
+}
+
+case "$1" in
+  purge)
+  ;;
+  remove | upgrade )
+    rm_ldconfig
+  ;;
+  *)
+    exit 0
+  ;;
+esac

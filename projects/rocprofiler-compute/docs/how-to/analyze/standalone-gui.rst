@@ -83,6 +83,7 @@ application's profiling data:
 #. Top Stats (Top Kernel Statistics)
 #. System Info
 #. System Speed-of-Light
+#. Roofline AI Data Metrics
 
 To dive deeper, use the dropdown menus at the top of the screen to isolate
 particular kernels or dispatches. You should see the web page update with

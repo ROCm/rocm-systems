@@ -1,0 +1,239 @@
+/* All views: initial background and text color */
+body
+{
+  color: #000000;
+  background-color: #FFFFFF;
+}
+
+/* All views: standard link format*/
+a:link
+{
+  color: #284FA8;
+  text-decoration: underline;
+}
+
+/* All views: standard link - activated format */
+a:active
+{
+  color: #FF0040;
+  text-decoration: underline;
+}
+
+/* All views: main title format */
+td.title
+{
+  text-align: center;
+  padding-bottom: 10px;
+  font-family: sans-serif;
+  font-size: 20pt;
+  font-style: italic;
+  font-weight: bold;
+}
+
+/* All views: header item format */
+td.headerItem
+{
+  text-align: right;
+  padding-right: 6px;
+  font-family: sans-serif;
+  font-weight: bold;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+/* All views: header item value format */
+td.headerValue
+{
+  text-align: left;
+  color: #284FA8;
+  font-family: sans-serif;
+  font-weight: bold;
+}
+
+/* All views: header item coverage table heading */
+td.headerCovTableHead
+{
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  font-size: 80%;
+  white-space: nowrap;
+}
+
+/* All views: header item coverage table entry */
+td.headerCovTableEntry
+{
+  text-align: center;
+  color: #284FA8;
+  font-family: sans-serif;
+  font-weight: bold;
+  white-space: nowrap;
+  padding-left: 6px;
+  padding-right: 6px;
+  background-color: #DAE7FE;
+}
+
+/* All views: header item coverage table entry for high coverage rate */
+td.headerCovTableEntryHi
+{
+  text-align: center;
+  color: #000000;
+  font-family: sans-serif;
+  font-weight: bold;
+  white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 4px;
+  background-color: #77DD77;
+}
+
+/* All views: header item coverage table entry for medium coverage rate */
+td.headerCovTableEntryMed
+{
+  text-align: center;
+  color: #000000;
+  font-family: sans-serif;
+  font-weight: bold;
+  white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 4px;
+  background-color: #E9EC6B;
+}
+
+/* All views: header item coverage table entry for ow coverage rate */
+td.headerCovTableEntryLo
+{
+  text-align: center;
+  color: #000000;
+  font-family: sans-serif;
+  font-weight: bold;
+  white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 4px;
+  background-color: #E66360;
+}
+
+/* All views: color of horizontal ruler */
+td.ruler
+{
+  background-color: #6688D4;
+}
+
+/* All views: version string format */
+td.versionInfo
+{
+  text-align: center;
+  padding-top: 2px;
+  font-family: sans-serif;
+  font-style: italic;
+}
+
+/* Directory view/File view (all)/Test case descriptions:
+   table headline format */
+td.tableHead
+{
+  text-align: center;
+  color: #FFFFFF;
+  background-color: #6688D4;
+  font-family: sans-serif;
+  font-weight: bold;
+  white-space: nowrap;
+  padding-left: 4px;
+  padding-right: 4px;
+  word-break: break-all;
+}
+
+/* Directory view/File view (all): filename entry format */
+td.coverFile
+{
+  text-align: left;
+  padding-left: 10px;
+  padding-right: 20px; 
+  color: #284FA8;
+  background-color: #DAE7FE;
+  font-family: monospace;
+}
+
+/* Directory view/File view (all): bar-graph entry format*/
+td.coverBar
+{
+  padding-left: 10px;
+  padding-right: 10px;
+  background-color: #DAE7FE;
+}
+
+/* Directory view/File view (all): bar-graph outline color */
+td.coverBarOutline
+{
+  background-color: #000000;
+}
+
+/* Directory view/File view (all): line count entry for files with
+   deprecated functions */
+td.coverDeprecated
+{
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  background-color: #d2d2d2;
+  white-space: nowrap;
+  font-family: sans-serif;
+}
+
+/* Directory view/File view (all): line count entry for files with
+   high coverage rate */
+td.coverNumHi
+{
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  background-color: #77DD77;
+  white-space: nowrap;
+  font-family: sans-serif;
+}
+
+/* Directory view/File view (all): line count entry for files with
+   medium coverage rate */
+td.coverNumMed
+{
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  background-color: #E9EC6B;
+  white-space: nowrap;
+  font-family: sans-serif;
+}
+
+/* Directory view/File view (all): line count entry for files with
+   low coverage rate */
+td.coverNumLo
+{
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  background-color: #E66360;
+  white-space: nowrap;
+  font-family: sans-serif;
+}
+
+/* File view (all): "show/hide details" link format */
+a.detail:link
+{
+  color: #B8D0FF;
+  font-size:80%;
+}
+
+/* File view (all): "show/hide details" link - visited format */
+a.detail:visited
+{
+  color: #B8D0FF;
+  font-size:80%;
+}
+
+/* File view (all): "show/hide details" link - activated format */
+a.detail:active
+{
+  color: #FFFFFF;
+  font-size:80%;
+}

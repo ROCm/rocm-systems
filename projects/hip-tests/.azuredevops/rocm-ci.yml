@@ -1,0 +1,48 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+  pipelines:
+  - pipeline: hip_pipeline
+    source: \HIP
+    trigger:
+      branches:
+        include:
+        - amd-staging
+        - amd-mainline
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - amd-staging
+    - amd-mainline
+  paths:
+    exclude:
+    - '.jenkins'
+    - CODEOWNERS
+    - LICENSE.txt
+    - '**/.md'
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - amd-staging
+    - amd-mainline
+  paths:
+    exclude:
+    - '.jenkins'
+    - CODEOWNERS
+    - LICENSE.txt
+    - '**/.md'
+  drafts: false
+
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/hip-tests.yml@pipelines_repo

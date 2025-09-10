@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import argparse
 import os
 import re
@@ -31,13 +30,15 @@ from pathlib import Path
 
 
 def print_avail_arch(avail_arch: list):
-    ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
+    ret_str = "List all available metrics for analysis on specified arch:"
     for arch in avail_arch:
-        ret_str += "\n\t\t\t   {}".format(arch)
+        ret_str += "\n   {}".format(arch)
     return ret_str
 
 
-def add_general_group(parser, rocprof_compute_version):
+def add_general_group(
+    parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+):
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -56,6 +57,20 @@ def add_general_group(parser, rocprof_compute_version):
     general_group.add_argument(
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
+    general_group.add_argument(
+        "--list-metrics",
+        dest="list_metrics",
+        metavar="",
+        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        help=print_avail_arch(supported_archs.keys()),
+    )
+    general_group.add_argument(
+        "--config-dir",
+        dest="config_dir",
+        metavar="",
+        help="Specify the directory of customized report section configs.",
+        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
+    )
     # Nowhere to load specs from in db mode
     if "database" not in parser.usage:
         general_group.add_argument(
@@ -72,7 +87,9 @@ def omniarg_parser(
 
     ## General Command Line Options
     ## ----------------------------
-    add_general_group(parser, rocprof_compute_version)
+    add_general_group(
+        parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
 
@@ -87,7 +104,8 @@ def omniarg_parser(
         help="Profile the target application",
         usage="""
 
-rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <profile_cmd>
+`rocprof-compute profile --name <workload_name>
+[profile options] [roofline options] -- <profile_cmd>`
 
 ---------------------------------------------------------------------------------
 Examples:
@@ -106,7 +124,9 @@ Examples:
     )
     profile_parser._optionals.title = "Help"
 
-    add_general_group(profile_parser, rocprof_compute_version)
+    add_general_group(
+        profile_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
@@ -118,7 +138,9 @@ Examples:
         dest="name",
         help="\t\t\tAssign a name to workload.",
     )
-    profile_group.add_argument("--target", type=str, default=None, help=argparse.SUPPRESS)
+    profile_group.add_argument(
+        "--target", type=str, default=None, help=argparse.SUPPRESS
+    )
     profile_group.add_argument(
         "-p",
         "--path",
@@ -127,8 +149,9 @@ Examples:
         dest="path",
         default=str(Path(os.getcwd()).joinpath("workloads")),
         required=False,
-        help="\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {}/workloads/<name>)".format(
-            os.getcwd()
+        help=(
+            "\t\t\tSpecify path to save workload.\n\t\t\t"
+            "(DEFAULT: {}/workloads/<name>)".format(os.getcwd())
         ),
     )
     profile_group.add_argument(
@@ -138,7 +161,9 @@ Examples:
         dest="subpath",
         default="gpu",
         required=False,
-        help="\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model.",
+        help=(
+            "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
+        ),
     )
     profile_group.add_argument(
         "--hip-trace",
@@ -146,7 +171,10 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help="\t\t\tHIP trace, execturion trace for the entire application at the HIP level.",
+        help=(
+            "\t\t\tHIP trace, execturion trace for the entire application at the HIP "
+            "level."
+        ),
     )
     profile_group.add_argument(
         "--kokkos-trace",
@@ -187,6 +215,12 @@ Examples:
         raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
 
     profile_group.add_argument(
+        "--list-available-metrics",
+        dest="list_available_metrics",
+        help="\t\t\tList all available metrics for analysis on current arch",
+        action="store_true",
+    )
+    profile_group.add_argument(
         "-b",
         "--block",
         type=validate_block,
@@ -195,18 +229,13 @@ Examples:
         nargs="+",
         required=False,
         default=[],
-        help="""\t\t\tSpecify metric id(s) from --list-metrics for filtering (e.g. 12, 12.1, 12.1.1).\n\t\t\tCan provide multiple space separated arguments.""",
+        help=(
+            "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
+            "(e.g. 12, 12.1, 12.1.1).\n"
+            "\t\t\tCan provide multiple space separated arguments.\n"
+            "\t\t\tCannot be used with --set or --roof-only"
+        ),
     )
-    profile_group.add_argument(
-        "--list-metrics",
-        metavar="",
-        nargs="?",
-        const="",
-        # Argument to --list-metrics is optional
-        choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
-    )
-
     profile_group.add_argument(
         "--list-sets",
         action="store_true",
@@ -216,23 +245,25 @@ Examples:
         "--set",
         default=None,
         dest="set_selected",
-        help="\t\t\tProfile a set of metrics of topic of interest by collecting counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
+        help=(
+            "\t\t\tProfile a set of metrics of topic of interest by collecting "
+            "counters in a single pass.\n"
+            "\t\t\tFor available sets, see --list-sets\n"
+            "\t\t\tCannot be used with --block or --roof-only"
+        ),
     )
 
-    profile_group.add_argument(
-        "--config-dir",
-        dest="config_dir",
-        metavar="",
-        help="\t\t\tSpecify the directory of customized report section configs.",
-        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
-    )
     profile_group.add_argument(
         "--join-type",
         metavar="",
         required=False,
         choices=["kernel", "grid"],
         default="grid",
-        help="\t\t\tChoose how to join rocprof runs: (DEFAULT: grid)\n\t\t\t   kernel (i.e. By unique kernel name dispatches)\n\t\t\t   grid (i.e. By unique kernel name + grid size dispatches)",
+        help=(
+            "\t\t\tChoose how to join rocprof runs: (DEFAULT: grid)\n"
+            "\t\t\t   kernel (i.e. By unique kernel name dispatches)\n"
+            "\t\t\t   grid (i.e. By unique kernel name + grid size dispatches)"
+        ),
     )
     profile_group.add_argument(
         "--no-roof",
@@ -274,7 +305,10 @@ Examples:
         metavar="",
         dest="pc_sampling_method",
         default="stochastic",
-        help="\t\t\tSet the method of pc sampling, stochastic or host_trap. Support stochastic only >= MI300",
+        help=(
+            "\t\t\tSet the method of pc sampling, stochastic or host_trap. "
+            "Support stochastic only >= MI300"
+        ),
     )
 
     profile_group.add_argument(
@@ -283,7 +317,12 @@ Examples:
         metavar="",
         dest="pc_sampling_interval",
         default=1048576,
-        help="\t\t\tSet the interval of pc sampling.\n\t\t\t   For stochastic sampling, the interval is in cycles.\n\t\t\t   For host_trap sampling, the interval is in microsecond (DEFAULT: 1048576).",
+        help=(
+            "\t\t\tSet the interval of pc sampling.\n"
+            "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
+            "\t\t\t  For host_trap sampling, the interval is in microsecond "
+            "(DEFAULT: 1048576)."
+        ),
     )
 
     profile_group.add_argument(
@@ -299,7 +338,10 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help="\t\t\tRetain the large raw rocpd database in workload directory.\n\t\t\tThis option requires --format-rocprof-output rocpd.",
+        help=(
+            "\t\t\tRetain the large raw rocpd database in workload directory.\n"
+            "\t\t\tThis option requires --format-rocprof-output rocpd."
+        ),
     )
 
     ## Roofline Command Line Options
@@ -308,7 +350,10 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help="\t\t\tProfile roofline data only.",
+        help=(
+            "\t\t\tProfile roofline data only.\n"
+            "\t\t\tCannot be used with --block or --set"
+        ),
     )
     roofline_group.add_argument(
         "--sort",
@@ -317,7 +362,11 @@ Examples:
         type=str,
         default="kernels",
         choices=["kernels", "dispatches"],
-        help="\t\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n\t\t\t   kernels\n\t\t\t   dispatches",
+        help=(
+            "\t\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n"
+            "\t\t\t   kernels\n"
+            "\t\t\t   dispatches"
+        ),
     )
     roofline_group.add_argument(
         "-m",
@@ -328,7 +377,13 @@ Examples:
         nargs="+",
         type=str,
         default="ALL",
-        help="\t\t\tFilter by memory level: (DEFAULT: ALL)\n\t\t\t   HBM\n\t\t\t   L2\n\t\t\t   vL1D\n\t\t\t   LDS",
+        help=(
+            "\t\t\tFilter by memory level: (DEFAULT: ALL)\n"
+            "\t\t\t   HBM\n"
+            "\t\t\t   L2\n"
+            "\t\t\t   vL1D\n"
+            "\t\t\t   LDS"
+        ),
     )
     roofline_group.add_argument(
         "--device",
@@ -350,19 +405,58 @@ Examples:
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
+        choices=[
+            "FP4",
+            "FP6",
+            "FP8",
+            "FP16",
+            "BF16",
+            "FP32",
+            "FP64",
+            "I8",
+            "I32",
+            "I64",
+        ],
         metavar="",
         nargs="+",
         type=str,
         default=["FP32"],
-        help="\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t   FP6\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t   I32\n\t\t\t   I64\n\t\t\t ",
+        help=(
+            "\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n"
+            "\t\t\t   FP4\n"
+            "\t\t\t   FP6\n"
+            "\t\t\t   FP8\n"
+            "\t\t\t   FP16\n"
+            "\t\t\t   BF16\n"
+            "\t\t\t   FP32\n"
+            "\t\t\t   FP64\n"
+            "\t\t\t   I8\n"
+            "\t\t\t   I32\n"
+            "\t\t\t   I64\n"
+            "\t\t\t "
+        ),
     )
 
-    # roofline_group.add_argument('-w', '--workgroups', required=False, default=-1, type=int, help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)")
-    # roofline_group.add_argument('--wsize', required=False, default=-1, type=int, help="\t\t\tWorkgroup size (DEFAULT: 256)")
-    # roofline_group.add_argument('--dataset', required=False, default = -1, type=int, help="\t\t\tDataset size (DEFAULT: 536M)")
-    # roofline_group.add_argument('-e', '--experiments', required=False, default=-1, type=int, help="\t\t\tNumber of experiments (DEFAULT: 100)")
-    # roofline_group.add_argument('--iter', required=False, default=-1, type=int, help="\t\t\tNumber of iterations (DEFAULT: 10)")
+    # roofline_group.add_argument(
+    #     '-w', '--workgroups', required=False, default=-1, type=int,
+    #     help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)"
+    # )
+    # roofline_group.add_argument(
+    #     '--wsize', required=False, default=-1, type=int,
+    #     help="\t\t\tWorkgroup size (DEFAULT: 256)"
+    # )
+    # roofline_group.add_argument(
+    #     '--dataset', required=False, default=-1, type=int,
+    #     help="\t\t\tDataset size (DEFAULT: 536M)"
+    # )
+    # roofline_group.add_argument(
+    #     '-e', '--experiments', required=False, default=-1, type=int,
+    #     help="\t\t\tNumber of experiments (DEFAULT: 100)"
+    # )
+    # roofline_group.add_argument(
+    #     '--iter', required=False, default=-1, type=int,
+    #     help="\t\t\tNumber of iterations (DEFAULT: 10)"
+    # )
 
     ## Database Command Line Options
     ## ----------------------------
@@ -374,9 +468,11 @@ Examples:
 
             \n\n-------------------------------------------------------------------------------
             \nExamples:
-            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
-            \n\trocprof-compute database --remove -H pavii1 -u temp -w rocprofiler-compute_asw_sample_mi200
-            \n-------------------------------------------------------------------------------\n
+            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "
+            "workloads/vcopy/mi200/"
+            "\n\trocprof-compute database --remove -H pavii1 -u temp -w "
+            "rocprofiler-compute_asw_sample_mi200"
+            "\n-------------------------------------------------------------------------------\n"
         """,
         prog="tool",
         allow_abbrev=False,
@@ -386,7 +482,9 @@ Examples:
     )
     db_parser._optionals.title = "Help"
 
-    add_general_group(db_parser, rocprof_compute_version)
+    add_general_group(
+        db_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
 
@@ -445,13 +543,20 @@ Examples:
         required=True,
         metavar="",
         dest="workload",
-        help="\t\t\t\tSpecify name of workload (to remove) or path to workload (to import)",
+        help=(
+            "\t\t\t\tSpecify name of workload (to remove) or path to workload "
+            "(to import)"
+        ),
     )
     connection_group.add_argument(
         "--kernel-verbose",
         required=False,
         metavar="",
-        help="\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 5) (DISABLE: 5)",
+        help=(
+            "\t\tSpecify Kernel Name verbose level 1-5. "
+            "Lower the level, shorter the kernel name. "
+            "(DEFAULT: 5) (DISABLE: 5)"
+        ),
         default=5,
         type=int,
     )
@@ -479,7 +584,9 @@ Examples:
     )
     analyze_parser._optionals.title = "Help"
 
-    add_general_group(analyze_parser, rocprof_compute_version)
+    add_general_group(
+        analyze_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+    )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
 
@@ -499,10 +606,10 @@ Examples:
         help="\t\tList all detected kernels and kernel dispatches.",
     )
     analyze_group.add_argument(
-        "--list-metrics",
-        metavar="",
-        choices=supported_archs.keys(),  # ["gfx906", "gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
+        "--list-available-metrics",
+        dest="list_available_metrics",
+        help="\t\tList all available metrics for analysis on current arch",
+        action="store_true",
     )
     analyze_group.add_argument(
         "-k",
@@ -547,34 +654,79 @@ Examples:
         help="\t\tMode of spatial multiplexing.",
     )
     analyze_group.add_argument(
-        "-o",
-        "--output",
+        "--output-format",
         metavar="",
-        dest="output_file",
-        help="\t\tSpecify an output file to save analysis results.",
+        dest="output_format",
+        choices=["stdout", "txt", "csv", "db"],
+        default="stdout",
+        help=(
+            "\t\tSet the format of output file or folder containing analysis data.\n"
+            "\t\tBy default, file or folder created will "
+            "have the name rocprof_compute_<uuid>.\n"
+            "\t\tFile or folder name can be overriden using --output-name.\n"
+            "\t\tDefault output format is stdout which will not "
+            "generate any file/folder.\n"
+        ),
+    )
+    analyze_group.add_argument(
+        "--output-name",
+        metavar="",
+        dest="output_name",
+        help=(
+            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "with the specified name.\n"
+            "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
+        ),
     )
     analyze_group.add_argument(
         "--gui",
         type=int,
         nargs="?",
         const=8050,
-        help="\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n\t\tOptionally, specify port to launch application (DEFAULT: 8050)",
+        help=(
+            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
+            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
+        ),
     )
     analyze_group.add_argument(
         "--tui",
         action="store_true",
-        help="\t\tActivate a Textual User Interface (TUI) to interact with rocprofiler-compute metrics.",
+        help="\t\tActivate a Textual User Interface (TUI) to "
+        "interact with rocprofiler-compute metrics.",
     )
     analyze_group.add_argument(
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
+        choices=[
+            "FP4",
+            "FP6",
+            "FP8",
+            "FP16",
+            "BF16",
+            "FP32",
+            "FP64",
+            "I8",
+            "I32",
+            "I64",
+        ],
         metavar="",
         nargs="+",
         type=str,
         default=["FP32"],
-        help="\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t   FP6\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t   I32\n\t\t\t   I64\n\t\t\t ",
+        help=(
+            "\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n"
+            "\t\t\t   FP4\n"
+            "\t\t\t   FP6\n"
+            "\t\t\t   FP8\n"
+            "\t\t\t   FP16\n"
+            "\t\t\t   BF16\n"
+            "\t\t\t   FP32\n"
+            "\t\t\t   FP64\n"
+            "\t\t\t   I8\n"
+            "\t\t\t   I32\n"
+            "\t\t\t   I64\n\t\t\t "
+        ),
     )
 
     analyze_group.add_argument(
@@ -584,13 +736,15 @@ Examples:
         dest="pc_sampling_sorting_type",
         default="offset",
         type=str,
-        help="\t\tSet the sorting type of pc sampling: offset or count (DEFAULT: offset).",
+        help="\t\tSet the sorting type of pc sampling: "
+        "offset or count (DEFAULT: offset).",
     )
 
     analyze_advanced_group.add_argument(
         "--random-port",
         action="store_true",
-        help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151).",
+        help="\t\tRandomly generate a port to launch GUI application.\n"
+        "\t\tRegistered Ports range inclusive (1024-49151).",
     )
     analyze_advanced_group.add_argument(
         "--max-stat-num",
@@ -598,7 +752,8 @@ Examples:
         metavar="",
         type=int,
         default=10,
-        help='\t\tSpecify the maximum number of stats shown in "Top Stats" tables (DEFAULT: 10)',
+        help="\t\tSpecify the maximum number of stats shown in "
+        '"Top Stats" tables (DEFAULT: 10)',
     )
     analyze_advanced_group.add_argument(
         "-n",
@@ -607,7 +762,11 @@ Examples:
         metavar="",
         default="per_kernel",
         choices=["per_wave", "per_cycle", "per_second", "per_kernel"],
-        help="\t\tSpecify the normalization unit: (DEFAULT: per_kernel)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second\n\t\t   per_kernel",
+        help="\t\tSpecify the normalization unit: (DEFAULT: per_kernel)\n"
+        "\t\t   per_wave\n"
+        "\t\t   per_cycle\n"
+        "\t\t   per_second\n"
+        "\t\t   per_kernel",
     )
     analyze_advanced_group.add_argument(
         "-t",
@@ -616,7 +775,11 @@ Examples:
         metavar="",
         default="ns",
         choices=["s", "ms", "us", "ns"],
-        help="\t\tSpecify display time unit: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
+        help="\t\tSpecify display time unit: (DEFAULT: ns)\n"
+        "\t\t   s\n"
+        "\t\t   ms\n"
+        "\t\t   us\n"
+        "\t\t   ns",
     )
     analyze_advanced_group.add_argument(
         "--decimal",
@@ -626,25 +789,15 @@ Examples:
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
     )
     analyze_advanced_group.add_argument(
-        "--config-dir",
-        dest="config_dir",
-        metavar="",
-        help="\t\tSpecify the directory of customized configs.",
-        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
-    )
-    analyze_advanced_group.add_argument(
-        "--save-dfs",
-        dest="df_file_dir",
-        metavar="",
-        help="\t\tSpecify the dirctory to save analysis dataframe csv files.",
-    )
-    analyze_advanced_group.add_argument(
         "--cols",
         type=int,
         dest="cols",
         metavar="",
         nargs="+",
-        help="\t\tSpecify column indices to display.\n\t\tDefaults to display all columns.",
+        help=(
+            "\t\tSpecify column indices to display.\n"
+            "\t\tDefaults to display all columns."
+        ),
     )
     analyze_advanced_group.add_argument(
         "--include-cols",
@@ -653,7 +806,8 @@ Examples:
         nargs="+",
         help=(
             "\t\tSpecify which hidden column names should be included in cli output.\n"
-            "\t\tFor example, to show 'Description' column which is hidden by default in cli output,\n"
+            "\t\tFor example, to show 'Description' column which is hidden by "
+            "default in cli output,\n"
             "\t\tuse the option --include-cols Description."
         ),
     )
@@ -669,7 +823,9 @@ Examples:
         "--kernel-verbose",
         required=False,
         metavar="",
-        help="\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 5) (DISABLE: 5)",
+        help="\t\tSpecify Kernel Name verbose level 1-5. "
+        "Lower the level, shorter the kernel name. "
+        "(DEFAULT: 5) (DISABLE: 5)",
         default=5,
         type=int,
     )
@@ -680,7 +836,9 @@ Examples:
         "--specs-correction",
         type=str,
         metavar="",
-        help="\t\tSpecify the specs to correct. e.g. --specs-correction='specname1:specvalue1,specname2:specvalue2'",
+        help="\t\tSpecify the specs to correct. e.g. "
+        "--specs-correction='specname1:specvalue1,"
+        "specname2:specvalue2'",
     )
     analyze_advanced_group.add_argument(
         "--list-nodes",
@@ -693,5 +851,8 @@ Examples:
         type=str,
         dest="nodes",
         nargs="*",
-        help="\t\tMulti-node option: filter with node names. Enable it without node names means ALL.",
+        help=(
+            "\t\tMulti-node option: filter with node names. "
+            "Enable it without node names means ALL."
+        ),
     )

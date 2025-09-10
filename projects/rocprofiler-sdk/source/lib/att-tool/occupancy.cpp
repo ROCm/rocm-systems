@@ -68,7 +68,7 @@ OccupancyFile(const Fspath&                                     dir,
             json_event.push_back(event.time);
             json_event.push_back(event.cu);
             json_event.push_back(event.simd);
-            json_event.push_back(event.slot);
+            json_event.push_back(event.wave_id);
             json_event.push_back(event.start);
             json_event.push_back(get_kernel_id(event.pc));
             list.push_back(json_event);
@@ -81,10 +81,10 @@ OccupancyFile(const Fspath&                                     dir,
         std::stringstream ss;
         try
         {
-            ss << table->getSymbolMap(pc.marker_id).at(pc.addr).name;
+            ss << table->getSymbolMap(pc.code_object_id).at(pc.address).name;
         } catch(std::exception& e)
         {
-            ss << pc.marker_id << " / 0x" << std::hex << pc.addr << std::dec;
+            ss << pc.code_object_id << " / 0x" << std::hex << pc.address << std::dec;
         }
         jocc["dispatches"][std::to_string(id)] = ss.str();
     }

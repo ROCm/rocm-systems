@@ -13,9 +13,13 @@ import sys
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
-# documentation root, use str(Path(<rel_path>).absolute().resolve()) to make it absolute, like shown here.
-#
+# documentation root, use str(Path(<rel_path>).absolute().resolve())
+# to make it absolute, like shown here.
 from pathlib import Path
+
+from pygments.styles import get_all_styles
+from recommonmark.parser import CommonMarkParser
+from recommonmark.transform import AutoStructify
 
 sys.path.insert(0, str(Path("..").absolute().resolve()))
 
@@ -68,7 +72,6 @@ source_suffix = {
     ".md": "markdown",
 }
 
-from recommonmark.parser import CommonMarkParser
 
 source_parsers = {".md": CommonMarkParser}
 
@@ -94,7 +97,6 @@ pygments_style = None
 latex_engine = "lualatex"
 latex_show_urls = "footnote"
 
-
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -112,7 +114,6 @@ html_theme = "sphinx_rtd_theme"
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
-
 
 # -- Options for HTMLHelp output ---------------------------------------------
 
@@ -136,8 +137,6 @@ html_theme_options = {
     "titles_only": False,
 }
 
-from pygments.styles import get_all_styles
-
 # The name of the Pygments (syntax highlighting) style to use.
 styles = list(get_all_styles())
 preferences = ("emacs", "pastie", "colorful")
@@ -145,8 +144,6 @@ for pref in preferences:
     if pref in styles:
         pygments_style = pref
         break
-
-from recommonmark.transform import AutoStructify
 
 
 # app setup hook
