@@ -704,7 +704,7 @@ The metadata section includes essential session information such as process ID (
 
 The config section is the most comprehensive part, containing all profiling options with their resolved boolean and numerical values. This includes tracing options like ``hip_runtime_api_trace``, ``hip_compiler_api_trace``, ``kernel_trace``, ``hsa_core_api_trace``, ``memory_copy_trace``, and many others. It also shows advanced configuration like PC sampling settings (``pc_sampling_method``, ``pc_sampling_interval``), filtering options (``kernel_filter_include``, ``kernel_filter_exclude``), output formatting choices (``csv_output``, ``json_output``, ``pftrace_output``), and performance tuning parameters.
 
-The environment section captures all environment variables that were active during the profiling session, including system variables like ``SHELL``, ``COLORTERM``, ``HOSTNAME``, and ROCm-specific variables, providing complete environmental context for reproduction.
+The environment section captures all environment variables active during the profiling session, including system variables such as ``SHELL``, ``COLORTERM``, ``HOSTNAME``, and ROCm-specific variables, providing complete environmental context for reproduction.
 
 Example configuration output structure:
 
