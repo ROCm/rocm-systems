@@ -26,6 +26,7 @@
 #endif
 
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -78,15 +79,6 @@ namespace Results
 {
 using pcinfo_t = rocprofiler_thread_trace_decoder_pc_t;
 
-struct address_sort_t
-{
-    bool operator()(const pcinfo_t& a, const pcinfo_t& b) const
-    {
-        if(a.marker_id == b.marker_id) return a.addr < b.addr;
-        return a.marker_id < b.marker_id;
-    }
-};
-
 struct Latency
 {
     uint64_t latency{0};
@@ -94,7 +86,7 @@ struct Latency
 };
 
 // Maps address to latency
-using LatencyTable = std::map<rocprofiler_thread_trace_decoder_pc_t, Latency, address_sort_t>;
+using LatencyTable = std::map<rocprofiler_thread_trace_decoder_pc_t, Latency>;
 // Used to disassemble instructions at (id, vaddr) pair
 using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
@@ -135,7 +127,7 @@ gen_output_stream()
     {
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
-        auto  inst    = table->get(addr.marker_id, addr.addr);
+        auto  inst    = table->get(addr.code_object_id, addr.address);
 
         auto   comment = inst->comment;
         size_t pos     = comment.rfind('/');
@@ -309,6 +301,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
     // This is set by ctests: TODO: move to client.cpp
     // If nullptr, searches rocprofiler-sdk install location
     const char* lib_path = std::getenv("ROCPROFILER_TRACE_DECODER_LIB_PATH");
+    if(lib_path == nullptr) lib_path = "/opt/rocm/lib";
 
     DECODER_CALL(rocprofiler_thread_trace_decoder_create(&Decoder::decoder, lib_path));
 
