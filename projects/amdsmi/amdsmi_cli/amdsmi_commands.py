@@ -767,6 +767,7 @@ class AMDSMICommands():
             if args.ras:
                 ras_dict = {"eeprom_version": "N/A",
                             "bad_page_threshold": "N/A",
+                            "bad_page_threshold_exceeded": "N/A",
                             "parity_schema" : "N/A",
                             "single_bit_schema" : "N/A",
                             "double_bit_schema" : "N/A",
@@ -794,6 +795,23 @@ class AMDSMICommands():
                     ras_dict["bad_page_threshold"] = amdsmi_interface.amdsmi_get_gpu_bad_page_threshold(args.gpu)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get bad page threshold count for gpu %s | %s", gpu_id, e.get_error_info())
+                try:
+                    bad_page_info = amdsmi_interface.amdsmi_get_gpu_bad_page_info(args.gpu)
+                    retired_pages = 0
+                    if bad_page_info:
+                        for bad_page in bad_page_info:
+                            if bad_page["status"] == amdsmi_interface.AmdSmiMemoryPageStatus.RESERVED:
+                                retired_pages += 1
+                    # default to N/A
+                    ras_dict["bad_page_threshold_exceeded"] = "N/A"
+                    # If this is an int, then default to False
+                    if isinstance(ras_dict["bad_page_threshold"], int):
+                        ras_dict["bad_page_threshold_exceeded"] = "False"
+                        if retired_pages > ras_dict["bad_page_threshold"]:
+                            # If there are more retired pages then set to True
+                            ras_dict["bad_page_threshold_exceeded"] = "True"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get retired pages count for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
                     ras_states = amdsmi_interface.amdsmi_get_gpu_ras_block_features_enabled(args.gpu)
@@ -5383,8 +5401,7 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
             if args.profile:
-                reset_profile_results = {'power_profile' : 'N/A',
-                                        'performance_level': 'N/A'}
+                reset_profile_results = {'power_profile' : 'N/A'}
                 try:
                     power_profile_mask = amdsmi_interface.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
                     amdsmi_interface.amdsmi_set_gpu_power_profile(args.gpu, 0, power_profile_mask)
@@ -5394,16 +5411,6 @@ class AMDSMICommands():
                         raise PermissionError('Command requires elevation') from e
                     reset_profile_results['power_profile'] = f"[{e.get_error_info(detailed=False)}] Unable to reset Power Profile to default (bootup default)"
                     logging.debug("Failed to reset power profile on gpu %s | %s", gpu_id, e.get_error_info())
-                    # Attempt to reset performance level even if power profile fails
-                try:
-                    level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
-                    amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                    reset_profile_results['performance_level'] = 'Successfully reset Performance Level to default (auto)'
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        raise PermissionError('Command requires elevation') from e
-                    reset_profile_results['performance_level'] = f"[{e.get_error_info(detailed=False)}] Unable to reset Performance Level to default (auto)"
-                    logging.debug("Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info())
 
                 self.logger.store_output(args.gpu, 'reset_profile', reset_profile_results)
                 self.logger.print_output()

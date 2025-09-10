@@ -24,19 +24,15 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <string.h>
+#include <cstring>
 #include <memory>
 #include <regex>
 #include "amd_smi/impl/amd_smi_drm.h"
-#include "amd_smi/impl/amd_smi_common.h"
 #include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_logger.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 
 std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
@@ -207,6 +203,4 @@ uint32_t AMDSmiDrm::get_vendor_id() {
     return vendor_id;
 }
 
-}  // namespace smi
-}  // namespace amd
-
+} // namespace amd::smi

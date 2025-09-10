@@ -5,7 +5,7 @@ myst:
     "keywords": "system, management, interface, cpu, gpu, hsmp, versions"
 ---
 
-# AMD SMI library and CLI tool
+# Install the AMD SMI library and CLI tool
 
 This section describes how to install the AMD SMI library, Python interface,
 and command line tool either as part of the
@@ -24,6 +24,22 @@ The following are required to install and use the AMD SMI library through its la
   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
   ```
 
+### Supported platforms
+
+The AMD SMI library supports Linux bare metal and Linux virtual machine guest
+for AMD GPUs and AMD EPYC™ CPUs via
+[esmi_ib_lirary](https://github.com/amd/esmi_ib_library). To use AMD SMI for virtualization, refer to
+the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
+
+AMD SMI library can run on AMD ROCm supported platforms. Refer to
+{doc}`System requirements (Linux) <rocm-install-on-linux:reference/system-requirements>`
+for more information.
+<!--https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html-->
+
+To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` driver need
+to be installed. Optionally, `libdrm` can be installed to query firmware
+information and hardware IPs.
+
 ### Python interface and CLI tool prerequisites
 
 * Python version 3.6.8 or greater (64-bit)
@@ -37,21 +53,6 @@ sudo python3 -m pip install more_itertools
 ### Go interface prerequisites
 
 * Go version 1.20 or greater
-
-### Supported platforms
-
-At initial release, the AMD SMI library will support Linux bare metal and Linux
-virtual machine guest for AMD GPUs. In a future release, the library will be
-extended to support AMD EPYC™ CPUs.
-
-AMD SMI library can run on AMD ROCm supported platforms, refer to
-{doc}`System requirements (Linux) <rocm-install-on-linux:reference/system-requirements>`
-for more information.
-<!--https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html-->
-
-To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` driver need
-to be installed. Optionally, `libdrm` can be installed to query firmware
-information and hardware IPs.
 
 (install_amdgpu_rocm)=
 ## Install amdgpu driver and AMD SMI with ROCm

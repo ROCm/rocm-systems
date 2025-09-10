@@ -20,8 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
@@ -29,7 +28,6 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "overdrive_read.h"
-#include "../test_common.h"
 
 TestOverdriveRead::TestOverdriveRead() : TestBase() {
   set_title("AMDSMI Overdrive Read Test");

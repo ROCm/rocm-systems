@@ -31,8 +31,7 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 uint32_t AMDSmiGPUDevice::get_gpu_id() const {
     return gpu_id_;
@@ -129,7 +128,6 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      */
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
     auto num_running_processes = uint32_t(0);
-    auto list_process_allocation_size = uint32_t(0);
 
     status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
     if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
@@ -312,5 +310,4 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
     return bitmask;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

@@ -20,9 +20,8 @@
  * THE SOFTWARE.
  */
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <stddef.h>
+#include <cinttypes>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
@@ -31,7 +30,6 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "hw_topology_read.h"
-#include "../test_common.h"
 
 typedef struct {
   std::string type;

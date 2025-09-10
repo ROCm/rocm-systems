@@ -20,21 +20,16 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
 
 #include <iostream>
 #include <string>
 
 #include <gtest/gtest.h>
-#include "amd_smi/amdsmi.h"
 #include "api_support_read.h"
-#include "../test_common.h"
-#include "../test_utils.h"
 
 TestAPISupportRead::TestAPISupportRead() : TestBase() {
   set_title("AMDSMI API Support Read Test");
-  set_description("This test verifies that the supported APIs are corretly "
+  set_description("This test verifies that the supported APIs are correctly "
                                                                "identified.");
 }
 

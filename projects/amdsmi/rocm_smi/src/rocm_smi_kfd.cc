@@ -31,11 +31,9 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_set>
-#include <regex>
 
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -45,8 +43,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 static const char *kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
@@ -455,10 +452,6 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
   proc->cu_occupancy = 0;
-
-  static amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map =
-                                                           smi.kfd_node_map();
 
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
@@ -1137,5 +1130,4 @@ int KFDNode::get_node_id(uint32_t *node_id) {
   return ret;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

@@ -20,18 +20,14 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
-#include <map>
-#include <type_traits>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "metrics_counter_read.h"
-#include "../test_common.h"
 
 
 TestMetricsCounterRead::TestMetricsCounterRead() : TestBase() {

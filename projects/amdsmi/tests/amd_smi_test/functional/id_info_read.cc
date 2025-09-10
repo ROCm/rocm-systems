@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
+#include <cstddef>
 #include <gtest/gtest.h>
 
 #include <iostream>

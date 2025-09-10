@@ -22,8 +22,8 @@
 
 #define _GNU_SOURCE 1 // REQUIRED: to utilize some GNU features/functions, see
                       // _GNU_SOURCE functions which check
-#include <assert.h>
-#include <errno.h>
+#include <cassert>
+#include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -46,7 +46,6 @@
 #include <cmath>
 
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -54,8 +53,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 const std::string kTmpFilePrefix = "rocmsmi_";
 
 // Return 0 if same file, 1 if not, and -1 for error
@@ -1338,5 +1336,4 @@ uint64_t get_multiplier_from_char(char units_char) {
   return multiplier;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

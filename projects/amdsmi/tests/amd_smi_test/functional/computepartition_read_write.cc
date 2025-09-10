@@ -20,8 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 #include <unistd.h>
 
 #include <iostream>
@@ -33,7 +32,6 @@
 
 #include "gtest/gtest.h"
 #include "../test_base.h"
-#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "amd_smi/impl/amd_smi_utils.h"

@@ -23,15 +23,13 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_
 #include <dlfcn.h>
-#include <string.h>
-#include <map>
+#include <cstring>
 #include <iostream>
 #include <mutex>   //  NOLINT(build/c++11)
 #include "amd_smi/amdsmi.h"
 
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 class AMDSmiLibraryLoader {
  public:
      AMDSmiLibraryLoader();
@@ -77,8 +75,7 @@ template<typename T> amdsmi_status_t AMDSmiLibraryLoader::load_symbol(
     return AMDSMI_STATUS_SUCCESS;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 
 #endif  // AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_

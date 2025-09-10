@@ -1078,3 +1078,156 @@ GPU: 0
                 LEVEL 0: 45 MHz
 ...
 ```
+
+### Listing CPER entries using amd-smi
+
+This example code shows how to list CPER entries for a given GPU into files
+
+```python
+from amdsmi import *
+import os
+
+amdsmi_init()
+
+def get_severity_mask(severity):
+    severity_mask = 0
+    if severity == "all":
+        # Set bits for NON_FATAL_UNCORRECTED (0), FATAL (1), and NON_FATAL_CORRECTED (2)
+        severity_mask |= ((1 << 0) | (1 << 1) | (1 << 2))
+    elif severity == "fatal":
+        # Set bit corresponding to AMDSMI_CPER_SEV_FATAL (which is 1)
+        severity_mask |= (1 << 1)
+    elif severity in ("nonfatal", "nonfatal-uncorrected"):
+        # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED (which is 0)
+        severity_mask |= (1 << 0)
+    elif severity in ("nonfatal-corrected", "corrected"):
+        # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
+        severity_mask |= (1 << 2)
+    return severity_mask
+
+def gpuid(device):
+    for gpu_index, device_handle in enumerate(amdsmi_interface.amdsmi_get_processor_handles()):
+        if device.value == device_handle.value:
+            return gpu_index
+
+def dump_cper_entry(entry, cper_data, key):
+    try:
+        os.mkdir("/tmp/cper_dump", mode=0o777, dir_fd=None)
+    except FileExistsError:
+        pass
+    cper_file = f"/tmp/cper_dump/cper_entry_{key}.bin"
+    with open(cper_file, "wb") as file:
+        size = cper_data[key]["size"]
+        data = cper_data[key]["bytes"]
+        data = bytes(x % 256 for x in data[:size])
+        file.write(data)
+        print(f"   Wrote cper data to file: {cper_file}")
+    json_file = f"/tmp/cper_dump/cper_entry_{key}.json"
+    with open(json_file, "wt") as file:
+        file.write(str(entry))
+
+def get_gpu_cper_entries():
+    try:
+        devices = amdsmi_interface.amdsmi_get_processor_handles()
+        buffer_size = 1024*100
+        initial_cursor = 0
+        severity = "all"
+        for device in devices:
+            while True:
+                entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(
+                    device, get_severity_mask(severity), buffer_size, initial_cursor)
+                gpu_id = gpuid(device)
+                print("#############################################################################")
+                print(f"cper entries for severity: '{severity}', gpu #{gpu_id}, cursor: {initial_cursor}-{new_cursor - 1}")
+                for key, entry in entries.items():
+                    print("----------------")
+                    print("Entry", initial_cursor + key)
+                    print("   Error Severity:", entry.get("error_severity", "Unknown"))
+                    print("   Notify Type:", entry.get("notify_type", "Unknown"))
+                    print("   Timestamp:", entry.get("timestamp", ""))
+                    print(f"   Cper entry metadata: {entry}")
+                    dump_cper_entry(entry, cper_data, key)
+                if initial_cursor == new_cursor:
+                    break
+                initial_cursor=new_cursor
+            break
+    except AmdSmiException as e:
+        print(e)
+
+get_gpu_cper_entries()
+
+```
+
+Output:
+
+```shell
+cper entries for severity: 'all', gpu #0, cursor: 0-3
+----------------
+Entry 0
+   Error Severity: non_fatal_corrected
+   Notify Type: CMC
+   Timestamp: 2025/09/07 00:14:22
+   Cper entry metadata: {'error_severity': 'non_fatal_corrected', 'notify_type': 'CMC', 'timestamp': '2025/09/07 00:14:22', 'signature': b'CPER', 'revision': 256, 'signature_end': '0xffffffff', 'sec_cnt': 1, 'record_length': 472, 'platform_id': b'0x1002:0x74A2', 'creator_id': b'amdgpu', 'record_id': b'5:1', 'flags': 0, 'persistence_info': 0}
+   Wrote cper data to file: /tmp/cper_dump/cper_entry_0.bin
+----------------
+Entry 1
+   Error Severity: non_fatal_corrected
+   Notify Type: CMC
+   Timestamp: 2025/09/07 00:14:26
+   Cper entry metadata: {'error_severity': 'non_fatal_corrected', 'notify_type': 'CMC', 'timestamp': '2025/09/07 00:14:26', 'signature': b'CPER', 'revision': 256, 'signature_end': '0xffffffff', 'sec_cnt': 1, 'record_length': 472, 'platform_id': b'0x1002:0x74A2', 'creator_id': b'amdgpu', 'record_id': b'5:2', 'flags': 0, 'persistence_info': 0}
+   Wrote cper data to file: /tmp/cper_dump/cper_entry_1.bin
+----------------
+Entry 2
+   Error Severity: non_fatal_corrected
+   Notify Type: CMC
+   Timestamp: 2025/09/08 06:12:11
+   Cper entry metadata: {'error_severity': 'non_fatal_corrected', 'notify_type': 'CMC', 'timestamp': '2025/09/08 06:12:11', 'signature': b'CPER', 'revision': 256, 'signature_end': '0xffffffff', 'sec_cnt': 1, 'record_length': 472, 'platform_id': b'0x1002:0x74A2', 'creator_id': b'amdgpu', 'record_id': b'5:3', 'flags': 0, 'persistence_info': 0}
+   Wrote cper data to file: /tmp/cper_dump/cper_entry_2.bin
+----------------
+Entry 3
+   Error Severity: non_fatal_corrected
+   Notify Type: CMC
+   Timestamp: 2025/09/08 06:13:59
+   Cper entry metadata: {'error_severity': 'non_fatal_corrected', 'notify_type': 'CMC', 'timestamp': '2025/09/08 06:13:59', 'signature': b'CPER', 'revision': 256, 'signature_end': '0xffffffff', 'sec_cnt': 1, 'record_length': 472, 'platform_id': b'0x1002:0x74A2', 'creator_id': b'amdgpu', 'record_id': b'5:4', 'flags': 0, 'persistence_info': 0}
+   Wrote cper data to file: /tmp/cper_dump/cper_entry_3.bin
+#############################################################################
+cper entries for severity: 'all', gpu #0, cursor: 4-3
+```
+
+### Listing AFID numbers from CPER files
+
+This example code shows how to retrieve the AFID numbers from CPER files
+
+```python
+from amdsmi import *
+import os
+
+amdsmi_init()
+
+def amdsmi_get_afids_from_cper():
+    directory_path = "/tmp/cper_dump/"
+    print(f"Searching for cper file in {directory_path}")
+    with os.scandir(directory_path) as cper_files:
+        for cper_file in cper_files:
+            if cper_file.is_file():  # Check if the entry is a file (not a subdirectory)
+                if ".bin" in cper_file.path:
+                    print(f"Found {cper_file.path}")
+                    with open(cper_file.path, "rb") as file:
+                        raw = file.read()
+                        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
+                        print(f"afids: {afids}")
+
+amdsmi_get_afids_from_cper()
+```
+
+Output:
+
+```shell
+sudo python3 afid.py
+Searching for cper file in /tmp/cper_dump/
+Found /tmp/cper_dump/cper_entry_0.bin
+afids: [17]
+Found /tmp/cper_dump/cper_entry_1.bin
+afids: [17]
+```
+

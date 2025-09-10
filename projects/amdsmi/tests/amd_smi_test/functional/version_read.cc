@@ -20,16 +20,11 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
-
 #include <iostream>
-#include <map>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "version_read.h"
-#include "../test_common.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("AMDSMI Version Read Test");
@@ -60,8 +55,6 @@ void TestVersionRead::Close() {
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
-static const uint32_t kVerMaxStrLen = 80;
 
 void TestVersionRead::Run(void) {
   amdsmi_status_t err;

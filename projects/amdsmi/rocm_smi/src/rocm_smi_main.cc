@@ -30,15 +30,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <functional>
 #include <iostream>
-#include <memory>
 #include <algorithm>
-#include <set>
 #include <sstream>
 #include <string>
-#include <utility>
-#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -55,8 +50,7 @@ static const char *kPathPowerRoot = "/sys/kernel/debug/dri";
 
 static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 static uint32_t GetDeviceIndex(const std::string s) {
   std::string t = s;
@@ -1111,5 +1105,4 @@ int RocmSMI::get_io_link_weight(uint32_t node_from, uint32_t node_to,
   return 0;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

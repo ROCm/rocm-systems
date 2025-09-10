@@ -54,8 +54,7 @@
   } while (false)
 #endif
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 pthread_mutex_t *GetMutex(uint32_t dv_ind);
 int SameFile(const std::string fileA, const std::string fileB);
@@ -660,7 +659,6 @@ inline ostream_joiner<std::decay_t<DelimiterType>, CharType, TraitsType>
 }
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_

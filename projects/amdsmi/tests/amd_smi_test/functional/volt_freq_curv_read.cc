@@ -20,8 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
@@ -29,7 +28,6 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "volt_freq_curv_read.h"
-#include "../test_common.h"
 
 TestVoltCurvRead::TestVoltCurvRead() : TestBase() {
   set_title("AMDSMI Voltage-Frequency Curve Read Test");

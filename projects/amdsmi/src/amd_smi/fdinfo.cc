@@ -21,7 +21,7 @@
  */
 
 #include <dirent.h>
-#include <inttypes.h>
+#include <cinttypes>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -29,7 +29,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
-#include <memory>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"

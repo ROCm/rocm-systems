@@ -29,7 +29,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "perf_level_read.h"
-#include "../test_common.h"
 
 TestPerfLevelRead::TestPerfLevelRead() : TestBase() {
   set_title("AMDSMI Performance Level Read Test");

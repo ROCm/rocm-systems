@@ -20,8 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
@@ -29,7 +28,6 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "process_info_read.h"
-#include "../test_common.h"
 
 TestProcInfoRead::TestProcInfoRead() : TestBase() {
   set_title("AMDSMI Process Info Read Test");

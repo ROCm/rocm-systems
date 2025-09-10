@@ -9,13 +9,14 @@ documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/p
 
 >[!NOTE]
 >This project is a successor to [rocm_smi_lib](https://github.com/ROCm/rocm_smi_lib)
->and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
+>and [esmi_ib_library](https://github.com/amd/esmi_ib_library).  
+>This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
 
 ## Supported platforms
 
-At initial release, the AMD SMI library will support Linux bare metal and Linux
-virtual machine guest for AMD GPUs. In a future release, the library will be
-extended to support AMD EPYC™ CPUs.
+The AMD SMI library supports Linux bare metal and Linux virtual machine guest
+for AMD GPUs and AMD EPYC™ CPUs via
+[esmi_ib_library](https://github.com/amd/esmi_ib_library).
 
 AMD SMI library can run on AMD ROCm supported platforms, refer to
 [System requirements (Linux)](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)

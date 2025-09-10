@@ -36,7 +36,7 @@
 
 #include <stdarg.h>
 #include <sys/types.h>
-#include <stdint.h>
+#include <cstdint>
 #ifndef __LIBDRM__
 #define __LIBDRM__
 #include <libdrm/drm.h>

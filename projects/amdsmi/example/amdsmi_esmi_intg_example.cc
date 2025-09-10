@@ -20,15 +20,13 @@
  * THE SOFTWARE.
  */
 
-#include <assert.h>
-#include <stdint.h>
+#include <cassert>
+#include <cstdint>
 #include <unistd.h>
 #include <vector>
 #include <iostream>
-#include <bitset>
 #include <iomanip>
 #include "amd_smi/amdsmi.h"
-#include "asm/amd_hsmp.h"
 #include <cstring>
 #include <cmath>
 

@@ -28,7 +28,6 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
-#include "test_common.h"
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";

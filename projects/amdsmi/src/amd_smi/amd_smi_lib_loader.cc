@@ -23,8 +23,8 @@
 #include "amd_smi/impl/amd_smi_lib_loader.h"
 #include <iostream>
 
-namespace amd {
-namespace smi {
+
+namespace amd::smi {
 
 AMDSmiLibraryLoader::AMDSmiLibraryLoader(): libHandler_(nullptr) {
 }
@@ -69,5 +69,5 @@ AMDSmiLibraryLoader::~AMDSmiLibraryLoader() {
         unload();
 }
 
-}  // namespace rdc
-}  // namespace amd
+}  // namespace amd::smi
+

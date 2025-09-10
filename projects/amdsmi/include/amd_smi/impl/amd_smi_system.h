@@ -25,14 +25,12 @@
 
 #include <vector>
 #include <set>
-#include <map>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 // Singleton: Only one system in an application
 class AMDSmiSystem {
@@ -81,7 +79,6 @@ class AMDSmiSystem {
     std::vector<AMDSmiSocket*> sockets_;
     std::set<AMDSmiProcessor*> processors_;     // Track valid processors
 };
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_SYSTEM_H_

@@ -20,13 +20,11 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <algorithm>
 #include <iostream>
 #include <iterator>
-#include <sstream>
 #include <string>
 #include <map>
 
