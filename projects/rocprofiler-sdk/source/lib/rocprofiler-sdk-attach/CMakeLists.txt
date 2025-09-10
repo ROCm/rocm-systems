@@ -8,17 +8,16 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-attach-shared-library ALIAS
 add_library(rocprofiler-sdk-attach::rocprofiler-sdk-attach-shared-library ALIAS
             rocprofiler-sdk-attach-shared-library)
 
-target_sources(rocprofiler-sdk-attach-shared-library
-    PRIVATE queue_registration.cpp
-            code_object_registration.cpp
-            attach.cpp
-            table.cpp)
+target_sources(
+    rocprofiler-sdk-attach-shared-library
+    PRIVATE queue_registration.cpp code_object_registration.cpp attach.cpp table.cpp)
 
 target_include_directories(
     rocprofiler-sdk-attach-shared-library
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/projects/rocprofiler-sdk/source/include>
-              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/projects/rocprofiler-sdk/source/include>
-              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    INTERFACE
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/projects/rocprofiler-sdk/source/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/projects/rocprofiler-sdk/source/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(
     rocprofiler-sdk-attach-shared-library
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
