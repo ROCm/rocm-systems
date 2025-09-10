@@ -245,7 +245,7 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
     else()
         # License file
         install ( FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
+            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.md
             COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
