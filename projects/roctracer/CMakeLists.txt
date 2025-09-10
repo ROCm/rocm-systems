@@ -127,9 +127,6 @@ set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
 set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${PROJECT_NAME}-tests")
 set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${PROJECT_NAME}-dev")
 
-# Debian specific packaging configuration
-configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
-
 # Debian package specific variable for ASAN
 set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${PROJECT_NAME}-asan" )
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "rocm-core-asan" )
@@ -195,6 +192,9 @@ else()
 endif()
 
 include(CPack)
+
+# Debian specific packaging configuration
+configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
 cpack_add_component(runtime
   DISPLAY_NAME "Runtime"
