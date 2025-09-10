@@ -264,9 +264,9 @@ class RocProfCompute:
         )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs(
-                [Path(self.__args.config_dir) / arch]
-            )
+            ac.panel_configs = file_io.load_panel_configs([
+                Path(self.__args.config_dir) / arch
+            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )

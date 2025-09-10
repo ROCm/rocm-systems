@@ -84,9 +84,9 @@ class RocProfCompute_Base:
 
         if (
             sum((
-                    bool(args.filter_blocks),
-                    bool(args.set_selected),
-                    bool(args.roof_only),
+                bool(args.filter_blocks),
+                bool(args.set_selected),
+                bool(args.roof_only),
             ))
             > 1
         ):

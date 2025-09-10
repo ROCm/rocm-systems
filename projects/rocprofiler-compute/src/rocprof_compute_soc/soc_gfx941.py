@@ -36,10 +36,10 @@ class gfx941_soc(OmniSoC_Base):
         super().__init__(args, mspec)
         self.set_arch("gfx941")
         self.set_compatible_profilers([
-                "rocprofv1",
-                "rocprofv2",
-                "rocprofv3",
-                "rocprofiler-sdk",
+            "rocprofv1",
+            "rocprofv2",
+            "rocprofv3",
+            "rocprofiler-sdk",
         ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx941"))
