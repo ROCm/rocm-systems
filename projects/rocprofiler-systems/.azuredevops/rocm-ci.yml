@@ -21,7 +21,6 @@ trigger:
     - docs
     - '.*.y*ml'
     - '*.md'
-    - LICENSE.md
     - VERSION
     - .wordlist.txt
 
