@@ -42,8 +42,6 @@ else()
     set(OMPVV_USE_OFFLOAD_TESTS TRUE)
 endif()
 
-rocprofiler_systems_message(STATUS "Configuring OMPVV...")
-
 # Master branch contains stable releases
 rocprofiler_systems_checkout_git_submodule(
   RELATIVE_PATH
@@ -58,13 +56,17 @@ rocprofiler_systems_checkout_git_submodule(
   "master"
 )
 
+set(ROCPROFSYS_OMPVV_SUBMODULE_DIR "${PROJECT_SOURCE_DIR}/external/ompvv")
+set(ROCPROFSYS_OMPVV_SOURCE_DIR "${CMAKE_BINARY_DIR}/examples/openmp/external/ompvv")
+set(OMPVV_MAKEDEF_FILE "sys/make/make.def")
+
 # ---------------------------------------------------------------------------------------#
 # helper functions
 # ---------------------------------------------------------------------------------------#
 
-# Updates the make.def FOFFLOADING flag. First call should remove O3 flags
+# Updates the make.def FOFFLOADING flag.
 function(update_make_def_foffloading FOFFLOADING_FLAGS)
-    file(READ ${PROJECT_SOURCE_DIR}/external/ompvv/sys/make/make.def MAKE_DEF_CONTENT)
+    file(READ ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE} MAKE_DEF_CONTENT)
 
     # Replaces all FOFFLOADING lines
     string(
@@ -75,11 +77,7 @@ function(update_make_def_foffloading FOFFLOADING_FLAGS)
         "${MAKE_DEF_CONTENT}"
     )
 
-    file(
-        WRITE
-        ${PROJECT_SOURCE_DIR}/external/ompvv/sys/make/make.def
-        "${MAKE_DEF_CONTENT}"
-    )
+    file(WRITE ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE} "${MAKE_DEF_CONTENT}")
 endfunction()
 
 # Individually compiles a given list of tests
@@ -94,7 +92,7 @@ function(compile_ompvv_tests TEST_LIST_VAR)
                 NUM_THREADS_HOST=${OMPVV_NUM_THREADS_HOST}
                 NUM_THREADS_DEVICE=${OMPVV_NUM_THREADS_DEVICE}
                 NUM_TEAMS_DEVICE=${OMPVV_NUM_TEAMS_DEVICE} "SOURCES=${test}" compile
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/external/ompvv
+            WORKING_DIRECTORY ${ROCPROFSYS_OMPVV_SOURCE_DIR}
             RESULT_VARIABLE OMPVV_BUILD_RESULT
             OUTPUT_VARIABLE OMPVV_BUILD_OUTPUT
             ERROR_VARIABLE OMPVV_BUILD_ERROR
@@ -109,6 +107,18 @@ function(compile_ompvv_tests TEST_LIST_VAR)
         endif()
     endforeach()
 endfunction()
+
+# ---------------------------------------------------------------------------------------#
+# Copy OMPVV to build folder
+# ---------------------------------------------------------------------------------------#
+
+if(NOT EXISTS "${ROCPROFSYS_OMPVV_SOURCE_DIR}")
+    execute_process(
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_directory ${ROCPROFSYS_OMPVV_SUBMODULE_DIR}
+            ${ROCPROFSYS_OMPVV_SOURCE_DIR}
+    )
+endif()
 
 # ---------------------------------------------------------------------------------------#
 # compiler
@@ -172,8 +182,9 @@ set(OMPVV_NUM_THREADS_HOST ${ROCPROFSYS_THREAD_COUNT})
 set(OMPVV_NUM_TEAMS_DEVICE 8) # default used by ompvv
 set(OMPVV_NUM_THREADS_DEVICE 8) # default used by ompvv
 
-# Files listed below are OpenMP 5.0 tests that compile for both amdflang 20.0
-# and 19.0 Set of host only tests to be compiled
+# Files listed below are OpenMP 5.0 tests that compile for
+# both amdflang 20.0 and 19.0.
+# Set of host only tests to be compiled
 set(OMPVV_HOST_TESTS_TO_COMPILE
     "${OMPVV_TDIR}/teams/test_team_default_shared.F90"
     "${OMPVV_TDIR}/parallel_for_simd/test_parallel_for_simd_atomic.F90"
@@ -194,12 +205,12 @@ endif()
 # ---------------------------------------------------------------------------------------#
 
 # Remove all -O3 flags to prevent function inlining
-file(READ ${PROJECT_SOURCE_DIR}/external/ompvv/sys/make/make.def MAKE_DEF_CONTENT)
+file(READ ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE} MAKE_DEF_CONTENT)
 string(REGEX REPLACE "-O3[ \t]*" "" MAKE_DEF_CONTENT "${MAKE_DEF_CONTENT}")
-file(WRITE ${PROJECT_SOURCE_DIR}/external/ompvv/sys/make/make.def "${MAKE_DEF_CONTENT}")
+file(WRITE ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE} "${MAKE_DEF_CONTENT}")
 
-# OMPVV makefile option NO_OFFLOADING not supported for amdflang, must manually
-# do it
+# OMPVV makefile option NO_OFFLOADING not supported for amdflang,
+# must manually do it
 set(OMPVV_HOST_FOFFLOADING_FLAGS "-fopenmp --offload-host-only")
 update_make_def_foffloading("${OMPVV_HOST_FOFFLOADING_FLAGS}")
 compile_ompvv_tests(OMPVV_HOST_TESTS_TO_COMPILE)
@@ -216,10 +227,10 @@ if(OMPVV_USE_OFFLOAD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------------------#
-# copy generated binaries to build folder for tests
+# copy generated binaries to top level of build folder
 # ---------------------------------------------------------------------------------------#
 
-set(OMPVV_BIN_SOURCE "${PROJECT_SOURCE_DIR}/external/ompvv/bin")
+set(OMPVV_BIN_SOURCE "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin")
 set(OMPVV_BIN_DEST "${CMAKE_BINARY_DIR}")
 
 set(ROCPROFSYS_OMPVV_HOST_TESTS "")

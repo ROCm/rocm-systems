@@ -121,7 +121,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
             SKIP_RUNTIME
             NAME ${HOST_TEST_NAME}
             TARGET ${HOST_TEST_NAME}
-            LABELS "openmp"
+            LABELS "openmp;ompvv"
             REWRITE_ARGS
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
@@ -134,19 +134,26 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
             REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
         )
     endforeach()
-endif()
 
-if(ROCPROFSYS_OMPVV_OFFLOAD_TESTS)
+    set(_ompvv_offload_environment
+        "${ompt_environment}"
+        "${_rocm_ld_env}"
+        "ROCPROFSYS_USE_SAMPLING=ON"
+        "ROCPROFSYS_SAMPLING_FREQ=50"
+        "ROCPROFSYS_COUT_OUTPUT=ON"
+        "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
+    )
+
     foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
         rocprofiler_systems_add_test(
             SKIP_RUNTIME
             NAME ${OFFLOAD_TEST_NAME}
             TARGET ${OFFLOAD_TEST_NAME}
             GPU ON
-            LABELS "openmp"
+            LABELS "openmp;ompvv;openmp-target"
             REWRITE_ARGS -e -v 2
             ENVIRONMENT
-              "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
+              "${_ompvv_offload_environment}"
             REWRITE_RUN_PASS_REGEX
               "${_OMPVV_OFFLOAD_PASS_REGEX}"
         )
