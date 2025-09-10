@@ -66,7 +66,7 @@ parse_rocm_version( ${ROCM_VERSION} )
 set( CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE PATH "default cpack directory" )
 set( BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not." )
 set( CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "package types to be produced " )
-set( LICENSE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/copyright" CACHE PATH "Path to License File in source dir" )
+set( LICENSE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" CACHE PATH "Path to License File in source dir" )
 set( BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR} )
 set( EXTENDED_PACKAGE_DESCRIPTION
      "ROCM-CORE package helps to get ROCm release version,get install path.

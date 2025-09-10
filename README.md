@@ -97,6 +97,7 @@ To begin contributing or building, see the [CONTRIBUTING.md](./CONTRIBUTING.md) 
 This super-repo contains multiple subprojects, each of which retains the license under which it was originally published.
 
 📁 Refer to the `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file within each `projects/` or `shared/` directory for specific license terms.
+📄 Refer to the header notice in individual files outside `projects/` or `shared/` folders for their specific license terms.
 
 > **Note**: The root of this repository does not define a unified license across all components.
 
