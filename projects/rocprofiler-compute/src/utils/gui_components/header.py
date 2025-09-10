@@ -34,7 +34,7 @@ AVAIL_NORMALIZATIONS = ["per_wave", "per_cycle", "per_second", "per_kernel"]
 
 
 # List all the unique column values for desired column in df, 'target_col'
-def list_unique(orig_list: list[Any], is_numeric: bool) -> list[Any]:
+def list_unique(orig_list: list[str], is_numeric: bool) -> list[str]:
     list_set = set(orig_list)
     unique_list = list(list_set)
     if is_numeric:
@@ -42,7 +42,7 @@ def list_unique(orig_list: list[Any], is_numeric: bool) -> list[Any]:
     return unique_list
 
 
-def create_span(input_value: Any) -> dict[str, Union[html.Span, str]]:
+def create_span(input_value: str) -> dict[str, Union[html.Span, str]]:
     return {
         "label": html.Span(str(input_value), title=str(input_value)),
         "value": str(input_value),

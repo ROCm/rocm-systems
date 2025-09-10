@@ -37,6 +37,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.specs import MachineSpecs
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -243,7 +244,7 @@ def to_mod(
         return a % b
 
 
-def to_concat(a: Any, b: Any) -> str:
+def to_concat(a: Any, b: Any) -> str: # noqa: ANN401
     return str(a) + str(b)
 
 
@@ -875,7 +876,7 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
     return empirical_peaks
 
 
-def create_sys_vars(sys_info: Any) -> dict[str, Any]:
+def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
     """Create variables from sys.info."""
     sys_vars_collection = {}
 
@@ -901,7 +902,6 @@ def create_sys_vars(sys_info: Any) -> dict[str, Any]:
         if np.isnan(variable_value) or variable_value == 0:
             console_warning(
                 f"{attr_name} is not available in sysinfo.csv, please provide the "
-                ""
                 "correct value using --specs-correction"
             )
         sys_vars_collection[f"ammolite__{var_name}"] = variable_value
@@ -920,7 +920,7 @@ def create_sys_vars(sys_info: Any) -> dict[str, Any]:
 
 def calc_builtin_vars(
     raw_pmc_df: Union[pd.DataFrame, dict], config: dict
-) -> dict[str, Any]:
+) -> dict[str, Optional[Union[str, float, int]]]:
     """Calculate built-in variables"""
     # TODO: fix all $normUnit in Unit column or title
     # build and eval all derived build-in global variables
@@ -967,7 +967,7 @@ def calc_builtin_vars(
 def eval_metric(
     dfs: dict,
     dfs_type: dict,
-    sys_info: Any,
+    sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: Union[pd.DataFrame, dict],
     debug: bool,
@@ -1126,7 +1126,7 @@ def apply_filters(
 
 
 def apply_kernel_filter(
-    df: pd.DataFrame, workload: Any, dir_path_path: str
+    df: pd.DataFrame, workload: schema.Workload, dir_path_path: str
 ) -> pd.DataFrame:
     """Apply kernel ID or name filters."""
     if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
@@ -1197,7 +1197,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     return df
 
 
-def find_key_recursively(data: Union[dict, list], search_key: str) -> Optional[Any]:
+def find_key_recursively(data: Union[dict, list], search_key: str) -> Union[list, dict, None]:
     """
     Recursively search for the search_key in the given data
     (which can be a dict or list).
@@ -1219,7 +1219,7 @@ def find_key_recursively(data: Union[dict, list], search_key: str) -> Optional[A
     return None  # Return None if the key was not found
 
 
-def search_key_in_json(file_path: Path, search_key: str) -> Optional[Any]:
+def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, None]:
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
@@ -1688,20 +1688,21 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     return comparable_columns
 
 
-def correct_sys_info(mspec: Any, specs_correction: dict[str, Any]) -> Any:
+def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> Optional[pd.DataFrame]:
     """
-    Correct system spec items manually
+    Correct system spec items manually based on user-provided corrections.
     """
-    # todo: more err checking for string specs_correction
+    # Parse key:value pairs
+    pairs: dict[str, str] = {}
+    for pair in specs_correction.split(','):
+        if ':' in pair:
+            key, value = pair.split(':', 1)
+            pairs[key.strip()] = value.strip()
 
-    pairs = dict(re.findall(r"(\w+):\s*(\d+)", str(specs_correction)))
-
-    for k, v in pairs.items():
-        if not hasattr(mspec, str(k)):
-            console_error(
-                "analyze",
-                f"Invalid specs correction '{k}'. Please use --specs option "
-                f"to peak valid specs",
-            )
-        setattr(mspec, str(k), v)
+    # Apply corrections
+    for key, value in pairs.items():
+        if hasattr(mspec, key):
+            setattr(mspec, key, value)
+        else:
+            console_error("analyze", f"Invalid spec '{key}'. Use --specs to see valid options")
     return mspec.get_class_members()

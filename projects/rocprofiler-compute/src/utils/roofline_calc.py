@@ -34,11 +34,11 @@ import pandas as pd
 from utils import schema
 from utils.logger import console_debug, console_warning
 from utils.parser import apply_filters, eval_metric
+from utils.specs import MachineSpecs
 
 ################################################
 # Global vars
 ################################################
-
 XMIN = 0.01
 XMAX = 1000
 
@@ -307,7 +307,7 @@ def calc_ceilings(
 # Calculate relevant metrics for ai calculation
 def calc_ai_analyze(
     workload: schema.Workload,
-    mspec: Any,
+    mspec: MachineSpecs,
     sort_type: str,
     config: dict[str, Any],
     arch_config: schema.ArchConfig,
@@ -443,7 +443,7 @@ def calc_ai_analyze(
 
 
 def calc_ai_profile(
-    mspec: Any, sort_type: str, ret_df: dict[str, pd.DataFrame]
+    mspec: MachineSpecs, sort_type: str, ret_df: dict[str, pd.DataFrame]
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """Given counter data, calculate arithmetic intensity for each kernel
     in the application. Leverage hard-coded equations to calculate AI values.

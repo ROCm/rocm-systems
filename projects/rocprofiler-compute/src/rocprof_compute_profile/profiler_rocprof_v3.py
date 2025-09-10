@@ -26,9 +26,9 @@
 import argparse
 import shlex
 from pathlib import Path
-from typing import Any
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
 
 
@@ -37,7 +37,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         self,
         profiling_args: argparse.Namespace,
         profiler_mode: str,
-        soc: Any,
+        soc: OmniSoC_Base,
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
         self.ready_to_profile = (
@@ -46,7 +46,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname: str, soc: Any) -> list[str]:
+    def get_profiler_options(self, fname: str, soc: OmniSoC_Base) -> list[str]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 

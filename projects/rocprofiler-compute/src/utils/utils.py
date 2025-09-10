@@ -38,7 +38,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 import pandas as pd
 import yaml
@@ -56,7 +56,6 @@ from utils.mi_gpu_spec import mi_gpu_specs
 
 rocprof_cmd = ""
 rocprof_args = ""
-spi_pipe_counter_regexs = [r"SPI_CS\d+_(.*)", r"SPI_CSQ_P\d+_(.*)"]
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
@@ -682,9 +681,9 @@ def parse_text(text_file: str) -> list[str]:
 
 def run_prof(
     fname: str,
-    profiler_options: Union[list[str], dict[str, Any]],
+    profiler_options: Union[list[str],  dict[str, Union[str, list[str]]]],
     workload_dir: str,
-    mspec: Any,
+    mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
     retain_rocpd_output: bool = False,
@@ -695,12 +694,12 @@ def run_prof(
 
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
-        options: Any = profiler_options
+        options = cast(dict[str, Union[str, list[str]]], profiler_options)
         options["ROCPROF_COUNTER_COLLECTION"] = "1"
         options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fname))}"
     else:
         default_options = ["-i", fname]
-        options = default_options + profiler_options
+        options = default_options + cast(list[str], profiler_options)
 
     if using_v3():
         if rocprof_cmd == "rocprofiler-sdk":
@@ -1129,8 +1128,8 @@ def gen_sysinfo(
     workload_dir: str,
     app_cmd: str,
     skip_roof: bool,
-    mspec: Any,
-    soc: Any,
+    mspec: Any,  # noqa: ANN401
+    soc: Any,  # noqa: ANN401
 ) -> None:
     df = mspec.get_class_members()
 
@@ -1146,7 +1145,7 @@ def gen_sysinfo(
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
 
 
-def detect_roofline(mspec: Any) -> dict[str, Any]:
+def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
     from utils import specs
 
     rocm_ver = int(mspec.rocm_version[:1])
@@ -1211,7 +1210,7 @@ def detect_roofline(mspec: Any) -> dict[str, Any]:
     return target_binary
 
 
-def mibench(args: argparse.Namespace, mspec: Any) -> None:
+def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
     console_log("roofline", "No roofline data found. Generating...")
 

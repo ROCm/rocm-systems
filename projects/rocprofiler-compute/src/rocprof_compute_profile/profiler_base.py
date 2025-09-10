@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
     console_debug,
     console_error,
@@ -61,7 +62,7 @@ class RocProfCompute_Base:
         self,
         args: argparse.Namespace,
         profiler_mode: str,
-        soc: Any,
+        soc: OmniSoC_Base,
     ) -> None:
         self.__args = args
         self.__profiler = profiler_mode
@@ -71,7 +72,7 @@ class RocProfCompute_Base:
         return self.__args
 
     def get_profiler_options(
-        self, fname: str, soc: Any
+        self, fname: str, soc: OmniSoC_Base
     ) -> Union[list[str], dict[str, Any]]:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default

@@ -54,6 +54,7 @@ from utils.roofline_calc import (
     calc_ai_profile,
     construct_roof,
 )
+from utils.specs import MachineSpecs
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
@@ -70,7 +71,7 @@ def wrap_text(text: str, width: int = 92) -> str:
     return "<br>".join(wrapped_lines)
 
 
-def to_int(value: Any) -> Union[int, float]:
+def to_int(value: Union[float, None]) -> Union[int, float]:
     if value is None:
         return np.nan
     return int(value)
@@ -80,7 +81,7 @@ class Roofline:
     def __init__(
         self,
         args: argparse.Namespace,
-        mspec: Any,
+        mspec: MachineSpecs,
         run_parameters: Optional[dict[str, Any]] = None,
     ) -> None:
         self.__args = args

@@ -27,7 +27,9 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TypeVar
+
+R = TypeVar("R")
 
 # Define the colors
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
@@ -58,8 +60,8 @@ LOG_LEVEL_MAPPING = {
 }
 
 
-def demarcate(function: Callable[..., Any]) -> Callable[..., Any]:
-    def wrap_function(*args: Any, **kwargs: Any) -> Any:
+def demarcate(function: Callable[..., R]) -> Callable[..., R]:
+    def wrap_function(*args: Any, **kwargs: Any) -> R:
         trace_logger(f"----- [entering function] -> {function.__qualname__}()")
         result = function(*args, **kwargs)
         trace_logger(f"----- [exiting  function] -> {function.__qualname__}()")

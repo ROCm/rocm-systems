@@ -85,7 +85,7 @@ class RocprofTUIApp(App):
     def action_refresh(self) -> None:
         self.main_view.refresh_view()
 
-    def load_soc_specs(self, sysinfo: Optional[Any] = None) -> None:
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         self.mspec = generate_machine_specs(self.args, sysinfo)
         arch = self.mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")

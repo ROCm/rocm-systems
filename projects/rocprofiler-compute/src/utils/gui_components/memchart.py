@@ -27,6 +27,7 @@ from typing import Any
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
+from utils import schema
 from utils.logger import console_error
 from utils.utils import format_scientific_notation_if_needed
 
@@ -36,7 +37,7 @@ DEFAULT_PRECISION = 1
 DEFAULT_SCIENTIFIC_WIDTH = 8
 
 
-def insert_chart_data(mem_data: list[dict[str, Any]], base_data: Any) -> G:
+def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> G:
     if len(mem_data) != 1:
         console_error("Memory Chart config doesn't follow expected formatting")
 
@@ -525,7 +526,7 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: Any) -> G:
     )
 
 
-def get_memchart(mem_data: list[dict[str, Any]], base_data: Any) -> html.Section:
+def get_memchart(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> html.Section:
     return html.Section(
         id="memchart",
         children=[
@@ -2043,7 +2044,7 @@ def get_memchart(mem_data: list[dict[str, Any]], base_data: Any) -> html.Section
     )
 
 
-def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str:
+def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str: # noqa: ANN401
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 

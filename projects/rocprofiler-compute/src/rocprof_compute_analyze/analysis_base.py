@@ -199,7 +199,7 @@ class OmniAnalyze_Base:
     @demarcate
     def initalize_runs(
         self, normalization_filter: Optional[str] = None
-    ) -> OrderedDict[str, Any]:
+    ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
         if args.list_metrics:
             self.list_metrics()

@@ -28,10 +28,11 @@ from typing import Any, Optional
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import MachineSpecs
 
 
 class gfx942_soc(OmniSoC_Base):
-    def __init__(self, args: argparse.Namespace, mspec: Any) -> None:
+    def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx942")
         self.set_compatible_profilers([

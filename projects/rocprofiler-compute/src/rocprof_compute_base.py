@@ -34,6 +34,7 @@ from typing import Optional
 
 import config
 from argparser import omniarg_parser
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
@@ -62,11 +63,8 @@ class RocProfCompute:
         self.__args: Optional[argparse.Namespace] = None
         self.__profiler_mode = None
         self.__analyze_mode = None
-        # gpu name, or in case of analyze mode, all loaded gpu name(s)
-        self.__soc_name = set()
-        self.__soc = {}  # set of key, value pairs. Where arch->OmniSoc() obj
+        self.__soc: dict[str, OmniSoC_Base] = {}
         self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
-        self.__options = {}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
         self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
 
