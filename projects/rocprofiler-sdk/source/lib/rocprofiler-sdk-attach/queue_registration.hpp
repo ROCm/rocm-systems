@@ -24,13 +24,12 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-namespace rocprofiler 
+namespace rocprofiler
 {
 namespace attach
 {
-
 void
 queue_registration_init(HsaApiTable* table);
 
-} // namespace rocprofiler
-} // namespace attach
+}  // namespace attach
+}  // namespace rocprofiler

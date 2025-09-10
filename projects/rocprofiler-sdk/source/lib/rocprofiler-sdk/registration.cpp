@@ -1085,7 +1085,8 @@ rocprofiler_set_api_table(const char* name,
     else if(std::string_view{name} == "rocattach")
     {
         ROCP_ERROR_IF(num_tables > 1)
-            << "rocprofiler expected rocprofiler attach library to pass 1 API table, not " << num_tables;
+            << "rocprofiler expected rocprofiler attach library to pass 1 API table, not "
+            << num_tables;
 
         auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
 

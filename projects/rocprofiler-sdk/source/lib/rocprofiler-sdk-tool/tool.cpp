@@ -3119,27 +3119,4 @@ rocprofv3_main(int argc, char** argv, char** envp)
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
 }
-
-ROCPROFILER_EXTERN_C_INIT
-
-void
-rocprofv3_attach() ROCPROFILER_PUBLIC_API;
-
-void
-rocprofv3_attach()
-{
-    initialize_logging();
-    initialize_rocprofv3();
 }
-
-void
-rocprofv3_detach() ROCPROFILER_PUBLIC_API;
-
-void
-rocprofv3_detach()
-{
-    finalize_rocprofv3(__FUNCTION__);
-}
-}
-
-ROCPROFILER_EXTERN_C_FINI

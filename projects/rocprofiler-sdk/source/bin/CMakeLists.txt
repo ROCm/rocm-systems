@@ -71,4 +71,3 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
                     WORLD_READ WORLD_EXECUTE
         COMPONENT rocpd)
 endforeach()
-

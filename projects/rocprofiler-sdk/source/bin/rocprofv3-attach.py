@@ -31,31 +31,33 @@ ROCPROFV3_ATTACH_DIR = os.path.dirname(os.path.realpath(__file__))
 ROCM_DIR = os.path.dirname(ROCPROFV3_ATTACH_DIR)
 ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-attach.so"
 
+
 def main(
     pid=os.environ.get("ROCPROF_ATTACH_PID", None),
-    attach_library=os.environ.get("ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY),
-    duration=os.environ.get("ROCPROF_ATTACH_DURATION", None)):
+    attach_library=os.environ.get(
+        "ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY
+    ),
+    duration=os.environ.get("ROCPROF_ATTACH_DURATION", None),
+):
     if pid is None:
-        raise RuntimeError(
-            "rocprofv3_attach called with no PID specified"
-        )
+        raise RuntimeError("rocprofv3_attach called with no PID specified")
 
     # Load the shared library into ctypes
     MAX_STR = 256
     c_lib = ctypes.CDLL(attach_library)
-    
+
     c_lib.attach.argtypes = [ctypes.c_uint]
     c_lib.attach(int(pid))
 
     if duration is None:
         sys.stdout.write("Press Enter to detach...")
-        sys.stdout.flush() # Force the prompt to appear immediately
-        input()            # Now wait for input
+        sys.stdout.flush()  # Force the prompt to appear immediately
+        input()  # Now wait for input
     else:
         time.sleep(int(duration) / 1000)
 
     c_lib.detach()
 
+
 if __name__ == "__main__":
     main()
-
