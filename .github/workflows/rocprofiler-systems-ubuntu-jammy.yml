@@ -45,9 +45,6 @@ jobs:
       matrix:
         compiler: ['g++-11', 'g++-12']
         rocm: ['OFF']
-        mpi: ['OFF']
-        ompt: ['OFF']
-        papi: ['OFF']
         python: ['ON']
         strip: ['OFF']
         hidden: ['ON', 'OFF']
@@ -76,15 +73,8 @@ jobs:
         command: |
           cd projects/rocprofiler-systems/
           apt-get update &&
-          apt-get install -y software-properties-common &&
           apt-get upgrade -y &&
-          apt-get install -y autoconf bison build-essential clang environment-modules \
-            gettext libfabric-dev libiberty-dev libomp-dev libopenmpi-dev libtool m4 \
-            openmpi-bin python3-pip texinfo ${{ matrix.compiler }} &&
-          python3 -m pip install --upgrade pip &&
-          python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin ${{ matrix.compiler }}
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -107,51 +97,45 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       env:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      run:
-        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
-        git config --global --add safe.directory ${PWD} &&
-        cmake --version &&
-        gcc --version &&
-        TAG="" &&
-        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
-        append-tagname ${{ matrix.mpi }} mpi &&
-        append-tagname ${{ matrix.ompt }} ompt &&
-        append-tagname ${{ matrix.papi }} papi &&
-        append-tagname ${{ matrix.python }} python &&
-        append-tagname ${{ matrix.mpi-headers }} mpip &&
-        append-tagname ${{ matrix.build-dyninst }} internal-dyninst &&
-        append-tagname ${{ matrix.strip }} strip &&
-        append-tagname ${{ matrix.hidden }} hidden-viz &&
-        python3 ./scripts/run-ci.py -B build
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG}
-          --build-jobs 2
-          --site GitHub
-          --
-          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
-          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-          -DROCPROFSYS_BUILD_TESTING=ON
-          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }}
-          -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }}
-          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
-          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
-          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
-          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
-          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
-          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
-          -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target"
-          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
-          -DUSE_CLANG_OMP=OFF
-          --
+      run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE}
+        git config --global --add safe.directory ${PWD}
+        echo "CMake version: $(cmake --version | head -n 1)"
+        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+        TAG=""
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; }
+        append-tagname ${{ matrix.python }} python
+        append-tagname ${{ matrix.mpi-headers }} mpip
+        append-tagname ${{ matrix.build-dyninst }} internal-dyninst
+        append-tagname ${{ matrix.strip }} strip
+        append-tagname ${{ matrix.hidden }} hidden-viz
+        python3 ./scripts/run-ci.py -B build \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG} \
+          --build-jobs 2 \
+          --site GitHub \
+          -- \
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }} \
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
+          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
+          -DUSE_CLANG_OMP=OFF \
+          -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
     - name: Install
@@ -216,9 +200,6 @@ jobs:
       matrix:
         compiler: ['g++']
         rocm: ['ON']
-        mpi: ['OFF']
-        ompt: ['OFF']
-        papi: ['OFF']
         python: ['ON']
         strip: ['OFF']
         hidden: ['ON']
@@ -247,15 +228,8 @@ jobs:
         command: |
           cd projects/rocprofiler-systems/
           apt-get update &&
-          apt-get install -y software-properties-common &&
           apt-get upgrade -y &&
-          apt-get install -y autoconf bison build-essential clang environment-modules \
-            gettext libfabric-dev libiberty-dev libomp-dev libopenmpi-dev libtool m4 \
-            openmpi-bin python3-pip texinfo ${{ matrix.compiler }} &&
-          python3 -m pip install --upgrade pip &&
-          python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin ${{ matrix.compiler }}
 
     - name: Install ROCm Packages
       timeout-minutes: 25
@@ -300,51 +274,47 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
-      run:
-        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
-        git config --global --add safe.directory ${PWD} &&
-        cmake --version &&
-        TAG="" &&
-        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
-        append-tagname ${{ matrix.rocm }} rocm-${{ matrix.rocm-version }} &&
-        append-tagname ${{ matrix.mpi }} mpi &&
-        append-tagname ${{ matrix.ompt }} ompt &&
-        append-tagname ${{ matrix.papi }} papi &&
-        append-tagname ${{ matrix.python }} python &&
-        append-tagname ${{ matrix.mpi-headers }} mpip &&
-        append-tagname ${{ matrix.build-dyninst }} internal-dyninst &&
-        append-tagname ${{ matrix.strip }} strip &&
-        append-tagname ${{ matrix.hidden }} hidden-viz &&
-        python3 ./scripts/run-ci.py -B build
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG}
-          --build-jobs 2
-          --site GitHub
-          --
-          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
-          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-          -DROCPROFSYS_BUILD_TESTING=ON
-          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }}
-          -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }}
-          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
-          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
-          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
-          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
-          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
-          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
-          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
-          -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target"
-          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
-          -DUSE_CLANG_OMP=OFF
-          --
+      run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE}
+        git config --global --add safe.directory ${PWD}
+        echo "CMake version: $(cmake --version | head -n 1)"
+        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+        echo "ROCm version: ${{ matrix.rocm-version }}"
+        TAG=""
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; }
+        append-tagname ${{ matrix.rocm }} rocm-${{ matrix.rocm-version }}
+        append-tagname ${{ matrix.python }} python
+        append-tagname ${{ matrix.mpi-headers }} mpip
+        append-tagname ${{ matrix.build-dyninst }} internal-dyninst
+        append-tagname ${{ matrix.strip }} strip
+        append-tagname ${{ matrix.hidden }} hidden-viz
+        python3 ./scripts/run-ci.py -B build \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG} \
+          --build-jobs 2 \
+          --site GitHub \
+          -- \
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }} \
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
+          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
+          -DUSE_CLANG_OMP=OFF \
+          -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
     - name: Install
@@ -427,16 +397,9 @@ jobs:
         command: |
           cd projects/rocprofiler-systems/
           apt-get update &&
-          apt-get install -y autoconf bison build-essential clang environment-modules gcc g++ libmpich-dev libomp-dev libtool m4 mpich python3-pip texinfo &&
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
-          python3 -m pip install --upgrade pip &&
-          python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
-          apt-get -y --purge autoremove &&
-          apt-get -y clean &&
-          /opt/conda/bin/conda clean -y -a
+          apt-get upgrade -y &&
+          apt-get install -y libomp-dev libmpich-dev mpich
+
     - name: Configure Env
       run:
         echo "${HOME}/.local/bin" >> $GITHUB_PATH
@@ -447,34 +410,32 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       env:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      run:
-        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
-        git config --global --add safe.directory ${PWD} &&
-        cmake --version &&
-        python3 ./scripts/run-ci.py -B build
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-codecov-mpi-python-ompt-papi
-          --build-jobs 2
-          --site GitHub
-          --coverage
-          --
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-          -DROCPROFSYS_BUILD_CI=OFF
-          -DROCPROFSYS_BUILD_TESTING=ON
-          -DROCPROFSYS_BUILD_DYNINST=ON
-          -DROCPROFSYS_BUILD_BOOST=ON
-          -DROCPROFSYS_BUILD_TBB=ON
-          -DROCPROFSYS_BUILD_ELFUTILS=ON
-          -DROCPROFSYS_BUILD_LIBIBERTY=ON
-          -DROCPROFSYS_BUILD_DEBUG=OFF
-          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF
-          -DROCPROFSYS_USE_MPI=ON
-          -DROCPROFSYS_USE_PYTHON=ON
-          -DROCPROFSYS_USE_OMPT=ON
-          -DROCPROFSYS_USE_PAPI=ON
-          -DROCPROFSYS_USE_ROCM=OFF
-          -DROCPROFSYS_USE_RCCL=OFF
-          -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp"
-          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
-          --
+      run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE}
+        git config --global --add safe.directory ${PWD}
+        echo "CMake version: $(cmake --version | head -n 1)"
+        echo "Compiler version: $(gcc --version | head -n 1)"
+        python3 ./scripts/run-ci.py -B build \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-codecov-mpi-python-ompt-papi \
+          --build-jobs 2 \
+          --site GitHub \
+          --coverage \
+          -- \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+          -DROCPROFSYS_BUILD_CI=OFF \
+          -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_BOOST=ON \
+          -DROCPROFSYS_BUILD_TBB=ON \
+          -DROCPROFSYS_BUILD_ELFUTILS=ON \
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+          -DROCPROFSYS_BUILD_DEBUG=OFF \
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF \
+          -DROCPROFSYS_USE_MPI=ON \
+          -DROCPROFSYS_USE_PYTHON=ON \
+          -DROCPROFSYS_USE_ROCM=OFF \
+          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
+          -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"

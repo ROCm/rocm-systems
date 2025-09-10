@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -128,4 +126,3 @@ class LightningProgram final : public roc::Program {
 /*@}*/  // namespace amd::roc
 }  // namespace amd::roc
 
-#endif /*WITHOUT_HSA_BACKEND*/

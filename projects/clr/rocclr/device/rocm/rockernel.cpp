@@ -23,8 +23,6 @@
 
 #include <algorithm>
 
-#ifndef WITHOUT_HSA_BACKEND
-
 namespace amd::roc {
 
 #if defined(USE_COMGR_LIBRARY)
@@ -131,8 +129,8 @@ bool Kernel::postLoad() {
   }
   assert(wavefront_size > 0);
 
-  workGroupInfo_.availableVGPRs_ = device().isa().vgprPerWavefront();
-  workGroupInfo_.availableSGPRs_ = device().isa().sgprPerWavefront();
+  workGroupInfo_.availableVGPRs_ = device().info().vgprsPerSimd_;
+  workGroupInfo_.availableSGPRs_ = device().info().availableSGPRs_;
   workGroupInfo_.privateMemSize_ = workitemPrivateSegmentByteSize_;
   workGroupInfo_.localMemSize_ = workgroupGroupSegmentByteSize_;
   workGroupInfo_.usedLDSSize_ = workgroupGroupSegmentByteSize_;
@@ -163,4 +161,3 @@ bool Kernel::postLoad() {
 #endif  // defined(USE_COMGR_LIBRARY)
 
 }  // namespace amd::roc
-#endif  // WITHOUT_HSA_BACKEND

@@ -256,11 +256,17 @@ class Pm4Factory {
  private:
   // PM4 factory instance map type
   struct instances_fncomp_t {
-    bool operator()(const hsa_agent_t& a, const hsa_agent_t& b) const {
-      return a.handle < b.handle;
+    bool operator()(const AgentInfo& a, const AgentInfo& b) const {
+      // using name instead of gfxip due to backward compatability with rocprofv2, 
+      // as in newer api which rocprofv3 uses both name and gfxip strings are same for a agent.
+      int cmp = strcmp(a.name, b.name); 
+      if (cmp < 0) return true;
+      if (cmp > 0) return false;
+      // If gfxip strings are equal, compare cu_num
+      return a.cu_num < b.cu_num;
     }
   };
-  typedef std::map<hsa_agent_t, Pm4Factory*, instances_fncomp_t> instances_t;
+  typedef std::map<AgentInfo, Pm4Factory*, instances_fncomp_t> instances_t;
 
   // Create GFX9 generic factory
   static Pm4Factory* Gfx9Create(const AgentInfo* agent_info);
@@ -295,7 +301,7 @@ inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_
                                       bool concurrent) {
   // Check if we have the instance already created
   if (instances_ == NULL) instances_ = new instances_t;
-  const auto ret = instances_->insert({agent_info->dev_id, NULL});
+  const auto ret = instances_->insert({*agent_info, NULL});
   instances_t::iterator it = ret.first;
 
   concurrent_create_mode_ = concurrent;

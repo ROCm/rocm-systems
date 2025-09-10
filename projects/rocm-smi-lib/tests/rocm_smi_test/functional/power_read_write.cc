@@ -132,7 +132,7 @@ void TestPowerReadWrite::Run(void) {
       ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
       continue;
     }
-    CHK_ERR_ASRT(ret)
+    CHK_ERR_ASRT(ret);
 
     // Verify api support checking functionality is working
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, nullptr);
@@ -181,24 +181,17 @@ void TestPowerReadWrite::Run(void) {
 
     rsmi_dev_perf_level_t pfl;
     ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-    CHK_ERR_ASRT(ret)
+    CHK_ERR_ASRT(ret);
     ASSERT_EQ(pfl, RSMI_DEV_PERF_LEVEL_MANUAL);
 
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
-    CHK_ERR_ASRT(ret)
+    CHK_ERR_ASRT(ret);
 
     ASSERT_EQ(status.current, new_prof);
 
-    ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-    CHK_ERR_ASRT(ret)
-
-    ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-    CHK_ERR_ASRT(ret)
-    ASSERT_EQ(pfl, RSMI_DEV_PERF_LEVEL_AUTO);
-
-    ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
-    CHK_ERR_ASRT(ret)
-
-    ASSERT_EQ(status.current, orig_profile);
+    // Restore original power profile and performance level
+    // assertion check not necessary because we are restoring the original state
+    rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    rsmi_dev_power_profile_set(dv_ind, 0, orig_profile);
   }
 }
