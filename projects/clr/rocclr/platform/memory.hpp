@@ -146,7 +146,9 @@ class Memory : public amd::RuntimeObject {
   };
 
   struct UserData {
-    int deviceId = 0;                      //!< Device ID memory is allocated on
+    int deviceId = 0;  //!< Device ID memory is allocated on
+    int locationType =
+        0;  //!< The type of the location (i.e. device or host) memory is allocated on
     void* data = nullptr;                  //!< Opaque user data from CL or HIP or etc.
     amd::Memory* phys_mem_obj = nullptr;   //<! Physical mem obj, only set on virtual mem
     amd::Memory* vaddr_mem_obj = nullptr;  //<! Virtual address mem obj, only set on virtual mem

@@ -59,6 +59,12 @@ static __global__ void square_kernel(int* Buff) {
   Buff[i] = temp;
 }
 
+// Simple HIP kernel: read from host-backed memory and write to a device buffer
+__global__ void copyFromHostMem(const int* hostMem, int* devOut, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N) devOut[i] = hostMem[i];
+}
+
 /**
  * Test Description
  * ------------------------
@@ -1318,6 +1324,119 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
   HIP_CHECK(hipMemRelease(handle));
   CTX_DESTROY();
+}
+
+TEST_CASE("Unit_hipMemSetAccessHostDevice_hostalloc") {
+  // Ensure device 0 is selected
+  REQUIRE(hipSetDevice(0) == hipSuccess);
+
+  // ---- Describe a HOST-backed allocation (NUMA-unaware) ----
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;       // pinned system RAM
+  prop.location.type = hipMemLocationTypeHost;  // generic host
+  prop.location.id = 0;                         // host id must be 0
+  prop.requestedHandleType = hipMemHandleTypeNone;
+
+  constexpr size_t N = 1024;
+  constexpr size_t bytes = N * sizeof(int);
+
+  // get minimum granularity
+  size_t gran = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum));
+  size_t mapSize = ((bytes + gran - 1) / gran) * gran;
+
+  // Create host-backed allocation handle
+  hipMemGenericAllocationHandle_t handle{};
+  HIP_CHECK(hipMemCreate(&handle, mapSize, &prop, 0 /*flags*/));
+
+  // Reserve VA and map
+  void* addr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, 0 /*addr*/, 0 /*flags*/));
+
+  HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/));
+
+  // Grant HOST access so the CPU can touch the VA range
+  hipMemAccessDesc accHost{};
+  accHost.flags = hipMemAccessFlagsProtReadWrite;
+  accHost.location.type = hipMemLocationTypeHost;
+  accHost.location.id = 0;
+  HIP_CHECK(hipMemSetAccess(addr, mapSize, &accHost, 1));
+
+  // Also grant DEVICE access so GPU can read/write it
+  hipMemAccessDesc accDev{};
+  accDev.flags = hipMemAccessFlagsProtReadWrite;
+  accDev.location.type = hipMemLocationTypeDevice;
+  accDev.location.id = 0;
+
+  HIP_CHECK(hipMemSetAccess(addr, mapSize, &accDev, 1));
+
+  // ---- CPU can now safely write to the mapping ----
+  int* hostPtr = reinterpret_cast<int*>(addr);
+  for (size_t i = 0; i < N; ++i) hostPtr[i] = static_cast<int>(i);
+
+  // Device output buffer
+  int* dOut = nullptr;
+  HIP_CHECK(hipMalloc(&dOut, bytes));
+
+  // Launch kernel to read host memory and write to device buffer
+  dim3 block(256), grid((N + block.x - 1) / block.x);
+  hipLaunchKernelGGL(copyFromHostMem, grid, block, 0, 0, reinterpret_cast<const int*>(addr), dOut,
+                     static_cast<int>(N));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Verify
+  std::vector<int> out(N, -1);
+  HIP_CHECK(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < N; ++i) {
+    REQUIRE(out[i] == static_cast<int>(i));
+  }
+
+  // Cleanup
+  HIP_CHECK(hipFree(dOut));
+  HIP_CHECK(hipMemUnmap(addr, mapSize));
+  HIP_CHECK(hipMemAddressFree(addr, mapSize));
+  HIP_CHECK(hipMemRelease(handle));
+}
+
+TEST_CASE("Unit_hipMemSetAccessHost_devicealloc") {
+  // Ensure device 0 is selected
+  REQUIRE(hipSetDevice(0) == hipSuccess);
+
+  // ---- Describe a DEVICE-backed allocation
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;         // pinned system RAM
+  prop.location.type = hipMemLocationTypeDevice;  // generic host
+  prop.location.id = 0;                           // host id must be 0
+  prop.requestedHandleType = hipMemHandleTypeNone;
+
+  constexpr size_t N = 1024;
+  constexpr size_t bytes = N * sizeof(int);
+
+  //get minimum granularity
+  size_t gran = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum));
+  size_t mapSize = ((bytes + gran - 1) / gran) * gran;
+
+  // Create host-backed allocation handle
+  hipMemGenericAllocationHandle_t handle{};
+  HIP_CHECK(hipMemCreate(&handle, mapSize, &prop, 0 /*flags*/));
+
+  // Reserve VA and map
+  void* addr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, 0 /*addr*/, 0 /*flags*/));
+
+  HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/));
+
+  // Grant HOST access. 
+  hipMemAccessDesc accHost{};
+  accHost.flags = hipMemAccessFlagsProtReadWrite;
+  accHost.location.type = hipMemLocationTypeHost;
+  accHost.location.id = 0;
+  HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorInvalidValue);
+
+  HIP_CHECK(hipMemUnmap(addr, mapSize));
+  HIP_CHECK(hipMemAddressFree(addr, mapSize));
+  HIP_CHECK(hipMemRelease(handle));
 }
 
 /**

@@ -1658,6 +1658,8 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
+  //<! Enum describing the location of Virtual memory
+  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1892,7 +1894,7 @@ class Device : public RuntimeObject {
    * @param ForceAlloc force_alloc
    */
   amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size, int deviceId,
-                                   bool parent, bool kForceAlloc = false);
+                                   int locationType, bool parent, bool kForceAlloc = false);
 
   /**
    * Deletes Virtual Buffer and creates memob
@@ -1918,7 +1920,8 @@ class Device : public RuntimeObject {
    * @param access_flags Access permissions
    * @param count Number of access permissions
    */
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) = 0;
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.
