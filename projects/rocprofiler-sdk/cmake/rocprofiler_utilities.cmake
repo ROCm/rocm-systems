@@ -1042,9 +1042,9 @@ endfunction()
 
 function(rocprofiler_add_unit_test)
     cmake_policy(PUSH)
-    # if(POLICY CMP0174)
-    cmake_policy(SET CMP0174 OLD)
-    # endif()
+    if(POLICY CMP0174)
+        cmake_policy(SET CMP0174 OLD)
+    endif()
 
     # parse args
     set(_FLAG_OPTS)
