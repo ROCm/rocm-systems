@@ -1690,9 +1690,9 @@ def correct_sys_info(
     """
     # Parse key:value pairs
     pairs: dict[str, str] = {}
-    for pair in specs_correction.split(','):
-        if ':' in pair:
-            key, value = pair.split(':', 1)
+    for pair in specs_correction.split(","):
+        if ":" in pair:
+            key, value = pair.split(":", 1)
             pairs[key.strip()] = value.strip()
 
     # Apply corrections
@@ -1701,6 +1701,6 @@ def correct_sys_info(
             setattr(mspec, key, value)
         else:
             console_error(
-                "analyze", f"Invalid spec '{key}'. Use --specs to see valid options"
+                "analyze", f'Invalid spec "{key}". Use --specs to see valid options'
             )
     return mspec.get_class_members()
