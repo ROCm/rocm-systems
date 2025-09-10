@@ -7,6 +7,15 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tests)
 set(SDK_PACKAGE_NAME "${PROJECT_NAME}")
 set(PACKAGE_NAME "${PROJECT_NAME}-tests")
 
+set(${PACKAGE_NAME}_BUILD_TREE
+    ON
+    CACHE BOOL "" FORCE)
+
+# do not install the package config if tests are not built
+if(NOT ROCPROFILER_BUILD_TESTS)
+    return()
+endif()
+
 install(
     EXPORT ${PACKAGE_NAME}-targets
     FILE ${PACKAGE_NAME}-targets.cmake
@@ -56,10 +65,6 @@ install(
 # ------------------------------------------------------------------------------#
 # build tree
 #
-set(${PACKAGE_NAME}_BUILD_TREE
-    ON
-    CACHE BOOL "" FORCE)
-
 install(
     FILES ${PROJECT_SOURCE_DIR}/LICENSE
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PACKAGE_NAME}
