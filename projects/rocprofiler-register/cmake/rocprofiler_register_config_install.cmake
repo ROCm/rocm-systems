@@ -4,7 +4,7 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT core)
 

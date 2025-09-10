@@ -484,10 +484,10 @@ add_custom_target(
     license
     COMMAND
         ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}/src
-        --license ${PROJECT_SOURCE_DIR}/LICENSE --extension '.py'
+        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
     COMMAND
         ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
-        --license ${PROJECT_SOURCE_DIR}/LICENSE --file
+        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
     )
 
@@ -524,7 +524,7 @@ add_custom_target(
     COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR})
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT main)
 
