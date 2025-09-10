@@ -839,9 +839,9 @@ static inline int MemProtToOsProt(MemProt prot) {
   return -1;
 }
 
-static size_t g_page_size_ = 0;  //!< The default os page size
 size_t PageSize() {
-  if (g_page_size_ != 0) {
+  static size_t g_page_size_ = 0;  //!< The default os page size
+  if (g_page_size_ == 0) {
     g_page_size_ = (size_t)::sysconf(_SC_PAGESIZE);
   }
   return g_page_size_;

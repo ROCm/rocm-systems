@@ -331,7 +331,7 @@ struct cpuid_t {
 bool ParseCpuID(cpuid_t* cpuinfo);
 
 //! Return the default os page size.
-inline size_t PageSize();
+size_t PageSize();
 
 /// @brief CPU time in nanoseconds
 /// @param: None
