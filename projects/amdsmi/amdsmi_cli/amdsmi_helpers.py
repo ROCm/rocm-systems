@@ -1145,10 +1145,14 @@ class AMDSMIHelpers():
             return
 
         required_groups = {'video', 'render'}
-        try:
-            user_groups = {grp.getgrgid(gid).gr_name for gid in os.getgroups()}
-        except Exception as e:
-            raise RuntimeError(f"Unable to determine group memberships: {e}")
+
+        user_groups = set()
+        for gid in set(os.getgroups()) | {os.getgid()}:
+            try:
+                user_groups.add(grp.getgrgid(gid).gr_name)
+            except Exception as e:
+                # Expected in containers when the name for this GID isn't defined
+                pass
 
         missing_groups = required_groups - user_groups
         if missing_groups:
