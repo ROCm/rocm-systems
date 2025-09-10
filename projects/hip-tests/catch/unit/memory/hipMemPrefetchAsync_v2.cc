@@ -29,13 +29,15 @@ THE SOFTWARE.
 /**
  * Kernel to fill value for each element in the given array
  */
-static __global__ void fillDataKernel(int *arr, size_t size, int value) {
-  size_t offset = blockDim.x * blockIdx.x + threadIdx.x;
-  size_t stride = blockDim.x * gridDim.x;
+static __global__ void fillDataKernel(int *arr, int value) {
+  arr[threadIdx.x] = value;
+}
 
-  for (size_t i = offset; i < size; i += stride) {
-    arr[i] = value;
-  }
+/**
+ * Kernel to copy data from source array to destination array
+ */
+static __global__ void copyDataKernel(int *dstArr, int *srcArr) {
+  dstArr[threadIdx.x] = srcArr[threadIdx.x];
 }
 
 /**
@@ -79,8 +81,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
 
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
-  int value = 10;
-
+  constexpr int value = 10;
+  int hostArr[N];
   int *memPtr = nullptr;
 
   hipStream_t stream;
@@ -89,12 +91,14 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
+  std::fill_n(memPtr, N, value);
 
   SECTION("With Device") {
-    int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    int currentValue = value;
 
     for (int deviceId : supportedDevices) {
+      HIP_CHECK(hipSetDevice(deviceId));
+
       hipMemLocation location;
       location.type = hipMemLocationTypeDevice;
       location.id = deviceId;
@@ -102,8 +106,32 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
       HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
 
-      fillDataKernel<<<1, N / 2, 0, stream>>>(memPtr, N, value);
-      HIP_CHECK(hipStreamSynchronize(stream));
+      int *devArr = nullptr;
+      HIP_CHECK(hipMalloc(&devArr, Nbytes));
+      REQUIRE(devArr != nullptr);
+
+      copyDataKernel<<<1, N>>>(devArr, memPtr);
+      HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      for (int i = 0; i < N; i++) {
+        INFO("For Device " << deviceId << " At index " << i
+                           << " Expected value = " << currentValue
+                           << " Got value = " << hostArr[i]);
+        REQUIRE(hostArr[i] == currentValue);
+      }
+
+      currentValue = currentValue + 1;
+      fillDataKernel<<<1, N>>>(memPtr, currentValue);
+      HIP_CHECK(hipDeviceSynchronize());
+
+      for (int i = 0; i < N; i++) {
+        INFO("At index " << i << " Expected value = " << currentValue
+                         << " Got value = " << memPtr[i]);
+        REQUIRE(memPtr[i] == currentValue);
+      }
+
+      HIP_CHECK(hipFree(devArr));
     }
   }
 
@@ -114,17 +142,19 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
     HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    // Fill data in Host
     for (int i = 0; i < N; i++) {
-      memPtr[i] = value;
+      INFO("At index " << i << " Expected value = " << value
+                       << " Got value = " << memPtr[i]);
+      REQUIRE(memPtr[i] == value);
     }
-  }
 
-  // Validate data
-  for (int i = 0; i < N; i++) {
-    INFO("At index " << i << " Expected value = " << value
-                     << " Got value = " << memPtr[i]);
-    REQUIRE(memPtr[i] == value);
+    std::fill_n(memPtr, N, value + 2);
+
+    for (int i = 0; i < N; i++) {
+      INFO("At index " << i << " Expected value = " << (value + 2)
+                       << " Got value = " << memPtr[i]);
+      REQUIRE(memPtr[i] == value + 2);
+    }
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
@@ -147,24 +177,19 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
 #if __linux__
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
-  if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test need at least one device with managed memory support");
+  if (supportedDevices.empty() || numa_available() < 0) {
+    HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
+                           "supported devices or No Numa nodes in system");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
-
-  if (numa_available() < 0) {
-    HipTest::HIP_SKIP_TEST("NUMA not available on this system");
-  }
 
   int maxNode = numa_max_node();
   REQUIRE(maxNode >= 0);
 
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
-  int value = 10;
-
+  constexpr int value = 10;
   int *memPtr = nullptr;
 
   hipStream_t stream;
@@ -173,10 +198,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
+  std::fill_n(memPtr, N, value);
 
   SECTION("With Host NUMA") {
     hipMemLocation location;
-
+    int currentValue = value;
     for (int node = 0; node <= maxNode; ++node) {
       location.type = hipMemLocationTypeHostNuma;
       location.id = node;
@@ -184,9 +210,19 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
       HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
 
-      // Fill data in Host
       for (int i = 0; i < N; i++) {
-        memPtr[i] = value;
+        INFO("For Node " << node << " At index " << i << " Expected value = "
+                         << currentValue << " Got value = " << memPtr[i]);
+        REQUIRE(memPtr[i] == currentValue);
+      }
+
+      currentValue = currentValue + 1;
+      std::fill_n(memPtr, N, currentValue);
+
+      for (int i = 0; i < N; i++) {
+        INFO("For Node " << node << " At index " << i << " Expected value = "
+                         << currentValue << " Got value = " << memPtr[i]);
+        REQUIRE(memPtr[i] == currentValue);
       }
 
 #if 0 // To work this part, fix provided in SWDEV-548802 is required
@@ -207,9 +243,18 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
     HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    // Fill data in Host
     for (int i = 0; i < N; i++) {
-      memPtr[i] = value;
+      INFO("At index " << i << " Expected value = " << value
+                       << " Got value = " << memPtr[i]);
+      REQUIRE(memPtr[i] == value);
+    }
+
+    std::fill_n(memPtr, N, value + 1);
+
+    for (int i = 0; i < N; i++) {
+      INFO("At index " << i << " Expected value = " << (value + 1)
+                       << " Got value = " << memPtr[i]);
+      REQUIRE(memPtr[i] == value + 1);
     }
 
     // determine current CPU’s NUMA node
@@ -223,13 +268,6 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
     int ret = move_pages(0, 1, &page, nullptr, &status, 0);
     REQUIRE(ret == 0);
     REQUIRE(status == cur_node);
-  }
-
-  // Validate data
-  for (int i = 0; i < N; i++) {
-    INFO("At index " << i << " Expected value = " << value
-                     << " Got value = " << memPtr[i]);
-    REQUIRE(memPtr[i] == value);
   }
 
   HIP_CHECK(hipStreamDestroy(stream));

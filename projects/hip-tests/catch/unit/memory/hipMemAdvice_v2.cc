@@ -27,15 +27,10 @@ THE SOFTWARE.
 #endif
 
 /**
- * Kernel to fill value for each element in the given array
+ * Kernel to copy data from source array to destination array
  */
-static __global__ void fillDataKernel(int *arr, size_t size, int value) {
-  size_t offset = blockDim.x * blockIdx.x + threadIdx.x;
-  size_t stride = blockDim.x * gridDim.x;
-
-  for (size_t i = offset; i < size; i += stride) {
-    arr[i] = value;
-  }
+static __global__ void copyDataKernel(int *dstArr, int *srcArr) {
+  dstArr[threadIdx.x] = srcArr[threadIdx.x];
 }
 
 /**
@@ -79,31 +74,41 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
 
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
-  int value = 10;
-
+  constexpr int value = 10;
+  int hostArr[N];
   int *memPtr = nullptr;
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
 
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
+  std::fill_n(memPtr, N, value);
 
   SECTION("With Device") {
-    int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    for (int deviceId : supportedDevices) {
+      HIP_CHECK(hipSetDevice(deviceId));
 
-    for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
       hipMemLocation location;
       location.type = hipMemLocationTypeDevice;
       location.id = deviceId;
 
       HIP_CHECK(
           hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
+      int *devArr = nullptr;
+      HIP_CHECK(hipMalloc(&devArr, Nbytes));
+      REQUIRE(devArr != nullptr);
 
-      fillDataKernel<<<1, N / 2>>>(memPtr, N, value);
+      copyDataKernel<<<1, N>>>(devArr, memPtr);
+      HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
       HIP_CHECK(hipDeviceSynchronize());
+
+      for (int i = 0; i < N; i++) {
+        INFO("For Device " << deviceId << " At index " << i
+                           << " Expected value = " << value
+                           << " Got value = " << hostArr[i]);
+        REQUIRE(hostArr[i] == value);
+      }
+
+      HIP_CHECK(hipFree(devArr));
     }
   }
 
@@ -115,18 +120,12 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
         hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
     for (int i = 0; i < N; i++) {
-      memPtr[i] = value;
+      INFO("At index " << i << " Expected value = " << value
+                       << " Got value = " << memPtr[i]);
+      REQUIRE(memPtr[i] == value);
     }
   }
 
-  // Validate data
-  for (int i = 0; i < N; i++) {
-    INFO("At index " << i << " Expected value = " << value
-                     << " Got value = " << memPtr[i]);
-    REQUIRE(memPtr[i] == value);
-  }
-
-  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
 
@@ -146,32 +145,25 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
 #if __linux__
 TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
-  if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test need at least one device with managed memory support");
+  if (supportedDevices.empty() || numa_available() < 0) {
+    HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
+                           "supported devices or No Numa nodes in system");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
-
-  if (numa_available() < 0) {
-    HipTest::HIP_SKIP_TEST("NUMA not available on this system");
-  }
 
   int maxNode = numa_max_node();
   REQUIRE(maxNode >= 0);
 
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
-  int value = 10;
-
+  constexpr int value = 10;
   int *memPtr = nullptr;
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
 
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
+  std::fill_n(memPtr, N, value);
 
   SECTION("With Host NUMA") {
     for (int node = 0; node <= maxNode; ++node) {
@@ -183,7 +175,9 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
           hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
       for (int i = 0; i < N; i++) {
-        memPtr[i] = value;
+        INFO("For Node " << node << " At index " << i << " Expected value = "
+                         << value << " Got value = " << memPtr[i]);
+        REQUIRE(memPtr[i] == value);
       }
     }
   }
@@ -196,18 +190,12 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
         hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
     for (int i = 0; i < N; i++) {
-      memPtr[i] = value;
+      INFO("At index " << i << " Expected value = " << value
+                       << " Got value = " << memPtr[i]);
+      REQUIRE(memPtr[i] == value);
     }
   }
 
-  // Validate data
-  for (int i = 0; i < N; i++) {
-    INFO("At index " << i << " Expected value = " << value
-                     << " Got value = " << memPtr[i]);
-    REQUIRE(memPtr[i] == value);
-  }
-
-  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
 #endif
@@ -240,11 +228,9 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
   constexpr int N = 16;
   constexpr int Nbytes = N * sizeof(int);
 
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
   void *memPtr = nullptr;
   HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+  REQUIRE(memPtr != nullptr);
 
   hipMemLocation location;
   location.type = hipMemLocationTypeDevice;
@@ -287,6 +273,5 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
