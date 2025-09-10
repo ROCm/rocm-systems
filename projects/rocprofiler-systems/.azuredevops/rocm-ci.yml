@@ -36,7 +36,6 @@ pr:
     - docs
     - '.*.y*ml'
     - '*.md'
-    - LICENSE.md
     - VERSION
     - .wordlist.txt
   drafts: false
