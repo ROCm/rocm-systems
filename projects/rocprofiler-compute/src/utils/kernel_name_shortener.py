@@ -36,6 +36,12 @@ from utils.logger import console_debug, console_error, console_log
 _NAME_CACHE: dict[str, str] = {}
 
 # Constants
+
+# NOTE: c++filt is a Linux-only solution for demangling C++ symbols.
+# TODO: We need to think about Windows support in the future.
+# Windows equivalent might be undname.exe or using llvm-cxxfilt.
+# CONCERN: Using absolute path here is brittle - c++filt location may vary
+# across distributions. TODO: Consider using shutil.which() or PATH lookup instead.
 CPP_FILT_PATH = "/usr/bin/c++filt"
 MAX_SHORTENING_LEVEL = 5
 KERNEL_NAME_COLUMNS = ["Kernel_Name", "Name"]
