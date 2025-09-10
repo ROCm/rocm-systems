@@ -124,8 +124,6 @@ class OmniAnalyze_Base:
             ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
-        # print(ac)
-
         parser.build_dfs(
             arch_configs=ac, filter_metrics=filter_metrics, sys_info=sys_info
         )

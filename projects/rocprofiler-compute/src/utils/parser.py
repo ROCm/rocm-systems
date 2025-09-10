@@ -456,7 +456,6 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
 
     # convert equation string to intermediate expression in df array format
     ast_node = ast.parse(equation_string)
-    # print(astunparse.dump(ast_node))
     transformer = CodeTransformer()
     transformer.visit(ast_node)
 
@@ -612,11 +611,6 @@ def build_dfs(
     """
 
     # TODO: more error checking for filter_metrics!!
-    # if filter_metrics:
-    #     for metric in filter_metrics:
-    #         if not metric in avail_ip_blocks:
-    #             print("{} is not a valid metric to filter".format(metric))
-    #             exit(1)
     simple_box = {
         "Min": ["MIN(", ")"],
         "Q1": ["QUANTILE(", ", 0.25)"],
@@ -643,8 +637,7 @@ def build_dfs(
                         # NB: support single placeholder for now!!
                         p_range = data_config["metric"].pop("placeholder_range")
                         metric, metric_expr = data_config["metric"].popitem()
-                        # print(len(data_config["metric"]))
-                        # data_config['metric'].clear()
+
                         for p, r in p_range.items():
                             # NB: We have to resolve placeholder range first if it
                             #   is a build-in var. It will be too late to do it in
@@ -830,7 +823,6 @@ def build_metric_value_string(
                     if not df.empty:
                         for i in range(df.shape[0]):
                             row_idx_label = df.index.to_list()[i]
-                            # print(i, "row_idx_label", row_idx_label, expr)
                             if expr.lower() != "alias":
                                 df.at[row_idx_label, expr] = build_eval_string(
                                     df.at[row_idx_label, expr],

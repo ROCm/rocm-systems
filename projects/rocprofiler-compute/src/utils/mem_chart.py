@@ -137,7 +137,6 @@ class InstrBuff(RectFrame):
     wave_life: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
-        # print("---------", self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
         canvas.rect(self.x_min, self.y_min, self.x_max - 2.0, self.y_max - 1.0)

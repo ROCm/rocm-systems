@@ -122,8 +122,6 @@ class cli_analysis(OmniAnalyze_Base):
                             arch_config=arch_config,
                         )
 
-            print(f"output: {self._output}")
-
             tty.show_all(
                 args,
                 self._runs,
