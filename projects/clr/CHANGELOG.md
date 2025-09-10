@@ -38,6 +38,23 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Improved hip module loading latency
 * Optimized kernel metadata retrieval during module post load
 
+## HIP 7.0.2 for ROCm 7.0.2
+
+### Added
+
+* Support for rocBLAS and hipBLASL targeting the new AMD GPUs gfx1150 and gfx1151.
+* Support for the `hipMemAllocationTypeUncached` flag, enabling developers to allocate uncached memory. This flag is now supported in the following APIs:
+    - `hipMemGetAllocationGranularity` determines the recommended allocation granularity for uncached memory.
+    - `hipMemCreate` allocates memory with uncached properties.
+
+### Resolved issues
+
+* A compilation failure affecting applications that compile kernels using `hiprtc` with the compiler option `std=c++11`.
+* A permission-related error occurred during the execution of hipLaunchHostFunc. This API is now supported and permitted to run during stream capture, aligning its behavior with CUDA.
+* A numerical error during graph capture of kernels that rely on a remainder in `globalWorkSize`, in frameworks like MIOpen and PyTorch, where the grid size is not a multiple of the block size. To ensure correct replay behavior, HIP runtime now stores this remainder in `hip::GraphKernelNode` during `hipExtModuleLaunchKernel` capture, enabling accurate execution and preventing corruption.
+* A page fault occurred during viewport rendering while running the file undo.blend in Blender. The issue was resolved by the HIP runtime, which reused the same context during image creation.
+* Resolved a segmentation fault in `gpu_metrics`, which is used in threshold logic for command submission patches to GPU device(s) during CPU synchronization.
+
 ## HIP 7.0 for ROCm 7.0
 
 ### Added
