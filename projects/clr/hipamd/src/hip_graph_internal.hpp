@@ -601,7 +601,7 @@ class Graph {
   void ScheduleNodes();
 
   //! Update streams for the graph execution
-  void UpdateStreams(
+  hipError_t UpdateStreams(
       hip::Stream* launch_stream,                       //!< Launch stream from the application
       const std::vector<hip::Stream*>& parallel_stream  //!< The list of parallel streams
   );
@@ -735,6 +735,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
  public:
   static std::unordered_set<GraphExec*> graphExecSet_;
   static amd::Monitor graphExecSetLock_;
+  static amd::Monitor graphExecStreamCreateLock_;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
     amd::ScopedLock lock(graphExecSetLock_);
