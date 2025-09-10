@@ -778,7 +778,6 @@ rocprofiler-sdk:
           - gfx908
           - gfx90a
           - gfx9
-          - gfx12
           - gfx1200
           - gfx1201
           expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
@@ -830,7 +829,6 @@ rocprofiler-sdk:
           - gfx900
           - gfx90a
           - gfx9
-          - gfx12
           - gfx1200
           - gfx1201
           block: GRBM
@@ -855,7 +853,6 @@ rocprofiler-sdk:
           - gfx908
           - gfx90a
           - gfx9
-          - gfx12
           - gfx1200
           - gfx1201
           expression: reduce(GRBM_GUI_ACTIVE,max)
