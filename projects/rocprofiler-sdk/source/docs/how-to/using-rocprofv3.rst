@@ -57,7 +57,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Specifies output file name. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
        | Specifies the output path for saving the output files. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
        | Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. |br| |br| |br|
-       | Generates a configuration output file containing the resolved rocprofv3 settings and options used for the profiling session. |br| |br| |br|
+       | Generates a configuration output file containing the resolved ``rocprofv3`` settings and options used for the profiling session. |br| |br| |br|
        | Sets the desired log level. |br| |br| |br|
        | Specifies the path to a YAML file consisting of extra counter definitions.
 
