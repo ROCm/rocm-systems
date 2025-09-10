@@ -375,6 +375,15 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
                                                            hsa_amd_memory_type_t* type);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t handle,
+                                               uint64_t flags);
+
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle);
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold);
 
 // Mirrors Amd Extension Apis

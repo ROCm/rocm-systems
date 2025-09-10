@@ -4299,6 +4299,26 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t *fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t handle,
+                                               const uint64_t flags) {
+
+  auto memoryHandle = memory_handle_map_.find((void*)handle.handle);
+  if (memoryHandle == memory_handle_map_.end()) {
+    debug_warning(false && "Can't find memory handle");
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  // NOT IMPLEMENTED: Call Thunk/KFD to get unique handle
+  return HSA_STATUS_ERROR;
+}
+
+hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle) {
+  // NOT IMPLEMENTED: Call Thunk/KFD to import
+  return HSA_STATUS_ERROR;
+}
+
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
