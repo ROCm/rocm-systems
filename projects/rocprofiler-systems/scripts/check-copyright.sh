@@ -22,7 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-expected_copyright=("Copyright (c)" ".COPYRIGHT")
+expected_copyright=("Copyright (c)" ".COPYRIGHT" "Copyright Advanced Micro Devices")
 files_with_missing_copyright=()
 files=("$@")
 
@@ -63,7 +63,7 @@ if [ ${#files_with_missing_copyright[@]} -ne 0 ]; then
                 else
                     copyright_notice+="$comS"$'\n'
                 fi
-            done < LICENSE
+            done < LICENSE.md
 
             # Add the notice to the beginning of the file
             temp_file=$(mktemp)
