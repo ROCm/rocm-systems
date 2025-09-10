@@ -184,10 +184,6 @@ if(NOT AMDFLANG_FULL_VERSION)
     rocprofiler_systems_message(FATAL_ERROR "Failed to detect amdflang version.")
 endif()
 
-if(AMDFLANG_VERSION_MAJOR LESS 19)
-    rocprofiler_systems_message(FATAL_ERROR "OMPVV tests require amdflang version 19.0.0 or above. Current: ${AMDFLANG_FULL_VERSION}")
-endif()
-
 # ---------------------------------------------------------------------------------------#
 # Variables
 # ---------------------------------------------------------------------------------------#
@@ -199,7 +195,7 @@ set(OMPVV_NUM_TEAMS_DEVICE 8) # default used by ompvv
 set(OMPVV_NUM_THREADS_DEVICE 8) # default used by ompvv
 
 # Files listed below are OpenMP 5.0 tests that compile for
-# both amdflang 20.0 and 19.0.
+# amdflang 20.0, 19.0 and 18.0.
 # Set of host only tests to be compiled
 set(OMPVV_HOST_TESTS_TO_COMPILE
     "${OMPVV_TDIR}/teams/test_team_default_shared.F90"
