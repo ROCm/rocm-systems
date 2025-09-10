@@ -347,8 +347,6 @@ Example for file plugin output:
 - Support for kernel name filtering in `rocprofv2`
 - Barrier bit to read and stop packets
 - ROCProfiler support for gfx1150 and gfx1151
-- ATT support for gfx12
-- gfx12 support
 
 ### Changed
 
