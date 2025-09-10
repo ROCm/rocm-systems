@@ -33,20 +33,20 @@ extern "C" {
 
 // DOT FUNCTIONS
 #if defined(__clang__) && defined(__HIP__)
-__device__ __attribute__((const)) int __ockl_sdot2(HIP_vector_base<short, 2>::Native_vec_,
-                                                   HIP_vector_base<short, 2>::Native_vec_, int,
+__device__ __attribute__((const)) int __ockl_sdot2(HIP_vector_type<short, 2>::Native_vec_,
+                                                   HIP_vector_type<short, 2>::Native_vec_, int,
                                                    bool);
 
 __device__ __attribute__((const)) unsigned int __ockl_udot2(
-    HIP_vector_base<unsigned short, 2>::Native_vec_,
-    HIP_vector_base<unsigned short, 2>::Native_vec_, unsigned int, bool);
+    HIP_vector_type<unsigned short, 2>::Native_vec_,
+    HIP_vector_type<unsigned short, 2>::Native_vec_, unsigned int, bool);
 
-__device__ __attribute__((const)) int __ockl_sdot4(HIP_vector_base<char, 4>::Native_vec_,
-                                                   HIP_vector_base<char, 4>::Native_vec_, int,
+__device__ __attribute__((const)) int __ockl_sdot4(HIP_vector_type<char, 4>::Native_vec_,
+                                                   HIP_vector_type<char, 4>::Native_vec_, int,
                                                    bool);
 
 __device__ __attribute__((const)) unsigned int __ockl_udot4(
-    HIP_vector_base<unsigned char, 4>::Native_vec_, HIP_vector_base<unsigned char, 4>::Native_vec_,
+    HIP_vector_type<unsigned char, 4>::Native_vec_, HIP_vector_type<unsigned char, 4>::Native_vec_,
     unsigned int, bool);
 
 __device__ __attribute__((const)) int __ockl_sdot8(int, int, int, bool);

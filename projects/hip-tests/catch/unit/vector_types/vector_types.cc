@@ -317,7 +317,7 @@ TEMPLATE_TEST_CASE("Unit_VectorStructuredBindings_SanityCheck_Basic_host", "", f
 }
 
 __host__ __device__ constexpr bool func() {
-  int3 vec3 = int3{0};
+  int3 vec3 = int3{0, 0, 0};
   int exp = int{0};
   return vec3.x == exp;
 }
