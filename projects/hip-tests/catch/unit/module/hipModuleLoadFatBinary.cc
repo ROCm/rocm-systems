@@ -75,8 +75,8 @@ void loadKernelData(hipFunction_t kernel) {
   HIP_CHECK(hipMalloc(&Ad, SIZE));
   HIP_CHECK(hipMalloc(&Bd, SIZE));
 
-  HIP_CHECK(hipMemcpy(Ad, &A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, &B, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Ad, A.data(), SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, B.data(), SIZE, hipMemcpyHostToDevice));
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -88,7 +88,7 @@ void loadKernelData(hipFunction_t kernel) {
   } args;
   args._Ad = reinterpret_cast<void *>(Ad);
   args._Bd = reinterpret_cast<void *>(Bd);
-  args.size = SIZE;
+  args.size = LEN;
   size_t size = sizeof(args);
 
   void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
@@ -97,15 +97,13 @@ void loadKernelData(hipFunction_t kernel) {
                                   reinterpret_cast<void **>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemcpy(&B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B.data(), Bd, SIZE, hipMemcpyDeviceToHost));
   // Validation
   for (size_t i = 0; i < A.size(); i++) {
-    if (A[i] != B[i]) {
-      INFO("Array Failed at index: " << i
-                                     << "\nA value at failed index: " << A[i]
-                                     << "\nB value at failed index: " << B[i]);
-      REQUIRE(false);
-    }
+    INFO("Array Failed at index: " << i
+                                   << "\nA value at failed index: " << A[i]
+                                   << "\nB value at failed index: " << B[i]);
+    REQUIRE(A[i] == B[i]);
   }
 
   HIP_CHECK(hipFree(Ad));
@@ -138,35 +136,30 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
     REQUIRE(kernel != nullptr);
     HIP_CHECK(hipModuleUnload(Module));
   }
-  SECTION("Compiled module with Generic target in regular fatbin") {
-    if (!isGenericTargetSupported()) {
-      INFO("Generic target test is skipped\n");
-      return;
+  if (isGenericTargetSupported()) {
+    SECTION("Compiled module with Generic target in regular fatbin") {
+      const auto loaded_module =
+          LoadModuleIntoBuffer("copyKernelGenericTarget.code");
+      HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+      REQUIRE(Module != nullptr);
+      hipFunction_t kernel = nullptr;
+      HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+      REQUIRE(kernel != nullptr);
+      loadKernelData(kernel);
+      HIP_CHECK(hipModuleUnload(Module));
     }
-    const auto loaded_module =
-        LoadModuleIntoBuffer("copyKernelGenericTarget.code");
-    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
-    REQUIRE(Module != nullptr);
-    hipFunction_t kernel = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
-    REQUIRE(kernel != nullptr);
-    loadKernelData(kernel);
-    HIP_CHECK(hipModuleUnload(Module));
-  }
-  SECTION("Compiled module with Generic target in compressed fatbin") {
-    if (!isGenericTargetSupported()) {
-      INFO("Generic target test is skipped\n");
-      return;
+
+    SECTION("Compiled module with Generic target in compressed fatbin") {
+      const auto loaded_module =
+          LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
+      HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+      REQUIRE(Module != nullptr);
+      hipFunction_t kernel = nullptr;
+      HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+      REQUIRE(kernel != nullptr);
+      loadKernelData(kernel);
+      HIP_CHECK(hipModuleUnload(Module));
     }
-    const auto loaded_module =
-        LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
-    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
-    REQUIRE(Module != nullptr);
-    hipFunction_t kernel = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
-    REQUIRE(kernel != nullptr);
-    loadKernelData(kernel);
-    HIP_CHECK(hipModuleUnload(Module));
   }
 }
 #endif
