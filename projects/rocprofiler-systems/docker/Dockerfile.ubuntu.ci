@@ -59,6 +59,7 @@ ARG THEROCK_GFX120X=""
 # Set up dependencies
 RUN set -euo pipefail; \
     if [ -n "$THEROCK_GFX94X" ] || [ -n "$THEROCK_GFX110X" ] || [ -n "$THEROCK_GFX120X" ]; then \
+        pip install --upgrade pip; \
         pip install awscli --break-system-packages; \
     fi
 
