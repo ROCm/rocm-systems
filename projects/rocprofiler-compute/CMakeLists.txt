@@ -41,11 +41,10 @@ set(EXECUTABLE_NAME "rocprof-compute")
 include(ExternalProject)
 include(GNUInstallDirs)
 
-
 set(ENABLE_KOKKOS OFF)
 
 if(ENABLE_TESTS)
-    
+
     if(UNIX)
         # Detect AMD GPU architecture using rocminfo
         execute_process(
@@ -141,7 +140,6 @@ if(ENABLE_KOKKOS)
         "       \"find_package(Kokkos REQUIRED PATHS \\\"\\\${KOKKOS_BUILD}\\\")\\n\"\n"
         "       \"file(GLOB SOURCES \\\"*.cc\\\")\\n\"\n"
         "       \"add_executable(lulesh \\\${SOURCES})\\n\"\n"
-
         "       \"option(USE_MPI \\\"Build with MPI\\\" OFF)\\n\"\n"
         "       \"if(USE_MPI)\\n\"\n"
         "       \"  find_package(MPI REQUIRED)\\n\"\n"
@@ -150,7 +148,6 @@ if(ENABLE_KOKKOS)
         "       \"else()\\n\"\n"
         "       \"  target_compile_definitions(lulesh PRIVATE USE_MPI=0)\\n\"\n"
         "       \"endif()\\n\"\n"
-
         "       \"target_include_directories(lulesh PRIVATE \\\"\\\${KOKKOS_BUILD}\\\"  \\\"\\\${KOKKOS_BUILD}/include\\\" \\\"\\\${KOKKOS_BUILD}/core/src\\\" \\\"\\\${KOKKOS_BUILD}/containers/src\\\" \\\"\\\${KOKKOS_BUILD}/algorithms/src\\\"   \\\"${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/includes\\\" \\\"\\\${HIP_INCLUDE_DIR}\\\" \\\"\\\${HIP_EXTRA_INCLUDE}\\\" \\\"\\\${HIP_LIB_DIR}\\\" )\\n\"\n"
         "       \"target_compile_options(lulesh PRIVATE \\n\"\n"
         "           \"-std=c++17\\n\"\n"
@@ -167,7 +164,8 @@ if(ENABLE_KOKKOS)
         "       )\n"
         "endif()\n")
 
-    file(WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_header.cmake"
+    file(
+        WRITE "${CMAKE_BINARY_DIR}/patch_lulesh_header.cmake"
         "message(STATUS \"Patching \${LULESH_HEADER} to remove hardcoded macro definitions...\")
         if(EXISTS \${LULESH_HEADER})
         \tfile(READ \${LULESH_HEADER} LULESH_CONTENT)
@@ -184,21 +182,17 @@ if(ENABLE_KOKKOS)
         kokkos_src
         GIT_REPOSITORY https://github.com/kokkos/kokkos.git
         GIT_TAG caea1f54557acb408fe994c7d5b2574e4847454e
-       SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos
-#        BINARY_DIR ${CMAKE_BINARY_DIR}/kokkos-build
-#        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/kokkos-build
-#                   -DKokkos_ENABLE_HIP=ON
-#                   -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
-#                   -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
-#                   -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so
-#                   -DCMAKE_PREFIX_PATH=/opt/rocm
-#                   -DKokkos_ENABLE_ROCTHRUST=OFF
-#                   -DKokkos_ENABLE_CUDA=OFF
-#                   -DCMAKE_CXX_COMPILER=amdclang++
-#                   -DKokkos_ENABLE_OPENMP=ON
-#                   -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
-#                   -DKokkos_ENABLE_DEPRECATED_CODE_4=ON
-#        BUILD_COMMAND ${CMAKE_COMMAND} --build . --target install
+        SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos
+        # BINARY_DIR ${CMAKE_BINARY_DIR}/kokkos-build CMAKE_ARGS
+        # -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/kokkos-build -DKokkos_ENABLE_HIP=ON
+        # -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
+        # -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
+        # -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so -DCMAKE_PREFIX_PATH=/opt/rocm
+        # -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF
+        # -DCMAKE_CXX_COMPILER=amdclang++ -DKokkos_ENABLE_OPENMP=ON
+        # -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
+        # -DKokkos_ENABLE_DEPRECATED_CODE_4=ON BUILD_COMMAND ${CMAKE_COMMAND} --build .
+        # --target install
         CONFIGURE_COMMAND ""
         BUILD_COMMAND ""
         INSTALL_COMMAND ""
@@ -224,40 +218,41 @@ if(ENABLE_KOKKOS)
 
     externalproject_add_step(
         kokkos_miniapps patch_lulesh_header
-        COMMAND ${CMAKE_COMMAND} -DLULESH_HEADER=${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/lulesh.h -P ${CMAKE_BINARY_DIR}/patch_lulesh_header.cmake
+        COMMAND
+            ${CMAKE_COMMAND}
+            -DLULESH_HEADER=${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/lulesh.h
+            -P ${CMAKE_BINARY_DIR}/patch_lulesh_header.cmake
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        DEPENDEES create_lulesh_cmakelists
-        )    
+        DEPENDEES create_lulesh_cmakelists)
 
     externalproject_add_step(
         kokkos_miniapps build_kokkos
-        COMMAND ${CMAKE_COMMAND} -S ${CMAKE_BINARY_DIR}/kokkos
-                -B ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
-                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}//kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
-                -DKokkos_ENABLE_HIP=ON
-                -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
-                -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
-                -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so
-                -DCMAKE_PREFIX_PATH=/opt/rocm
-                -DKokkos_ENABLE_ROCTHRUST=OFF
-                -DKokkos_ENABLE_CUDA=OFF
-                -DCMAKE_CXX_COMPILER=amdclang++
-                -DKokkos_ENABLE_OPENMP=OFF
-        
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
-        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+        COMMAND
+            ${CMAKE_COMMAND} -S ${CMAKE_BINARY_DIR}/kokkos -B
+            ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}//kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+            -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
+            -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
+            -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so -DCMAKE_PREFIX_PATH=/opt/rocm
+            -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF
+            -DCMAKE_CXX_COMPILER=amdclang++ -DKokkos_ENABLE_OPENMP=OFF
+        COMMAND ${CMAKE_COMMAND} --build
+                ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+        COMMAND ${CMAKE_COMMAND} --install
+                ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/
-        DEPENDEES patch_lulesh_header
-        )
+        DEPENDEES patch_lulesh_header)
 
     externalproject_add_step(
         kokkos_miniapps build_lulesh
         COMMAND ${CMAKE_COMMAND} -E rm -f CMakeCache.txt
-        COMMAND ${CMAKE_COMMAND} -S ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm 
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
-        DEPENDEES build_kokkos
-        )
+        COMMAND ${CMAKE_COMMAND} -S
+                ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm
+        COMMAND ${CMAKE_COMMAND} --build
+                ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+        WORKING_DIRECTORY
+            ${CMAKE_BINARY_DIR}/kokkos-miniapps/lulesh-2.0/kokkos-no-uvm/build
+        DEPENDEES build_kokkos)
 
 endif()
 
