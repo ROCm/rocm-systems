@@ -119,6 +119,7 @@ TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, sho
   delete[] B;
   HIP_CHECK(hipFree(devPtrA));
   HIP_CHECK(hipFree(devPtrB));
+  HIP_CHECK(hipDestroyTextureObject(texObj));
 }
 
 /**

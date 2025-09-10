@@ -125,9 +125,3 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
           NUM_COMPUTE_UNITS: 28
           TARGET_GRAPHICS_VERSION: gfx1102
   ```
-
-
-
-
-> [!WARNING]
-> To use ROCprofiler-SDK, obtain the latest mainline version of AQLprofile from [here](https://github.com/ROCm/aqlprofile).

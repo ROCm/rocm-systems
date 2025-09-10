@@ -170,13 +170,17 @@ endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
 enable_testing()
+include(CTest)
 
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
     set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing"
                    "--cov-report=lcov:tests/coverage.info")
-    # "--cov-report=term-missing" "--cov-report=xml:tests/coverage.xml")
+
+    set(CTEST_COVERAGE_COMMAND "python3")
+    set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml" "-o"
+                                   "${CMAKE_BINARY_DIR}/coverage.xml")
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
@@ -350,6 +354,42 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_autogen_config.xml
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_autogen_config.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+# -----------------------------------
+# Generate coverage tests
+# -----------------------------------
+
+if(${ENABLE_COVERAGE})
+    set(ALL_TEST_NAMES
+        test_profile_kernel_execution
+        test_profile_dispatch
+        test_profile_mem
+        test_profile_join
+        test_profile_sort
+        test_profile_misc
+        test_profile_section
+        test_profile_sets_func
+        test_analyze_commands
+        test_analyze_workloads
+        test_L1_cache_counters
+        test_num_xcds_spec_class
+        test_num_xcds_cli_output
+        test_db_connector
+        test_utils
+        test_autogen_config)
+
+    string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
+
+    add_test(
+        NAME generate_coverage_report
+        COMMAND ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    set_tests_properties(
+        generate_coverage_report
+        PROPERTIES DEPENDS "${ALL_TESTS_STRING}" LABELS "coverage" ENVIRONMENT
+                   "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage")
+endif()
 
 # ---------
 # Install

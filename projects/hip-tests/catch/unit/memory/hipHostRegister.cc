@@ -234,7 +234,9 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "", int, float
     HIP_CHECK(hipSetDevice(dev));
     HIP_CHECK(hipGetDeviceProperties(&prop, dev));
     std::string arch = prop.gcnArchName;
-    TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
+    if (arch.find("xnack+") == std::string::npos) {
+      continue;  // Skip if xnack is not supported
+    }
     // Register host memory for each device
     if (register_once == 0) {
       HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
@@ -977,6 +979,21 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   free(hostPtr);
   SECTION("hipHostRegister Negative Test - freed memory") {
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, 0, 0), hipErrorInvalidValue);
+  }
+}
+
+TEST_CASE("Unit_hipHostRegister_Capture") {
+  constexpr size_t kBufferSize = 1024;
+  auto buffer = std::make_unique<int[]>(kBufferSize);
+  hipError_t capture_error = hipSuccess;
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    HIP_CHECK(hipHostUnregister(buffer.get()));
   }
 }
 

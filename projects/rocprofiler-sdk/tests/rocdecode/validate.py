@@ -177,6 +177,16 @@ def test_rocdecode_traces(input_data):
         "rocDecGetVideoFrame",
         "rocDecGetDecodeStatus",
         "rocDecDestroyBitstreamReader",
+        "rocDecCreateDecoder",
+        "rocDecGetErrorName",
+        "rocDecCreateVideoParser",
+        "rocDecParseVideoData",
+        "rocDecDestroyVideoParser",
+        "rocDecDestroyDecoder",
+        "rocDecGetDecoderCaps",
+        "rocDecGetDecodeStatus",
+        "rocDecReconfigureDecoder",
+        "rocDecGetVideoFrame",
     ]:
         assert call in api_calls
 
