@@ -35,6 +35,7 @@
 #include "impl/wddm/va_mgr.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
+#include "dxcore_loader.h"
 
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 uint32_t get_num_wddmdev();

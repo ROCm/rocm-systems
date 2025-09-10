@@ -88,7 +88,7 @@ static NTSTATUS WDDMQueryAdapter(D3DKMT_HANDLE adapter, KMTQUERYADAPTERINFOTYPE 
   args.pPrivateDriverData = data;
   args.PrivateDriverDataSize = size;
 
-  return D3DKMTQueryAdapterInfo(&args);
+  return DXCORE_CALL(D3DKMTQueryAdapterInfo(&args));
 }
 
 uint64_t WDDMDevice::VramAvail(void) {
@@ -107,7 +107,7 @@ uint64_t WDDMDevice::VramAvail(void) {
   stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
   stats.AdapterLuid = adapter_luid_;
   stats.QuerySegment.SegmentId = 0;
-  ret = D3DKMTQueryStatistics(&stats);
+  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
   if (ret == 0)
     usedVis = stats.QueryResult.SegmentInformation.BytesResident;
 
@@ -117,7 +117,7 @@ uint64_t WDDMDevice::VramAvail(void) {
   stats.AdapterLuid = adapter_luid_;
   stats.QuerySegment.SegmentId = 1;
 
-  ret = D3DKMTQueryStatistics(&stats);
+  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
   if (ret == 0)
     usedInv = stats.QueryResult.SegmentInformation.BytesResident;
 
@@ -128,7 +128,7 @@ bool WDDMDevice::CreateDevice(void) {
   D3DKMT_CREATEDEVICE args = {0};
   args.hAdapter = adapter_;
 
-  NTSTATUS ret = D3DKMTCreateDevice(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateDevice(&args));
   if (ret == STATUS_SUCCESS) {
     device_ = args.hDevice;
     return true;
@@ -142,7 +142,7 @@ bool WDDMDevice::DestroyDevice(void) {
   D3DKMT_DESTROYDEVICE args = {0};
   args.hDevice = device_;
 
-  NTSTATUS ret = D3DKMTDestroyDevice(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyDevice(&args));
   if (ret == STATUS_SUCCESS)
     return true;
 
@@ -155,7 +155,7 @@ bool WDDMDevice::CreatePagingQueue(void) {
   args.hDevice = device_;
   args.Priority = D3DDDI_PAGINGQUEUE_PRIORITY_NORMAL;
 
-  NTSTATUS ret = D3DKMTCreatePagingQueue(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreatePagingQueue(&args));
   if (ret == STATUS_SUCCESS) {
     page_queue_ = args.hPagingQueue;
     page_syncobj_ = args.hSyncObject;
@@ -172,7 +172,7 @@ bool WDDMDevice::DestroyPagingQueue(void) {
   D3DDDI_DESTROYPAGINGQUEUE args = {0};
   args.hPagingQueue = page_queue_;
 
-  NTSTATUS ret = D3DKMTDestroyPagingQueue(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyPagingQueue(&args));
   if (ret == STATUS_SUCCESS)
     return true;
 
@@ -201,7 +201,7 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   d3dkmt_escape.PrivateDriverDataSize = priv_size;
   d3dkmt_escape.Flags.HardwareAccess  = true;
 
-  NTSTATUS status = D3DKMTEscape(&d3dkmt_escape);
+  NTSTATUS status = DXCORE_CALL(D3DKMTEscape(&d3dkmt_escape));
   pr_debug("status %d, restore %d\n", status, restore);
   free(priv_data);
 }
@@ -239,7 +239,7 @@ void *WDDMDevice::Lock(D3DKMT_HANDLE handle) {
   args.hDevice = device_;
   args.hAllocation = handle;
 
-  NTSTATUS ret = D3DKMTLock2(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTLock2(&args));
   if (ret == STATUS_SUCCESS)
     return args.pData;
 
@@ -252,7 +252,7 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   args.hDevice = device_;
   args.hAllocation = handle;
 
-  NTSTATUS ret = D3DKMTUnlock2(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTUnlock2(&args));
   if (ret == STATUS_SUCCESS)
     return true;
 
@@ -287,7 +287,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   else
     args.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(engine, &device_info_);
 
-  NTSTATUS ret = D3DKMTCreateContextVirtual(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
     *handle = args.hContext;
     free(priv_data);
@@ -304,7 +304,7 @@ bool WDDMDevice::DestroyContext(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYCONTEXT args = {0};
   args.hContext = handle;
 
-  NTSTATUS ret = D3DKMTDestroyContext(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyContext(&args));
   if (ret == STATUS_SUCCESS)
     return true;
 
@@ -321,7 +321,7 @@ bool WDDMDevice::GpuWait(WDDMQueue *queue, const D3DKMT_HANDLE *syncobjs,
   args.ObjectHandleArray = syncobjs;
   args.MonitoredFenceValueArray = values;
 
-  NTSTATUS ret = D3DKMTWaitForSynchronizationObjectFromGpu(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTWaitForSynchronizationObjectFromGpu(&args));
   if (ret == STATUS_SUCCESS)
       return true;
 
@@ -337,7 +337,7 @@ bool WDDMDevice::GpuSignal(D3DKMT_HANDLE context, const D3DKMT_HANDLE *syncobjs,
   args.ObjectHandleArray = syncobjs;
   args.MonitoredFenceValueArray = value;
 
-  NTSTATUS ret = D3DKMTSignalSynchronizationObjectFromGpu(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTSignalSynchronizationObjectFromGpu(&args));
   if (ret == STATUS_SUCCESS)
     return true;
 
@@ -354,7 +354,7 @@ bool WDDMDevice::CpuWait(const D3DKMT_HANDLE *syncobjs, uint64_t *value,
   args.FenceValueArray = value;
   args.Flags.WaitAny = wait_any;
 
-  NTSTATUS ret = D3DKMTWaitForSynchronizationObjectFromCpu(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTWaitForSynchronizationObjectFromCpu(&args));
   if (ret == STATUS_SUCCESS)
     return true;
 
@@ -378,7 +378,7 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   args.Info.Type = D3DDDI_MONITORED_FENCE;
   args.Info.MonitoredFence.EngineAffinity = 1 << 0;
 
-  NTSTATUS ret = D3DKMTCreateSynchronizationObject2(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateSynchronizationObject2(&args));
   if (ret == STATUS_SUCCESS) {
     *handle = args.hSyncObject;
     *addr = (uint64_t *)args.Info.MonitoredFence.FenceValueCPUVirtualAddress;
@@ -397,7 +397,7 @@ void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
 
-  NTSTATUS ret = D3DKMTDestroySynchronizationObject(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroySynchronizationObject(&args));
   if (ret != STATUS_SUCCESS)
     pr_err("fail %x\n", ret);
 }
@@ -433,7 +433,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
   bool supported = false;
   D3DKMT_ENUMADAPTERS2 args = {0};
-  NTSTATUS ret = D3DKMTEnumAdapters2(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTEnumAdapters2(&args));
   if (ret != STATUS_SUCCESS)
     return ret;
 
@@ -446,7 +446,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
     return STATUS_NO_MEMORY;
 
   args.pAdapters = info;
-  ret = D3DKMTEnumAdapters2(&args);
+  ret = DXCORE_CALL(D3DKMTEnumAdapters2(&args));
   if (ret != STATUS_SUCCESS)
     goto err_out0;
 
@@ -517,7 +517,7 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
   args.NodeOrdinal = ordinal;
   args.PhysicalAdapterIndex = 0;
 
-  NTSTATUS status = D3DKMTQueryClockCalibration(&args);
+  NTSTATUS status = DXCORE_CALL(D3DKMTQueryClockCalibration(&args));
   if (status) {
     pr_debug("status %d \n", status);
   } else {
@@ -589,7 +589,7 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   args.pPrivateDriverData = priv_data;
   args.PrivateDriverDataSize = priv_size;
 
-  NTSTATUS ret = D3DKMTSubmitCommand(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTSubmitCommand(&args));
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     free(priv_data);
@@ -621,7 +621,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   createHwQueue.pPrivateDriverData = priv_data;
   createHwQueue.PrivateDriverDataSize = priv_size;
 
-  NTSTATUS ret = D3DKMTCreateHwQueue(&createHwQueue);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateHwQueue(&createHwQueue));
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     free(priv_data);
@@ -642,7 +642,7 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
     .hHwQueue = queue->queue,
   };
 
-  NTSTATUS ret = D3DKMTDestroyHwQueue(&DestroyHwQueue);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyHwQueue(&DestroyHwQueue));
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     return false;
@@ -670,7 +670,7 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   args.pPrivateDriverData = priv_data;
   args.PrivateDriverDataSize = priv_size;
 
-  NTSTATUS ret = D3DKMTSubmitCommandToHwQueue(&args);
+  NTSTATUS ret = DXCORE_CALL(D3DKMTSubmitCommandToHwQueue(&args));
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     free(priv_data);

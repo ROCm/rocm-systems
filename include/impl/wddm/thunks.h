@@ -45,6 +45,7 @@
 
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"
+#include "dxcore_loader.h"
 
 namespace wsl {
 namespace thunk {
@@ -113,11 +114,11 @@ typedef D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE     SubmitWaitForSyncObjectsToH
 typedef D3DKMT_CREATESYNCFILE                        CreateSyncFileArgs;
 
 inline ErrorCode MapGpuVirtualAddress(D3DDDI_MAPGPUVIRTUALADDRESS *args) {
-  return TranslateNtStatus(D3DKMTMapGpuVirtualAddress(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTMapGpuVirtualAddress(args)));
 }
 
 inline ErrorCode CreateAllocation(CreateAllocationArgs *args) {
-  return TranslateNtStatus(D3DKMTCreateAllocation2(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTCreateAllocation2(args)));
 }
 
 inline ErrorCode DestroyAllocation(
@@ -137,11 +138,11 @@ inline ErrorCode DestroyAllocation(
     args.AllocationCount = num_allocations;
   }
 
-  return TranslateNtStatus(D3DKMTDestroyAllocation2(&args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroyAllocation2(&args)));
 }
 
 inline ErrorCode ReserveGpuVirtualAddress(D3DDDI_RESERVEGPUVIRTUALADDRESS *args) {
-  return TranslateNtStatus(D3DKMTReserveGpuVirtualAddress(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTReserveGpuVirtualAddress(args)));
 }
 
 inline ErrorCode ReserveGpuVirtualAddress(WinAdapterHandle handle,
@@ -177,7 +178,7 @@ inline ErrorCode ReserveGpuVirtualAddress(WinAdapterHandle handle,
 }
 
 inline ErrorCode FreeGpuVirtualAddress(FreeGpuVirtualAddressArgs *args) {
-  return TranslateNtStatus(D3DKMTFreeGpuVirtualAddress(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTFreeGpuVirtualAddress(args)));
 }
 
 inline ErrorCode FreeGpuVirtualAddress(WinAdapterHandle handle,
@@ -191,11 +192,11 @@ inline ErrorCode FreeGpuVirtualAddress(WinAdapterHandle handle,
 }
 
 inline ErrorCode MakeResident(D3DDDI_MAKERESIDENT *args) {
-  return TranslateNtStatus(D3DKMTMakeResident(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTMakeResident(args)));
 }
 
 inline ErrorCode Evict(EvictArgs *args) {
-  return TranslateNtStatus(D3DKMTEvict(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTEvict(args)));
 }
 
 inline ErrorCode ShareObjects(size_t num_allocations,
@@ -207,8 +208,8 @@ inline ErrorCode ShareObjects(size_t num_allocations,
   ErrorCode ret;
 
   InitializeObjectAttributes(&obj_attr, nullptr, OBJ_INHERIT, nullptr, nullptr);
-  ret = TranslateNtStatus(D3DKMTShareObjects(num_allocations,
-        &resource, &obj_attr, flags, &nt_handle));
+  ret = TranslateNtStatus(DXCORE_CALL(D3DKMTShareObjects(num_allocations,
+        &resource, &obj_attr, flags, &nt_handle)));
   if (ret == ErrorCode::Success)
     *dmabuf_fd = *(reinterpret_cast<int*>(&nt_handle));
   else
@@ -218,11 +219,11 @@ inline ErrorCode ShareObjects(size_t num_allocations,
 }
 
 inline ErrorCode QueryResourceInfoFromNtHandle(D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE *args) {
-  return TranslateNtStatus(D3DKMTQueryResourceInfoFromNtHandle(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryResourceInfoFromNtHandle(args)));
 }
 
 inline ErrorCode OpenResourceFromNtHandle(D3DKMT_OPENRESOURCEFROMNTHANDLE *args) {
-  return TranslateNtStatus(D3DKMTOpenResourceFromNtHandle(args));
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTOpenResourceFromNtHandle(args)));
 }
 
 } // namespace d3dthunk
