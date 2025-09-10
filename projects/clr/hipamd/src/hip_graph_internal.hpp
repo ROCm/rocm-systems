@@ -49,7 +49,7 @@ class GraphKernelNode;
 typedef GraphNode* Node;
 hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                             hip::GraphNode* const* pDependencies, size_t numDependencies,
-                            bool capture);
+                            bool capture = true, int devId = 0);
 
 class UserObject : public amd::ReferenceCountedObject {
   typedef void (*UserCallbackDestructor)(void* data);
@@ -1319,6 +1319,7 @@ class GraphKernelNode : public GraphNode {
   }
 
   hipError_t SetParams(GraphNode* node) override {
+    dev_id_ = ihipGetDevice();
     const GraphKernelNode* kernelNode = static_cast<GraphKernelNode const*>(node);
     return SetParams(&kernelNode->kernelParams_);
   }
@@ -1526,6 +1527,32 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   hipMemcpyKind kind_;
 
  public:
+  // When device memory is on dev1 and graph node is added from different device update the device
+  // id accordingly so that node can be executed on dev1.
+  void UpdateDevId() {
+    size_t sOffset = 0;
+    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    size_t dOffset = 0;
+    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+    hip::MemcpyType memType = ihipGetMemcpyType(src_, dst_, kind_);
+    switch (memType) {
+      case hipCopyBuffer:
+        // D2H/H2D source/dst is pinned memory
+        // Override the device id when node is created
+        if (!((srcMemory->GetDeviceById() != dstMemory->GetDeviceById()) &&
+              srcMemory->getContext().devices().size() == 1 &&
+              dstMemory->getContext().devices().size() == 1)) {
+          if (srcMemory->getContext().devices().size() == 1) {
+            dev_id_ = srcMemory->GetDeviceById()->index();
+          } else {
+            dev_id_ = dstMemory->GetDeviceById()->index();
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
   GraphMemcpyNode1D(void* dst, const void* src, size_t count, hipMemcpyKind kind,
                     hipGraphNodeType type = hipGraphNodeTypeMemcpy)
       : GraphMemcpyNode(nullptr), dst_(dst), src_(src), count_(count), kind_(kind) {
@@ -1535,6 +1562,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     copyParams_.extent.height = 1;
     copyParams_.extent.depth = 1;
     copyParams_.kind = kind;
+    UpdateDevId();
   }
 
   ~GraphMemcpyNode1D() {}
@@ -1544,6 +1572,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     src_ = rhs.src_;
     count_ = rhs.count_;
     kind_ = rhs.kind_;
+    UpdateDevId();
   }
 
   GraphNode* clone() const override { return new GraphMemcpyNode1D(*this); }
@@ -1646,6 +1675,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     src_ = src;
     count_ = count;
     kind_ = kind;
+    UpdateDevId();
     return hipSuccess;
   }
 
