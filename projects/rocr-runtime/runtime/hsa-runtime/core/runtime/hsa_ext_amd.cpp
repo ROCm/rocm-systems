@@ -1997,5 +1997,26 @@ hsa_status_t hsa_amd_external_semaphore_handle_close(
   CATCH;
 }
 
+hsa_status_t hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t handle,
+                                               uint64_t flags) {
+  TRY;
+  IS_OPEN();
+  return core::Runtime::runtime_singleton_->VMemoryExportFabricHandle(fabric_handle,
+                                                handle, flags);
+  CATCH;
+}
+
+
+hsa_status_t hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle) {
+  TRY;
+  IS_OPEN();
+  return core::Runtime::runtime_singleton_->VMemoryImportFabricHandle(fabric_handle,
+                                                handle);
+  CATCH;
+}
+
+
 }   //  namespace amd
 }   //  namespace rocr
