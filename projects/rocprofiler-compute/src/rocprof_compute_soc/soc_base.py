@@ -71,7 +71,7 @@ class OmniSoC_Base:
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
         self.__soc_params: dict[str, Any] = {}  # SoC specifications
-        self.__compatible_profilers: list[str] =  [] # Store profilers compatible with SoC
+        self.__compatible_profilers: list[str] =  [] # Store SoC compatible profilers
         self.populate_mspec()
         # Create roofline object if mode is provided; skip for --specs
         if hasattr(self.__args, "mode") and self.__args.mode:
@@ -85,7 +85,7 @@ class OmniSoC_Base:
             return NotImplemented
         return self.__arch == other.get_soc()
 
-    def set_perfmon_config(self, config: dict[str, int]):
+    def set_perfmon_config(self, config: dict[str, int]) -> None:
         self.__perfmon_config = config
 
     def set_arch(self, arch: str) -> None:
@@ -284,7 +284,7 @@ class OmniSoC_Base:
         return gpu_model
 
     @demarcate
-    def detect_counters(self) -> set[str]:
+    def detect_counters(self) -> tuple[list[str], list[str]]:
         """
         Create a set of counters required for the selected report sections.
         Parse analysis report configuration files based on the selected report
@@ -794,7 +794,7 @@ class OmniSoC_Base:
             self.roofline_obj.post_processing()
 
     @abstractmethod
-    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]):
+    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:
         """Perform any SoC-specific setup prior to analysis."""
         console_debug("analysis", f"perform SoC analysis setup for {self.__arch}")
         if roofline_parameters:
