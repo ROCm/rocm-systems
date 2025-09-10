@@ -42,12 +42,12 @@ from utils.logger import console_error, demarcate
 
 class tui_analysis(OmniAnalyze_Base):
     def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, Any], path: Path
+        self, args: argparse.Namespace, supported_archs: dict[str, str], path: Path
     ) -> None:
         super().__init__(args, supported_archs)
         self.path = str(path)
         self.args = self.get_args()
-        self.raw_dfs: dict[str, Any] = {}
+        self.raw_dfs: dict[str, dict] = {}
 
     # -----------------------
     # Required child methods
@@ -95,7 +95,7 @@ class tui_analysis(OmniAnalyze_Base):
         self.raw_dfs = {}
         for idx in workload.raw_pmc.index:
             kernel_df = workload.raw_pmc.loc[[idx]]
-            kernel_name = kernel_df.pmc_perf["Kernel_Name"].loc[idx]
+            kernel_name = str(kernel_df.pmc_perf["Kernel_Name"].loc[idx])
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             parser.eval_metric(

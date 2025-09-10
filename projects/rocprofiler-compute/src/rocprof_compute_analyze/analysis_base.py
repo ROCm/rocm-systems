@@ -74,7 +74,7 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 
 class OmniAnalyze_Base:
     def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, Any]
+        self, args: argparse.Namespace, supported_archs: dict[str, str]
     ) -> None:
         self.__args = args
         self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
@@ -105,7 +105,7 @@ class OmniAnalyze_Base:
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
-    ) -> dict[str, Any]:
+    ) -> dict[str, schema.ArchConfig]:
         single_panel_config = file_io.is_single_panel_config(
             config_dir, self.__supported_archs
         )

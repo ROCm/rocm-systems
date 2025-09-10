@@ -70,7 +70,6 @@ class OmniSoC_Base:
         self._mspec = mspec
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
-        self.__soc_params: dict[str, Any] = {}  # SoC specifications
         self.__compatible_profilers: list[str] = []  # Store SoC compatible profilers
         self.populate_mspec()
         # Create roofline object if mode is provided; skip for --specs
@@ -93,9 +92,6 @@ class OmniSoC_Base:
 
     def set_compatible_profilers(self, profiler_names: list[str]) -> None:
         self.__compatible_profilers = profiler_names
-
-    def get_soc_param(self) -> dict[str, Any]:
-        return self.__soc_params
 
     def get_arch(self) -> Optional[str]:
         return self.__arch

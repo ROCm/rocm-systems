@@ -27,7 +27,7 @@ import argparse
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
 
 def print_avail_arch(avail_arch: list[str]) -> str:
@@ -41,7 +41,7 @@ def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Any],
+    rocprof_compute_version: dict[str, Optional[str]],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -86,7 +86,7 @@ def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Any],
+    rocprof_compute_version: dict[str, Optional[str]]
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)

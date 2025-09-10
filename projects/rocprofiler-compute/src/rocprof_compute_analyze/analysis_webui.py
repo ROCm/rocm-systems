@@ -44,7 +44,7 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 
 class webui_analysis(OmniAnalyze_Base):
     def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, Any]
+        self, args: argparse.Namespace, supported_archs: dict[str, str]
     ) -> None:
         super().__init__(args, supported_archs)
         self.app = dash.Dash(
@@ -123,7 +123,7 @@ class webui_analysis(OmniAnalyze_Base):
             norm_filt: str,
             top_n_filt: str,
             div_children: list[html.Section],
-        ) -> list[Any]:
+        ) -> list[html.Section]:
             console_debug("analysis", f"gui normalization is {norm_filt}")
 
             # Re-initalizes everything
@@ -399,7 +399,7 @@ def determine_chart_type(
     barchart_elements: dict[str, list[int]],
     comparable_columns: list[str],
     decimal: int,
-) -> list[Any]:
+) -> list[html.Div]:
     content = []
 
     if original_df.empty:
