@@ -835,7 +835,6 @@ rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
     void* sdk_handle = rocp_load_lib(rocprofiler_lib_name);
-    LOG(ERROR) << "IAN " << sdk_handle;
 
     rocprofv3_detach_t rocprofv3_detach_fn;
     *(void**) (&rocprofv3_detach_fn) = dlsym(sdk_handle, rocprof_detach_entrypoint);
