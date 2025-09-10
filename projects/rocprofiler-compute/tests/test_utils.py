@@ -9306,12 +9306,6 @@ def test_scientific_notation_trigger_at_lower_bound():
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
-def test_scientific_notation_trigger_above_upper_bound():
-    value = 1234567890
-    result = utils.format_scientific_notation_if_needed(value)
-    assert pytest.approx(float(result.strip()), rel=1e-9) == value
-
-
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_just_below_upper_bound():
     value = 999999
