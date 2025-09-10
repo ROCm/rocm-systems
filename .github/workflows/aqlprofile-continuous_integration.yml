@@ -173,8 +173,8 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        python3 -m venv rocprofiler-sdk
-        source rocprofiler-sdk/bin/activate
+        python3 -m venv aqlprofile
+        source aqlprofile/bin/activate
         export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
         python3 -m pip install --upgrade pip
         python3 -m pip install cmake
@@ -182,7 +182,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
-        source rocprofiler-sdk/bin/activate
+        source aqlprofile/bin/activate
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -195,7 +195,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        source rocprofiler-sdk/bin/activate;
+        source aqlprofile/bin/activate;
         PATH=~/.local/bin:/opt/rocm/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
