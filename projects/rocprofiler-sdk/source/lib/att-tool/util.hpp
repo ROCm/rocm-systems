@@ -29,45 +29,33 @@
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 #include "lib/common/logging.hpp"
 
 #include <memory>
 #include <string>
 #include <string_view>
 
-using pcinfo_t           = rocprofiler_thread_trace_decoder_pc_t;
-using occupancy_t        = rocprofiler_thread_trace_decoder_occupancy_t;
-using wave_t             = rocprofiler_thread_trace_decoder_wave_t;
-using perfevent_t        = rocprofiler_thread_trace_decoder_perfevent_t;
-using wave_instruction_t = rocprofiler_thread_trace_decoder_inst_t;
-
 template <>
-struct std::hash<pcinfo_t>
+struct std::hash<rocprofiler_thread_trace_decoder_pc_t>
 {
-public:
-    size_t operator()(const pcinfo_t& a) const
+    size_t operator()(const rocprofiler_thread_trace_decoder_pc_t& a) const noexcept
     {
-        return (a.marker_id << 32) ^ (a.marker_id >> 32) ^ a.addr;
+        return (a.code_object_id << 32) ^ (a.code_object_id >> 32) ^ a.address;
     }
-};
-
-inline bool
-operator==(const pcinfo_t& a, const pcinfo_t& b)
-{
-    return a.addr == b.addr && a.marker_id == b.marker_id;
-};
-
-inline bool
-operator<(const pcinfo_t& a, const pcinfo_t& b)
-{
-    if(a.marker_id == b.marker_id) return a.addr < b.addr;
-    return a.marker_id < b.marker_id;
 };
 
 namespace rocprofiler
 {
 namespace att_wrapper
 {
+using pcinfo_t           = rocprofiler_thread_trace_decoder_pc_t;
+using occupancy_t        = rocprofiler_thread_trace_decoder_occupancy_t;
+using wave_t             = rocprofiler_thread_trace_decoder_wave_t;
+using perfevent_t        = rocprofiler_thread_trace_decoder_perfevent_t;
+using wave_instruction_t = rocprofiler_thread_trace_decoder_inst_t;
+using realtime_t         = rocprofiler_thread_trace_decoder_realtime_t;
+
 class GlobalDefs
 {
 public:
