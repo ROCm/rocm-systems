@@ -23,6 +23,8 @@ else()
     set(OMPVV_USE_OFFLOAD_TESTS TRUE)
 endif()
 
+rocprofiler_systems_message(STATUS "Configuring OMPVV...")
+
 # Master branch contains stable releases
 rocprofiler_systems_checkout_git_submodule(
   RELATIVE_PATH
@@ -42,14 +44,13 @@ set(ROCPROFSYS_OMPVV_SOURCE_DIR "${CMAKE_BINARY_DIR}/examples/openmp/external/om
 set(OMPVV_MAKEDEF_FILE "sys/make/make.def")
 
 # ---------------------------------------------------------------------------------------#
-# helper functions
+# Helper functions
 # ---------------------------------------------------------------------------------------#
 
-# Updates the make.def FOFFLOADING flag.
+# Updates the make.def FOFFLOADING flag
 function(update_make_def_foffloading FOFFLOADING_FLAGS)
     file(READ ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE} MAKE_DEF_CONTENT)
 
-    # Replaces all FOFFLOADING lines
     string(
         REGEX REPLACE
         "FOFFLOADING[ \t]*=[ \t]*-fopenmp[^\n\r]*"
@@ -102,7 +103,7 @@ if(NOT EXISTS "${ROCPROFSYS_OMPVV_SOURCE_DIR}")
 endif()
 
 # ---------------------------------------------------------------------------------------#
-# compiler
+# Compiler setup
 # ---------------------------------------------------------------------------------------#
 
 # OMPVV requires amdclang++
@@ -153,8 +154,42 @@ set(OMPVV_COMPILER
 )
 set(OMPVV_FC "amdflang")
 
+execute_process(
+    COMMAND ${amdflang_EXECUTABLE} --version
+    OUTPUT_VARIABLE AMDFLANG_VERSION_CMD_OUTPUT
+    RESULT_VARIABLE AMDFLANG_VERSION_CMD_RESULT
+)
+
+set(AMDFLANG_FULL_VERSION "")
+
+if(AMDFLANG_VERSION_CMD_RESULT EQUAL 0)
+    string(
+        REGEX MATCH
+        "version ([0-9]+)\\.([0-9]+)\\.([0-9]+)"
+        VERSION_MATCH
+        "${AMDFLANG_VERSION_CMD_OUTPUT}"
+    )
+    if(VERSION_MATCH)
+        set(AMDFLANG_VERSION_MAJOR "${CMAKE_MATCH_1}")
+        set(AMDFLANG_VERSION_MINOR "${CMAKE_MATCH_2}")
+        set(AMDFLANG_VERSION_PATCH "${CMAKE_MATCH_3}")
+        set(AMDFLANG_FULL_VERSION
+            "${AMDFLANG_VERSION_MAJOR}.${AMDFLANG_VERSION_MINOR}.${AMDFLANG_VERSION_PATCH}"
+        )
+        rocprofiler_systems_message(STATUS "Detected amdflang version: ${AMDFLANG_FULL_VERSION}")
+    endif()
+endif()
+
+if(NOT AMDFLANG_FULL_VERSION)
+    rocprofiler_systems_message(FATAL_ERROR "Failed to detect amdflang version.")
+endif()
+
+if(AMDFLANG_VERSION_MAJOR LESS 19)
+    rocprofiler_systems_message(FATAL_ERROR "OMPVV tests require amdflang version 19.0.0 or above. Current: ${AMDFLANG_FULL_VERSION}")
+endif()
+
 # ---------------------------------------------------------------------------------------#
-# variables
+# Variables
 # ---------------------------------------------------------------------------------------#
 
 set(OMPVV_OPENMP_VERSION 5.0)
@@ -181,8 +216,14 @@ if(OMPVV_USE_OFFLOAD_TESTS)
     )
 endif()
 
+# if(AMDFLANG_VERSION_MAJOR EQUAL 20)
+#     list(APPEND OMPVV_HOST_TESTS_TO_COMPILE
+#         "${OMPVV_TDIR}/task/test_task_detach.F90"
+#     )
+# endif()
+
 # ---------------------------------------------------------------------------------------#
-# compile tests
+# Compile tests
 # ---------------------------------------------------------------------------------------#
 
 # Remove all -O3 flags to prevent function inlining
@@ -208,7 +249,7 @@ if(OMPVV_USE_OFFLOAD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------------------#
-# copy generated binaries to top level of build folder
+# Copy generated binaries to top level of build folder
 # ---------------------------------------------------------------------------------------#
 
 set(OMPVV_BIN_SOURCE "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin")
