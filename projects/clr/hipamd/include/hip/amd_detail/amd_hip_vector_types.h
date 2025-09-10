@@ -41,7 +41,7 @@ THE SOFTWARE.
 #define __HIP_USE_NATIVE_VECTOR__ 1
 #define __NATIVE_VECTOR__(n, T) T __attribute__((ext_vector_type(n)))
 #else
-#define __NATIVE_VECTOR__(n, T) T[n]
+#define __NATIVE_VECTOR__(n, T) alignas(n * sizeof(T)) T[n]
 #endif
 
 #if defined(__cplusplus)
