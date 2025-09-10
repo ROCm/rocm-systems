@@ -49,8 +49,8 @@ typedef enum rocprofiler_thread_trace_decoder_info_t
  */
 typedef struct rocprofiler_thread_trace_decoder_pc_t
 {
-    size_t addr;       ///< Memory address (marker_id == 0), or ELF vaddr (marker_id != 0).
-    size_t marker_id;  ///< Code object load ID. Zero if no code object was found.
+    uint64_t address;         ///< Address (code_object_id == 0), or ELF vaddr (code_object_id != 0)
+    uint64_t code_object_id;  ///< Zero if no code object was found.
 } rocprofiler_thread_trace_decoder_pc_t;
 
 /**
@@ -163,8 +163,8 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
     int64_t begin_time;  ///< Wave begin time. Should match occupancy event wave start.
     int64_t end_time;    ///< Wave end time. Should match occupancy event wave end.
 
-    size_t                                         timeline_size;      ///< timeline_array size
-    size_t                                         instructions_size;  ///< instructions_array size
+    uint64_t                                       timeline_size;      ///< timeline_array size
+    uint64_t                                       instructions_size;  ///< instructions_array size
     rocprofiler_thread_trace_decoder_wave_state_t* timeline_array;     ///< wave state change events
     rocprofiler_thread_trace_decoder_inst_t*       instructions_array;  ///< Instructions executed
 } rocprofiler_thread_trace_decoder_wave_t;
@@ -217,7 +217,7 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
  */
 typedef enum rocprofiler_thread_trace_decoder_record_type_t
 {
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP = 0,  ///< Record is gfxip_major, type size_t
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP = 0,  ///< Record is gfxip_major, type uint64_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY,  ///< rocprofiler_thread_trace_decoder_occupancy_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_PERFEVENT,  ///< rocprofiler_thread_trace_decoder_perfevent_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE,   ///< rocprofiler_thread_trace_decoder_wave_t*
