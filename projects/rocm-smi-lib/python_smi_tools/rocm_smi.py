@@ -2591,6 +2591,26 @@ def showPcieBw(deviceList):
     max_pkt_sz = c_uint64()
     printLogSpacer(' Measured PCIe Bandwidth ')
     for device in deviceList:
+        # Get BW from GPU metrics from version >= 1.5
+        header = metrics_table_header_t()
+        ret_version = rocmsmi.rsmi_dev_metrics_header_info_get(device, byref(header))
+        if rsmi_ret_ok(ret_version, device, 'get_metrics_header', True):
+            if header.format_revision >= 1 and header.content_revision >= 5:
+                gpu_metrics = rsmi_gpu_metrics_t()
+                ret = rocmsmi.rsmi_dev_gpu_metrics_info_get(device, byref(gpu_metrics))
+                if rsmi_ret_ok(ret, device, "get_gpu_metrics", True):
+                    metric_bw = gpu_metrics.pcie_bandwidth_inst
+                    if metric_bw != ctypes.c_uint64(-1).value and metric_bw > 0:
+                        bandwidth_mbps = metric_bw / 8.0  # Convert megabits to megabytes
+                        bwstr = f"{bandwidth_mbps:.3f}"
+                        printLog(device, "Current PCIe bandwidth (MB/s)", bwstr)
+                        continue
+                    else:
+                        printLog(device, "GPU metrics pcie_bandwidth_inst is invalid", None)
+                else:
+                    printLog(device, "Failed to get GPU metrics info", None)
+
+        # Use legacy API (For GPU metric version < 1.5 or failed)
         ret = rocmsmi.rsmi_dev_pci_throughput_get(device, byref(sent), byref(received), byref(max_pkt_sz))
         if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth'):
             # Use 1024.0 to ensure that the result is a float and not integer division
