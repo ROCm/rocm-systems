@@ -1502,11 +1502,6 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_INST_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)
-    - architectures:
-      - gfx12
-      - gfx1200
-      - gfx1201
-      expression: reduce(accumulate(SQ_INSTS_VEC32_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)
   - name: LdsPipeIssueUtil
     description: 'Unit: percent'
     properties: []
