@@ -801,15 +801,30 @@ rocprofiler_register_invoke_all_registrations()
 }
 
 rocprofiler_register_error_code_t
-rocprofiler_register_attach(const char* environment_buffer)
-    ROCPROFILER_REGISTER_PUBLIC_API;
+rocprofiler_register_attach(const char* environment_buffer,
+                            const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
 
 //
 //  This function can be invoked by ptrace
 rocprofiler_register_error_code_t
-rocprofiler_register_attach(const char* environment_buffer)
+rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path)
 {
-    LOG(INFO) << "rocprofiler_register_attach started";
+    LOG(INFO) << "rocprofiler_register_attach started with tool_lib_path: "
+              << (tool_lib_path ? tool_lib_path : "NULL (will use default)");
+
+    // Set default tool library path if not provided
+    if(tool_lib_path == nullptr)
+    {
+        // Use default path - this gets loaded into ROCP_TOOL_LIBRARIES
+        setenv("ROCP_TOOL_LIBRARIES", "librocprofiler-sdk-tool.so", 1);
+        LOG(INFO) << "Using default tool library: librocprofiler-sdk-tool.so";
+    }
+    else
+    {
+        // Use provided path
+        setenv("ROCP_TOOL_LIBRARIES", tool_lib_path, 1);
+        LOG(INFO) << "Using provided tool library: " << tool_lib_path;
+    }
 
     // TODO: should save old environment variables if they get overwritten and restore
     // them on detach

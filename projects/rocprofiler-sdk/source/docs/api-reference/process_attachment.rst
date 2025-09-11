@@ -56,7 +56,7 @@ These functions are exported from the ``librocprofiler-register.so`` library and
    extern "C" {
        // Activate profiling in target process (called via ptrace)
        rocprofiler_register_error_code_t 
-       rocprofiler_register_attach(const char* environment_buffer) 
+       rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path) 
            ROCPROFILER_REGISTER_PUBLIC_API;
            
        // Deactivate profiling in target process (called via ptrace) 
@@ -67,10 +67,11 @@ These functions are exported from the ``librocprofiler-register.so`` library and
 
 **Function Details:**
 
-- **``rocprofiler_register_attach(const char* environment_buffer)``**: 
+- **``rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path)``**: 
   - Called via ptrace from the attachment system
   - Receives serialized environment variables for profiling configuration
-  - Loads the rocprofiler-sdk-tool library and activates profiling services
+  - Receives the tool library path to load (defaults to "librocprofiler-sdk-tool.so" if NULL)
+  - Loads the specified tool library and activates profiling services
   - Returns ``rocprofiler_register_error_code_t`` status
 
 - **``rocprofiler_register_detach()``**: 
@@ -216,8 +217,8 @@ Complete Tool Example
        // Set up profiling environment variables before attachment
        setenv("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", "1", 1);
        
-       // Optional: Use custom tool library (defaults to rocprofiler-sdk/librocprofiler-sdk-tool.so)
-       // setenv("ROCPROFILER_REGISTER_ATTACHMENT_TOOL_LIB", "/opt/rocm/lib/rocprofiler-sdk/libmy-custom-tool.so", 1);
+       // Note: The attachment system now uses the hardcoded default tool library path
+       // "librocprofiler-sdk-tool.so" and no longer uses environment variables for tool selection
        
        setenv("ROCPROF_HIP_API_TRACE", "1", 1);
        setenv("ROCPROF_KERNEL_TRACE", "1", 1);
@@ -257,11 +258,12 @@ Required Variables
 Tool Library Configuration
 --------------------------
 
+The attachment system now uses a hardcoded default tool library path:
+
 .. code-block:: cpp
 
-   // Optional: Override the default tool library used for attachment
-   // Default: "rocprofiler-sdk/librocprofiler-sdk-tool.so"
-   setenv("ROCPROFILER_REGISTER_ATTACHMENT_TOOL_LIB", "/path/to/custom/tool.so", 1);
+   // The attachment system automatically uses "librocprofiler-sdk-tool.so"
+   // No environment variable configuration is needed or supported
 
 Tracing Options
 --------------

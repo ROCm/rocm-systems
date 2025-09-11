@@ -513,6 +513,98 @@ PTraceSession::call_function(const std::string& library,
     return true;
 }
 
+// This supports calling a dynamically loaded function with at most 2 parameters.
+// Uses x64 calling convention: RDI for first param, RSI for second param
+bool
+PTraceSession::call_function(const std::string& library,
+                             const std::string& symbol,
+                             void*              first_param,
+                             void*              second_param)
+{
+    if(!attached)
+    {
+        ROCP_ERROR << "call_function called while not attached";
+        return false;
+    }
+
+    // Stop the process
+    if(!stop())
+    {
+        return false;
+    }
+
+    void* target_addr;
+    if(!find_symbol(target_addr, library, symbol))
+    {
+        return false;
+    }
+
+    // Get entry address for safe injection of op codes
+    size_t entry_addr{0};
+    get_auxv_entry(pid, entry_addr);
+
+    // Save current register file
+    struct user_regs_struct oldregs;
+    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &oldregs);
+
+    // Construct registers to call a function with 2 parameters
+    // symbol(first_param, second_param)
+    struct user_regs_struct newregs = oldregs;
+    newregs.rax                     = reinterpret_cast<size_t>(target_addr);   // target function
+    newregs.rdi                     = reinterpret_cast<size_t>(first_param);   // first parameter
+    newregs.rsi                     = reinterpret_cast<size_t>(second_param);  // second parameter
+    newregs.rip                     = entry_addr;
+    newregs.rsp = oldregs.rsp - 128;  // move sp by 128 to not clobber redlined functions
+    newregs.rsp -= (newregs.rsp % 16);
+
+    // x64 assembly to call a function by register and breakpoint when done
+    // ff d0  call rax
+    // cc     int3
+    std::vector<uint8_t> new_code({0xff, 0xd0, 0xcc});
+    std::vector<uint8_t> old_code;
+
+    // Write in new opcodes
+    if(!swap(entry_addr, new_code, old_code, 3))
+    {
+        return false;
+    }
+    // Set syscall registers
+    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
+
+    ROCP_TRACE << "Attempting to execute " << library << "::" << symbol << "(" << first_param
+               << ", " << second_param << ")";
+    // Restart execution
+    if(!cont())
+    {
+        return false;
+    }
+
+    // Wait for int3 to be hit
+    if(waitpid(pid, 0, WSTOPPED) == -1)
+    {
+        return false;
+    }
+
+    // Get registers to see return values
+    struct user_regs_struct returnregs;
+    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &returnregs);
+
+    // Write in old opcodes
+    if(!write(entry_addr, old_code, 3))
+    {
+        return false;
+    }
+    // Restore register file
+    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &oldregs);
+    // Restart execution
+    if(!cont())
+    {
+        return false;
+    }
+
+    return true;
+}
+
 int
 PTraceSession::get_pid()
 {
