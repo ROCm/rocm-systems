@@ -61,12 +61,16 @@ It can be set by the user in different locations if needed.
 ## Build and Installation
 
 ```bash
-git clone https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+cd rocm-systems
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocprofiler-sdk
+git checkout develop
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
       -DCMAKE_PREFIX_PATH=/opt/rocm           \
-       rocprofiler-sdk-source
+      projects/rocprofiler-sdk
 
 cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 ```

@@ -68,15 +68,18 @@ Building ROCprofiler-SDK from source
 
 .. code-block:: bash
 
-    git clone https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
+    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+    cd rocm-systems
+    git sparse-checkout init --cone
+    git sparse-checkout set projects/rocprofiler-sdk
+    git checkout develop
     cmake                                         \
         -B rocprofiler-sdk-build                \
-        -D ROCPROFILER_BUILD_TESTS=ON           \
-        -D ROCPROFILER_BUILD_SAMPLES=ON         \
-        -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
-        rocprofiler-sdk-source
+        -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
+        -DCMAKE_PREFIX_PATH=/opt/rocm           \
+        projects/rocprofiler-sdk
 
-    cmake --build rocprofiler-sdk-build --target all --parallel 8
+    cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 
 Installing ROCprofiler-SDK
 ---------------------------
