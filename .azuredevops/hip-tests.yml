@@ -30,7 +30,7 @@ trigger:
     - projects/hip-tests/.jenkins
     - projects/hip-tests/CODEOWNERS
     - projects/hip-tests/LICENSE.txt
-    - projects/hip-tests/**/.md
+    - projects/hip-tests/**/*.md
 
 pr: none
 
