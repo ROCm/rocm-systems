@@ -75,7 +75,6 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
   constexpr int value = 10;
-  int hostArr[N];
   int *memPtr = nullptr;
 
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
@@ -98,6 +97,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
       REQUIRE(devArr != nullptr);
 
       copyDataKernel<<<1, N>>>(devArr, memPtr);
+
+      int hostArr[N];
       HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
       HIP_CHECK(hipDeviceSynchronize());
 
@@ -267,9 +268,9 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
     location.type = hipMemLocationTypeDevice;
     location.id = 0;
 
-    hipMemoryAdvise advice = static_cast<hipMemoryAdvise>(-1);
+    hipMemoryAdvise advise = static_cast<hipMemoryAdvise>(-1);
 
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, advice, location),
+    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, advise, location),
                     hipErrorInvalidValue);
   }
 

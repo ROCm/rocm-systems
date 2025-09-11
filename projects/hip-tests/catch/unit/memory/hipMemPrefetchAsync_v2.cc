@@ -82,7 +82,6 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
   constexpr int value = 10;
-  int hostArr[N];
   int *memPtr = nullptr;
 
   hipStream_t stream;
@@ -111,6 +110,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
       REQUIRE(devArr != nullptr);
 
       copyDataKernel<<<1, N>>>(devArr, memPtr);
+
+      int hostArr[N];
       HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
       HIP_CHECK(hipDeviceSynchronize());
 

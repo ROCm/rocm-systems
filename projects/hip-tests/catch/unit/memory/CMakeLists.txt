@@ -109,7 +109,7 @@ if(HIP_PLATFORM MATCHES "amd")
       hipGetProcAddressMemoryApis.cc
       # Will be enabled for NVIDIA after fix for SWDEV-551244
       hipMemPrefetchAsync_v2.cc
-      hipMemAdvice_v2.cc)
+      hipMemAdvise_v2.cc)
   if(UNIX)
     # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
     # For windows build error occurs undefined symbol: hipPointerSetAttribute
