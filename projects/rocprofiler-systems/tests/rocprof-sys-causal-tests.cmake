@@ -1,30 +1,30 @@
-# MIT License
+#MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#Copyright(c) 2025 Advanced Micro Devices, Inc.All rights reserved.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
+#Permission is hereby granted, free of charge, to any person obtaining a copy
+#of this software and associated documentation files(the "Software"), to deal
+#in the Software without restriction, including without limitation the rights
+#to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+#copies of the Software, and to permit persons to whom the Software is
+#furnished to do so, subject to the following              conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+#The above copyright notice and this permission notice shall be included in
+#all copies or substantial portions of the                      Software.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF   MERCHANTABILITY,
+#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#THE SOFTWARE.
 
-# -------------------------------------------------------------------------------------- #
+#-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- #
 #
-# causal profiling tests
+#causal profiling tests
 #
-# -------------------------------------------------------------------------------------- #
+#-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- #
 
 rocprofiler_systems_add_causal_test(
     NAME cpu-rocprofsys-func
@@ -33,6 +33,22 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "function"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+)
+
+add_test(
+    NAME causal-no-arg
+    COMMAND $<TARGET_FILE:rocprofiler-systems-causal>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+)
+set_tests_properties(
+    causal-no-arg
+    PROPERTIES
+        ENVIRONMENT
+            "ROCPROFSYS_CI=ON;ROCPROFSYS_VERBOSE=3;ROCPROFSYS_TIME_OUTPUT=OFF;ROCPROFSYS_USE_PID=OFF;ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/;ROCPROFSYS_OUTPUT_PREFIX=causal-combined-test/"
+        TIMEOUT 45
+        LABELS "causal"
+        CAUSAL_PASS_REGEX
+            "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
 
 rocprofiler_systems_add_causal_test(
@@ -113,7 +129,7 @@ rocprofiler_systems_add_causal_test(
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
 
-# set(_causal_e2e_exe_args 80 100 432525 100000000) set(_causal_e2e_exe_args 80 12 432525
+#set(_causal_e2e_exe_args 80 100 432525 100000000) set(_causal_e2e_exe_args 80 12 432525
 # 500000000)
 set(_causal_e2e_exe_args 80 50 432525 100000000)
 set(_causal_common_args
@@ -131,15 +147,15 @@ macro(
     _V30
     _TOL # tolerance for virtual speedup
 )
-    # arguments to rocprofiler-systems-causal
+    #arguments to rocprofiler - systems - causal
     set(${_NAME}_args "${_causal_common_args} ${_MODE} ${_EXPER}")
 
-    # arguments to validate-causal-json.py
+    #arguments to validate - causal - json.py
     set(${_NAME}_valid
         "-n 0 -i rocprof-sys-tests-output/causal-cpu-rocprofsys-${_TEST}-e2e/causal/experiments.json -v ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 10 ${_V10} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 20 ${_V20} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 30 ${_V30} ${_TOL}"
     )
 
-    # patch string for command-line
+    #patch string for command - line
     string(REPLACE " " ";" ${_NAME}_args "${${_NAME}_args}")
     string(REPLACE " " ";" ${_NAME}_valid "${${_NAME}_valid}")
 endmacro()
