@@ -123,3 +123,99 @@ gtest_add_tests(
 set_tests_properties(
     ${counters-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add tests for pm4 factory
+add_executable(pm4-factory-test)
+SET(AQLPROFILE_PM4_FACTORY_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/pm4_factory_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
+)
+target_sources(pm4-factory-test PRIVATE ${AQLPROFILE_PM4_FACTORY_SOURCES})
+target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    pm4-factory-test
+    PRIVATE
+            hsa-runtime64::hsa-runtime64
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main)
+
+gtest_add_tests(
+    TARGET pm4-factory-test
+    SOURCES ${AQLPROFILE_PM4_FACTORY_SOURCES}
+    TEST_LIST pm4-factory-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${pm4-factory-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add tests for logger
+add_executable(logger-test)
+SET(AQLPROFILE_LOGGER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/logger_tests.cpp
+)
+target_sources(logger-test PRIVATE ${AQLPROFILE_LOGGER_SOURCES})
+target_include_directories(logger-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    logger-test
+    PRIVATE
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
+
+gtest_add_tests(
+    TARGET logger-test
+    SOURCES ${AQLPROFILE_LOGGER_SOURCES}
+    TEST_LIST logger-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    
+set_tests_properties(
+    ${logger-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add tests for aql profile v2 header
+add_executable(aql-profile-v2-test)
+SET(AQLPROFILE_V2_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_v2_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../counters.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../memorymanager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../populate_aql.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ip_offset_table_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../parse_ip_discovery.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx90a_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx9_factory.cpp
+
+)
+target_sources(aql-profile-v2-test PRIVATE ${AQLPROFILE_V2_SOURCES})
+target_include_directories(aql-profile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    aql-profile-v2-test
+    PRIVATE
+            hsa-runtime64::hsa-runtime64
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main)
+
+gtest_add_tests(
+    TARGET aql-profile-v2-test
+    SOURCES ${AQLPROFILE_V2_SOURCES}
+    TEST_LIST aql-profile-v2-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    
+set_tests_properties(
+    ${aql-profile-v2-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
