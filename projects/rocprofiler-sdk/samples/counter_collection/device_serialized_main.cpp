@@ -182,7 +182,7 @@ main(int, char**)
         else
         {
             hipLaunchKernelGGL(
-                check_order_kernel, dim3(1), dim3(1), 0, executor.get_stream2(), i, no_opt_1);
+                check_order_kernel, dim3(1), dim3(1), 0, executor.get_stream2(), i, no_opt_0);
         }
     }
     executor.synchronize();
