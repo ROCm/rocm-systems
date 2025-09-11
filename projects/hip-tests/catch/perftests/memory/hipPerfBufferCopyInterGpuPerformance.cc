@@ -26,6 +26,8 @@ srcDevice, size_t sizeBytes, hipStream_t stream) ` -
 * Copies data between devices.
 */
 
+
+
 #include <cmd_options.hh>
 #include <hip_array_common.hh>
 #include <hip_test_common.hh>
@@ -42,7 +44,7 @@ static constexpr int nIters = 10;                     // interation number for t
  * ------------------------
  * - Verify  device 0 to all devices copy performance.
  *   It also verify the copy performance of indiviual devices like device 0
- *   to device 1, device 0 to device 2,...., device 0 to device 7.
+ *   to device 1, device 0 to device 2,...., and device 0 to device 7.
  * Test source
  * ------------------------
  * - perftests/memory/hipPerfBufferCopyInterGpuPerformance.cc
