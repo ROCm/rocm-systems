@@ -143,7 +143,7 @@ typename std::remove_volatile<T>::type __atomic_fetch_sub(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
       val * (-1));
   } else {
-    return InterlockedExchangeAdd64(
+    return InterlockedExchangeAdd(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
       val * (-1));
   }
