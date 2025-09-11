@@ -86,8 +86,6 @@ endmacro()
 #############################
 # Setup version information
 #############################
-find_package(Perl REQUIRED)
-
 # Determine HIP_BASE_VERSION
 set(ENV{HIP_PATH} "")
 file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
