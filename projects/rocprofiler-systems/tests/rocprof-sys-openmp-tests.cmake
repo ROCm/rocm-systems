@@ -117,7 +117,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
     endforeach()
 
     set(_ompvv_offload_environment
-        "${ompt_environment}"
+        "${_ompt_environment}"
         "${_rocm_ld_env}"
         "ROCPROFSYS_USE_SAMPLING=ON"
         "ROCPROFSYS_SAMPLING_FREQ=50"
