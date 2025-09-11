@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
+#include "hip_graph_internal.hpp"
 #include "hip_event.hpp"
 #include "thread/monitor.hpp"
 #include "hip_prof_api.h"
@@ -102,6 +103,13 @@ bool isValid(hipStream_t& stream) {
     }
   }
   return false;
+}
+
+void Stream::ReleaseCaptureGraph() {
+  if (pCaptureGraph_ != nullptr) {
+    delete pCaptureGraph_;
+    pCaptureGraph_ = nullptr;
+  }
 }
 
 // ================================================================================================
@@ -482,7 +490,9 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    if (!waitStream->IsOriginStream()) {
+    // Dont set when forked stream joins back to the parent
+    if (!waitStream->IsOriginStream() &&
+        waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
       waitStream->SetCaptureGraph((eventStream)->GetCaptureGraph());
       waitStream->SetCaptureId((eventStream)->GetCaptureID());
       waitStream->SetCaptureMode((eventStream)->GetCaptureMode());
