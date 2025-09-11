@@ -1829,7 +1829,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
         app_name="app_occupancy",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
@@ -1861,7 +1861,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
         app_name="app_occupancy",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
