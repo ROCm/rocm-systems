@@ -512,7 +512,7 @@ profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
     }
 
     // Check if queue is currently executing
-    if(_dispatch_queue && _dispatch_queue->get_id().handle == queue_id)
+    if(_dispatch_queue != nullptr && _dispatch_queue->get_id().handle == queue_id)
     {
         ROCP_FATAL << "Queue is being destroyed while kernel launch is still active";
     }
