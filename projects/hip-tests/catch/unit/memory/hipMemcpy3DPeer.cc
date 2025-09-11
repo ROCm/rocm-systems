@@ -70,17 +70,15 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   HIP_CHECK(hipMalloc3DArray(&array_1, &channelDesc_1, extent, 0));
 
   // Set the array memory
-  char* tmpHost = (char*)malloc(volume);
-  memset(tmpHost, 0xb, volume);
+  std::vector<char>tmpHost(volume, 0xb);
   hipMemcpy3DParms fillParms{};
   fillParms.srcPos = make_hipPos(0, 0, 0);
   fillParms.dstPos = make_hipPos(0, 0, 0);
-  fillParms.srcPtr = make_hipPitchedPtr(tmpHost, numW, numW, numH);
+  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), numW, numW, numH);
   fillParms.dstArray = array_1;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
   HIP_CHECK(hipMemcpy3D(&fillParms));
-  free(tmpHost);
 
   // Array-2 Memory allocation
   HIP_CHECK(hipSetDevice(dst_device));
@@ -104,23 +102,19 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
 
   HIP_CHECK(hipMemcpy3DPeer(&peerCopyParams));
   // Copy data from Device Array- host ptr
-  char* hostBuf = (char*)malloc(volume);
-  memset(hostBuf, 0xa, volume);
+  std::vector<char>hostBuf(volume, 0xa);
   hipMemcpy3DParms copyParms{};
   copyParms.srcArray = array_2;
-  copyParms.dstPtr = make_hipPitchedPtr(hostBuf, numW, numW, numH);
+  copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), numW, numW, numH);
   copyParms.extent = extent;
   copyParms.kind = hipMemcpyDeviceToHost;
   HIP_CHECK(hipMemcpy3D(&copyParms));
 
   // Validation
-  for (size_t i = 0; i < volume; ++i) {
-    if (hostBuf[i] != 0xb) {
-      INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
-      REQUIRE(false);
-    }
+  for (size_t i = 0; i < volume; i++) {
+    INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
+    REQUIRE(hostBuf[i] == 0xb);
   }
-  free(hostBuf);
   HIP_CHECK(hipFreeArray(array_1));
   HIP_CHECK(hipFreeArray(array_2));
 }
