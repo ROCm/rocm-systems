@@ -50,26 +50,20 @@ TEST_CASE("Unit_hipMemsetD2D32_BasicFunctional") {
   size_t width = numW * sizeof(int);
   size_t sizeElements = width * numH;
   size_t elements = numW * numH;
-  int *A_d, *A_h;
+  int *A_d;
+
+  std::vector<int>A_h(sizeElements, 1);
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH, sizeof(int)));
-  A_h = reinterpret_cast<int*>(malloc(sizeElements));
-  REQUIRE(A_h != nullptr);
 
-  for (size_t i = 0; i < elements; i++) {
-    A_h[i] = 1;
-  }
   HIP_CHECK(hipMemsetD2D32(A_d, pitch_A, memsetval, width, numH));
-  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < elements; i++) {
-    if (A_h[i] != memsetval) {
-      INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
-                                         << " memsetval:" << memsetval);
-      REQUIRE(false);
-    }
+    INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
+                                       << " memsetval:" << memsetval);
+    REQUIRE(A_h[i] == memsetval);
   }
   HIP_CHECK(hipFree(A_d));
-  free(A_h);
 }
 /**
  * Test Description
@@ -85,39 +79,34 @@ TEST_CASE("Unit_hipMemsetD2D32_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemsetD2D32_UnEvenRowsCols") {
-  int *A_h, *B_h, *A_d;
+  int *A_d;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
   size_t devPitch;
 
-  A_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
-  B_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < cols; j++) {
-      A_h[i * cols + j] = 1;
-    }
-  }
+  size_t size = sizeof(int) * rows * cols;
+  std::vector<int>A_h(size, 1);
+  std::vector<int>B_h(size, 1);
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(int) * cols, rows,
                              sizeof(int)));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h, sizeof(int) * cols, sizeof(int) * cols, rows,
+  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h.data(), sizeof(int) * cols, sizeof(int) * cols, rows,
                         hipMemcpyHostToDevice));
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemsetD2D32(A_d, devPitch, 5, sizeof(int) * cols, rows));
   HIP_CHECK(hipDeviceSynchronize());
 
-  HIP_CHECK(hipMemcpy2D(B_h, sizeof(int) * cols, A_d, devPitch, sizeof(int) * cols, rows,
+  HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(int) * cols, A_d, devPitch, sizeof(int) * cols, rows,
                         hipMemcpyDeviceToHost));
 
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
+      INFO("Memset2D mismatch at index:" << i << " computed:" << B_h[i * cols + j]);
       REQUIRE(B_h[i * cols + j] == 5);
     }
   }
   HIP_CHECK(hipFree(A_d));
-  free(A_h);
-  free(B_h);
 }
 /**
  * Test Description
@@ -136,19 +125,14 @@ TEST_CASE("Unit_hipMemsetD2D32_KernelOperation") {
   constexpr int memsetval = 15;
   constexpr unsigned blocksPerCU = 6;
   constexpr unsigned threadsPerBlock = 256;
-  int *C_h, *A_d, *B_d, *C_d;
-  constexpr size_t numH = 256;
-  constexpr size_t numW = 256;
+  int *A_d, *B_d, *C_d;
+  constexpr size_t numH = 64;
+  constexpr size_t numW = 64;
   size_t devPitchA, devPitchB, devPitchC;
   size_t width = numW * sizeof(int);
   size_t sizeElements = width * numH;
 
-  C_h = reinterpret_cast<int*>(malloc(sizeElements));
-  for (int i = 0; i < numH; i++) {
-    for (int j = 0; j < numW; j++) {
-      C_h[i * numH + j] = 0;
-    }
-  }
+  std::vector<int>C_h(sizeElements, 1);
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitchA, width, numH, sizeof(int)));
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&B_d), &devPitchB, width, numH, sizeof(int)));
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&C_d), &devPitchC, width, numH, sizeof(int)));
@@ -165,16 +149,17 @@ TEST_CASE("Unit_hipMemsetD2D32_KernelOperation") {
                      C_d, size);
 
   HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy2D(C_h, width, C_d, devPitchC, width, numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(C_h.data(), width, C_d, devPitchC, width, numH, hipMemcpyDeviceToHost));
   for (int i = 0; i < numH; i++) {
     for (int j = 0; j < numW; j++) {
-      C_h[i * numH + j] = memsetval + memsetval;
+      INFO("Memset2D mismatch at index:" << i << " computed:" << C_h[i * numW + j]
+                                         << " memsetval:" << memsetval);
+      REQUIRE(C_h[i * numW + j] == 2 * memsetval);
     }
   }
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipFree(B_d));
   HIP_CHECK(hipFree(C_d));
-  free(C_h);
   HIP_CHECK(hipStreamDestroy(stream));
 }
 /**
