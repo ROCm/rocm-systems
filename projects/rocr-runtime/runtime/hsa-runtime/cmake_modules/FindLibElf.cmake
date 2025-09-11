@@ -82,18 +82,13 @@ else()
         ${CMAKE_SOURCE_DIR}/../../hsail-compiler/lib/loaders/elf/utils/libelf
       NO_DEFAULT_PATH)
 
-  if (ROCR_BUILD)
-    include(FindPackageHandleStandardArgs)
-    find_package_handle_standard_args(LibElf
-        "\nHSA Loader not found"
-        ROCR_LIBELF_INCLUDE_DIR)
+  message("=> LibElf paths:" ${CMAKE_CURRENT_BINARY_DIR} ${ROCR_LIBELF_INCLUDE_DIR})
+  if (${BUILD_SHARED_LIBS})
     mark_as_advanced(ROCR_LIBELF_INCLUDE_DIR)
-
     add_subdirectory("${ROCR_LIBELF_INCLUDE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/libelf)
   endif()
-    set(USE_AMD_LIBELF "yes" CACHE FORCE "")
-    message("=> LibElf paths:" ${CMAKE_CURRENT_BINARY_DIR} ${ROCR_LIBELF_INCLUDE_DIR})
-    set(AMD_ELFTOOLCHAIN_DIR ${ROCR_LIBELF_INCLUDE_DIR}/../..;${ROCR_LIBELF_INCLUDE_DIR}/../common/win32;${ROCR_LIBELF_INCLUDE_DIR}/../common)
-    set(ROCR_LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR};${AMD_ELFTOOLCHAIN_DIR}) 
-    set(LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR}) 
+  set(USE_AMD_LIBELF "yes" CACHE FORCE "")
+  set(AMD_ELFTOOLCHAIN_DIR ${ROCR_LIBELF_INCLUDE_DIR}/../..;${ROCR_LIBELF_INCLUDE_DIR}/../common/win32;${ROCR_LIBELF_INCLUDE_DIR}/../common)
+  set(ROCR_LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR};${AMD_ELFTOOLCHAIN_DIR}) 
+  set(LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR}) 
 endif()
