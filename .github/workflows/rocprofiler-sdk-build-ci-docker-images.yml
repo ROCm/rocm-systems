@@ -72,7 +72,7 @@ jobs:
         with:
           file: projects/rocprofiler-sdk/docker/Dockerfile.ci
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BASE_TAG=${{ matrix.os }}
             GPU_TYPE=${{ matrix.gpu }}
