@@ -261,6 +261,9 @@ static void runTestShflXor_4() {
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 /**
