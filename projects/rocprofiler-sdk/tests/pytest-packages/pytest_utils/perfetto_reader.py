@@ -298,7 +298,7 @@ class PerfettoReader:
             FROM counter_track
             JOIN counter ON counter.track_id = counter_track.id
             WHERE counter_track.name LIKE 'AGENT%'
-            AND counter.value >= 0
+            AND counter.value > 0
             GROUP BY counter.track_id"""
         )
 

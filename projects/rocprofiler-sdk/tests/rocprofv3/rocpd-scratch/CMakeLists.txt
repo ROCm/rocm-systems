@@ -31,7 +31,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --scratch-memory-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out --output-format rocpd json
-        --runtime-trace --kernel-rename --output-config -- $<TARGET_FILE:scratch-memory>)
+        --runtime-trace --kernel-rename -- $<TARGET_FILE:scratch-memory>)
 
 set_tests_properties(
     rocprofv3-test-rocpd-scratch-execute

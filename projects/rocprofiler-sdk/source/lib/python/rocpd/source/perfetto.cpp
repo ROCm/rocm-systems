@@ -33,6 +33,7 @@
 #include "lib/output/sql/common.hpp"
 #include "lib/output/stream_info.hpp"
 #include "lib/rocprofiler-sdk-tool/config.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <fmt/format.h>
 
@@ -699,20 +700,15 @@ write_perfetto(
             bool                   is_alloc_op = {false};
         };
 
-        struct agent_and_size
-        {
-            uint64_t agent_abs_index = {};
-            uint64_t size            = {0};
-        };
-
         auto mem_alloc_endpoints =
             std::unordered_map<uint64_t, std::map<rocprofiler_timestamp_t, memory_information>>{};
         auto mem_alloc_extremes = std::pair<uint64_t, uint64_t>{
             std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
         auto address_to_agent_and_size =
-            std::unordered_map<rocprofiler_address_t, agent_and_size>{};
-        auto queue_to_agent_and_size = std::unordered_map<rocprofiler_queue_id_t, agent_and_size>{};
-        auto free_mem_info           = std::vector<free_memory_information>{};
+            std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+        auto queue_to_agent_and_size =
+            std::unordered_map<rocprofiler_queue_id_t, rocprofiler::agent::index_and_size>{};
+        auto free_mem_info = std::vector<free_memory_information>{};
 
         // Load memory allocation endpoints
         for(auto ditr : memory_allocation_gen)
@@ -741,7 +737,7 @@ write_perfetto(
 
                         address_to_agent_and_size.emplace(
                             rocprofiler_address_t{.handle = itr.address},
-                            agent_and_size{itr.agent_abs_index, itr.size});
+                            rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
                     }
                     // Scratch memory operations are indexed by queue id as agent
                     // id is not available
@@ -749,7 +745,7 @@ write_perfetto(
                     {
                         queue_to_agent_and_size.emplace(
                             rocprofiler_queue_id_t{.handle = itr.queue_id},
-                            agent_and_size{itr.agent_abs_index, itr.size});
+                            rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
                     }
                 }
                 else if(itr.type == "FREE")
@@ -909,21 +905,16 @@ write_perfetto(
         for(const auto& ditr : scratch_memory_gen)
             for(const auto& itr : scratch_memory_gen.get(ditr))
             {
-                auto agent_abs_index = itr.agent_abs_index;
-                if(itr.operation == "FREE")
+                if(itr.operation == "ALLOC")
                 {
-                    auto [agent_index, size] =
-                        queue_to_agent_and_size[rocprofiler_queue_id_t{.handle = itr.queue_id}];
-                    agent_abs_index = agent_index;
-                }
-                // For each timestamp in the range of this record
-                auto begin = scratch_mem_endpoints.at(agent_abs_index).lower_bound(itr.start);
-                auto end   = scratch_mem_endpoints.at(agent_abs_index).upper_bound(itr.end);
+                    auto agent_abs_index = itr.agent_abs_index;
 
-                for(auto mitr = begin; mitr != end; ++mitr)
-                {
-                    // Add scratch memory size to the counter value at this timestamp
-                    if(itr.operation == "ALLOC")
+                    // For each timestamp in the range of this record including intervening
+                    // deallocations write in allocation size
+                    auto begin = scratch_mem_endpoints.at(agent_abs_index).lower_bound(itr.start);
+                    auto end   = scratch_mem_endpoints.at(agent_abs_index).upper_bound(itr.end);
+
+                    for(auto mitr = begin; mitr != end; ++mitr)
                     {
                         mitr->second = itr.size;
                     }

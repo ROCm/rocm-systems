@@ -41,6 +41,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/sql/deferred_transaction.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -1210,16 +1211,11 @@ write_rocpd(
             }
         };
 
-    struct agent_and_size
-    {
-        uint64_t agent_abs_index = {};
-        uint64_t size            = {0};
-    };
-    auto address_to_agent_and_size = std::unordered_map<rocprofiler_address_t, agent_and_size>{};
-
     auto insert_memory_alloc_data =
-        [&conn, &tool_metadata, &string_entries, node_id, this_pid, &address_to_agent_and_size](
-            const auto& _gen) {
+        [&conn, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen) {
+            auto address_to_agent_and_size =
+                std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+
             for(auto pitr : _gen)
             {
                 auto _deferred = sql::deferred_transaction{conn};
@@ -1258,7 +1254,7 @@ write_rocpd(
                         _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
                         address_to_agent_and_size.emplace(
                             rocprofiler_address_t{.handle = _address.handle},
-                            agent_and_size{_node_id.value(), _allocation_size});
+                            rocprofiler::agent::index_and_size{_node_id.value(), _allocation_size});
                     }
                     else if(_type == "FREE")
                     {
