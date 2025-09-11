@@ -45,337 +45,362 @@
 
 #include <dlfcn.h>
 #include <iostream>
+#include <fcntl.h>
 
 namespace rocr {
 namespace core {
 
-  ThunkLoader::ThunkLoader() {
+  std::string ThunkLoader::whoami() {
+    is_dtif_ = is_dxg_ = false;
     if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
+      is_dtif_ = true;
+      return "libdtif.so";
+    }
+
+    if (core::Runtime::runtime_singleton_->flag().enable_dxg_detection()) {
+      int fd = open("/dev/dxg", O_RDWR);
+      if (fd >= 0) {
+        close(fd);
+        is_dxg_ = true;
+        return "librocdxg.so";
+      }
+    }
+
+    return "";
+  }
+
+  ThunkLoader::ThunkLoader()
+    : thunk_handle(NULL),
+      library_name(whoami()),
+      is_loaded_(false) {
+    if (!library_name.empty()) {
       dlerror(); // Clear any existing error messages
-      dtif_handle = dlopen("libdtif.so", RTLD_LAZY);
-      if (dtif_handle == NULL)
-        fprintf(stderr, "Cannot load libdtif.so, failed:%s\n", dlerror());
-      else
-        debug_print("Load libdtif.so successully!\n");
+      thunk_handle = dlopen(library_name.c_str(), RTLD_LAZY);
+      if (thunk_handle == NULL) {
+        fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(), dlerror());
+      } else {
+        debug_print("Load %s successully!\n", library_name.c_str());
+      }
+      is_loaded_ = true;
     }
   }
 
   ThunkLoader::~ThunkLoader() {
-    if (core::Runtime::runtime_singleton_->flag().enable_dtif()
-      && (dtif_handle != NULL)) {
-        if (dlclose(dtif_handle) != 0) {
-          fprintf(stderr, "Cannot unload libdtif.so, failed:%s\n", dlerror());
+    if (IsSharedLibraryLoaded()
+      && (thunk_handle != NULL)) {
+        if (dlclose(thunk_handle) != 0) {
+          fprintf(stderr, "Cannot unload %s, failed:%s\n", library_name.c_str(), dlerror());
         } else {
-          debug_print("Unload libdtif.so successully!\n");
+          debug_print("Unload %s successully!\n", library_name.c_str());
         }
     }
   }
 
   void ThunkLoader::LoadThunkApiTable() {
-    if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
+    if (IsSharedLibraryLoaded()) {
       dlerror(); // Clear any existing error messages
 
-      HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)dlsym(dtif_handle, "hsaKmtOpenKFD");
+      HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)dlsym(thunk_handle, "hsaKmtOpenKFD");
       if (HSAKMT_PFN(hsaKmtOpenKFD) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)dlsym(dtif_handle, "hsaKmtCloseKFD");
+      HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)dlsym(thunk_handle, "hsaKmtCloseKFD");
       if (HSAKMT_PFN(hsaKmtCloseKFD) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetVersion) = (HSAKMT_DEF(hsaKmtGetVersion)*)dlsym(dtif_handle, "hsaKmtGetVersion");
+      HSAKMT_PFN(hsaKmtGetVersion) = (HSAKMT_DEF(hsaKmtGetVersion)*)dlsym(thunk_handle, "hsaKmtGetVersion");
       if (HSAKMT_PFN(hsaKmtGetVersion) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtAcquireSystemProperties) = (HSAKMT_DEF(hsaKmtAcquireSystemProperties)*)dlsym(dtif_handle, "hsaKmtAcquireSystemProperties");
+      HSAKMT_PFN(hsaKmtAcquireSystemProperties) = (HSAKMT_DEF(hsaKmtAcquireSystemProperties)*)dlsym(thunk_handle, "hsaKmtAcquireSystemProperties");
       if (HSAKMT_PFN(hsaKmtAcquireSystemProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtReleaseSystemProperties) = (HSAKMT_DEF(hsaKmtReleaseSystemProperties)*)dlsym(dtif_handle, "hsaKmtReleaseSystemProperties");
+      HSAKMT_PFN(hsaKmtReleaseSystemProperties) = (HSAKMT_DEF(hsaKmtReleaseSystemProperties)*)dlsym(thunk_handle, "hsaKmtReleaseSystemProperties");
       if (HSAKMT_PFN(hsaKmtReleaseSystemProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetNodeProperties) = (HSAKMT_DEF(hsaKmtGetNodeProperties)*)dlsym(dtif_handle, "hsaKmtGetNodeProperties");
+      HSAKMT_PFN(hsaKmtGetNodeProperties) = (HSAKMT_DEF(hsaKmtGetNodeProperties)*)dlsym(thunk_handle, "hsaKmtGetNodeProperties");
       if (HSAKMT_PFN(hsaKmtGetNodeProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetNodeMemoryProperties) = (HSAKMT_DEF(hsaKmtGetNodeMemoryProperties)*)dlsym(dtif_handle, "hsaKmtGetNodeMemoryProperties");
+      HSAKMT_PFN(hsaKmtGetNodeMemoryProperties) = (HSAKMT_DEF(hsaKmtGetNodeMemoryProperties)*)dlsym(thunk_handle, "hsaKmtGetNodeMemoryProperties");
       if (HSAKMT_PFN(hsaKmtGetNodeMemoryProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetNodeCacheProperties) = (HSAKMT_DEF(hsaKmtGetNodeCacheProperties)*)dlsym(dtif_handle, "hsaKmtGetNodeCacheProperties");
+      HSAKMT_PFN(hsaKmtGetNodeCacheProperties) = (HSAKMT_DEF(hsaKmtGetNodeCacheProperties)*)dlsym(thunk_handle, "hsaKmtGetNodeCacheProperties");
       if (HSAKMT_PFN(hsaKmtGetNodeCacheProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetNodeIoLinkProperties) = (HSAKMT_DEF(hsaKmtGetNodeIoLinkProperties)*)dlsym(dtif_handle, "hsaKmtGetNodeIoLinkProperties");
+      HSAKMT_PFN(hsaKmtGetNodeIoLinkProperties) = (HSAKMT_DEF(hsaKmtGetNodeIoLinkProperties)*)dlsym(thunk_handle, "hsaKmtGetNodeIoLinkProperties");
       if (HSAKMT_PFN(hsaKmtGetNodeIoLinkProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtCreateEvent) = (HSAKMT_DEF(hsaKmtCreateEvent)*)dlsym(dtif_handle, "hsaKmtCreateEvent");
+      HSAKMT_PFN(hsaKmtCreateEvent) = (HSAKMT_DEF(hsaKmtCreateEvent)*)dlsym(thunk_handle, "hsaKmtCreateEvent");
       if (HSAKMT_PFN(hsaKmtCreateEvent) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDestroyEvent) = (HSAKMT_DEF(hsaKmtDestroyEvent)*)dlsym(dtif_handle, "hsaKmtDestroyEvent");
+      HSAKMT_PFN(hsaKmtDestroyEvent) = (HSAKMT_DEF(hsaKmtDestroyEvent)*)dlsym(thunk_handle, "hsaKmtDestroyEvent");
       if (HSAKMT_PFN(hsaKmtDestroyEvent) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSetEvent) = (HSAKMT_DEF(hsaKmtSetEvent)*)dlsym(dtif_handle, "hsaKmtSetEvent");
+      HSAKMT_PFN(hsaKmtSetEvent) = (HSAKMT_DEF(hsaKmtSetEvent)*)dlsym(thunk_handle, "hsaKmtSetEvent");
       if (HSAKMT_PFN(hsaKmtSetEvent) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtResetEvent) = (HSAKMT_DEF(hsaKmtResetEvent)*)dlsym(dtif_handle, "hsaKmtResetEvent");
+      HSAKMT_PFN(hsaKmtResetEvent) = (HSAKMT_DEF(hsaKmtResetEvent)*)dlsym(thunk_handle, "hsaKmtResetEvent");
       if (HSAKMT_PFN(hsaKmtResetEvent) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtQueryEventState) = (HSAKMT_DEF(hsaKmtQueryEventState)*)dlsym(dtif_handle, "hsaKmtQueryEventState");
+      HSAKMT_PFN(hsaKmtQueryEventState) = (HSAKMT_DEF(hsaKmtQueryEventState)*)dlsym(thunk_handle, "hsaKmtQueryEventState");
       if (HSAKMT_PFN(hsaKmtQueryEventState) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtWaitOnEvent) = (HSAKMT_DEF(hsaKmtWaitOnEvent)*)dlsym(dtif_handle, "hsaKmtWaitOnEvent");
+      HSAKMT_PFN(hsaKmtWaitOnEvent) = (HSAKMT_DEF(hsaKmtWaitOnEvent)*)dlsym(thunk_handle, "hsaKmtWaitOnEvent");
       if (HSAKMT_PFN(hsaKmtWaitOnEvent) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtWaitOnMultipleEvents) = (HSAKMT_DEF(hsaKmtWaitOnMultipleEvents)*)dlsym(dtif_handle, "hsaKmtWaitOnMultipleEvents");
+      HSAKMT_PFN(hsaKmtWaitOnMultipleEvents) = (HSAKMT_DEF(hsaKmtWaitOnMultipleEvents)*)dlsym(thunk_handle, "hsaKmtWaitOnMultipleEvents");
       if (HSAKMT_PFN(hsaKmtWaitOnMultipleEvents) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtCreateQueue) = (HSAKMT_DEF(hsaKmtCreateQueue)*)dlsym(dtif_handle, "hsaKmtCreateQueue");
+      HSAKMT_PFN(hsaKmtCreateQueue) = (HSAKMT_DEF(hsaKmtCreateQueue)*)dlsym(thunk_handle, "hsaKmtCreateQueue");
       if (HSAKMT_PFN(hsaKmtCreateQueue) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtCreateQueueExt) = (HSAKMT_DEF(hsaKmtCreateQueueExt)*)dlsym(dtif_handle, "hsaKmtCreateQueueExt");
+      HSAKMT_PFN(hsaKmtCreateQueueExt) = (HSAKMT_DEF(hsaKmtCreateQueueExt)*)dlsym(thunk_handle, "hsaKmtCreateQueueExt");
       if (HSAKMT_PFN(hsaKmtCreateQueueExt) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtUpdateQueue) = (HSAKMT_DEF(hsaKmtUpdateQueue)*)dlsym(dtif_handle, "hsaKmtUpdateQueue");
+      HSAKMT_PFN(hsaKmtUpdateQueue) = (HSAKMT_DEF(hsaKmtUpdateQueue)*)dlsym(thunk_handle, "hsaKmtUpdateQueue");
       if (HSAKMT_PFN(hsaKmtUpdateQueue) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)dlsym(dtif_handle, "hsaKmtDestroyQueue");
+      HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)dlsym(thunk_handle, "hsaKmtDestroyQueue");
       if (HSAKMT_PFN(hsaKmtDestroyQueue) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSetQueueCUMask) = (HSAKMT_DEF(hsaKmtSetQueueCUMask)*)dlsym(dtif_handle, "hsaKmtSetQueueCUMask");
+      HSAKMT_PFN(hsaKmtSetQueueCUMask) = (HSAKMT_DEF(hsaKmtSetQueueCUMask)*)dlsym(thunk_handle, "hsaKmtSetQueueCUMask");
       if (HSAKMT_PFN(hsaKmtSetQueueCUMask) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSetMemoryPolicy) = (HSAKMT_DEF(hsaKmtSetMemoryPolicy)*)dlsym(dtif_handle, "hsaKmtSetMemoryPolicy");
+      HSAKMT_PFN(hsaKmtSetMemoryPolicy) = (HSAKMT_DEF(hsaKmtSetMemoryPolicy)*)dlsym(thunk_handle, "hsaKmtSetMemoryPolicy");
       if (HSAKMT_PFN(hsaKmtSetMemoryPolicy) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtAllocMemory) = (HSAKMT_DEF(hsaKmtAllocMemory)*)dlsym(dtif_handle, "hsaKmtAllocMemory");
+      HSAKMT_PFN(hsaKmtAllocMemory) = (HSAKMT_DEF(hsaKmtAllocMemory)*)dlsym(thunk_handle, "hsaKmtAllocMemory");
       if (HSAKMT_PFN(hsaKmtAllocMemory) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtAllocMemoryAlign) = (HSAKMT_DEF(hsaKmtAllocMemoryAlign)*)dlsym(dtif_handle, "hsaKmtAllocMemoryAlign");
+      HSAKMT_PFN(hsaKmtAllocMemoryAlign) = (HSAKMT_DEF(hsaKmtAllocMemoryAlign)*)dlsym(thunk_handle, "hsaKmtAllocMemoryAlign");
       if (HSAKMT_PFN(hsaKmtAllocMemoryAlign) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtFreeMemory) = (HSAKMT_DEF(hsaKmtFreeMemory)*)dlsym(dtif_handle, "hsaKmtFreeMemory");
+      HSAKMT_PFN(hsaKmtFreeMemory) = (HSAKMT_DEF(hsaKmtFreeMemory)*)dlsym(thunk_handle, "hsaKmtFreeMemory");
       if (HSAKMT_PFN(hsaKmtFreeMemory) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtAvailableMemory) = (HSAKMT_DEF(hsaKmtAvailableMemory)*)dlsym(dtif_handle, "hsaKmtAvailableMemory");
+      HSAKMT_PFN(hsaKmtAvailableMemory) = (HSAKMT_DEF(hsaKmtAvailableMemory)*)dlsym(thunk_handle, "hsaKmtAvailableMemory");
       if (HSAKMT_PFN(hsaKmtAvailableMemory) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterMemory) = (HSAKMT_DEF(hsaKmtRegisterMemory)*)dlsym(dtif_handle, "hsaKmtRegisterMemory");
+      HSAKMT_PFN(hsaKmtRegisterMemory) = (HSAKMT_DEF(hsaKmtRegisterMemory)*)dlsym(thunk_handle, "hsaKmtRegisterMemory");
       if (HSAKMT_PFN(hsaKmtRegisterMemory) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) = (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)*)dlsym(dtif_handle, "hsaKmtRegisterMemoryToNodes");
+      HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) = (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)*)dlsym(thunk_handle, "hsaKmtRegisterMemoryToNodes");
       if (HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) = (HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)*)dlsym(dtif_handle, "hsaKmtRegisterMemoryWithFlags");
+      HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) = (HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)*)dlsym(thunk_handle, "hsaKmtRegisterMemoryWithFlags");
       if (HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodes) = (HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodes)*)dlsym(dtif_handle, "hsaKmtRegisterGraphicsHandleToNodes");
+      HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodes) = (HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodes)*)dlsym(thunk_handle, "hsaKmtRegisterGraphicsHandleToNodes");
       if (HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodes) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodesExt) = (HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodesExt)*)dlsym(dtif_handle, "hsaKmtRegisterGraphicsHandleToNodesExt");
+      HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodesExt) = (HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodesExt)*)dlsym(thunk_handle, "hsaKmtRegisterGraphicsHandleToNodesExt");
       if (HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodesExt) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtShareMemory) = (HSAKMT_DEF(hsaKmtShareMemory)*)dlsym(dtif_handle, "hsaKmtShareMemory");
+      HSAKMT_PFN(hsaKmtShareMemory) = (HSAKMT_DEF(hsaKmtShareMemory)*)dlsym(thunk_handle, "hsaKmtShareMemory");
       if (HSAKMT_PFN(hsaKmtShareMemory) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterSharedHandle) = (HSAKMT_DEF(hsaKmtRegisterSharedHandle)*)dlsym(dtif_handle, "hsaKmtRegisterSharedHandle");
+      HSAKMT_PFN(hsaKmtRegisterSharedHandle) = (HSAKMT_DEF(hsaKmtRegisterSharedHandle)*)dlsym(thunk_handle, "hsaKmtRegisterSharedHandle");
       if (HSAKMT_PFN(hsaKmtRegisterSharedHandle) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRegisterSharedHandleToNodes) = (HSAKMT_DEF(hsaKmtRegisterSharedHandleToNodes)*)dlsym(dtif_handle, "hsaKmtRegisterSharedHandleToNodes");
+      HSAKMT_PFN(hsaKmtRegisterSharedHandleToNodes) = (HSAKMT_DEF(hsaKmtRegisterSharedHandleToNodes)*)dlsym(thunk_handle, "hsaKmtRegisterSharedHandleToNodes");
       if (HSAKMT_PFN(hsaKmtRegisterSharedHandleToNodes) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtProcessVMRead) = (HSAKMT_DEF(hsaKmtProcessVMRead)*)dlsym(dtif_handle, "hsaKmtProcessVMRead");
+      HSAKMT_PFN(hsaKmtProcessVMRead) = (HSAKMT_DEF(hsaKmtProcessVMRead)*)dlsym(thunk_handle, "hsaKmtProcessVMRead");
       if (HSAKMT_PFN(hsaKmtProcessVMRead) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtProcessVMWrite) = (HSAKMT_DEF(hsaKmtProcessVMWrite)*)dlsym(dtif_handle, "hsaKmtProcessVMWrite");
+      HSAKMT_PFN(hsaKmtProcessVMWrite) = (HSAKMT_DEF(hsaKmtProcessVMWrite)*)dlsym(thunk_handle, "hsaKmtProcessVMWrite");
       if (HSAKMT_PFN(hsaKmtProcessVMWrite) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDeregisterMemory) = (HSAKMT_DEF(hsaKmtDeregisterMemory)*)dlsym(dtif_handle, "hsaKmtDeregisterMemory");
+      HSAKMT_PFN(hsaKmtDeregisterMemory) = (HSAKMT_DEF(hsaKmtDeregisterMemory)*)dlsym(thunk_handle, "hsaKmtDeregisterMemory");
       if (HSAKMT_PFN(hsaKmtDeregisterMemory) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtMapMemoryToGPU) = (HSAKMT_DEF(hsaKmtMapMemoryToGPU)*)dlsym(dtif_handle, "hsaKmtMapMemoryToGPU");
+      HSAKMT_PFN(hsaKmtMapMemoryToGPU) = (HSAKMT_DEF(hsaKmtMapMemoryToGPU)*)dlsym(thunk_handle, "hsaKmtMapMemoryToGPU");
       if (HSAKMT_PFN(hsaKmtMapMemoryToGPU) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) = (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)*)dlsym(dtif_handle, "hsaKmtMapMemoryToGPUNodes");
+      HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) = (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)*)dlsym(thunk_handle, "hsaKmtMapMemoryToGPUNodes");
       if (HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)dlsym(dtif_handle, "hsaKmtUnmapMemoryToGPU");
+      HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)dlsym(thunk_handle, "hsaKmtUnmapMemoryToGPU");
       if (HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgRegister) = (HSAKMT_DEF(hsaKmtDbgRegister)*)dlsym(dtif_handle, "hsaKmtDbgRegister");
+      HSAKMT_PFN(hsaKmtDbgRegister) = (HSAKMT_DEF(hsaKmtDbgRegister)*)dlsym(thunk_handle, "hsaKmtDbgRegister");
       if (HSAKMT_PFN(hsaKmtDbgRegister) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgUnregister) = (HSAKMT_DEF(hsaKmtDbgUnregister)*)dlsym(dtif_handle, "hsaKmtDbgUnregister");
+      HSAKMT_PFN(hsaKmtDbgUnregister) = (HSAKMT_DEF(hsaKmtDbgUnregister)*)dlsym(thunk_handle, "hsaKmtDbgUnregister");
       if (HSAKMT_PFN(hsaKmtDbgUnregister) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgWavefrontControl) = (HSAKMT_DEF(hsaKmtDbgWavefrontControl)*)dlsym(dtif_handle, "hsaKmtDbgWavefrontControl");
+      HSAKMT_PFN(hsaKmtDbgWavefrontControl) = (HSAKMT_DEF(hsaKmtDbgWavefrontControl)*)dlsym(thunk_handle, "hsaKmtDbgWavefrontControl");
       if (HSAKMT_PFN(hsaKmtDbgWavefrontControl) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgAddressWatch) = (HSAKMT_DEF(hsaKmtDbgAddressWatch)*)dlsym(dtif_handle, "hsaKmtDbgAddressWatch");
+      HSAKMT_PFN(hsaKmtDbgAddressWatch) = (HSAKMT_DEF(hsaKmtDbgAddressWatch)*)dlsym(thunk_handle, "hsaKmtDbgAddressWatch");
       if (HSAKMT_PFN(hsaKmtDbgAddressWatch) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgEnable) = (HSAKMT_DEF(hsaKmtDbgEnable)*)dlsym(dtif_handle, "hsaKmtDbgEnable");
+      HSAKMT_PFN(hsaKmtDbgEnable) = (HSAKMT_DEF(hsaKmtDbgEnable)*)dlsym(thunk_handle, "hsaKmtDbgEnable");
       if (HSAKMT_PFN(hsaKmtDbgEnable) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgDisable) = (HSAKMT_DEF(hsaKmtDbgDisable)*)dlsym(dtif_handle, "hsaKmtDbgDisable");
+      HSAKMT_PFN(hsaKmtDbgDisable) = (HSAKMT_DEF(hsaKmtDbgDisable)*)dlsym(thunk_handle, "hsaKmtDbgDisable");
       if (HSAKMT_PFN(hsaKmtDbgDisable) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgGetDeviceData) = (HSAKMT_DEF(hsaKmtDbgGetDeviceData)*)dlsym(dtif_handle, "hsaKmtDbgGetDeviceData");
+      HSAKMT_PFN(hsaKmtDbgGetDeviceData) = (HSAKMT_DEF(hsaKmtDbgGetDeviceData)*)dlsym(thunk_handle, "hsaKmtDbgGetDeviceData");
       if (HSAKMT_PFN(hsaKmtDbgGetDeviceData) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDbgGetQueueData) = (HSAKMT_DEF(hsaKmtDbgGetQueueData)*)dlsym(dtif_handle, "hsaKmtDbgGetQueueData");
+      HSAKMT_PFN(hsaKmtDbgGetQueueData) = (HSAKMT_DEF(hsaKmtDbgGetQueueData)*)dlsym(thunk_handle, "hsaKmtDbgGetQueueData");
       if (HSAKMT_PFN(hsaKmtDbgGetQueueData) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)dlsym(dtif_handle, "hsaKmtGetClockCounters");
+      HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)dlsym(thunk_handle, "hsaKmtGetClockCounters");
       if (HSAKMT_PFN(hsaKmtGetClockCounters) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)dlsym(dtif_handle, "hsaKmtPmcGetCounterProperties");
+      HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)dlsym(thunk_handle, "hsaKmtPmcGetCounterProperties");
       if (HSAKMT_PFN(hsaKmtPmcGetCounterProperties) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcRegisterTrace) = (HSAKMT_DEF(hsaKmtPmcRegisterTrace)*)dlsym(dtif_handle, "hsaKmtPmcRegisterTrace");
+      HSAKMT_PFN(hsaKmtPmcRegisterTrace) = (HSAKMT_DEF(hsaKmtPmcRegisterTrace)*)dlsym(thunk_handle, "hsaKmtPmcRegisterTrace");
       if (HSAKMT_PFN(hsaKmtPmcRegisterTrace) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcUnregisterTrace) = (HSAKMT_DEF(hsaKmtPmcUnregisterTrace)*)dlsym(dtif_handle, "hsaKmtPmcUnregisterTrace");
+      HSAKMT_PFN(hsaKmtPmcUnregisterTrace) = (HSAKMT_DEF(hsaKmtPmcUnregisterTrace)*)dlsym(thunk_handle, "hsaKmtPmcUnregisterTrace");
       if (HSAKMT_PFN(hsaKmtPmcUnregisterTrace) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcAcquireTraceAccess) = (HSAKMT_DEF(hsaKmtPmcAcquireTraceAccess)*)dlsym(dtif_handle, "hsaKmtPmcAcquireTraceAccess");
+      HSAKMT_PFN(hsaKmtPmcAcquireTraceAccess) = (HSAKMT_DEF(hsaKmtPmcAcquireTraceAccess)*)dlsym(thunk_handle, "hsaKmtPmcAcquireTraceAccess");
       if (HSAKMT_PFN(hsaKmtPmcAcquireTraceAccess) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcReleaseTraceAccess) = (HSAKMT_DEF(hsaKmtPmcReleaseTraceAccess)*)dlsym(dtif_handle, "hsaKmtPmcReleaseTraceAccess");
+      HSAKMT_PFN(hsaKmtPmcReleaseTraceAccess) = (HSAKMT_DEF(hsaKmtPmcReleaseTraceAccess)*)dlsym(thunk_handle, "hsaKmtPmcReleaseTraceAccess");
       if (HSAKMT_PFN(hsaKmtPmcReleaseTraceAccess) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcStartTrace) = (HSAKMT_DEF(hsaKmtPmcStartTrace)*)dlsym(dtif_handle, "hsaKmtPmcStartTrace");
+      HSAKMT_PFN(hsaKmtPmcStartTrace) = (HSAKMT_DEF(hsaKmtPmcStartTrace)*)dlsym(thunk_handle, "hsaKmtPmcStartTrace");
       if (HSAKMT_PFN(hsaKmtPmcStartTrace) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcQueryTrace) = (HSAKMT_DEF(hsaKmtPmcQueryTrace)*)dlsym(dtif_handle, "hsaKmtPmcQueryTrace");
+      HSAKMT_PFN(hsaKmtPmcQueryTrace) = (HSAKMT_DEF(hsaKmtPmcQueryTrace)*)dlsym(thunk_handle, "hsaKmtPmcQueryTrace");
       if (HSAKMT_PFN(hsaKmtPmcQueryTrace) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPmcStopTrace) = (HSAKMT_DEF(hsaKmtPmcStopTrace)*)dlsym(dtif_handle, "hsaKmtPmcStopTrace");
+      HSAKMT_PFN(hsaKmtPmcStopTrace) = (HSAKMT_DEF(hsaKmtPmcStopTrace)*)dlsym(thunk_handle, "hsaKmtPmcStopTrace");
       if (HSAKMT_PFN(hsaKmtPmcStopTrace) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtMapGraphicHandle) = (HSAKMT_DEF(hsaKmtMapGraphicHandle)*)dlsym(dtif_handle, "hsaKmtMapGraphicHandle");
+      HSAKMT_PFN(hsaKmtMapGraphicHandle) = (HSAKMT_DEF(hsaKmtMapGraphicHandle)*)dlsym(thunk_handle, "hsaKmtMapGraphicHandle");
       if (HSAKMT_PFN(hsaKmtMapGraphicHandle) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtUnmapGraphicHandle) = (HSAKMT_DEF(hsaKmtUnmapGraphicHandle)*)dlsym(dtif_handle, "hsaKmtUnmapGraphicHandle");
+      HSAKMT_PFN(hsaKmtUnmapGraphicHandle) = (HSAKMT_DEF(hsaKmtUnmapGraphicHandle)*)dlsym(thunk_handle, "hsaKmtUnmapGraphicHandle");
       if (HSAKMT_PFN(hsaKmtUnmapGraphicHandle) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSetTrapHandler) = (HSAKMT_DEF(hsaKmtSetTrapHandler)*)dlsym(dtif_handle, "hsaKmtSetTrapHandler");
+      HSAKMT_PFN(hsaKmtSetTrapHandler) = (HSAKMT_DEF(hsaKmtSetTrapHandler)*)dlsym(thunk_handle, "hsaKmtSetTrapHandler");
       if (HSAKMT_PFN(hsaKmtSetTrapHandler) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetTileConfig) = (HSAKMT_DEF(hsaKmtGetTileConfig)*)dlsym(dtif_handle, "hsaKmtGetTileConfig");
+      HSAKMT_PFN(hsaKmtGetTileConfig) = (HSAKMT_DEF(hsaKmtGetTileConfig)*)dlsym(thunk_handle, "hsaKmtGetTileConfig");
       if (HSAKMT_PFN(hsaKmtGetTileConfig) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtQueryPointerInfo) = (HSAKMT_DEF(hsaKmtQueryPointerInfo)*)dlsym(dtif_handle, "hsaKmtQueryPointerInfo");
+      HSAKMT_PFN(hsaKmtQueryPointerInfo) = (HSAKMT_DEF(hsaKmtQueryPointerInfo)*)dlsym(thunk_handle, "hsaKmtQueryPointerInfo");
       if (HSAKMT_PFN(hsaKmtQueryPointerInfo) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSetMemoryUserData) = (HSAKMT_DEF(hsaKmtSetMemoryUserData)*)dlsym(dtif_handle, "hsaKmtSetMemoryUserData");
+      HSAKMT_PFN(hsaKmtSetMemoryUserData) = (HSAKMT_DEF(hsaKmtSetMemoryUserData)*)dlsym(thunk_handle, "hsaKmtSetMemoryUserData");
       if (HSAKMT_PFN(hsaKmtSetMemoryUserData) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetQueueInfo) = (HSAKMT_DEF(hsaKmtGetQueueInfo)*)dlsym(dtif_handle, "hsaKmtGetQueueInfo");
+      HSAKMT_PFN(hsaKmtGetQueueInfo) = (HSAKMT_DEF(hsaKmtGetQueueInfo)*)dlsym(thunk_handle, "hsaKmtGetQueueInfo");
       if (HSAKMT_PFN(hsaKmtGetQueueInfo) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtAllocQueueGWS) = (HSAKMT_DEF(hsaKmtAllocQueueGWS)*)dlsym(dtif_handle, "hsaKmtAllocQueueGWS");
+      HSAKMT_PFN(hsaKmtAllocQueueGWS) = (HSAKMT_DEF(hsaKmtAllocQueueGWS)*)dlsym(thunk_handle, "hsaKmtAllocQueueGWS");
       if (HSAKMT_PFN(hsaKmtAllocQueueGWS) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRuntimeEnable) = (HSAKMT_DEF(hsaKmtRuntimeEnable)*)dlsym(dtif_handle, "hsaKmtRuntimeEnable");
+      HSAKMT_PFN(hsaKmtRuntimeEnable) = (HSAKMT_DEF(hsaKmtRuntimeEnable)*)dlsym(thunk_handle, "hsaKmtRuntimeEnable");
       if (HSAKMT_PFN(hsaKmtRuntimeEnable) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtRuntimeDisable) = (HSAKMT_DEF(hsaKmtRuntimeDisable)*)dlsym(dtif_handle, "hsaKmtRuntimeDisable");
+      HSAKMT_PFN(hsaKmtRuntimeDisable) = (HSAKMT_DEF(hsaKmtRuntimeDisable)*)dlsym(thunk_handle, "hsaKmtRuntimeDisable");
       if (HSAKMT_PFN(hsaKmtRuntimeDisable) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport) = (HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)*)dlsym(dtif_handle, "hsaKmtCheckRuntimeDebugSupport");
+      HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport) = (HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)*)dlsym(thunk_handle, "hsaKmtCheckRuntimeDebugSupport");
       if (HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)dlsym(dtif_handle, "hsaKmtGetRuntimeCapabilities");
+      HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)dlsym(thunk_handle, "hsaKmtGetRuntimeCapabilities");
       if (HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtDebugTrapIoctl) = (HSAKMT_DEF(hsaKmtDebugTrapIoctl)*)dlsym(dtif_handle, "hsaKmtDebugTrapIoctl");
+      HSAKMT_PFN(hsaKmtDebugTrapIoctl) = (HSAKMT_DEF(hsaKmtDebugTrapIoctl)*)dlsym(thunk_handle, "hsaKmtDebugTrapIoctl");
       if (HSAKMT_PFN(hsaKmtDebugTrapIoctl) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSPMAcquire) = (HSAKMT_DEF(hsaKmtSPMAcquire)*)dlsym(dtif_handle, "hsaKmtSPMAcquire");
+      HSAKMT_PFN(hsaKmtSPMAcquire) = (HSAKMT_DEF(hsaKmtSPMAcquire)*)dlsym(thunk_handle, "hsaKmtSPMAcquire");
       if (HSAKMT_PFN(hsaKmtSPMAcquire) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSPMRelease) = (HSAKMT_DEF(hsaKmtSPMRelease)*)dlsym(dtif_handle, "hsaKmtSPMRelease");
+      HSAKMT_PFN(hsaKmtSPMRelease) = (HSAKMT_DEF(hsaKmtSPMRelease)*)dlsym(thunk_handle, "hsaKmtSPMRelease");
       if (HSAKMT_PFN(hsaKmtSPMRelease) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSPMSetDestBuffer) = (HSAKMT_DEF(hsaKmtSPMSetDestBuffer)*)dlsym(dtif_handle, "hsaKmtSPMSetDestBuffer");
+      HSAKMT_PFN(hsaKmtSPMSetDestBuffer) = (HSAKMT_DEF(hsaKmtSPMSetDestBuffer)*)dlsym(thunk_handle, "hsaKmtSPMSetDestBuffer");
       if (HSAKMT_PFN(hsaKmtSPMSetDestBuffer) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSVMSetAttr) = (HSAKMT_DEF(hsaKmtSVMSetAttr)*)dlsym(dtif_handle, "hsaKmtSVMSetAttr");
+      HSAKMT_PFN(hsaKmtSVMSetAttr) = (HSAKMT_DEF(hsaKmtSVMSetAttr)*)dlsym(thunk_handle, "hsaKmtSVMSetAttr");
       if (HSAKMT_PFN(hsaKmtSVMSetAttr) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSVMGetAttr) = (HSAKMT_DEF(hsaKmtSVMGetAttr)*)dlsym(dtif_handle, "hsaKmtSVMGetAttr");
+      HSAKMT_PFN(hsaKmtSVMGetAttr) = (HSAKMT_DEF(hsaKmtSVMGetAttr)*)dlsym(thunk_handle, "hsaKmtSVMGetAttr");
       if (HSAKMT_PFN(hsaKmtSVMGetAttr) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtSetXNACKMode) = (HSAKMT_DEF(hsaKmtSetXNACKMode)*)dlsym(dtif_handle, "hsaKmtSetXNACKMode");
+      HSAKMT_PFN(hsaKmtSetXNACKMode) = (HSAKMT_DEF(hsaKmtSetXNACKMode)*)dlsym(thunk_handle, "hsaKmtSetXNACKMode");
       if (HSAKMT_PFN(hsaKmtSetXNACKMode) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetXNACKMode) = (HSAKMT_DEF(hsaKmtGetXNACKMode)*)dlsym(dtif_handle, "hsaKmtGetXNACKMode");
+      HSAKMT_PFN(hsaKmtGetXNACKMode) = (HSAKMT_DEF(hsaKmtGetXNACKMode)*)dlsym(thunk_handle, "hsaKmtGetXNACKMode");
       if (HSAKMT_PFN(hsaKmtGetXNACKMode) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtOpenSMI) = (HSAKMT_DEF(hsaKmtOpenSMI)*)dlsym(dtif_handle, "hsaKmtOpenSMI");
+      HSAKMT_PFN(hsaKmtOpenSMI) = (HSAKMT_DEF(hsaKmtOpenSMI)*)dlsym(thunk_handle, "hsaKmtOpenSMI");
       if (HSAKMT_PFN(hsaKmtOpenSMI) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtExportDMABufHandle) = (HSAKMT_DEF(hsaKmtExportDMABufHandle)*)dlsym(dtif_handle, "hsaKmtExportDMABufHandle");
+      HSAKMT_PFN(hsaKmtExportDMABufHandle) = (HSAKMT_DEF(hsaKmtExportDMABufHandle)*)dlsym(thunk_handle, "hsaKmtExportDMABufHandle");
       if (HSAKMT_PFN(hsaKmtExportDMABufHandle) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtWaitOnEvent_Ext) = (HSAKMT_DEF(hsaKmtWaitOnEvent_Ext)*)dlsym(dtif_handle, "hsaKmtWaitOnEvent_Ext");
+      HSAKMT_PFN(hsaKmtWaitOnEvent_Ext) = (HSAKMT_DEF(hsaKmtWaitOnEvent_Ext)*)dlsym(thunk_handle, "hsaKmtWaitOnEvent_Ext");
       if (HSAKMT_PFN(hsaKmtWaitOnEvent_Ext) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtWaitOnMultipleEvents_Ext) = (HSAKMT_DEF(hsaKmtWaitOnMultipleEvents_Ext)*)dlsym(dtif_handle, "hsaKmtWaitOnMultipleEvents_Ext");
+      HSAKMT_PFN(hsaKmtWaitOnMultipleEvents_Ext) = (HSAKMT_DEF(hsaKmtWaitOnMultipleEvents_Ext)*)dlsym(thunk_handle, "hsaKmtWaitOnMultipleEvents_Ext");
       if (HSAKMT_PFN(hsaKmtWaitOnMultipleEvents_Ext) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtReplaceAsanHeaderPage) = (HSAKMT_DEF(hsaKmtReplaceAsanHeaderPage)*)dlsym(dtif_handle, "hsaKmtReplaceAsanHeaderPage");
+      HSAKMT_PFN(hsaKmtReplaceAsanHeaderPage) = (HSAKMT_DEF(hsaKmtReplaceAsanHeaderPage)*)dlsym(thunk_handle, "hsaKmtReplaceAsanHeaderPage");
       if (HSAKMT_PFN(hsaKmtReplaceAsanHeaderPage) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtReturnAsanHeaderPage) = (HSAKMT_DEF(hsaKmtReturnAsanHeaderPage)*)dlsym(dtif_handle, "hsaKmtReturnAsanHeaderPage");
+      HSAKMT_PFN(hsaKmtReturnAsanHeaderPage) = (HSAKMT_DEF(hsaKmtReturnAsanHeaderPage)*)dlsym(thunk_handle, "hsaKmtReturnAsanHeaderPage");
       if (HSAKMT_PFN(hsaKmtReturnAsanHeaderPage) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtGetAMDGPUDeviceHandle) = (HSAKMT_DEF(hsaKmtGetAMDGPUDeviceHandle)*)dlsym(dtif_handle, "hsaKmtGetAMDGPUDeviceHandle");
+      HSAKMT_PFN(hsaKmtGetAMDGPUDeviceHandle) = (HSAKMT_DEF(hsaKmtGetAMDGPUDeviceHandle)*)dlsym(thunk_handle, "hsaKmtGetAMDGPUDeviceHandle");
       if (HSAKMT_PFN(hsaKmtGetAMDGPUDeviceHandle) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPcSamplingQueryCapabilities) = (HSAKMT_DEF(hsaKmtPcSamplingQueryCapabilities)*)dlsym(dtif_handle, "hsaKmtPcSamplingQueryCapabilities");
+      HSAKMT_PFN(hsaKmtPcSamplingQueryCapabilities) = (HSAKMT_DEF(hsaKmtPcSamplingQueryCapabilities)*)dlsym(thunk_handle, "hsaKmtPcSamplingQueryCapabilities");
       if (HSAKMT_PFN(hsaKmtPcSamplingQueryCapabilities) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPcSamplingCreate) = (HSAKMT_DEF(hsaKmtPcSamplingCreate)*)dlsym(dtif_handle, "hsaKmtPcSamplingCreate");
+      HSAKMT_PFN(hsaKmtPcSamplingCreate) = (HSAKMT_DEF(hsaKmtPcSamplingCreate)*)dlsym(thunk_handle, "hsaKmtPcSamplingCreate");
       if (HSAKMT_PFN(hsaKmtPcSamplingCreate) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPcSamplingDestroy) = (HSAKMT_DEF(hsaKmtPcSamplingDestroy)*)dlsym(dtif_handle, "hsaKmtPcSamplingDestroy");
+      HSAKMT_PFN(hsaKmtPcSamplingDestroy) = (HSAKMT_DEF(hsaKmtPcSamplingDestroy)*)dlsym(thunk_handle, "hsaKmtPcSamplingDestroy");
       if (HSAKMT_PFN(hsaKmtPcSamplingDestroy) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPcSamplingStart) = (HSAKMT_DEF(hsaKmtPcSamplingStart)*)dlsym(dtif_handle, "hsaKmtPcSamplingStart");
+      HSAKMT_PFN(hsaKmtPcSamplingStart) = (HSAKMT_DEF(hsaKmtPcSamplingStart)*)dlsym(thunk_handle, "hsaKmtPcSamplingStart");
       if (HSAKMT_PFN(hsaKmtPcSamplingStart) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPcSamplingStop) = (HSAKMT_DEF(hsaKmtPcSamplingStop)*)dlsym(dtif_handle, "hsaKmtPcSamplingStop");
+      HSAKMT_PFN(hsaKmtPcSamplingStop) = (HSAKMT_DEF(hsaKmtPcSamplingStop)*)dlsym(thunk_handle, "hsaKmtPcSamplingStop");
       if (HSAKMT_PFN(hsaKmtPcSamplingStop) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtPcSamplingSupport) = (HSAKMT_DEF(hsaKmtPcSamplingSupport)*)dlsym(dtif_handle, "hsaKmtPcSamplingSupport");
+      HSAKMT_PFN(hsaKmtPcSamplingSupport) = (HSAKMT_DEF(hsaKmtPcSamplingSupport)*)dlsym(thunk_handle, "hsaKmtPcSamplingSupport");
       if (HSAKMT_PFN(hsaKmtPcSamplingSupport) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)dlsym(dtif_handle, "hsaKmtModelEnabled");
+      HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)dlsym(thunk_handle, "hsaKmtModelEnabled");
       if (HSAKMT_PFN(hsaKmtModelEnabled) == NULL) goto ERROR;
 
-      HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)dlsym(dtif_handle, "hsaKmtQueueRingDoorbell");
+      HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)dlsym(thunk_handle, "hsaKmtQueueRingDoorbell");
       if (HSAKMT_PFN(hsaKmtQueueRingDoorbell) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)dlsym(dtif_handle, "amdgpu_device_initialize");
+      DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)dlsym(thunk_handle, "amdgpu_device_initialize");
       if (DRM_PFN(amdgpu_device_initialize) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)dlsym(dtif_handle, "amdgpu_device_deinitialize");
+      DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)dlsym(thunk_handle, "amdgpu_device_deinitialize");
       if (DRM_PFN(amdgpu_device_deinitialize) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)dlsym(dtif_handle, "amdgpu_query_gpu_info");
+      DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)dlsym(thunk_handle, "amdgpu_query_gpu_info");
       if (DRM_PFN(amdgpu_query_gpu_info) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)dlsym(dtif_handle, "amdgpu_bo_cpu_map");
+      DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)dlsym(thunk_handle, "amdgpu_bo_cpu_map");
       if (DRM_PFN(amdgpu_bo_cpu_map) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)dlsym(dtif_handle, "amdgpu_bo_free");
+      DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)dlsym(thunk_handle, "amdgpu_bo_free");
       if (DRM_PFN(amdgpu_bo_free) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)dlsym(dtif_handle, "amdgpu_bo_export");
+      DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)dlsym(thunk_handle, "amdgpu_bo_export");
       if (DRM_PFN(amdgpu_bo_export) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)dlsym(dtif_handle, "amdgpu_bo_import");
+      DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)dlsym(thunk_handle, "amdgpu_bo_import");
       if (DRM_PFN(amdgpu_bo_import) == NULL) goto ERROR;
 
-      DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)dlsym(dtif_handle, "amdgpu_bo_va_op");
+      DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)dlsym(thunk_handle, "amdgpu_bo_va_op");
       if (DRM_PFN(amdgpu_bo_va_op) == NULL) goto ERROR;
 
-      DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)dlsym(dtif_handle, "drmCommandWriteRead");
+      DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)dlsym(thunk_handle, "drmCommandWriteRead");
       if (DRM_PFN(drmCommandWriteRead) == NULL) goto ERROR;
 
       debug_print("Load all DTIF APIs OK!\n");
@@ -489,10 +514,10 @@ ERROR:
   }
 
   bool ThunkLoader::CreateThunkInstance() {
-    if (!core::Runtime::runtime_singleton_->flag().enable_dtif())
+    if (!IsDTIF())
       return true;
 
-    DtifCreateFunc* pfnDtifCreate = (DtifCreateFunc*)dlsym(dtif_handle, "DtifCreate");
+    DtifCreateFunc* pfnDtifCreate = (DtifCreateFunc*)dlsym(thunk_handle, "DtifCreate");
     if (pfnDtifCreate != NULL) {
       if (pfnDtifCreate("HSA") != NULL) {
         debug_print("DtifCreate OK!\n");
@@ -506,13 +531,13 @@ ERROR:
   }
 
   bool ThunkLoader::DestroyThunkInstance() {
-    if (!core::Runtime::runtime_singleton_->flag().enable_dtif())
+    if (!IsDTIF())
       return true;
 
-    if (dtif_handle == NULL)
+    if (thunk_handle == NULL)
       return false;
 
-    DtifDestroyFunc* pfnDtifDestroy = (DtifDestroyFunc*)dlsym(dtif_handle, "DtifDestroy");
+    DtifDestroyFunc* pfnDtifDestroy = (DtifDestroyFunc*)dlsym(thunk_handle, "DtifDestroy");
     if (pfnDtifDestroy != NULL) {
       pfnDtifDestroy();
       debug_print("DtifDestroy OK!\n");

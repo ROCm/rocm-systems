@@ -139,6 +139,13 @@ TEST(rocrtstFunc, MemoryAccessTests) {
   RunCustomTestEpilog(&mt);
 }
 
+TEST(rocrtstFunc, MemoryAccessCoherent) {
+  MemoryAccessTest mt;
+  RunCustomTestProlog(&mt);
+  mt.MemoryAccessCoherentTest();
+  RunCustomTestEpilog(&mt);
+}
+
 TEST(rocrtstFunc, GroupMemoryAllocationTest) {
   MemoryAllocationTest ma(true, false);
   RunCustomTestProlog(&ma);

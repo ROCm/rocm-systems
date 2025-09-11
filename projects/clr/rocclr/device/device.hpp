@@ -1376,6 +1376,10 @@ class VirtualDevice : public amd::HeapObject {
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
 };
 
+#if defined(USE_COMGR_LIBRARY)
+extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
+#endif
+
 }  // namespace amd::device
 
 namespace amd {
@@ -1535,20 +1539,6 @@ class Isa {
   /// @returns This Isa's number of banks of local memory.
   uint32_t localMemBanks() const { return localMemBanks_; }
 
-#if defined(USE_COMGR_LIBRARY)
-  /// @returns This Isa's available sgprs per wavefront
-  size_t sgprPerWavefront() const {
-    setAvailableSgprVgprCached();
-    return sgprPerWavefront_;
-  }
-
-  /// @returns This Isa's available vgprs per wavefront
-  size_t vgprPerWavefront() const {
-    setAvailableSgprVgprCached();
-    return vgprPerWavefront_;
-  }
-#endif
-
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
@@ -1586,18 +1576,10 @@ class Isa {
         simdInstructionWidth_(simdInstructionWidth),
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
-        localMemBanks_(localMemBanks),
-        sgprPerWavefront_(0),
-        vgprPerWavefront_(0) {}
+        localMemBanks_(localMemBanks) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
-
-#if defined(USE_COMGR_LIBRARY)
-  // @brief Populate this Isa's available sgprs/vgprs per wavefront from comgr.
-  // Only called once per Isa.
-  void setAvailableSgprVgprCached() const;
-#endif
 
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
@@ -1621,11 +1603,7 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
-
-  mutable size_t sgprPerWavefront_;        //!< Number of sgpr per wavefront.
-  mutable size_t vgprPerWavefront_;        //!< Number of vgpr per wavefront.
-  mutable std::once_flag setSgprVgprFlag;  //!< Once flag for sgpr and vgpr retrieval.
-};  // class Isa
+}; // class Isa
 
 /*! \addtogroup Runtime
  *  @{
@@ -1680,6 +1658,8 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
+  //<! Enum describing the location of Virtual memory
+  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1836,13 +1816,27 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::hostAlloc
    */
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const {
+  virtual void* hostAlloc(size_t size, size_t alignment,
+                          MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const {
     ShouldNotCallThis();
     return NULL;
   }
 
-  virtual void* deviceLocalAlloc(size_t size, bool atomics = false, bool pseudo_fine_grain = false,
-                                 bool contiguous = false) const {
+  //! Flags for deviceLocalAlloc method
+  typedef union {
+    struct {
+      uint32_t atomics_ : 1;           //!< True if atomics support is required
+      uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
+      uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
+      uint32_t executable_ : 1;        //!< True if executable memory is required
+      uint32_t reserved_ : 28;         //!< Reserved for future use
+    };
+    uint32_t data_;
+  } AllocationFlags;
+
+  virtual void* deviceLocalAlloc(
+      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1900,7 +1894,7 @@ class Device : public RuntimeObject {
    * @param ForceAlloc force_alloc
    */
   amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size, int deviceId,
-                                   bool parent, bool kForceAlloc = false);
+                                   int locationType, bool parent, bool kForceAlloc = false);
 
   /**
    * Deletes Virtual Buffer and creates memob
@@ -1926,7 +1920,8 @@ class Device : public RuntimeObject {
    * @param access_flags Access permissions
    * @param count Number of access permissions
    */
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) = 0;
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.

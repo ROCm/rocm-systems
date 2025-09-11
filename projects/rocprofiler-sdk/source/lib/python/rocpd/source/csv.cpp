@@ -234,8 +234,8 @@ write_kernel_csv(
         CsvType::KERNEL_DISPATCH,
         kernel_dispatch_gen,
         [](CsvManager& cm, CsvType type, const rocpd::types::kernel_dispatch& kernel) {
-            std::string kernel_identifier = cm.config.kernel_rename ? kernel.region : kernel.name;
-
+            std::string kernel_identifier =
+                (cm.config.kernel_rename && !kernel.region.empty()) ? kernel.region : kernel.name;
             std::string agent_identifier = create_agent_index(cm.config.agent_index_value,
                                                               kernel.agent_abs_index,
                                                               kernel.agent_log_index,
