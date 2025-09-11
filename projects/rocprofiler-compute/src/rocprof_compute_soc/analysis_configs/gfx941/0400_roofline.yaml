@@ -208,7 +208,7 @@ Panel Config:
             512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
             * 512) ) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64) )
           unit: FLOPs/Byte
-        Performance GFLOPs:
+        Performance (GFLOPs):
           value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
             + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
             + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)

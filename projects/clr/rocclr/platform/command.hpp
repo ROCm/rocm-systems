@@ -388,6 +388,12 @@ class Command : public Event {
   //! Release the resources associated with this event.
   virtual void releaseResources();
 
+  //! Empty function for pinned memory check
+  virtual bool IsMemoryPinned() const { return false; }
+
+  //! Empty function for release of pinned memory
+  virtual void ReleasePinnedMemory() {}
+
   //! Empty function for adding pinned memory
   virtual void AddPinnedMemory(Memory* pinned) {}
 
@@ -500,10 +506,18 @@ class OneMemoryArgCommand : public Command {
     memory_->release();
     DEBUG_ONLY(memory_ = NULL);
     Command::releaseResources();
+    ReleasePinnedMemory();
+  }
+
+  //! Release all pinned memory for this command
+  virtual void ReleasePinnedMemory() {
     for (auto it : pinned_memory_) {
       it->release();
     }
+    pinned_memory_.clear();
   }
+  //! Release all pinned memory for this command
+  virtual bool IsMemoryPinned() const { return !pinned_memory_.empty(); }
 
   //! Adds pinned memory, used in this command for later release
   virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }

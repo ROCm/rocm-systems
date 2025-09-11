@@ -84,22 +84,15 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
   }
 
   SECTION("hipResourceTypeLinear and sizeInBytes(0)") {
-    if ((TestContext::get()).isAmd()) {
-      // Populate resource descriptor
-      resDesc.res.linear.devPtr = texBuf;
-      resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
-      resDesc.res.linear.sizeInBytes = 0;
+    // Populate resource descriptor
+    resDesc.res.linear.devPtr = texBuf;
+    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
+    resDesc.res.linear.sizeInBytes = 0;
 
-      // Populate texture descriptor
-      texDesc.readMode = hipReadModeElementType;
-      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
-      REQUIRE(ret != hipSuccess);
-    } else {
-      // API expected to return failure. Test skipped
-      // on nvidia as api returns success and would lead
-      // to unexpected behavior with app.
-      WARN("Resource type Linear/sizeInBytes(0) skipped on nvidia");
-    }
+    // Populate texture descriptor
+    texDesc.readMode = hipReadModeElementType;
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
+    HIP_CHECK(hipDestroyTextureObject(texObj));
   }
 
   SECTION("hipResourceTypeLinear and sizeInBytes(max(size_t))") {

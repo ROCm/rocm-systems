@@ -120,7 +120,7 @@ class Settings : public device::Settings {
   bool create(const Pal::DeviceProperties& palProp,       //!< PAL  device properties
               const Pal::GpuMemoryHeapProperties* heaps,  //!< PAL heap settings
               const Pal::WorkStationCaps& wscaps,         //!< PAL  workstation settings
-              bool enableXNACK,                           //!< XNACK is enabled on this device
+              const amd::Isa& isa,                        //!< XNACK is enabled on this device
               bool reportAsOCL12Device = false            //!< Report As OpenCL1.2 Device
   );
 

@@ -766,6 +766,13 @@ enum hipLimit_t {
 /** Event is captured in the graph as an external event node when performing stream capture. */
 #define hipEventRecordExternal 0x01
 
+//Flags that can be used with hipStreamWaitEvent.
+/** Default flag. */
+#define hipEventWaitDefault 0x00
+
+/** Wait is captured in the graph as an external event node when performing stream capture. */
+#define hipEventWaitExternal 0x01
+
 /** Disable performing a system scope sequentially consistent memory fence when the event
  * transitions from recording to recorded.  This can be used for events that are only being
  * used to measure timing, and do not require the event inspection operations
@@ -823,14 +830,17 @@ enum hipLimit_t {
 
 /** Allocates the memory as write-combined. On some system configurations, write-combined allocation
  * may be transferred faster across the PCI Express bus, however, could have low read efficiency by
- * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.*/
+ * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.
+ * @note  This flag is only for CUDA source compatibility but not functional within HIP runtime,
+ * because the allocation path is currently not supported on the AMD platform.*/
 #define hipHostAllocWriteCombined 0x4
 
 /** Allocates the memory as write-combined. On some system configurations, write-combined allocation
  * may be transferred faster across the PCI Express bus, however, could have low read efficiency by
  * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.
  * @note  This flag is the same definition as #hipHostAllocWriteCombined which is equivalent to
- * cudaHostAllocWriteCombined.*/
+ * cudaHostAllocWriteCombined. It is only for CUDA source compatibility but not functional within
+ * HIP runtime, because the allocation path is currently not supported on the AMD platform.*/
 #define hipHostMallocWriteCombined 0x4
 
 /**
@@ -2896,13 +2906,19 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  *
  * @param[in] stream  Stream to make wait
  * @param[in] event  Event to wait on
- * @param[in] flags  Parameters to control the operation [must be 0]
+ * @param[in] flags  Parameters to control the operation
  *
- * @returns #hipSuccess, #hipErrorInvalidHandle
+ * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue,
+ * #hipErrorStreamCaptureIsolation
  *
  * This function inserts a wait operation into the specified stream.
  * All future work submitted to @p stream will wait until @p event reports completion before
  * beginning execution.
+ *
+ * Flags include:
+ *   hipEventWaitDefault: Default event creation flag.
+ *   hipEventWaitExternal: Wait is captured in the graph as an external event node when
+ *                           performing stream capture
  *
  * This function only waits for commands in the current stream to complete.  Notably, this function
  * does not implicitly wait for commands in the default stream to complete, even if the specified
