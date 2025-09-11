@@ -922,6 +922,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
   memory to be tested */
   FlagType flags = GENERATE(
       FlagType{hipHostRegisterDefault, true}, FlagType{hipHostRegisterPortable, true},
+      FlagType{hipHostRegisterIoMemory, true},
       FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
