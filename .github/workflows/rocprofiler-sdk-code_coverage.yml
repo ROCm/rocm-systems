@@ -58,17 +58,19 @@ env:
 
 jobs:
   code-coverage:
-    name: Code Coverage • ${{ matrix.runner }} • ${{ matrix.os }}
+    name: Code Coverage • ${{ matrix.gpu }} • ${{ matrix.os }}
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi300a']
-        os: ['ubuntu-22.04']
-        build-type: ['Release']
+        gpu: [ 'mi300a' ]
+        runner: [ 'rocprofiler-mi300a-dind' ]
+        os: [ 'ubuntu-22.04' ]
+        build-type: [ 'Release' ]
+        gfx: [ 'gfx94X' ]
 
-    runs-on: rocprofiler-mi300a-dind
+    runs-on: ${{ matrix.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gfx }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -79,7 +81,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: 'rocprofiler-mi300a-dind'
+      GPU_RUNNER: ${{ matrix.runner }}
       GCC_COMPILER_VERSION: 11
       ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
@@ -88,7 +90,7 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        tar -xf /opt/rocm-${{ matrix.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
@@ -203,7 +205,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      if: ${{ contains(matrix.gpu, 'mi200') || contains(matrix.gpu, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
@@ -212,7 +214,7 @@ jobs:
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
       with:
-        key: ccache-${{ matrix.os }}-rocprofiler-mi300a-dind-${{ matrix.runner }}
+        key: ccache-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.gpu }}
         max-size: 2G
         save: true
 
@@ -305,9 +307,9 @@ jobs:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.gpu }}-codecov
           --build-jobs 16
-          --site 'rocprofiler-mi300a-dind'
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
@@ -317,8 +319,8 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
@@ -329,9 +331,9 @@ jobs:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.gpu }}-codecov-tests
           --build-jobs 16
-          --site 'rocprofiler-mi300a-dind'
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
@@ -341,8 +343,8 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
@@ -353,9 +355,9 @@ jobs:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.gpu }}-codecov-samples
           --build-jobs 16
-          --site 'rocprofiler-mi300a-dind'
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
@@ -365,8 +367,8 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Save XML Code Coverage
       id: save-coverage
@@ -492,7 +494,7 @@ jobs:
         #   - unittests
         #   - integration-tests
         #
-        ctest -N -LE 'samples|tests' -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" -O ctest.mislabeled.log
+        ctest -N -LE 'samples|tests' -E "${${{ matrix.gpu }}_EXCLUDE_TESTS_REGEX}" -O ctest.mislabeled.log
         grep 'Total Tests: 0' ctest.mislabeled.log
         #
         # if following fails, then there is overlap between the labels.

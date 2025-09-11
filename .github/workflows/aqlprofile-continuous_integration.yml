@@ -50,14 +50,14 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X"},
-          {gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X"},
-          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X"}
+          {gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gfx: "gfx120X"},
+          {gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gfx: "gfx110X"},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gfx: "gfx94X"}
         ]
 
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.therock-s3 }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gfx }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -79,7 +79,7 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-${{ matrix.system.therock-s3 }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        tar -xf /opt/rocm-${{ matrix.system.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
         ln -s -f /usr/bin/git /usr/local/bin/git
@@ -131,14 +131,14 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'mi325', os: 'rhel-8.8', build-type: 'RelWithDebInfo', container: ''},
-          {gpu: 'mi325', os: 'rhel-9.5', build-type: 'RelWithDebInfo', container: ''},
-          {gpu: 'mi325', os: 'sles-15.6', build-type: 'RelWithDebInfo', container: ''}
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gfx: "gfx94X"},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gfx: "gfx94X"},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gfx: "gfx94X"}
         ]
 
-    runs-on: linux-mi325-1gpu-ossci-rocm
+    runs-on: ${{ matrix.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-gfx94X-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.gfx }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -163,7 +163,7 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        tar -xf /opt/rocm-${{ matrix.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
@@ -199,7 +199,8 @@ jobs:
         PATH=~/.local/bin:/opt/rocm/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="linux-mi325-1gpu-ossci-rocm"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" 
+          -DCTEST_SITE=${{ matrix.runner }}
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
