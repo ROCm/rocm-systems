@@ -507,7 +507,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
 
     def test_clean_gpu_local_data(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -521,12 +521,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_cpu_apb_disable(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -540,12 +540,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_cpu_apb_enable(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -559,14 +559,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_first_online_core_on_cpu_socket(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_first_online_core_on_cpu_socket as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -580,31 +580,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
-
-
-    def test_free_name_value_pairs(self):
-        if self.TODO_SKIP_NYI:
-            self.skipTest("Skipping test_free_name_value_pairs as it is not implemented yet.")
-        raise_exception = None
-        self.setUp()
-        try:
-            msg = f""
-            rc = amdsmi.amdsmi_free_name_value_pairs(None)
-            self._print(msg, ret)
-        except amdsmi.AmdSmiLibraryException as e:
-                if self._check_ret(msg, e, self.PASS):
-                    raise_exception = e
-        if raise_exception:
-            raise raise_exception
-        self.tearDown()
-
 
     def test_get_clk_freq(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_clock_info as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -619,14 +600,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_clock_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_clock_info as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -641,12 +622,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_cclk_limit(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -660,12 +641,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_core_boostlimit(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -677,14 +658,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 if self._check_ret(msg, e, self.PASS):
                     raise_exception = e
-        self.tearDown()
+
         if raise_exception:
             raise raise_exception
 
 
     def test_get_cpu_core_current_freq_limit(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -698,14 +679,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_core_energy(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_core_energy as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -719,12 +700,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_current_io_bandwidth(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -739,12 +720,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_ddr_bw(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -758,14 +739,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_dimm_power_consumption(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_dimm_power_consumption as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -781,14 +762,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_dimm_temp_range_and_refresh_rate(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_dimm_temp_range_and_refresh_rate as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -804,14 +785,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_dimm_thermal_sensor(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_dimm_thermal_sensor as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -827,14 +808,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_family(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_family as it fails.")
         raise_exception = None
-        self.setUp()
+
         try:
             msg = ''
             ret = amdsmi.amdsmi_get_cpu_family()
@@ -844,12 +825,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                 raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_fclk_mclk(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -863,14 +844,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_handles(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_cpu_handles as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         try:
             msg = ''
             ret = amdsmi.amdsmi_get_cpu_handles(amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES)
@@ -880,14 +861,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                 raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_hsmp_driver_version(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_hsmp_driver_version as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -901,14 +882,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_hsmp_proto_ver(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_hsmp_proto_ver as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -922,14 +903,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_model(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_model as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -942,12 +923,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_prochot_status(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -961,12 +942,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_pwr_svi_telemetry_all_rails(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -980,12 +961,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_smu_fw_version(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -999,12 +980,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_c0_residency(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1018,12 +999,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_current_active_freq_limit(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1037,14 +1018,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_energy(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_socket_energy as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1058,12 +1039,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_freq_range(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1077,12 +1058,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_lclk_dpm_level(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1097,12 +1078,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_power(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1116,12 +1097,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_power_cap(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1135,12 +1116,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_power_cap_max(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1154,12 +1135,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_cpu_socket_temperature(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1173,12 +1154,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_energy_count(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1192,14 +1173,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_esmi_err_msg(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_esmi_err_msg as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         for status_num in error_map:
             try:
                 msg = f'status({error_map[status_num]}): '
@@ -1210,12 +1191,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_fw_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1229,12 +1210,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_accelerator_partition_profile(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1248,12 +1229,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_accelerator_partition_profile_config(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1267,12 +1248,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_activity(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1286,12 +1267,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_asic_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1305,12 +1286,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_bad_page_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1324,12 +1305,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_bad_page_threshold(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1343,12 +1324,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_bdf_id(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1362,12 +1343,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_board_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1381,12 +1362,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_cache_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1400,12 +1381,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_compute_partition(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1419,14 +1400,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_compute_process_gpus(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_compute_process_gpus as it fails.")
         raise_exception = None
-        self.setUp()
+
         # TODO pid = 0
         pid = 0
         try:
@@ -1438,12 +1419,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_compute_process_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1457,14 +1438,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_compute_process_info_by_pid(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_compute_process_info_by_pid as it fails.")
         raise_exception = None
-        self.setUp()
+
         # TODO pid = 0
         pid = 0
         try:
@@ -1476,12 +1457,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_device_bdf(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1495,12 +1476,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_device_uuid(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1514,12 +1495,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_driver_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1533,12 +1514,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_ecc_count(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1553,12 +1534,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_ecc_enabled(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1572,14 +1553,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_ecc_status(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_ecc_status as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1594,12 +1575,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_enumeration_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1613,14 +1594,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_event_notification(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_gpu_event_notification as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1634,12 +1615,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_fan_rpms(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1653,12 +1634,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_fan_speed(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1672,12 +1653,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_fan_speed_max(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1691,12 +1672,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_id(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1710,12 +1691,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_kfd_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1729,12 +1710,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_mem_overdrive_level(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1748,12 +1729,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_memory_partition(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1767,12 +1748,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_memory_partition_config(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1786,12 +1767,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_memory_reserved_pages(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1805,12 +1786,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_memory_total(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1825,12 +1806,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_memory_usage(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1845,12 +1826,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_metrics_header_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1864,12 +1845,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_metrics_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1883,12 +1864,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_od_volt_curve_regions(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1903,14 +1884,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_od_volt_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_od_volt_info as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1924,12 +1905,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_overdrive_level(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1943,12 +1924,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_pci_bandwidth(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1962,12 +1943,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_pci_replay_counter(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -1981,12 +1962,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_pci_throughput(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2000,12 +1981,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_perf_level(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2019,14 +2000,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_pm_metrics_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_pm_metrics_info as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2040,12 +2021,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_power_profile_presets(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2059,14 +2040,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_process_isolation(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_gpu_process_isolation as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2080,12 +2061,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_process_list(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2099,12 +2080,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_ras_block_features_enabled(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2118,12 +2099,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_ras_feature_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2137,14 +2118,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_reg_table_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_reg_table_info as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2159,14 +2140,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_revision(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_gpu_revision as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2180,12 +2161,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_subsystem_id(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2199,12 +2180,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_subsystem_name(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2218,12 +2199,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_topo_numa_affinity(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2237,12 +2218,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_total_ecc_count(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2256,12 +2237,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_vbios_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2275,12 +2256,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_vendor_name(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2294,12 +2275,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_virtualization_mode(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2313,12 +2294,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_volt_metric(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2341,12 +2322,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                                 raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_vram_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2360,12 +2341,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_vram_usage(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2379,12 +2360,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_vram_vendor(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2398,12 +2379,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_xcd_counter(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2417,12 +2398,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_xgmi_link_status(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2436,12 +2417,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_hsmp_metrics_table(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2455,12 +2436,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_hsmp_metrics_table_version(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2474,12 +2455,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_lib_version(self):
         raise_exception = None
-        self.setUp()
+
         try:
             msg = f''
             ret = amdsmi.amdsmi_get_lib_version()
@@ -2489,14 +2470,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_link_metrics(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_link_metrics as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2510,12 +2491,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_link_topology_nearest(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2530,14 +2511,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_minmax_bandwidth_between_processors(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_minmax_bandwidth_between_processors as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2552,12 +2533,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_pcie_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2571,12 +2552,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_power_cap_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2590,12 +2571,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_power_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2609,14 +2590,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_processor_count_from_handles(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_processor_count_from_handles as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2630,14 +2611,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_processor_handle_from_bdf(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_processor_handle_from_bdf as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2653,12 +2634,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_processor_handles(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2666,14 +2647,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             self._print(f'    {i:2d} processor_handles: {processors[i]}')
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_processor_handles_by_type(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_processor_handles_by_type as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2687,12 +2668,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_processor_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2706,12 +2687,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_processor_type(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2725,14 +2706,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_soc_pstate(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_soc_pstate as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2746,14 +2727,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_socket_handles(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_socket_handles as it fails.")
         raise_exception = None
-        self.setUp()
+
         try:
             msg = f''
             ret = amdsmi.amdsmi_get_socket_handles()
@@ -2763,12 +2744,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_socket_info(self):
         raise_exception = None
-        self.setUp()
+
         sockets = amdsmi.amdsmi_get_socket_handles()
         self.assertGreaterEqual(len(sockets), 1)
         # TODO Find maximum number of sockets
@@ -2783,12 +2764,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_temp_metric(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2811,14 +2792,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                                 raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_threads_per_core(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_threads_per_core as it fails.")
         raise_exception = None
-        self.setUp()
+
         # TODO threads_per_core 
         try:
             msg = f'threads_per_core: '
@@ -2829,14 +2810,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                 raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_utilization_count(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_utilization_count as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2851,12 +2832,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_violation_status(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2870,12 +2851,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_xgmi_info(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2889,14 +2870,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_xgmi_plpd(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_xgmi_plpd as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2910,14 +2891,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_gpu_counter_group_supported(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_counter_group_supported as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2932,7 +2913,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
     if False: # TODO: create_counter, destroy_counter, read_counter, get_gpu_available_counters, gpu_control_counter
         ''' Check these:
@@ -2946,7 +2927,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_create_counter as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -2961,14 +2942,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_gpu_destroy_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_destroy_counter as it fails.")
         raise_exception = None
-        self.setUp()
+
         # TODO event_handle = 0
         event_handle = 0
         try:
@@ -2981,14 +2962,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                 raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_gpu_read_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_read_counter as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3004,14 +2985,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_get_gpu_available_counters(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_available_counters as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3026,14 +3007,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_gpu_control_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_control_counter as it fails.")
         raise_exception = None
-        self.setUp()
+
         # TODO event_handle = 0
         event_handle = 0
         for counter_command_name, counter_command, counter_commands_cond in self.counter_commands:
@@ -3046,14 +3027,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_gpu_validate_ras_eeprom(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_gpu_validate_ras_eeprom as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3067,12 +3048,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_gpu_xgmi_error_status(self):
+        self.skipTest("Skipping test_gpu_xgmi_error_status currently not a valid test - temporarily disabled.")
+        # See information in xgmi_read_write.cc file, it also skips this test for all ASICs.
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3086,12 +3069,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_init(self):
         raise_exception = None
-        self.setUp()
+
         try:
             msg = f''
             ret = amdsmi.amdsmi_init()
@@ -3101,12 +3084,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_shut_down(self):
         raise_exception = None
-        self.setUp()
+
         try:
             msg = f''
             ret = amdsmi.amdsmi_shut_down()
@@ -3116,14 +3099,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_init_gpu_event_notification(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_init_gpu_event_notification as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3137,12 +3120,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_is_P2P_accessible(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3157,12 +3140,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_is_gpu_power_management_enabled(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3176,12 +3159,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_reset_gpu(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3195,12 +3178,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_reset_gpu_fan(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3214,12 +3197,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_reset_gpu_xgmi_error(self):
+        self.skipTest("Skipping test_reset_gpu_xgmi_error currently not a valid test - temporarily disabled.")
+        # See information in xgmi_read_write.cc file, it also skips this test for all ASICs.
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3233,14 +3218,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_clk_freq(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_clk_freq as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3257,14 +3242,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_core_boostlimit(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_core_boostlimit as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3280,14 +3265,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_df_pstate_range(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_df_pstate_range as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3304,14 +3289,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_gmi3_link_width_range(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_gmi3_link_width_range as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3328,14 +3313,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_pcie_link_rate(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_pcie_link_rate as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3351,14 +3336,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_pwr_efficiency_mode(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_set_cpu_pwr_efficiency_mode as it is not implemented is not yet implemented.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3374,14 +3359,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_socket_boostlimit(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_socket_boostlimit as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3397,14 +3382,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_socket_lclk_dpm_level(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_socket_lclk_dpm_level as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3422,14 +3407,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_socket_power_cap(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_socket_power_cap as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3445,14 +3430,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_cpu_xgmi_width(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_xgmi_width as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3469,14 +3454,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_accelerator_partition_profile(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_accelerator_partition_profile as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3492,14 +3477,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_clk_limit(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_clk_limit as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3524,14 +3509,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                             raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_clk_range(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_clk_range as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3549,14 +3534,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_compute_partition(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_compute_partition as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3571,14 +3556,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_event_notification_mask(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_set_gpu_event_notification_mask as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3592,14 +3577,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_fan_speed(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_fan_speed as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3615,14 +3600,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_memory_partition(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_memory_partition as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3637,14 +3622,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_memory_partition_mode(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_memory_partition_mode as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3659,14 +3644,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_od_clk_info(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_od_clk_info as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3691,14 +3676,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                             raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_od_volt_info(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_od_volt_info as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3716,14 +3701,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_overdrive_level(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_overdrive_level as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3739,14 +3724,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_pci_bandwidth(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_pci_bandwidth as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3762,14 +3747,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_perf_determinism_mode(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_perf_determinism_mode as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3785,14 +3770,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_perf_level(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_perf_level as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3808,14 +3793,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_power_profile(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_power_profile as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3830,14 +3815,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_gpu_process_isolation(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_set_gpu_process_isolation as it is not yet implemented.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3853,14 +3838,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_power_cap(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_power_cap as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3876,14 +3861,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_soc_pstate(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_soc_pstate as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3899,14 +3884,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_set_xgmi_plpd(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_xgmi_plpd as it is not complete.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3922,28 +3907,28 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_status_code_to_string(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_status_code_to_string as it fails.")
         raise_exception = None
-        self.setUp()
+
         # TODO status = 0
         status = 0
         status_code_to_string = amdsmi.amdsmi_status_code_to_string(status)
         self._print(f'    {status} status_code_to_string: {status_code_to_string}')
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_stop_gpu_event_notification(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_stop_gpu_event_notification as it is not implemented yet.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3957,12 +3942,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_topo_get_link_type(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3977,12 +3962,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_topo_get_link_weight(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -3997,12 +3982,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_topo_get_numa_node_number(self):
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -4016,14 +4001,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                     raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
 
 
     def test_topo_get_p2p_status(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_topo_get_p2p_status as it fails.")
         raise_exception = None
-        self.setUp()
+
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
@@ -4038,13 +4023,45 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                         raise_exception = e
         if raise_exception:
             raise raise_exception
-        self.tearDown()
+
+def print_test_ids(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            print_test_ids(test)
+        else:
+            print(" -", test.id())
 
 if __name__ == '__main__':
+    import sys
+    import unittest
+    import os
+
+    print("AMD SMI Unit Tests")
     verbose=1
     if '-q' in sys.argv or '--quiet' in sys.argv:
         verbose=0
     elif '-v' in sys.argv or '--verbose' in sys.argv:
         verbose=2
 
-    unittest.main()
+    # If no -k or --keyword argument is given, print all available tests
+    if not ('-k' in sys.argv or '--keyword' in sys.argv):
+        loader = unittest.TestLoader()
+        suite = loader.loadTestsFromModule(sys.modules[__name__])
+        print("==============================================================")
+        print("Available tests:")
+        print_test_ids(suite)
+
+    # Provide Legend for test results, otherwise it is not clear what the output means
+    print("==============================================================")
+    print("Legend: . = pass, s = skipped, F = fail, E = error")
+    print("==============================================================")
+    print("Running tests...\n")
+
+    # Detect if ran without sudo or root privileges
+    if os.geteuid() != 0:
+        print("Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n")
+        print("Please relaunch with elevated privileges.\n")
+        sys.exit(1)
+
+    runner = unittest.TextTestRunner(verbosity=verbose)
+    unittest.main(testRunner=runner)
