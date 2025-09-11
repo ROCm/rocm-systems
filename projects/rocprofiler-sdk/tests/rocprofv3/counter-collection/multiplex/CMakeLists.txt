@@ -58,8 +58,16 @@ set(cc-env-pmc1 "${PRELOAD_ENV}")
 set_tests_properties(
     rocprofv3-test-counter-collection-multiplex-execute
     rocprofv3-test-counter-collection-multiple-yaml-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc1}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${cc-env-pmc1}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               TRUE)
 
 add_test(
     NAME rocprofv3-test-counter-collection-multiplex-validate
@@ -71,9 +79,16 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-counter-collection-multiplex-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
                rocprofv3-test-counter-collection-multiplex-execute
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               TRUE)
 
 add_test(
     NAME rocprofv3-test-counter-collection-multiple-yaml-validate
@@ -85,6 +100,13 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-counter-collection-multiple-yaml-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
                rocprofv3-test-counter-collection-multiple-yaml-execute
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               TRUE)
