@@ -6934,13 +6934,12 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
 
                 utils_mod.set_locale_encoding()
 
-                assert len(console_error_calls) == 2
+                assert len(console_error_calls) == 1
                 assert (
-                    "Failed to set locale to the current UTF-8-based locale."
+                    "Failed to set locale to the current UTF-8-based locale:"
                     in console_error_calls[0][0][0]
                 )
-                assert console_error_calls[0][1]["exit"] == False  # noqa
-                assert console_error_calls[1][0][0] == fallback_error
+                assert "Fallback locale failed" in console_error_calls[0][0][0]
 
 
 def test_set_locale_encoding_no_utf8_locale_available():
@@ -7194,8 +7193,8 @@ def test_set_locale_encoding_different_locale_error_types():
 
                     utils_mod.set_locale_encoding()
 
-                    assert len(console_error_calls) == 2
-                    assert console_error_calls[1][0][0] == fallback_error
+                    assert len(console_error_calls) == 1
+                    assert str(fallback_error) in console_error_calls[0][0][0]
 
 
 def test_set_locale_encoding_unusual_locale_names():
@@ -7492,7 +7491,7 @@ def test_set_locale_encoding_comprehensive_error_handling():
                 locale.Error("Fallback fail"),
             ],
             "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 2,
+            "expected_errors": 1,
         },
         {
             "name": "No UTF-8 locale available",
