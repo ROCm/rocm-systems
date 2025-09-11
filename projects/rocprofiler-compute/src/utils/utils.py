@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import selectors
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -762,7 +763,8 @@ def run_prof(
             app_cmd, new_env=new_env, profileMode=True
         )
     else:
-        console_debug(f"rocprof command: {[rocprof_cmd] + options}")
+        # print in readable format using shlex
+        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + options)}")
         # profile the app
         success, output = capture_subprocess_output(
             [rocprof_cmd] + options, new_env=new_env, profileMode=True
