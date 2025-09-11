@@ -1494,7 +1494,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx1200
       - gfx1201
-      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)
+      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*(SIMD_NUM/4))
   - name: MAX_WAVE_SIZE
     description: Max wave size constant
     properties: []
@@ -10197,7 +10197,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx1200
       - gfx1201
-      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,max)
+      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/(SIMD_NUM/4)/reduce(GRBM_GUI_ACTIVE,max)
   - name: VALUInsts
     description: The average number of vector ALU instructions executed per work-item (affected by flow control).
     properties: []
@@ -10299,7 +10299,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx1200
       - gfx1201
-      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)
+      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*(SIMD_NUM/4))
   - name: VmemLatency
     description: 'Unit: cycles'
     properties: []
