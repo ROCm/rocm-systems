@@ -49,4 +49,8 @@ add_subdirectory(python-bindings)
 add_subdirectory(rocpd)
 add_subdirectory(rocpd-kernel-rename)
 add_subdirectory(attachment)
+<<<<<<< HEAD
 add_subdirectory(rocpd-scratch)
+=======
+add_subdirectory(att-consecutive-kernels)
+>>>>>>> fab529b3d5 (Add test to check that generated stats csv file is not empty)
