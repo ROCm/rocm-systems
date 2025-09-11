@@ -308,6 +308,14 @@ class thread_block : public thread_group {
   __CG_STATIC_QUALIFIER__ void sync() { internal::workgroup::sync(); }
   //! Returns the group dimensions.
   __CG_QUALIFIER__ dim3 group_dim() { return internal::workgroup::block_dim(); }
+  struct arrival_token {};
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ arrival_token barrier_arrive() const {
+    internal::workgroup::barrier_arrive();
+    return arrival_token{};
+  }
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ void barrier_wait(arrival_token&&) const { internal::workgroup::barrier_wait(); }
 };
 
 /** \ingroup CooperativeGConstruct

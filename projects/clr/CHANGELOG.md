@@ -8,6 +8,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `hipKernelGetParamInfo`   returns the offset and size of a kernel parameter
+* Support for `barrier_arrive` and `barrier_wait` for `grid_group` and `thread_block`.
 
 * New HIP supports
     - `grid_group::block_rank()` returns the rank of the block in the calling thread
