@@ -84,6 +84,7 @@ def main(argv=None) -> None:
         "projects/rocr-runtime": 354
         "projects/rocminfo": 356,
         "projects/rocm-smi-lib": 358,
+        "projects/rocprofiler-sdk": 347,
     }
 
     args = parse_arguments(argv)
