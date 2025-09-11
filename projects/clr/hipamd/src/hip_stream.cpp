@@ -490,7 +490,9 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    if (!waitStream->IsOriginStream()) {
+    // Dont set when forked stream joins back to the parent
+    if (!waitStream->IsOriginStream() &&
+        waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
       waitStream->SetCaptureGraph((eventStream)->GetCaptureGraph());
       waitStream->SetCaptureId((eventStream)->GetCaptureID());
       waitStream->SetCaptureMode((eventStream)->GetCaptureMode());
