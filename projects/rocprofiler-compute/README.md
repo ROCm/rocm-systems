@@ -16,7 +16,7 @@ feedback from the community. Please see the
 [CONTRIBUTING.md](CONTRIBUTING.md) file for additional details on our
 contribution process.
 
-* Licensing information can be found in the [LICENSE](LICENSE) file.
+* Licensing information can be found in the [LICENSE](LICENSE.md) file.
 
 ## Development
 

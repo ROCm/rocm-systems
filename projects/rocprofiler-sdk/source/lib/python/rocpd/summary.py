@@ -46,13 +46,22 @@ def check_function_availability(connection, function_name):
     """
     cursor = connection.cursor()
 
-    # Query pragma_function_list to check for the function
-    cursor.execute(
-        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?)", (function_name,)
-    )
-    result = cursor.fetchone()[0]
-
-    return bool(result)
+    try:
+        # Try the modern approach first (SQLite 3.30.0+)
+        cursor.execute(
+            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?)",
+            (function_name,),
+        )
+        result = cursor.fetchone()[0]
+        return bool(result)
+    except Exception:
+        # Fallback for older SQLite versions (Workaround for RHEL 8)
+        # Try to execute a simple query using the function to see if it exists
+        try:
+            cursor.execute(f"SELECT {function_name}(1)")
+            return True
+        except Exception:
+            return False
 
 
 def get_temp_view_names(connection: RocpdImportData) -> List[str]:

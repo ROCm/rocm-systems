@@ -551,6 +551,7 @@ BlitKernel::BlitKernel(core::Queue* queue)
 BlitKernel::~BlitKernel() {}
 
 hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
+  agent_ = &agent;
   queue_bitmask_ = queue_->public_handle()->size - 1;
 
   bytes_written_.resize(queue_->public_handle()->size);
@@ -561,15 +562,15 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
     return status;
   }
 
-  const AMD::GpuAgent& gpuAgent = static_cast<const AMD::GpuAgent&>(agent);
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
   kernarg_async_ = reinterpret_cast<KernelArgs*>(
-      gpuAgent.system_allocator()(queue_->public_handle()->size * AlignUp(sizeof(KernelArgs), 16),
+      gpuAgent->system_allocator()(queue_->public_handle()->size * AlignUp(sizeof(KernelArgs), 16),
                                   16, core::MemoryRegion::AllocateNoFlags));
 
   kernarg_async_mask_ = queue_->public_handle()->size - 1;
 
   // Obtain the number of compute units in the underlying agent.
-  num_cus_ = gpuAgent.properties().NumFComputeCores / 4;
+  num_cus_ = gpuAgent->properties().NumFComputeCores / 4;
 
   // Assemble shaders to AQL code objects.
   std::map<KernelType, const char*> kernel_names = {
@@ -579,29 +580,29 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
 
   for (auto kernel_name : kernel_names) {
     KernelCode& kernel = kernels_[kernel_name.first];
-    gpuAgent.AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
+    gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
                             kernel.code_buf_size_);
   }
 
-  if (agent.profiling_enabled()) {
+  if (agent_->profiling_enabled()) {
     return EnableProfiling(true);
   }
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::Destroy(const core::Agent& agent) {
+hsa_status_t BlitKernel::Destroy() {
   std::lock_guard<std::mutex> guard(lock_);
 
-  const AMD::GpuAgent& gpuAgent = static_cast<const AMD::GpuAgent&>(agent);
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
 
   for (auto kernel_pair : kernels_) {
-    gpuAgent.ReleaseShader(kernel_pair.second.code_buf_,
+    gpuAgent->ReleaseShader(kernel_pair.second.code_buf_,
                            kernel_pair.second.code_buf_size_);
   }
 
   if (kernarg_async_ != NULL) {
-    gpuAgent.system_deallocator()(kernarg_async_);
+    gpuAgent->system_deallocator()(kernarg_async_);
   }
 
   if (completion_signal_.handle != 0) {
@@ -633,6 +634,11 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
                                      HSA_WAIT_STATE_ACTIVE) != 0) {
     // Signal wait returned unexpected value.
     return HSA_STATUS_ERROR;
+  }
+
+  if(agent_->profiling_enabled()) {
+    LogSignalDuration(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, completion_signal_,
+                      "BlitKernel::SubmitLinearCopyCommand");
   }
 
   return HSA_STATUS_SUCCESS;

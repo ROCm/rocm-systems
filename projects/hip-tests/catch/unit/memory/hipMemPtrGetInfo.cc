@@ -51,4 +51,8 @@ TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
   REQUIRE(sGetSize == sSetSize);
   HIP_CHECK(hipMemPtrGetInfo(sPtr, &sGetSize));
   REQUIRE(sGetSize == sSetSize);
+
+  HIP_CHECK(hipFree(iPtr));
+  HIP_CHECK(hipFree(fPtr));
+  HIP_CHECK(hipFree(sPtr));
 }

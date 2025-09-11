@@ -93,6 +93,8 @@ void runTestFMA() {
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(A[i] == true);
   }
+
+  HIP_CHECK(hipFree(Ad));
 }
 
 __global__ void kernelTestHalfFMA(bool* Ad) {
@@ -166,6 +168,8 @@ void runTestHalfFMA() {
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(A[i] == true);
   }
+
+  HIP_CHECK(hipFree(Ad));
 }
 
 TEST_CASE("Unit_hipTestFMA") {

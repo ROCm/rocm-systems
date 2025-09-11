@@ -384,3 +384,22 @@ TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
     REQUIRE(ptr == nullptr);
   }
 }
+
+TEST_CASE("Unit_hipHostAlloc_Capture") {
+  int* host_memory = nullptr;
+  int flags = get_flags();
+
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+
+  HIP_CHECK_ERROR(hipHostAlloc(reinterpret_cast<void**>(&host_memory), sizeof(int), flags),
+                  capture_error);
+
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    REQUIRE(host_memory != nullptr);
+    HIP_CHECK(hipFreeHost(host_memory));
+  }
+}
