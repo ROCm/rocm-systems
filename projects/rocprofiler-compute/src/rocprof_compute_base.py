@@ -377,7 +377,7 @@ class RocProfCompute:
             sys.exit("Either --list-name or --name is required")
 
         if "/" in self.__args.name:
-            console_error("'/' not permitted in profile name")
+            console_error('"/" is not permitted in profile name')
 
         # instantiate desired profiler
         profiler = self.create_profiler()
