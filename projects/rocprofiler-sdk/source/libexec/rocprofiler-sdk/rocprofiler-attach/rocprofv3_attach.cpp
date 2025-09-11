@@ -58,6 +58,90 @@ initialize_logging()
 
 ROCPROFILER_EXTERN_C_INIT
 
+namespace
+{
+// Helper function to allocate memory in target process and write data
+bool
+write_data_to_target(const std::string&          description,
+                     const std::vector<uint8_t>& data,
+                     void*&                      allocated_addr)
+{
+    // Allocate memory in target process
+    if(!ptrace_session->simple_mmap(allocated_addr, data.size()))
+    {
+        ROCP_ERROR << "Failed to allocate memory for " << description << " in target process";
+        return false;
+    }
+    ROCP_TRACE << "Allocated memory for " << description << " at " << allocated_addr;
+
+    // Stop target process for writing
+    if(!ptrace_session->stop())
+    {
+        ROCP_ERROR << "Failed to stop target process for " << description << " writing";
+        return false;
+    }
+
+    // Write data to target process memory
+    if(!ptrace_session->write(reinterpret_cast<size_t>(allocated_addr), data, data.size()))
+    {
+        ROCP_ERROR << "Failed to write " << description << " to target process";
+        return false;
+    }
+
+    // Continue target process
+    if(!ptrace_session->cont())
+    {
+        ROCP_ERROR << "Failed to continue target process after " << description << " writing";
+        return false;
+    }
+
+    ROCP_TRACE << "Wrote " << description << " to target process";
+    return true;
+}
+
+// Helper function to build environment buffer
+std::vector<uint8_t>
+build_environment_buffer()
+{
+    std::vector<uint8_t> environment_buffer(4);
+    uint32_t             var_count = 0;
+
+    char** invars = environ;
+    for(; *invars; invars++)
+    {
+        const char* var = *invars;
+        if(strncmp("ROCP", var, 4) != 0)
+        {
+            continue;
+        }
+
+        var_count++;
+        ROCP_TRACE << "Adding to environment buffer: " << var;
+
+        // Add variable name
+        while(*var != '=')
+        {
+            environment_buffer.emplace_back(*var++);
+        }
+        environment_buffer.emplace_back(0);
+
+        // Add variable value
+        var++;
+        while(*var)
+        {
+            environment_buffer.emplace_back(*var++);
+        }
+        environment_buffer.emplace_back(0);
+    }
+
+    // Store count in first 4 bytes
+    const uint8_t* var_count_bytes = reinterpret_cast<uint8_t*>(&var_count);
+    std::copy(var_count_bytes, var_count_bytes + 4, environment_buffer.data());
+
+    return environment_buffer;
+}
+}  // anonymous namespace
+
 void
 handle_ptrace_operations(uint32_t pid)
 {
@@ -72,77 +156,45 @@ handle_ptrace_operations(uint32_t pid)
     }
     ROCP_TRACE << "Attachment success to pid " << pid;
 
-    // Environment_buffer is a null-character delimited list of name value pairs.
-    // Each name and value is delimited separately.
-    // The first 4 bytes contain an uint32_t count of pairs
-
-    std::vector<uint8_t> environment_buffer(4);
-    {
-        uint32_t var_count = 0;
-        char**   invars    = environ;
-        for(; *invars; invars++)
-        {
-            const char* var = *invars;
-            if(strncmp("ROCP", var, 4) != 0)
-            {
-                continue;
-            }
-            var_count++;
-            ROCP_TRACE << "Adding to environment buffer: " << var;
-            while(*var != '=')
-            {
-                environment_buffer.emplace_back(*var++);
-            }
-            environment_buffer.emplace_back(0);
-
-            var++;
-            while(*var)
-            {
-                environment_buffer.emplace_back(*var++);
-            }
-            environment_buffer.emplace_back(0);
-        }
-
-        const uint8_t* var_count_bytes = reinterpret_cast<uint8_t*>(&var_count);
-        std::copy(var_count_bytes, var_count_bytes + 4, environment_buffer.data());
-    }
-
-    // Now, allocate a buffer to store the environment variables
+    // Build and write environment buffer to target process
+    auto  environment_buffer      = build_environment_buffer();
     void* environment_buffer_addr = nullptr;
-    if(!ptrace_session->simple_mmap(environment_buffer_addr, environment_buffer.size()))
+    if(!write_data_to_target("environment buffer", environment_buffer, environment_buffer_addr))
     {
-        ROCP_ERROR << "Failed to call mmap in target process";
         return;
     }
-    ROCP_TRACE << "mmap'd in target process at " << environment_buffer_addr;
 
-    // Write to that buffer
-    if(!ptrace_session->stop())
-    {
-        ROCP_ERROR << "Failed to stop target process for environment buffer writing";
-        return;
-    }
-    if(!ptrace_session->write(reinterpret_cast<size_t>(environment_buffer_addr),
-                              environment_buffer,
-                              environment_buffer.size()))
-    {
-        ROCP_ERROR << "Failed to write environment buffer in target process";
-        return;
-    }
-    if(!ptrace_session->cont())
-    {
-        ROCP_ERROR << "Failed to continue target process for environment buffer writing";
-        return;
-    }
-    ROCP_TRACE << "wrote environment buffer to target process";
+    // Build and write tool library path to target process
+    const char* tool_lib_path = "librocprofiler-sdk-tool.so";
+    ROCP_TRACE << "Tool library path: " << tool_lib_path;
 
-    // Execute the attach function with the buffer addr as parameter
-    if(!ptrace_session->call_function(
-           "librocprofiler-register.so", "rocprofiler_register_attach", environment_buffer_addr))
+    size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
+    std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
+
+    void* tool_lib_path_addr = nullptr;
+    if(!write_data_to_target("tool library path", tool_lib_buffer, tool_lib_path_addr))
+    {
+        return;
+    }
+
+    // Execute the attach function with both parameters
+    if(!ptrace_session->call_function("librocprofiler-register.so",
+                                      "rocprofiler_register_attach",
+                                      environment_buffer_addr,
+                                      tool_lib_path_addr))
     {
         ROCP_ERROR << "Failed to call attach function in target process " << pid;
         return;
     }
+
+    // Clean up - free the tool library path memory in target process
+    if(!ptrace_session->simple_munmap(tool_lib_path_addr, tool_lib_path_len))
+    {
+        ROCP_ERROR << "Failed to free tool library path memory in target process";
+        // Continue anyway since the main operation succeeded
+    }
+    ROCP_TRACE << "Cleaned up tool library path memory in target process";
+
     // Allow main thread to continue
     finished_setup.store(true);
     if(!ptrace_session->handle_signals())

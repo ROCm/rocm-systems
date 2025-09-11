@@ -152,6 +152,14 @@ rocprofiler_register_iterate_registration_info(
     void*                                       data)
     ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(1)) ROCPROFILER_REGISTER_PUBLIC_API;
 
+/// @brief Function for attaching to a process and loading tool library
+/// @param[in] environment_buffer Environment variables to set
+/// @param[in] tool_lib_path Path to the tool library to load (can be NULL)
+/// @return ::rocprofiler_register_error_code_t
+rocprofiler_register_error_code_t
+rocprofiler_register_attach(const char* environment_buffer,
+                            const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
+
 #ifdef __cplusplus
 }
 #endif

@@ -57,6 +57,10 @@ public:
 
     bool call_function(const std::string& library, const std::string& symbol);
     bool call_function(const std::string& library, const std::string& symbol, void* first);
+    bool call_function(const std::string& library,
+                       const std::string& symbol,
+                       void*              first,
+                       void*              second);
 
     bool stop();
     bool cont();
