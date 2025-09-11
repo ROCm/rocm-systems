@@ -240,6 +240,15 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
   return (dim3(static_cast<__hip_uint32_t>(blockDim.x), static_cast<__hip_uint32_t>(blockDim.y),
                static_cast<__hip_uint32_t>(blockDim.z)));
 }
+
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+  __builtin_amdgcn_s_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+}
 }  // namespace workgroup
 
 namespace tiled_group {
