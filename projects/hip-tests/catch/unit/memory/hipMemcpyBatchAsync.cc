@@ -18,7 +18,6 @@
  */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
-#include <array>
 /**
  * @addtogroup hipMemcpyBatchAsync hipMemcpyBatchAsync
  * @{
@@ -43,6 +42,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
+#if HT_AMD
 TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   const size_t count = 2;
   size_t numAttrs = 0;
@@ -52,7 +52,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
 
   // Allocate buffers for pointer-ptr copy
   void *srcPtr[count], *dstPtr[count];
-  char** hostPtr = new char*[count];
+  std::vector<std::array<char, size>> hostPtr(count);
   size_t sizes[2];
   size_t attrsIdxs[1];
   for (int i = 0; i < count; i++) {
@@ -60,8 +60,6 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
     HIP_CHECK(hipMalloc(&dstPtr[i], size));
     HIP_CHECK(hipMemset(srcPtr[i], 'b', size));  // Fill with value
     sizes[i] = size;
-    std::array<char, size>arr;
-    hostPtr[i] = arr.data();
   }
 
   attrsIdxs[0] = 0;
@@ -72,7 +70,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   HIP_CHECK(hipStreamSynchronize(stream));
   // validation
   for (int i = 0; i < count; i++) {
-    HIP_CHECK(hipMemcpy(hostPtr[i], dstPtr[i], size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostPtr[i].data(), dstPtr[i], size, hipMemcpyDeviceToHost));
     for (int j = 0; j < size; j++) {
       INFO("Array FAILURE at Index: "<< i << " "<< j << "\nval : " << hostPtr[i][j]);
       REQUIRE(hostPtr[i][j] == 'b');
@@ -84,9 +82,9 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
     HIP_CHECK(hipFree(srcPtr[i]));
     HIP_CHECK(hipFree(dstPtr[i]));
   }
-  delete[] hostPtr;
   HIP_CHECK(hipStreamDestroy(stream));
 }
+#endif
 /**
  * Test Description
  * ------------------------
