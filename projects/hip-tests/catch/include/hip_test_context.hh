@@ -43,10 +43,6 @@ THE SOFTWARE.
 #error "OS not recognized"
 #endif
 
-#if HT_LINUX
-#include <sys/resource.h>
-#endif
-
 // Platform check
 #if defined(__HIP_PLATFORM_AMD__)
 #define HT_AMD 1
@@ -93,11 +89,6 @@ class TestContext {
   };
 
   std::unordered_map<std::string, rtcState> compiledKernels{};
-
-#if HT_LINUX
-  struct rlimit core_limit_;
-  bool rlimit_saved_;
-#endif
 
   Config config_;
   std::string& getCommonJsonFile();
@@ -159,16 +150,6 @@ class TestContext {
   void addResults(HCResult r);  // Add multi threaded results
   void finalizeResults();       // Validate on all results
   bool hasErrorOccured();       // Query if error has occured
-
-  /**
-   * @brief Disable core dumps by setting RLIMIT_CORE to 0
-   */
-  void disableCoreDumps();
-
-  /**
-   * @brief Restore the original core dump limits
-   */
-  void restoreCoreDumps();
 
   /**
    * @brief Unload all loaded modules.
