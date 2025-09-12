@@ -41,23 +41,23 @@ class Terimnal(Container):
         name: Optional[str] = None,
         id: Optional[str] = None,
         classes: Optional[str] = None,
-    ):
+    ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         self.current_directory = os.getcwd()
-        self.output_text = ""
-        self.input_text = ""
-        self.input_prompt = ""
-        self.has_focus = True
+        self.output_text: str = ""
+        self.input_text: str = ""
+        self.input_prompt: str = ""
+        self.has_focus: bool = True
 
         # Command history
-        self.command_history = []
-        self.history_index = -1
-        self.current_command = ""
+        self.command_history: list[str] = []
+        self.history_index: int = -1
+        self.current_command: str = ""
 
         # Tab completion
-        self.tab_completions = []
-        self.tab_index = -1
-        self.tab_prefix = ""
+        self.tab_completions: list[str] = []
+        self.tab_index: int = -1
+        self.tab_prefix: str = ""
 
     def compose(self) -> ComposeResult:
         # Output area with scroll wrapper
@@ -94,8 +94,8 @@ class Terimnal(Container):
     def add_output(self, text: str) -> None:
         """Add text to the terminal output."""
         self.output_text += text
-        output = self.query_one("#terminal-output")
-        output.update(Text.from_ansi(self.output_text))
+        scroll = self.query_one("#term-output-scroll", VerticalScroll)
+        scroll.scroll_end(animate=False)
 
         # Ensure scroll to bottom
         scroll = self.query_one("#term-output-scroll")
@@ -104,7 +104,7 @@ class Terimnal(Container):
     def action_clear(self) -> None:
         """Clear the terminal output."""
         self.output_text = ""
-        output = self.query_one("#terminal-output")
+        output = self.query_one("#terminal-output", Static)
         output.update(Text.from_ansi(""))
 
     def action_interrupt(self) -> None:
@@ -125,7 +125,7 @@ class Terimnal(Container):
         else:
             # If no process is running, just show ^C and clear the input
             self.add_output("\n^C\n")
-            self.query_one("#terminal-input").value = ""
+            self.query_one("#terminal-input", Input).value = ""
 
     def run_command(self, command: str) -> None:
         """Run a system command and display its output."""
@@ -137,7 +137,7 @@ class Terimnal(Container):
             self.history_index = len(self.command_history)
 
         # Show the command in the output
-        prompt = self.query_one("#terminal-input").placeholder
+        prompt = self.query_one("#terminal-input", Input).placeholder
         self.add_output(f"{prompt}{command}\n")
 
         if not command.strip():
@@ -207,7 +207,7 @@ class Terimnal(Container):
         """Handle key events for history navigation."""
         # Handle arrow keys for command history
         if event.key == "up" and self.command_history:
-            input_widget = self.query_one("#terminal-input")
+            input_widget = self.query_one("#terminal-input", Input)
             if self.history_index > 0:
                 self.history_index -= 1
                 input_widget.value = self.command_history[self.history_index]
@@ -215,7 +215,7 @@ class Terimnal(Container):
             event.prevent_default()
 
         elif event.key == "down" and self.command_history:
-            input_widget = self.query_one("#terminal-input")
+            input_widget = self.query_one("#terminal-input", Input)
             if self.history_index < len(self.command_history) - 1:
                 self.history_index += 1
                 input_widget.value = self.command_history[self.history_index]
