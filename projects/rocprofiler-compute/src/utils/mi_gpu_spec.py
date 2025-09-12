@@ -24,7 +24,6 @@
 ##############################################################################
 
 import os
-from pathlib import Path
 from typing import Any, Optional
 
 import yaml
@@ -83,7 +82,7 @@ class MIGPUSpecs:
         """
 
         console_debug("mi_gpu_spec", "[load_yaml]")
-        with open(Path(file_path)) as file:
+        with open(file_path) as file:
             data = yaml.safe_load(file)
             return data or {}
 

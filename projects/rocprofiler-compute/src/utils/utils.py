@@ -420,7 +420,7 @@ def v3_json_get_dispatches(data: dict[str, Any]) -> dict[Any, Any]:
 
 
 def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
-    with open(Path(json_file_path)) as f:
+    with open(json_file_path) as f:
         data = json.load(f)
 
     dispatch_records = v3_json_get_dispatches(data)
@@ -672,7 +672,7 @@ def parse_text(text_file: str) -> list[str]:
         # remove tabs and duplicate spaces
         return _dedup(line.replace("pmc:", ""), ["\n", "\t", " "]).split(" ")
 
-    with open(Path(text_file)) as file:
+    with open(text_file) as file:
         return [
             counter
             for litr in [process_line(itr) for itr in file.readlines()]

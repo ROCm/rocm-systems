@@ -26,7 +26,6 @@
 import csv
 import sqlite3
 from contextlib import closing
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -67,7 +66,7 @@ def convert_db_to_csv(
     try:
         with closing(sqlite3.connect(db_path)) as conn:
             with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
-                with open(Path(csv_file_path), "w", newline="") as csvfile:
+                with open(csv_file_path, "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow([
                         description[0] for description in cursor.description

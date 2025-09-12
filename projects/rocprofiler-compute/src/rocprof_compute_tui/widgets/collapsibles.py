@@ -22,9 +22,6 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
-
-from pathlib import Path
 from typing import Any, Optional, Union
 
 import pandas as pd
@@ -84,7 +81,7 @@ def create_widget_from_data(
 
 
 def load_config(config_path: str) -> dict[str, Any]:
-    with open(Path(config_path)) as file:
+    with open(config_path) as file:
         return yaml.safe_load(file)
 
 

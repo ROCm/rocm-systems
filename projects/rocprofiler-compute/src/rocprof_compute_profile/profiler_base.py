@@ -131,7 +131,7 @@ class RocProfCompute_Base:
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = glob.glob(f"{args.path}/results_*.csv")
 
-            with open(Path(output_file), "w", newline="") as outfile:
+            with open(output_file, "w", newline="") as outfile:
                 writer = None
                 for file in result_files:
                     with open(file, newline="") as infile:
@@ -361,7 +361,7 @@ class RocProfCompute_Base:
         self._filter_blocks = self._soc.profiling_setup()
 
         # Write profiling configuration as yaml file
-        with open(Path(self.__args.path).joinpath("profiling_config.yaml"), "w") as f:
+        with open(f"{self.__args.path}/profiling_config.yaml", "w") as f:
             args_dict = vars(self.__args)
             # Override filter_blocks when writing profiling config yaml
             args_dict["filter_blocks"] = self._filter_blocks

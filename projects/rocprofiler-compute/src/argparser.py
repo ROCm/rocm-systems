@@ -73,7 +73,7 @@ def add_general_group(
         dest="config_dir",
         metavar="",
         help="Specify the directory of customized report section configs.",
-        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
+        default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
     )
     # Nowhere to load specs from in db mode
     if parser.usage and "database" not in parser.usage:
