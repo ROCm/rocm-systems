@@ -27,6 +27,7 @@ import os
 import re
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any, Optional
 
 import pandas as pd
 import yaml
@@ -39,90 +40,71 @@ from utils.logger import console_debug, console_error, console_log, demarcate
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
 
-# the build-in config to list kernel names purpose only
-top_stats_build_in_config = {
-    0: {
-        "id": 0,
-        "title": "Top Kernels",
-        "data source": [{"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}],
-    },
-    1: {
-        "id": 1,
-        "title": "Dispatch List",
-        "data source": [
-            {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
-        ],
-    },
-}
 
-
-def load_sys_info(f):
+def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
     return pd.read_csv(f)
 
 
-def load_panel_configs(dirs):
+def load_panel_configs(
+    dirs: list[str],
+) -> OrderedDict[int, dict[str, Any]]:
     """
     Load all panel configs from yaml file.
     """
-    d = {}
-    for dir in dirs:
-        for root, _, files in os.walk(dir):
-            for f in files:
-                if f.endswith(".yaml"):
-                    with open(Path(root) / f) as file:
+    configs: dict[int, dict[str, Any]] = {}
+    for dir_path in dirs:
+        for root, _, files in os.walk(dir_path):
+            for file_name in files:
+                if file_name.endswith(".yaml"):
+                    with open(Path(root) / file_name) as file:
                         config_yml = yaml.safe_load(file)
                         # metric key can be None due to some metric-
                         # tables not having any metrics
                         # metric key should be empty dict instead of None
-                        for data_source in config_yml["Panel Config"]["data source"]:
+                        panel_config = config_yml["Panel Config"]
+                        for data_source in panel_config["data source"]:
                             metric_table = data_source.get("metric_table")
                             if metric_table and metric_table["metric"] is None:
                                 metric_table["metric"] = {}
-                        d[config_yml["Panel Config"]["id"]] = config_yml["Panel Config"]
+                        configs[panel_config["id"]] = panel_config
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order
-
-    od = OrderedDict(sorted(d.items()))
-    # for key, value in od.items():
-    #     print(key, value)
-    return od
+    return OrderedDict(sorted(configs.items()))
 
 
-def load_profiling_config(config_dir):
+def load_profiling_config(config_dir: str) -> dict[str, Any]:
     """
     Load profiling config from yaml file.
     """
+    config_path = Path(config_dir) / "profiling_config.yaml"
     try:
-        with open(Path(config_dir).joinpath("profiling_config.yaml")) as file:
-            prof_config = yaml.safe_load(file)
-            return prof_config
+        with open(config_path) as file:
+            return yaml.safe_load(file) or {}
     except FileNotFoundError:
         console_log(f"Could not find profiling_config.yaml in {config_dir}")
-    return dict()
+    return {}
 
 
 @demarcate
 def create_df_kernel_top_stats(
-    df_in,
-    raw_data_dir,
-    filter_gpu_ids,
-    filter_dispatch_ids,
-    filter_nodes,
-    time_unit,
-    max_stat_num,
-    kernel_verbose,
-    sortby="sum",
-):
+    df_in: dict[str, pd.DataFrame],
+    raw_data_dir: str,
+    filter_gpu_ids: Optional[list[str]],
+    filter_dispatch_ids: Optional[list[str]],
+    filter_nodes: Optional[str],
+    time_unit: str,
+    kernel_verbose: int,
+    sortby: str = "sum",
+) -> None:
     """
     Create top stats info by grouping kernels with user's filters.
     """
 
-    # NB: think about df = pd.DataFrame(df_in["pmc_perf"].copy())
-    df = df_in["pmc_perf"]
+    df = df_in["pmc_perf"].copy()
 
     # Demangle original KernelNames
     kernel_name_shortener(df, kernel_verbose)
@@ -139,87 +121,105 @@ def create_df_kernel_top_stats(
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
-        if ">" in filter_dispatch_ids[0]:
-            m = re.match(r"\> (\d+)", filter_dispatch_ids[0])
-            df = df[df["Dispatch_ID"] > int(m.group(1))]
+        first_filter = filter_dispatch_ids[0]
+        if first_filter.startswith(">"):
+            match = re.match(r">\s*(\d+)", first_filter)
+            if match:
+                threshold = int(match.group(1))
+                df = df[df["Dispatch_ID"] > threshold]
         else:
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_info = (
-        df.loc[:, ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]]
+    dispatch_columns = (
+        ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]
         if "Node" in df.columns
-        else df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]]
+        else ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
     )
-    dispatch_info.to_csv(
-        str(Path(raw_data_dir).joinpath("pmc_dispatch_info.csv")), index=False
-    )
+    dispatch_info = df[dispatch_columns]
+    dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
+    dispatch_info.to_csv(dispatch_output_path, index=False)
 
-    time_stats = pd.concat(
-        [df["Kernel_Name"], (df["End_Timestamp"] - df["Start_Timestamp"])],
-        keys=["Kernel_Name", "ExeTime"],
-        axis=1,
-    )
-
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
-        "ExeTime": ["count", "sum", "mean", "median"]
+    # Calculate execution times
+    execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
+    time_stats = pd.DataFrame({
+        "Kernel_Name": df["Kernel_Name"],
+        "ExeTime": execution_times,
     })
 
-    time_unit_str = "(" + time_unit + ")"
-    grouped.columns = [
-        x.capitalize() + time_unit_str if x != "count" else x.capitalize()
-        for x in grouped.columns.get_level_values(1)
-    ]
+    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
+        "count",
+        "sum",
+        "mean",
+        "median",
+    ])
 
-    key = "Sum" + time_unit_str
-    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
-    key = "Mean" + time_unit_str
-    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
-    key = "Median" + time_unit_str
-    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
+    # Rename columns with time unit
+    time_unit_suffix = f"({time_unit})"
+    column_mapping = {
+        "count": "Count",
+        "sum": f"Sum{time_unit_suffix}",
+        "mean": f"Mean{time_unit_suffix}",
+        "median": f"Median{time_unit_suffix}",
+    }
+    grouped = grouped.rename(columns=column_mapping)
 
-    grouped = grouped.reset_index()  # Remove special group indexing
+    # Convert time units
+    time_divisor = config.TIME_UNITS[time_unit]
+    for col in [
+        f"Sum{time_unit_suffix}",
+        f"Mean{time_unit_suffix}",
+        f"Median{time_unit_suffix}",
+    ]:
+        grouped[col] = grouped[col] / time_divisor
 
-    key = "Sum" + time_unit_str
-    grouped["Pct"] = grouped[key] / grouped[key].sum() * 100
+    grouped = grouped.reset_index()
 
-    # NB:
+    # Calculate percentage
+    sum_column = f"Sum{time_unit_suffix}"
+    grouped["Pct"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+
     #   Sort by total time as default.
     if sortby == "sum":
-        grouped = grouped.sort_values(by=("Sum" + time_unit_str), ascending=False)
-        grouped.to_csv(
-            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
-        )
+        grouped = grouped.sort_values(sum_column, ascending=False)
+        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(
-            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
-        )
+        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
 
 
 @demarcate
 def create_df_pmc(
-    raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose, verbose, config
-):
+    raw_data_root_dir: str,
+    nodes: Optional[list[str]],
+    spatial_multiplexing: bool,
+    kernel_verbose: int,
+    verbose: int,
+    config_dict: dict[str, Any],
+) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
     """
 
-    def create_single_df_pmc(raw_data_dir, node_name, kernel_verbose, verbose):
-        dfs = []
-        coll_levels = []
+    def create_single_df_pmc(
+        raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
+    ) -> pd.DataFrame:
+        dfs: list[pd.DataFrame] = []
+        coll_levels: list[str] = []
 
-        df = pd.DataFrame()  # noqa: F841
-        new_df = pd.DataFrame()  # noqa: F841
-        for root, dirs, files in os.walk(raw_data_dir):
-            for f in files:
-                # print("file ", f)
-                if (f.endswith(".csv") and f.startswith("SQ")) or (
-                    f == schema.pmc_perf_file_prefix + ".csv"
-                ):
-                    tmp_df = pd.read_csv(str(Path(root).joinpath(f)))
-                    if config.get("format_rocprof_output") == "rocpd":
+        for root, _, files in os.walk(raw_data_dir):
+            for file_name in files:
+                # Process SQ*.csv or pmc_perf.csv files
+                is_sq_file = file_name.endswith(".csv") and file_name.startswith("SQ")
+                is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+
+                if is_sq_file or is_pmc_perf:
+                    file_path = Path(root) / file_name
+                    tmp_df = pd.read_csv(file_path)
+
+                    if config_dict.get("format_rocprof_output") == "rocpd":
                         tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
+
                     # Demangle original KernelNames
                     kernel_name_shortener(tmp_df, kernel_verbose)
 
@@ -228,117 +228,126 @@ def create_df_pmc(
                     #   multiindexing level. Here, we add it into pmc_perf
                     #   as it is the main sub-df which can be handled easily
                     #   later.
-                    if f == "pmc_perf.csv" and node_name != None:
+                    if file_name == "pmc_perf.csv" and node_name is not None:
                         tmp_df.insert(0, "Node", node_name)
+
                     dfs.append(tmp_df)
-                    coll_levels.append(f[:-4])
+                    # Remove .csv extension for collection level
+                    coll_levels.append(file_name[:-4])
+
+        if not dfs:
+            return pd.DataFrame()
 
         # TODO: double check the case if all tmp_df.shape[0] are not on the same page
         final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
         if verbose >= 2:
-            console_debug("pmc_raw_data final_single_df %s" % final_df.info)
+            console_debug(f"pmc_raw_data final_single_df {final_df.info}")
         return final_df
 
+    root_path = Path(raw_data_root_dir)
+
+    # 1. spatial multiplexing case
     if spatial_multiplexing:
-        df = pd.DataFrame()
-        # todo: more err check
-        for subdir in Path(raw_data_root_dir).iterdir():
+        dfs: list[pd.DataFrame] = []
+
+        for subdir in root_path.iterdir():
             if subdir.is_dir():
                 new_df = create_single_df_pmc(
-                    subdir, str(subdir.name), kernel_verbose, verbose
+                    str(subdir), str(subdir.name), kernel_verbose, verbose
                 )
-                df = pd.concat([df, new_df])
-        return df
+                if not new_df.empty:
+                    dfs.append(new_df)
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-    # specified node list
-    else:
-        # regular single node case
-        if nodes is None:
-            return create_single_df_pmc(
-                raw_data_root_dir, None, kernel_verbose, verbose
-            )
+    # 2. regular single node case (nodes=None)
+    if nodes is None:
+        return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
 
-        # "empty list" means all nodes
-        elif not nodes:
-            df = pd.DataFrame()
-            # todo: more err check
-            for subdir in Path(raw_data_root_dir).iterdir():
-                if subdir.is_dir():
-                    new_df = create_single_df_pmc(
-                        subdir, str(subdir.name), kernel_verbose, verbose
-                    )
-                    df = pd.concat([df, new_df])
-            return df
+    # 3. all nodes case (nodes=[])
+    if not nodes:
+        dfs: list[pd.DataFrame] = []
 
-        # specified node list
-        else:
-            df = pd.DataFrame()
-            # todo: more err check
-            for subdir in nodes:
-                p = Path(raw_data_root_dir)
+        for subdir in root_path.iterdir():
+            if subdir.is_dir():
                 new_df = create_single_df_pmc(
-                    p.joinpath(subdir), subdir, kernel_verbose, verbose
+                    str(subdir), str(subdir.name), kernel_verbose, verbose
                 )
-                df = pd.concat([df, new_df])
-            return df
+                if not new_df.empty:
+                    dfs.append(new_df)
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+    # 4. specified node list case (nodes=[...])
+    dfs: list[pd.DataFrame] = []
+
+    for node in nodes:
+        node_path = root_path / node
+        if node_path.exists():
+            new_df = create_single_df_pmc(str(node_path), node, kernel_verbose, verbose)
+            if not new_df.empty:
+                dfs.append(new_df)
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 
-def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
+def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
     """
     Collect wave occupancy info from in_dir csv files
     and consolidate into out_dir/wave_occu_per_cu.csv.
     It depends highly on wave_occu_se*.csv format.
     """
+    in_path = Path(in_dir)
+    all_data = pd.DataFrame()
 
-    all = pd.DataFrame()
+    for i in range(num_se):
+        file_path = in_path / f"wave_occu_se{i}.csv"
+        if not file_path.exists():
+            continue
 
-    for i in range(numSE):
-        p = Path(in_dir, "wave_occu_se" + str(i) + ".csv")
-        if p.exists():
-            tmp_df = pd.read_csv(p)
-            SE_idx = "SE" + str(tmp_df.loc[0, "SE"])
-            tmp_df.rename(
-                columns={
-                    "Dispatch": "Dispatch",
-                    "SE": "SE",
-                    "CU": "CU",
-                    "Occupancy": SE_idx,
-                },
-                inplace=True,
-            )
+        tmp_df = pd.read_csv(file_path)
+        if tmp_df.empty:
+            continue
 
-            # TODO: join instead of concat!
-            if i == 0:
-                all = tmp_df[{"CU", SE_idx}]
-                all.sort_index(axis=1, inplace=True)
-            else:
-                all = pd.concat([all, tmp_df[SE_idx]], axis=1, copy=False)
+        se_idx = f"SE{tmp_df.loc[0, 'SE']}"
+        tmp_df.rename(
+            columns={
+                "Dispatch": "Dispatch",
+                "SE": "SE",
+                "CU": "CU",
+                "Occupancy": se_idx,
+            }
+        )
 
-    if not all.empty:
-        # print(all.transpose())
-        all.to_csv(Path(out_dir, "wave_occu_per_cu.csv"), index=False)
+        # TODO: join instead of concat!
+        if i == 0:
+            all_data = tmp_df[{"CU", se_idx}]
+            all_data.sort_index(axis=1, inplace=True)
+        else:
+            all_data = pd.concat([all_data, tmp_df[se_idx]], axis=1, copy=False)
+
+    if not all_data.empty:
+        all_data.to_csv(Path(out_dir) / "wave_occu_per_cu.csv", index=False)
 
 
-def is_single_panel_config(root_dir, supported_archs):
+def is_single_panel_config(
+    root_dir: str, supported_archs: dict[str, str]
+) -> Optional[bool]:
     """
     Check the root configs dir structure to decide using one config set for all
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    supported_archs = supported_archs.keys()
-    counter = 0
-    for arch in supported_archs:
-        if root_dir.joinpath(arch).exists():
-            counter += 1
-    if counter == 0:
+    arch_names = list(supported_archs.keys())
+    root_path = Path(root_dir)
+    arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
+
+    if arch_count == 0:
         return True
-    elif counter == len(supported_archs):
+    elif arch_count == len(arch_names):
         return False
     else:
         console_error("Found multiple panel config sets but incomplete for all archs.")
 
 
-def find_1st_sub_dir(directory):
+def find_1st_sub_dir(directory: str) -> Optional[str]:
     """
     Find the first sub dir in a directory
     """
@@ -347,7 +356,7 @@ def find_1st_sub_dir(directory):
         # Iterate over entries in the directory
         for entry in dir_path.iterdir():
             if entry.is_dir():  # Check if it's a directory
-                return entry
+                return str(entry)
+        return None
     except FileNotFoundError:
-        print(f"The directory '{directory}' does not exist.")
-    return None
+        console_error(f'The directory "{directory}" does not exist.', exit=False)

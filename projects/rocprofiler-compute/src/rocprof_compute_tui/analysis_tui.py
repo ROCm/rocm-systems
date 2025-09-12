@@ -23,8 +23,10 @@
 
 ##############################################################################
 
+import argparse
 import copy
 from pathlib import Path
+from typing import Any, Hashable, Optional, OrderedDict
 
 import pandas as pd
 
@@ -39,17 +41,19 @@ from utils.logger import console_error, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
-    def __init__(self, args, supported_archs, path):
+    def __init__(
+        self, args: argparse.Namespace, supported_archs: dict[str, str], path: Path
+    ) -> None:
         super().__init__(args, supported_archs)
         self.path = str(path)
         self.args = self.get_args()
-        self.raw_dfs = {}
+        self.raw_dfs: dict[str, dict] = {}
 
     # -----------------------
     # Required child methods
     # -----------------------
     @demarcate
-    def pre_processing(self):
+    def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
         self._runs = self.initalize_runs()
 
@@ -78,13 +82,12 @@ class tui_analysis(OmniAnalyze_Base):
             filter_dispatch_ids=workload.filter_dispatch_ids,
             filter_nodes=workload.filter_nodes,
             time_unit=self.args.time_unit,
-            max_stat_num=self.args.max_stat_num,
             kernel_verbose=self.args.kernel_verbose,
         )
         kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
 
         # 1. load top kernel
-        parser.load_kernel_top(
+        parser.load_non_mertrics_table(
             workload=self._runs[self.path], dir=self.path, args=self.args
         )
 
@@ -92,7 +95,7 @@ class tui_analysis(OmniAnalyze_Base):
         self.raw_dfs = {}
         for idx in workload.raw_pmc.index:
             kernel_df = workload.raw_pmc.loc[[idx]]
-            kernel_name = kernel_df.pmc_perf["Kernel_Name"].loc[idx]
+            kernel_name = str(kernel_df.pmc_perf["Kernel_Name"].loc[idx])
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             parser.eval_metric(
@@ -107,9 +110,11 @@ class tui_analysis(OmniAnalyze_Base):
 
             self.raw_dfs[kernel_name] = kernel_dfs
 
-    def initalize_runs(self, normalization_filter=None):
+    def initalize_runs(
+        self, normalization_filter: Optional[str] = None
+    ) -> OrderedDict[str, schema.Workload]:
         # Load system info and configure
-        sys_info = file_io.load_sys_info(Path(self.path) / "sysinfo.csv")
+        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(
@@ -132,11 +137,8 @@ class tui_analysis(OmniAnalyze_Base):
         )
 
         roofline_path = Path(self.path) / "roofline.csv"
-        w.roofline_peaks = (
-            pd.read_csv(roofline_path)
-            if not getattr(self.args, "no_roof", False) and roofline_path.exists()
-            else pd.DataFrame()
-        )
+        if roofline_path.is_file() and not getattr(self.args, "no_roof", False):
+            w.roofline_peaks = pd.read_csv(roofline_path)
 
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
@@ -145,7 +147,7 @@ class tui_analysis(OmniAnalyze_Base):
         self._runs[self.path] = w
         return self._runs
 
-    def run_kernel_analysis(self):
+    def run_kernel_analysis(self) -> dict[str, Any]:
         arch = list(self._arch_configs.keys())[0]
         return {
             kernel_name: process_panels_to_dataframes(
@@ -154,5 +156,5 @@ class tui_analysis(OmniAnalyze_Base):
             for kernel_name, df in self.raw_dfs.items()
         }
 
-    def run_top_kernel(self):
+    def run_top_kernel(self) -> Optional[list[dict[Hashable, Any]]]:
         return get_top_kernels_and_dispatch_ids(self._runs)

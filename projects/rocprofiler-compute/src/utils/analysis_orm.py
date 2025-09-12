@@ -21,6 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 ##############################################################################el
+from typing import Any, Optional
 
 from sqlalchemy import (
     JSON,
@@ -30,19 +31,23 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    TextClause,
     create_engine,
     func,
     select,
     text,
 )
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from sqlalchemy.sql import Select
 
 from utils.logger import console_debug, console_error
 
-Base = declarative_base()
-
 PREFIX = "compute_"
 SCHEMA_VERSION = "1.0.0"
+
+
+Base = declarative_base()
 
 
 class Workload(Base):
@@ -162,33 +167,38 @@ class Metadata(Base):
 
 
 class Database:
-    _session = None
+    _session: Optional[Session] = None
+    _engine: Optional[Engine] = None
 
     @classmethod
-    def init(cls, db_name):
-        engine = create_engine(f"sqlite:///{db_name}")
-        Base.metadata.create_all(engine)
-        cls._session = sessionmaker(bind=engine)()
+    def init(cls, db_name: str) -> str:
+        cls._engine = create_engine(f"sqlite:///{db_name}")
+        Base.metadata.create_all(cls._engine)
+        cls._session = sessionmaker(bind=cls._engine)()
         console_debug(f"SQLite database initialized with name: {db_name}")
         return db_name
 
     @classmethod
-    def get_session(cls):
+    def get_session(cls) -> Optional[Session]:
         return cls._session
 
     @classmethod
-    def write(self):
+    def write(cls) -> None:
+        if cls._session is None:
+            console_error("No active database session")
+
         try:
-            self._session.commit()
+            cls._session.commit()
         except Exception as e:
-            self._session.rollback()
+            cls._session.rollback()
             console_error(f"Error writing analysis database: {e}")
         finally:
-            self._session.close()
+            cls._session.close()
+            cls._session = None
 
 
-def get_views():
-    views = {
+def get_views() -> list[TextClause]:
+    views: dict[str, Select[Any]] = {
         "kernel_view": select(
             Dispatch.kernel_name,
             func.count(Dispatch.dispatch_id).label("dispatch_count"),
@@ -207,6 +217,7 @@ def get_views():
             Value.value,
         ).join(Value, Metric.metric_uuid == Value.metric_uuid),
     }
+
     return [
         text(
             f"CREATE VIEW {PREFIX}{view_name} AS "

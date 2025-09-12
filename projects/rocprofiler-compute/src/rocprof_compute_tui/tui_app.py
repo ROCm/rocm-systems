@@ -27,12 +27,14 @@ ROCm Compute Profiler TUI - Main Application with Analysis Methods
 ----------------------------------------------------------------
 """
 
+import argparse
 import importlib
 import json
 from pathlib import Path
+from typing import Any, Optional
 
 from textual import on, work
-from textual.app import App
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Button, Footer, Header
 from textual_fspicker import SelectDirectory
@@ -60,7 +62,11 @@ class RocprofTUIApp(App):
         # Binding(key="a", action="analyze", description="Analyze"),
     ]
 
-    def __init__(self, args=None, supported_archs=None):
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        supported_archs: Optional[dict[str, Any]] = None,
+    ) -> None:
         super().__init__()
         self.main_view = MainView()
         self.recent_dirs = self._load_recent_dirs()
@@ -68,37 +74,37 @@ class RocprofTUIApp(App):
         # Analysis attributes
         self.args = args
         self.supported_archs = supported_archs or {}
-        self.soc = {}
-        self.mspec = None
+        self.soc: dict[str, Any] = {}
+        self.mspec: Optional[Any] = None
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         yield Header()
         yield self.main_view
         yield Footer()
 
-    def action_refresh(self):
+    def action_refresh(self) -> None:
         self.main_view.refresh_view()
 
-    def load_soc_specs(self, sysinfo=None):
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         self.mspec = generate_machine_specs(self.args, sysinfo)
         arch = self.mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
         soc_class = getattr(soc_module, f"{arch}_soc")
         self.soc[arch] = soc_class(self.args, self.mspec)
 
-    def _load_recent_dirs(self):
+    def _load_recent_dirs(self) -> list[str]:
         recent_file = Path.home() / ".textual_browser_recent.json"
         if recent_file.exists():
-            with open(recent_file, "r") as f:
+            with open(recent_file) as f:
                 return json.load(f)
         return []
 
-    def _save_recent_dirs(self):
+    def _save_recent_dirs(self) -> None:
         recent_file = Path.home() / ".textual_browser_recent.json"
         with open(recent_file, "w") as f:
             json.dump(self.recent_dirs, f, indent=2)
 
-    def add_recent_dir(self, directory):
+    def add_recent_dir(self, directory: str) -> None:
         directory = str(Path(directory).absolute())
 
         # Remove if exists, add to front, keep max 5
@@ -108,14 +114,14 @@ class RocprofTUIApp(App):
         self.recent_dirs = self.recent_dirs[:5]
         self._save_recent_dirs()
 
-    def on_recent_selected(self, selected_dir):
+    def on_recent_selected(self, selected_dir: Optional[str]) -> None:
         if selected_dir:
             self.main_view.selected_path = selected_dir
             self.main_view.run_analysis()
 
     @on(Button.Pressed, "#menu-open-workload")
     @work
-    async def pick_directory(self):
+    async def pick_directory(self) -> None:
         if opened := await self.push_screen_wait(SelectDirectory()):
             self.add_recent_dir(str(opened))
             self.main_view.selected_path = opened
@@ -123,7 +129,9 @@ class RocprofTUIApp(App):
             self.main_view.run_analysis()
 
 
-def run_tui(args=None, supported_archs=None):
+def run_tui(
+    args: argparse.Namespace, supported_archs: Optional[dict[str, Any]] = None
+) -> None:
     """Run the TUI application."""
     app = RocprofTUIApp(args, supported_archs)
     app.run()

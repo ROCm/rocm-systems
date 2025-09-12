@@ -35,20 +35,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--tag", type=str, required=True, help="tagname to check")
 args = parser.parse_args()
 
-execPath = str(Path(__file__).parent)
-with open(execPath + "/../VERSION") as f:
-    repoVer = f.readline().strip()
+exec_path = Path(__file__).parent
+with open(exec_path / "../VERSION") as f:
+    repo_ver = f.readline().strip()
 
-repoCheck = "v" + repoVer
+repo_check = f"v{repo_ver}"
 tag = args.tag
 
-print("Current repository version = %s" % repoVer)
-print("-->  tagname               = %s" % tag)
+print(f"Current repository version = {repo_ver}")
+print(f"-->  tagname               = {tag}")
 
-if repoCheck == tag:
+if repo_check == tag:
     print("OK: exact match")
     exit(0)
-elif tag.startswith(repoCheck + "-"):
+elif tag.startswith(repo_check + "-"):
     print("OK: allowed match with extra delimiter")
     exit(0)
 elif tag.startswith("rocm-"):

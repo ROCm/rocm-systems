@@ -21,14 +21,28 @@ extend-exclude = [
     ".misc",
     "external",
     "build-rocprof_compute",
+    # deprecated files
+    "src/rocprof_compute_profile/profiler_rocprof_v1.py",
+    "src/rocprof_compute_profile/profiler_rocprof_v2.py",
+    "src/rocprof_compute_analyze/analysis_db.py",
+    "src/utils/db_connector.py",
+    # WIP files
+    "src/rocprof_compute_tui/widgets/splitter.py"
 ]
 
 [tool.ruff.lint]
-# Enable Pyflakes (F), pycodestyle (E, W for PEP8), and isort (I) rules.
-select = ["E", "W", "F", "I"]
-ignore = ["E713", "E711"]
+# Enable Pyflakes (F), pycodestyle (E, W for PEP8), aisort (I),
+# type annotation (ANN), and f-string (UP) rules.
+select = ["E", "W", "F", "I", "ANN","UP"]
+ignore = ["E713", "E711", "ANN001", "ANN401", "UP045"]
 fixable = ["ALL"]
 unfixable = []
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true  #allow Any for *args
+ignore-fully-untyped = false  #require type annotations
+suppress-dummy-args = true  #don't require annotation for "_" arguments
+suppress-none-returning = false  #require explicit None return types
 
 [tool.ruff.format]
 preview = true

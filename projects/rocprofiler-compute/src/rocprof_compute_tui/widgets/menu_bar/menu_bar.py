@@ -22,8 +22,10 @@
 # THE SOFTWARE.
 
 ##############################################################################
+from typing import Any, Optional
 
 from textual import on
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.reactive import reactive
 from textual.widgets import Button
@@ -32,7 +34,7 @@ from rocprof_compute_tui.widgets.recent_directories import RecentDirectoriesScre
 
 
 class DropdownMenu(Container):
-    def compose(self):
+    def compose(self) -> ComposeResult:
         """Compose the dropdown menu with menu items."""
         yield Button("Open Workload", id="menu-open-workload", classes="menu-item")
         yield Button("Open Recent", id="menu-open-recent", classes="menu-item")
@@ -47,11 +49,11 @@ class DropdownMenu(Container):
 class MenuButton(Button):
     is_open = reactive(False)
 
-    def __init__(self, label, menu_id, *args, **kwargs):
+    def __init__(self, label: str, menu_id: str, *args: Any, **kwargs: Any) -> None:
         super().__init__(label, *args, **kwargs)
         self.menu_id = menu_id
 
-    def on_click(self):
+    def on_click(self) -> None:
         self.is_open = not self.is_open
         dropdown = self.app.query_one(f"#{self.menu_id}", DropdownMenu)
 
@@ -64,7 +66,7 @@ class MenuButton(Button):
 class MenuBar(Container):
     """A menu bar that spans the width of the app."""
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         yield Horizontal(
             MenuButton("File", "file-dropdown", id="menu-file"), id="menu-buttons"
         )
@@ -72,18 +74,18 @@ class MenuBar(Container):
         with Container(id="dropdown-container"):
             yield DropdownMenu(id="file-dropdown")
 
-    def on_mount(self):
+    def on_mount(self) -> None:
         self.border_title = "MENU BAR"
         self.add_class("section")
         self.parent_main_view = self.screen.query_one("#main-container", Horizontal)
 
     @on(Button.Pressed, "#menu-open-recent")
-    def show_recent(self):
+    def show_recent(self) -> None:
         if not self.app.recent_dirs:
             self.notify("No recent directories found", severity="warning")
             return
 
-        def on_recent_selected(selected_dir):
+        def on_recent_selected(selected_dir: Optional[str]) -> None:
             if selected_dir:
                 self.parent_main_view.selected_path = selected_dir
                 self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
@@ -94,5 +96,5 @@ class MenuBar(Container):
         )
 
     @on(Button.Pressed, "#menu-exit")
-    def exit_app(self):
+    def exit_app(self) -> None:
         self.app.exit()

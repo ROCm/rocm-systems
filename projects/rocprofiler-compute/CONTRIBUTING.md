@@ -82,6 +82,41 @@ ruff format .
 
 -----
 
+```markdown
+## Type Annotations
+
+This project enforces type annotations using Ruff's `flake8-annotations` rules. All new code must include proper type annotations.
+
+### Requirements
+
+- All function arguments must have type annotations (except `self` and `cls`)
+- All function return types must be annotated
+- Class attributes should have type annotations where applicable
+
+### Examples
+
+```python
+# Good - properly annotated
+def process_kernel_data(kernel_name: str, metrics: list[float]) -> dict[str, Any]:
+    """Process kernel performance metrics."""
+    return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
+
+# Bad - missing annotations (will be caught by Ruff)
+def process_kernel_data(kernel_name, metrics):
+    return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
+```
+
+### Checking Type Annotations
+
+To specifically check for missing type annotations:
+
+```bash
+ruff check --select ANN .
+```
+
+For existing code, we're gradually adding type annotations. When modifying existing functions, please add type annotations to any code you touch.
+```
+
 ## Disabling Formatting for Specific Sections
 
 There may be instances where you need to disable Ruff's formatting on a specific block of code. You can do this using special comments:
