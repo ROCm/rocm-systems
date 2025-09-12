@@ -618,6 +618,9 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchAsync_v2, hipMemPrefetchAsync_v2, hipMemPrefetchAsync_v2_fn, dev_ptr, count, location, flags, stream);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemAdvise_v2, hipMemAdvise_v2, hipMemAdvise_v2_fn, dev_ptr, count, advice, location);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetId, hipStreamGetId, hipStreamGetId_fn, stream, streamId);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 15
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryLoadData, hipLibraryLoadData, hipLibraryLoadData_fn, library, code, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryLoadFromFile, hipLibraryLoadFromFile, hipLibraryLoadFromFile_fn, library, fileName, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryUnload, hipLibraryUnload, hipLibraryUnload_fn, library);

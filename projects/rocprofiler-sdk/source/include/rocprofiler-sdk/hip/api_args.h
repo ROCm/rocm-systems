@@ -3284,6 +3284,43 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t         stream;
         unsigned long long* streamId;
     } hipStreamGetId;
+    struct
+    {
+        hipLibrary_t* library;
+        const void* code;
+        hipJitOption** jitOptions;
+        void** jitOptionsValues;
+        unsigned int numJitOptions;
+        hipLibraryOption** libraryOptions;
+        void** libraryOptionValues;
+        unsigned int numLibraryOptions;
+    } hipLibraryLoadData;
+    struct
+    {
+        hipLibrary_t* library;
+        const char* fileName;
+        hipJitOption** jitOptions;
+        void** jitOptionsValues;
+        unsigned int numJitOptions;
+        hipLibraryOption** libraryOptions;
+        void** libraryOptionValues;
+        unsigned int numLibraryOptions;
+    } hipLibraryLoadFromFile;
+    struct
+    {
+        hipLibrary_t library;
+    } hipLibraryUnload;
+    struct
+    {
+        hipKernel_t* pKernel;
+        hipLibrary_t library;
+        const char* name;
+    } hipLibraryGetKernel;
+    struct
+    {
+        unsigned int *count;
+        hipLibrary_t library;
+    } hipLibraryGetKernelCount;
 #endif
 } rocprofiler_hip_api_args_t;
 
