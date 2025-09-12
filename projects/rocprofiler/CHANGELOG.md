@@ -403,6 +403,3 @@ Example for file plugin output:
 ### Removed
 
 - rocprofv2 doesn't support gfx12, Use rocprofv3 tool.
-
-
-
