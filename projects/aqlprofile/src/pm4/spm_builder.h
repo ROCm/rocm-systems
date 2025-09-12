@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "pm4/cmd_config.h"
+#include "pm4/cmd_builder.h"
 
 namespace pm4_builder {
 class CmdBuffer;
