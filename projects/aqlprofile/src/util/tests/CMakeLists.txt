@@ -15,7 +15,8 @@ target_link_libraries(
     PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
-            GTest::gtest_main)
+            GTest::gtest_main
+            dl)
 
 
 gtest_add_tests(
