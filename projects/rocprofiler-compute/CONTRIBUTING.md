@@ -58,7 +58,7 @@ To ensure code quality and consistency, we use **Ruff**, a fast Python linter an
 
 -----
 
-## Installing and Running Ruff
+### Installing and Running Ruff
 
 Ruff is available on PyPI and can be installed using `pip`:
 
@@ -82,18 +82,17 @@ ruff format .
 
 -----
 
-```markdown
-## Type Annotations
+### Type Annotation Guidelines
 
-This project enforces type annotations using Ruff's `flake8-annotations` rules. All new code must include proper type annotations.
+This project enforces type annotations using Ruff's `flake8-annotations` rules (ANN). All new code in `src/` must include proper type annotations.
 
-### Requirements
+#### Requirements
 
 - All function arguments must have type annotations (except `self` and `cls`)
 - All function return types must be annotated
 - Class attributes should have type annotations where applicable
 
-### Examples
+#### Examples
 
 ```python
 # Good - properly annotated
@@ -106,7 +105,7 @@ def process_kernel_data(kernel_name, metrics):
     return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
 ```
 
-### Checking Type Annotations
+#### Checking Type Annotations
 
 To specifically check for missing type annotations:
 
@@ -115,9 +114,66 @@ ruff check --select ANN .
 ```
 
 For existing code, we're gradually adding type annotations. When modifying existing functions, please add type annotations to any code you touch.
+
+-----
+
+### String Formatting Guidelines
+
+This project enforces modern Python string formatting practices using Ruff's `pyupgrade` rules (UP). All new code in `src/` should use f-strings where applicable instead of older formatting methods.
+
+#### Requirements
+
+- Use f-strings for string formatting when variables or expressions need to be embedded
+- Replace `.format()` method calls and `%` formatting with f-strings where possible
+- F-strings are preferred for readability and performance
+
+#### Examples
+```python
+# Good - using f-strings
+name = "kernel_analysis"
+count = 42
+message = f"Processing {name} with {count} metrics"
+path = f"{base_dir}/results/{filename}.csv"
+
+# Bad - will be caught by Ruff (UP045)
+message = "Processing {} with {} metrics".format(name, count)
+message = "Processing %s with %s metrics" % (name, count)
+path = "{}/results/{}.csv".format(base_dir, filename)
 ```
 
-## Disabling Formatting for Specific Sections
+-----
+
+### Path Handling Guidelines
+
+This project enforces modern Python path handling practices using Ruff's `flake8-use-pathlib` rules (PTH). All new code in `src/` should use `pathlib.Path` methods instead of legacy `os.path` functions for directory operations.
+
+#### Requirements
+
+- Use `pathlib.Path` methods for all path operations instead of `os.path` functions
+- Use `Path.cwd()` instead of `os.getcwd()`
+- Use `Path.exists()` instead of `os.path.exists()`
+- Use `Path.is_file()` and `Path.is_dir()` instead of `os.path.isfile()` and `os.path.isdir()`
+- Use the `/` operator for path joining instead of `os.path.join()`
+
+#### Examples
+```python
+# Good - using pathlib methods
+current_dir = Path.cwd()
+config_path = current_dir / "config" / "settings.yaml"
+if config_path.exists() and config_path.is_file():
+    # Process file
+
+# Bad - will be caught by Ruff (PTH rules)
+import os
+current_dir = Path(os.getcwd())  # PTH109
+config_path = os.path.join(current_dir, "config", "settings.yaml")  # PTH118
+if os.path.exists(config_path) and os.path.isfile(config_path):  # PTH110, PTH113
+    # Process file
+```
+
+-----
+
+### Disabling Formatting for Specific Sections
 
 There may be instances where you need to disable Ruff's formatting on a specific block of code. You can do this using special comments:
 
@@ -126,12 +182,12 @@ There may be instances where you need to disable Ruff's formatting on a specific
 
 You can also disable specific linting rules for a line by using `# noqa: <rule_code>`.
 
-## Coding guidelines
+### Coding guidelines
 
 Below are some repository specific guidelines which are followed througout the repository.
 Any future contributions should adhere to these guidelines:
 * Use the `pathlib` library functions instead of `os.path` for manipulating the file paths.
 
-## Build and test documentation changes
+### Build and test documentation changes
 
 For instructions on how to build and test documentation changes (files under docs folder), please see https://rocm.docs.amd.com/en/latest/contribute/contributing.html

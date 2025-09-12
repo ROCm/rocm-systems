@@ -24,7 +24,6 @@
 ##############################################################################
 
 import argparse
-import glob
 import json
 import math
 import os
@@ -293,8 +292,8 @@ class OmniSoC_Base:
         # File id dict
         config_root_dir = f"{args.config_dir}/{self.__arch}"
         config_filename_dict = {
-            Path(filename).name.split("_")[0]: filename
-            for filename in glob.glob(f"{config_root_dir}/*.yaml")
+            filename.name.split("_")[0]: str(filename)
+            for filename in Path(config_root_dir).glob("*.yaml")
         }
 
         filter_blocks = args.filter_blocks

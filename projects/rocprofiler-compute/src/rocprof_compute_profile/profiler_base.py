@@ -25,9 +25,6 @@
 
 import argparse
 import csv
-import glob
-import os
-import re
 import shlex
 import shutil
 import time
@@ -129,7 +126,7 @@ class RocProfCompute_Base:
         # handle rocpd format
         if args.format_rocprof_output == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = glob.glob(f"{args.path}/results_*.csv")
+            result_files = list(Path(args.path).glob("results_*.csv"))
 
             with open(output_file, "w", newline="") as outfile:
                 writer = None
@@ -148,7 +145,7 @@ class RocProfCompute_Base:
 
             # Delete results_*.csv files
             for file in result_files:
-                os.remove(file)
+                Path(file).unlink()
                 console_debug(f"Deleted file: {file}")
             return
 
@@ -158,27 +155,17 @@ class RocProfCompute_Base:
             files = [
                 file
                 for pattern in csv_patterns
-                for file in glob.glob(f"{args.path}/{pattern}")
+                for file in Path(args.path).glob(pattern)
             ]
 
             if args.hip_trace:
-                # remove hip api trace ouputs from this list
-                files = [
-                    f
-                    for f in files
-                    if not re.compile(r"^.*_hip_api_trace\.csv$").match(
-                        os.path.basename(f)
-                    )
-                ]
+                # remove hip api trace outputs from this list
+                files = [f for f in files if not f.name.endswith("_hip_api_trace.csv")]
 
             if args.kokkos_trace:
-                # remove marker api trace ouputs from this list
+                # remove marker api trace outputs from this list
                 files = [
-                    f
-                    for f in files
-                    if not re.compile(r"^.*_marker_api_trace\.csv$").match(
-                        os.path.basename(f)
-                    )
+                    f for f in files if not f.name.endswith("_marker_api_trace.csv")
                 ]
         elif isinstance(args.path, list):
             files = args.path
@@ -344,7 +331,7 @@ class RocProfCompute_Base:
                 for file in files:
                     # Do not remove accumulate counter files
                     if "SQ_" not in file or "SQC_" not in file:
-                        os.remove(file)
+                        Path(file).unlink()
             return None
         else:
             return df
@@ -410,7 +397,7 @@ class RocProfCompute_Base:
         print_status(status_msg)
 
         # Run profiling on each input file
-        input_files = sorted(glob.glob(f"{args.path}/perfmon/*.txt"))
+        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
         total_runs = len(input_files)
         total_profiling_time = 0.0
 
@@ -440,7 +427,7 @@ class RocProfCompute_Base:
                     "-i",
                     "-r",
                     f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    fname,
+                    str(fname),
                 ])
                 # log output from profile filtering
                 if not success:
@@ -455,7 +442,7 @@ class RocProfCompute_Base:
                     "-i",
                     "-r",
                     f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    fname,
+                    str(fname),
                 ])
                 # log output from profile filtering
                 if not success:
@@ -471,10 +458,10 @@ class RocProfCompute_Base:
                 "rocprofv3",
                 "rocprofiler-sdk",
             ):
-                options = self.get_profiler_options(fname, self._soc)
+                options = self.get_profiler_options(str(fname), self._soc)
                 start_time = time.time()
                 run_prof(
-                    fname=fname,
+                    fname=str(fname),
                     profiler_options=options,
                     workload_dir=args.path,
                     mspec=self._soc._mspec,
@@ -500,8 +487,7 @@ class RocProfCompute_Base:
         ):
             return
 
-        input_files = glob.glob(f"{args.path}/perfmon/*.txt")
-        total_runs = len(input_files)
+        total_runs = len(list(Path(args.path).glob("perfmon/*.txt")))
 
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 
