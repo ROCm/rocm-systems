@@ -100,7 +100,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(void *address, uint64_t size,
 
 int hsakmt_open_drm_render_device(int minor);
 void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t align,
-			    uint64_t guard_size, void *aper_base, void *aper_limit);
+			    uint64_t guard_size, void *aper_base, void *aper_limit, int fd);
 
 extern int (*hsakmt_fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
 #endif /* FMM_H_ */

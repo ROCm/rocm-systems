@@ -51,6 +51,7 @@
 #include "core/inc/agent.h"
 #include "core/inc/queue.h"
 #include "core/inc/cache.h"
+#include "core/inc/driver.h"
 
 namespace rocr {
 namespace AMD {
@@ -62,7 +63,9 @@ class CpuAgent : public core::Agent {
   // @param [in] node Node id. Each CPU in different socket will get distinct
   // id.
   // @param [in] node_props Node property.
-  CpuAgent(HSAuint32 node, const HsaNodeProperties& node_props);
+  // @param [in] driver_type Driver type. Default is KFD.
+  CpuAgent(HSAuint32 node, const HsaNodeProperties& node_props,
+           core::DriverType driver_type = core::DriverType::KFD);
 
   // @brief CpuAgent destructor.
   ~CpuAgent();

@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,23 +10,24 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
-from config import HIDDEN_COLUMNS
 from utils.logger import console_error
+from utils.utils import format_scientific_notation_if_needed
 
 
 def insert_chart_data(mem_data, base_data):
@@ -60,7 +61,9 @@ def insert_chart_data(mem_data, base_data):
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=memchart_values["Wavefront Occupancy"],
+                children=format_value_for_display(
+                    memchart_values.get("Wavefront Occupancy")
+                ),
             ),
             Text(
                 x="49",
@@ -69,7 +72,7 @@ def insert_chart_data(mem_data, base_data):
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=memchart_values["Wave Life"],
+                children=format_value_for_display(memchart_values.get("Wave Life")),
             ),
             # ----------------------------------------
             # Instr Dispatch Block
@@ -79,7 +82,7 @@ def insert_chart_data(mem_data, base_data):
                 id="salu",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["SALU"]),
+                children=format_value_for_display(memchart_values.get("SALU")),
             ),
             Text(
                 x="386",
@@ -87,7 +90,7 @@ def insert_chart_data(mem_data, base_data):
                 id="smem",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["SMEM"]),
+                children=format_value_for_display(memchart_values.get("SMEM")),
             ),
             Text(
                 x="386",
@@ -95,7 +98,7 @@ def insert_chart_data(mem_data, base_data):
                 id="valu",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VALU"]),
+                children=format_value_for_display(memchart_values.get("VALU")),
             ),
             Text(
                 x="386",
@@ -103,7 +106,7 @@ def insert_chart_data(mem_data, base_data):
                 id="mfma",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["MFMA"]),
+                children=format_value_for_display(memchart_values.get("MFMA")),
             ),
             Text(
                 x="386",
@@ -111,7 +114,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vmem",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VMEM"]),
+                children=format_value_for_display(memchart_values.get("VMEM")),
             ),
             Text(
                 x="386",
@@ -119,7 +122,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS"],
+                children=format_value_for_display(memchart_values.get("LDS")),
             ),
             Text(
                 x="386",
@@ -127,7 +130,7 @@ def insert_chart_data(mem_data, base_data):
                 id="gws",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["GWS"],
+                children=format_value_for_display(memchart_values.get("GWS")),
             ),
             Text(
                 x="386",
@@ -135,7 +138,7 @@ def insert_chart_data(mem_data, base_data):
                 id="br",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["BR"],
+                children=format_value_for_display(memchart_values.get("BR")),
             ),
             # ----------------------------------------
             # Exec Block
@@ -146,7 +149,7 @@ def insert_chart_data(mem_data, base_data):
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=memchart_values["Active CUs"],
+                children=format_value_for_display(memchart_values.get("Active CUs")),
             ),  # x=454
             Text(
                 x="580",
@@ -154,7 +157,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vgpr",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VGPR"],
+                children=format_value_for_display(memchart_values.get("VGPR")),
             ),
             Text(
                 x="581",
@@ -162,7 +165,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sgpr",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["SGPR"],
+                children=format_value_for_display(memchart_values.get("SGPR")),
             ),
             Text(
                 x="580",
@@ -170,7 +173,9 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_alloc",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS Allocation"],
+                children=format_value_for_display(
+                    memchart_values.get("LDS Allocation")
+                ),
             ),
             Text(
                 x="580",
@@ -178,7 +183,9 @@ def insert_chart_data(mem_data, base_data):
                 id="scratch_alloc",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Scratch Allocation"],
+                children=format_value_for_display(
+                    memchart_values.get("Scratch Allocation")
+                ),
             ),
             Text(
                 x="580",
@@ -186,7 +193,7 @@ def insert_chart_data(mem_data, base_data):
                 id="wavefronts",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Wavefronts"],
+                children=format_value_for_display(memchart_values.get("Wavefronts")),
             ),
             Text(
                 x="580",
@@ -194,7 +201,7 @@ def insert_chart_data(mem_data, base_data):
                 id="workgroups",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Workgroups"],
+                children=format_value_for_display(memchart_values.get("Workgroups")),
             ),
             # ----------------------------------------
             # LDS Block
@@ -204,7 +211,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_req",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["LDS Req"],
+                children=format_value_for_display(memchart_values.get("LDS Req")),
             ),
             Text(
                 x="839",
@@ -212,7 +219,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_util",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS Util"],
+                children=format_value_for_display(memchart_values.get("LDS Util")),
             ),
             Text(
                 x="839",
@@ -220,7 +227,7 @@ def insert_chart_data(mem_data, base_data):
                 id="lds_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["LDS Latency"],
+                children=format_value_for_display(memchart_values.get("LDS Latency")),
             ),
             # ----------------------------------------
             # Vector L1 Cache Block
@@ -230,7 +237,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1 Rd"]),
+                children=format_value_for_display(memchart_values.get("VL1 Rd")),
             ),
             Text(
                 x="708",
@@ -238,7 +245,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1 Wr"]),
+                children=format_value_for_display(memchart_values.get("VL1 Wr")),
             ),
             Text(
                 x="716",
@@ -246,7 +253,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["VL1 Atomic"],
+                children=format_value_for_display(memchart_values.get("VL1 Atomic")),
             ),
             Text(
                 x="840",
@@ -254,7 +261,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Hit"],
+                children=format_value_for_display(memchart_values.get("VL1 Hit")),
             ),
             Text(
                 x="840",
@@ -262,7 +269,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Lat"],
+                children=format_value_for_display(memchart_values.get("VL1 Lat")),
             ),
             Text(
                 x="840",
@@ -270,7 +277,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_coales",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Coalesce"],
+                children=format_value_for_display(memchart_values.get("VL1 Coalesce")),
             ),
             Text(
                 x="838",
@@ -278,7 +285,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_stall",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1 Stall"],
+                children=format_value_for_display(memchart_values.get("VL1 Stall")),
             ),
             Text(
                 x="1000",
@@ -286,7 +293,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_l2_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("VL1_L2 Rd")),
             ),
             Text(
                 x="1000",
@@ -294,7 +301,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_l2_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1_L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("VL1_L2 Wr")),
             ),
             Text(
                 x="1008",
@@ -302,7 +309,7 @@ def insert_chart_data(mem_data, base_data):
                 id="vl1_l2_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["VL1_L2 Atomic"],
+                children=format_value_for_display(memchart_values.get("VL1_L2 Atomic")),
             ),
             # ----------------------------------------
             # Scalar L1D Cache Block
@@ -312,7 +319,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1D Rd"]),
+                children=format_value_for_display(memchart_values.get("sL1D Rd")),
             ),
             Text(
                 x="838",
@@ -320,7 +327,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1D Hit"],
+                children=format_value_for_display(memchart_values.get("sL1D Hit")),
             ),
             Text(
                 x="838",
@@ -328,7 +335,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1D Lat"],
+                children=format_value_for_display(memchart_values.get("sL1D Lat")),
             ),
             Text(
                 x="1000",
@@ -336,7 +343,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1D_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("sL1D_L2 Rd")),
             ),
             Text(
                 x="1000",
@@ -344,7 +351,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1D_L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("sL1D_L2 Wr")),
             ),
             Text(
                 x="1008",
@@ -352,7 +359,9 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["VL1D_L2 Atomic"],
+                children=format_value_for_display(
+                    memchart_values.get("sL1D_L2 Atomic")
+                ),
             ),
             # ----------------------------------------
             # Instr L1  Cache Block
@@ -362,7 +371,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_fetch",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["IL1 Fetch"],
+                children=format_value_for_display(memchart_values.get("IL1 Fetch")),
             ),
             Text(
                 x="837",
@@ -370,7 +379,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["IL1 Hit"],
+                children=format_value_for_display(memchart_values.get("IL1 Hit")),
             ),
             Text(
                 x="837",
@@ -378,7 +387,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["IL1 Lat"],
+                children=format_value_for_display(memchart_values.get("IL1 Lat")),
             ),
             Text(
                 x="1015",
@@ -386,7 +395,7 @@ def insert_chart_data(mem_data, base_data):
                 id="il1_l2_req",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["IL1_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("IL1_L2 Rd")),
             ),
             # ----------------------------------------
             # L2 Cache Block(inside)
@@ -396,7 +405,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_rd",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("L2 Rd")),
             ),
             Text(
                 x="1145",
@@ -404,7 +413,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_wr",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("L2 Wr")),
             ),
             Text(
                 x="1145",
@@ -412,7 +421,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_atom",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Atomic"],
+                children=format_value_for_display(memchart_values.get("L2 Atomic")),
             ),
             Text(
                 x="1145",
@@ -420,7 +429,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Hit"],
+                children=format_value_for_display(memchart_values.get("L2 Hit")),
             ),
             Text(
                 x="1145",
@@ -428,7 +437,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_rd_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Rd Lat"],
+                children=format_value_for_display(memchart_values.get("L2 Rd Lat")),
             ),
             Text(
                 x="1145",
@@ -436,7 +445,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_wr_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["L2 Wr Lat"],
+                children=format_value_for_display(memchart_values.get("L2 Wr Lat")),
             ),
             # ----------------------------------------
             # Fabric Block
@@ -446,7 +455,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_fabric_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["Fabric_L2 Rd"]),
+                children=format_value_for_display(memchart_values.get("Fabric_L2 Rd")),
             ),
             Text(
                 x="1317",
@@ -454,7 +463,7 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_fabric_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["Fabric_L2 Wr"]),
+                children=format_value_for_display(memchart_values.get("Fabric_L2 Wr")),
             ),
             Text(
                 x="1319",
@@ -462,7 +471,9 @@ def insert_chart_data(mem_data, base_data):
                 id="l2_fabric_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["Fabric_L2 Atomic"],
+                children=format_value_for_display(
+                    memchart_values.get("Fabric_L2 Atomic")
+                ),
             ),
             Text(
                 x="1435",
@@ -470,7 +481,7 @@ def insert_chart_data(mem_data, base_data):
                 id="fabric_rd_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Fabric Rd Lat"],
+                children=format_value_for_display(memchart_values.get("Fabric Rd Lat")),
             ),
             Text(
                 x="1435",
@@ -478,7 +489,7 @@ def insert_chart_data(mem_data, base_data):
                 id="fabric_wr_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Fabric Wr Lat"],
+                children=format_value_for_display(memchart_values.get("Fabric Wr Lat")),
             ),
             Text(
                 x="1435",
@@ -486,7 +497,9 @@ def insert_chart_data(mem_data, base_data):
                 id="fabric_atom_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["Fabric Atomic Lat"],
+                children=format_value_for_display(
+                    memchart_values.get("Fabric Atomic Lat")
+                ),
             ),
             Text(
                 x="1578",
@@ -494,7 +507,7 @@ def insert_chart_data(mem_data, base_data):
                 id="hbm_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["HBM Rd"]),
+                children=format_value_for_display(memchart_values.get("HBM Rd")),
             ),
             Text(
                 x="1577",
@@ -502,7 +515,7 @@ def insert_chart_data(mem_data, base_data):
                 id="hbm_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["HBM Wr"]),
+                children=format_value_for_display(memchart_values.get("HBM Wr")),
             ),
         ],
     )
@@ -579,21 +592,31 @@ def get_memchart(mem_data, base_data):
                                             Rect(x="319", y="329.5", rx="3", ry="3"),
                                             Rect(x="319", y="382", rx="3", ry="3"),
                                             Rect(x="1367.69", y="271", rx="3", ry="3"),
-                                            Rect(x="1367.69", y="296.5", rx="3", ry="3"),
-                                            Rect(x="1367.69", y="322.5", rx="3", ry="3"),
+                                            Rect(
+                                                x="1367.69", y="296.5", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="1367.69", y="322.5", rx="3", ry="3"
+                                            ),
                                             Rect(x="1078", y="199", rx="3", ry="3"),
                                             Rect(x="1078", y="224.5", rx="3", ry="3"),
                                             Rect(x="1078", y="250.5", rx="3", ry="3"),
                                             Rect(x="771.44", y="103", rx="3", ry="3"),
-                                            Rect(x="770.44", y="358.75", rx="3", ry="3"),
-                                            Rect(x="770.44", y="390.25", rx="3", ry="3"),
+                                            Rect(
+                                                x="770.44", y="358.75", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="770.44", y="390.25", rx="3", ry="3"
+                                            ),
                                             Rect(x="769.44", y="477", rx="3", ry="3"),
                                             Rect(x="769.44", y="508.5", rx="3", ry="3"),
                                             Rect(x="1078", y="278", rx="3", ry="3"),
                                             Rect(x="1078", y="342.5", rx="3", ry="3"),
                                             Rect(x="1078", y="368.5", rx="3", ry="3"),
                                             Rect(x="772.44", y="179", rx="3", ry="3"),
-                                            Rect(x="772.44", y="210.18", rx="3", ry="3"),
+                                            Rect(
+                                                x="772.44", y="210.18", rx="3", ry="3"
+                                            ),
                                             Rect(x="771.44", y="71.28", rx="3", ry="3"),
                                             Rect(x="772.44", y="242", rx="3", ry="3"),
                                             Rect(x="770.44", y="274.5", rx="3", ry="3"),
@@ -616,21 +639,31 @@ def get_memchart(mem_data, base_data):
                                         className="val-3",
                                         children=[
                                             Rect(x="1410.69", y="271", rx="3", ry="3"),
-                                            Rect(x="1410.69", y="296.5", rx="3", ry="3"),
-                                            Rect(x="1410.69", y="322.5", rx="3", ry="3"),
+                                            Rect(
+                                                x="1410.69", y="296.5", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="1410.69", y="322.5", rx="3", ry="3"
+                                            ),
                                             Rect(x="1121", y="199", rx="3", ry="3"),
                                             Rect(x="1121", y="224.5", rx="3", ry="3"),
                                             Rect(x="1121", y="250.5", rx="3", ry="3"),
                                             Rect(x="814.44", y="103", rx="3", ry="3"),
-                                            Rect(x="813.44", y="358.75", rx="3", ry="3"),
-                                            Rect(x="813.44", y="390.25", rx="3", ry="3"),
+                                            Rect(
+                                                x="813.44", y="358.75", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="813.44", y="390.25", rx="3", ry="3"
+                                            ),
                                             Rect(x="812.44", y="477", rx="3", ry="3"),
                                             Rect(x="812.44", y="508.5", rx="3", ry="3"),
                                             Rect(x="1121", y="278", rx="3", ry="3"),
                                             Rect(x="1121", y="342.5", rx="3", ry="3"),
                                             Rect(x="1121", y="368.5", rx="3", ry="3"),
                                             Rect(x="815.44", y="179", rx="3", ry="3"),
-                                            Rect(x="815.44", y="210.18", rx="3", ry="3"),
+                                            Rect(
+                                                x="815.44", y="210.18", rx="3", ry="3"
+                                            ),
                                             Rect(x="814.44", y="71.28", rx="3", ry="3"),
                                             Rect(x="815.44", y="242", rx="3", ry="3"),
                                             Rect(x="813.44", y="274.5", rx="3", ry="3"),
@@ -693,7 +726,8 @@ def get_memchart(mem_data, base_data):
                                         children=[
                                             Path(
                                                 id="p1",
-                                                d="M 100 243.72 L 120 220.28 L 475 220.28 L 495 243.72 Z",
+                                                d="M 100 243.72 L 120 220.28 L "
+                                                "475 220.28 L 495 243.72 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -743,7 +777,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 62 L 411.89 65.51 L 413.63 62.01 L 411.88 58.51 Z",
+                                                d="M 418.88 62 L 411.89 65.51 L "
+                                                "413.63 62.01 L 411.88 58.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -753,7 +788,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 112 L 411.88 115.49 L 413.63 112 L 411.88 108.49 Z",
+                                                d="M 418.88 112 L 411.88 115.49 L "
+                                                "413.63 112 L 411.88 108.49 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -763,7 +799,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 162 L 411.88 165.51 L 413.63 162 L 411.88 158.51 Z",
+                                                d="M 418.88 162 L 411.88 165.51 L "
+                                                "413.63 162 L 411.88 158.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -773,7 +810,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 212 L 411.88 215.5 L 413.63 212 L 411.88 208.5 Z",
+                                                d="M 418.88 212 L 411.88 215.5 "
+                                                "L 413.63 212 L 411.88 208.5 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -783,7 +821,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 262 L 411.88 265.5 L 413.63 262 L 411.88 258.5 Z",
+                                                d="M 418.88 262 L 411.88 265.5 L "
+                                                "413.63 262 L 411.88 258.5 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -793,7 +832,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 312 L 411.89 315.51 L 413.63 312.01 L 411.88 308.51 Z",
+                                                d="M 418.88 312 L 411.89 315.51 L "
+                                                "413.63 312.01 L 411.88 308.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -803,7 +843,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 362 L 411.88 365.5 L 413.63 362 L 411.88 358.5 Z",
+                                                d="M 418.88 362 L 411.88 365.5 L "
+                                                "413.63 362 L 411.88 358.5 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -813,7 +854,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 409 L 411.87 412.47 L 413.63 408.97 L 411.9 405.47 Z",
+                                                d="M 418.88 409 L 411.87 412.47 L "
+                                                "413.63 408.97 L 411.9 405.47 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -823,7 +865,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 647.12 207 L 654.12 203.5 L 652.37 207 L 654.12 210.5 Z",
+                                                d="M 647.12 207 L 654.12 203.5 L "
+                                                "652.37 207 L 654.12 210.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -833,17 +876,20 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 748.88 236.01 L 741.9 239.54 L 743.63 236.03 L 741.86 232.54 Z",
+                                                d="M 748.88 236.01 L 741.9 239.54 L "
+                                                "743.63 236.03 L 741.86 232.54 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 750 502 L 110 502 Q 100 502 100 492 L 100 468.37",
+                                                d="M 750 502 L 110 502 Q 100 "
+                                                "502 100 492 L 100 468.37",
                                                 fill="none",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 100 463.12 L 103.5 470.12 L 100 468.37 L 96.5 470.12 Z",
+                                                d="M 100 463.12 L 103.5 470.12 L "
+                                                "100 468.37 L 96.5 470.12 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -853,7 +899,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 937.12 504 L 944.12 500.5 L 942.37 504 L 944.12 507.5 Z",
+                                                d="M 937.12 504 L 944.12 500.5 L "
+                                                "942.37 504 L 944.12 507.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -863,7 +910,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1528.81 242.93 L 1535.81 239.43 L 1534.06 242.93 L 1535.81 246.43 Z",
+                                                d="M 1528.81 242.93 L 1535.81 239.43 L "
+                                                "1534.06 242.93 L 1535.81 246.43 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -873,7 +921,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1596.57 274.64 L 1589.57 278.14 L 1591.32 274.64 L 1589.57 271.14 Z",
+                                                d="M 1596.57 274.64 L 1589.57 278.14 L "
+                                                "1591.32 274.64 L 1589.57 271.14 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -883,7 +932,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1413 127.12 L 1416.5 134.12 L 1413 132.37 L 1409.5 134.12 Z",
+                                                d="M 1413 127.12 L 1416.5 134.12 L "
+                                                "1413 132.37 L 1409.5 134.12 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -893,7 +943,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1443 194.88 L 1439.5 187.88 L 1443 189.63 L 1446.5 187.88 Z",
+                                                d="M 1443 194.88 L 1439.5 187.88 L "
+                                                "1443 189.63 L 1446.5 187.88 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -903,7 +954,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1413.01 372.12 L 1416.54 379.1 L 1413.03 377.37 L 1409.54 379.14 Z",
+                                                d="M 1413.01 372.12 L 1416.54 379.1 L "
+                                                "1413.03 377.37 L 1409.54 379.14 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -913,12 +965,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1443.35 437.38 L 1439.82 430.4 L 1443.33 432.13 L 1446.82 430.36 Z",
+                                                d="M 1443.35 437.38 L 1439.82 430.4 L "
+                                                "1443.33 432.13 L 1446.82 430.36 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1145.25 341.38 L 1141.75 334.38 L 1145.25 336.13 L 1148.75 334.38 Z",
+                                                d="M 1145.25 341.38 L 1141.75 334.38 L "
+                                                "1145.25 336.13 L 1148.75 334.38 Z",
                                                 fill="rgb(0, 0, 0)",
                                                 stroke="rgb(0, 0, 0)",
                                             ),
@@ -928,7 +982,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 647.12 82 L 654.12 78.5 L 652.37 82 L 654.12 85.5 Z",
+                                                d="M 647.12 82 L 654.12 78.5 L 652.37 "
+                                                "82 L 654.12 85.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -938,7 +993,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 651.12 386.75 L 658.12 383.25 L 656.37 386.75 L 658.12 390.25 Z",
+                                                d="M 651.12 386.75 L 658.12 383.25 L "
+                                                "656.37 386.75 L 658.12 390.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -948,12 +1004,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 646.12 269 L 653.12 265.5 L 651.37 269 L 653.12 272.5 Z",
+                                                d="M 646.12 269 L 653.12 265.5 L "
+                                                "651.37 269 L 653.12 272.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 748.88 269 L 741.88 272.5 L 743.63 269 L 741.88 265.5 Z",
+                                                d="M 748.88 269 L 741.88 272.5 L "
+                                                "743.63 269 L 741.88 265.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -963,7 +1021,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 939.12 206.41 L 946.12 202.91 L 944.37 206.41 L 946.12 209.91 Z",
+                                                d="M 939.12 206.41 L 946.12 202.91 L "
+                                                "944.37 206.41 L 946.12 209.91 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -973,7 +1032,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 235.42 L 1033.9 238.95 L 1035.63 235.44 L 1033.86 231.95 Z",
+                                                d="M 1040.88 235.42 L 1033.9 238.95 L "
+                                                "1035.63 235.44 L 1033.86 231.95 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -983,12 +1043,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 938.12 268.41 L 945.12 264.91 L 943.37 268.41 L 945.12 271.91 Z",
+                                                d="M 938.12 268.41 L 945.12 264.91 L "
+                                                "943.37 268.41 L 945.12 271.91 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 268.41 L 1033.88 271.91 L 1035.63 268.41 L 1033.88 264.91 Z",
+                                                d="M 1040.88 268.41 L 1033.88 271.91 L "
+                                                "1035.63 268.41 L 1033.88 264.91 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -998,7 +1060,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 939.12 354.32 L 946.12 350.82 L 944.37 354.32 L 946.12 357.82 Z",
+                                                d="M 939.12 354.32 L 946.12 350.82 L "
+                                                "944.37 354.32 L 946.12 357.82 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1008,7 +1071,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 383.33 L 1033.9 386.86 L 1035.63 383.35 L 1033.86 379.86 Z",
+                                                d="M 1040.88 383.33 L 1033.9 386.86 L "
+                                                "1035.63 383.35 L 1033.86 379.86 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1018,12 +1082,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 938.12 416.32 L 945.12 412.82 L 943.37 416.32 L 945.12 419.82 Z",
+                                                d="M 938.12 416.32 L 945.12 412.82 L "
+                                                "943.37 416.32 L 945.12 419.82 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 416.32 L 1033.88 419.82 L 1035.63 416.32 L 1033.88 412.82 Z",
+                                                d="M 1040.88 416.32 L 1033.88 419.82 L "
+                                                "1035.63 416.32 L 1033.88 412.82 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1033,7 +1099,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1252.12 245.75 L 1259.12 242.25 L 1257.37 245.75 L 1259.12 249.25 Z",
+                                                d="M 1252.12 245.75 L 1259.12 242.25 L "
+                                                "1257.37 245.75 L 1259.12 249.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1043,7 +1110,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1353.88 274.76 L 1346.9 278.29 L 1348.63 274.78 L 1346.86 271.29 Z",
+                                                d="M 1353.88 274.76 L 1346.9 278.29 L "
+                                                "1348.63 274.78 L 1346.86 271.29 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1053,18 +1121,21 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1251.12 307.75 L 1258.12 304.25 L 1256.37 307.75 L 1258.12 311.25 Z",
+                                                d="M 1251.12 307.75 L 1258.12 304.25 L "
+                                                "1256.37 307.75 L 1258.12 311.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1353.88 307.75 L 1346.88 311.25 L 1348.63 307.75 L 1346.88 304.25 Z",
+                                                d="M 1353.88 307.75 L 1346.88 311.25 L "
+                                                "1348.63 307.75 L 1346.88 304.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
                                                 id="p2",
-                                                d="M 235 67 L 245 57 L 265 57 L 275 67 Z",
+                                                d="M 235 67 L 245 57 L "
+                                                "265 57 L 275 67 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1090,7 +1161,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p3",
-                                                d="M 235 117 L 245 107 L 265 107 L 275 117 Z",
+                                                d="M 235 117 L 245 107 L 265 "
+                                                "107 L 275 117 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1116,7 +1188,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p4",
-                                                d="M 235 167 L 245 157 L 265 157 L 275 167 Z",
+                                                d="M 235 167 L 245 157 L "
+                                                "265 157 L 275 167 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1142,7 +1215,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p5",
-                                                d="M 235 217 L 245 207 L 265 207 L 275 217 Z",
+                                                d="M 235 217 L 245 207 L "
+                                                "265 207 L 275 217 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1168,7 +1242,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p6",
-                                                d="M 235 267 L 245 257 L 265 257 L 275 267 Z",
+                                                d="M 235 267 L 245 257 L "
+                                                "265 257 L 275 267 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1194,7 +1269,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p7",
-                                                d="M 235 317 L 245 307 L 265 307 L 275 317 Z",
+                                                d="M 235 317 L 245 307 L "
+                                                "265 307 L 275 317 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1220,7 +1296,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p8",
-                                                d="M 235 367 L 245 357 L 265 357 L 275 367 Z",
+                                                d="M 235 367 L 245 357 L "
+                                                "265 357 L 275 367 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1246,7 +1323,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p9",
-                                                d="M 235 417 L 245 407 L 265 407 L 275 417 Z",
+                                                d="M 235 417 L 245 407 L "
+                                                "265 407 L 275 417 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1963,42 +2041,93 @@ def get_memchart(mem_data, base_data):
 
 def format_value_for_display(value, max_length=6):
     """
-    Format values to prevent overflow in SVG text elements.
-    """
-    #####
-    # TODO: this is quick fix to prevent value overflow.
-    # The long term solution should be dynamically adjust
-    # SVG dimensions and positions to maintain visual
-    # integrity while preventing overflow.
-    #####
+    Format a value (int, float, or str) into a concise string suitable for display.
 
-    # 1. If non-numerical
+    The function attempts to convert strings to numeric types if possible.
+    It then decides between normal decimal notation and scientific notation
+    based on length constraints and value magnitude.
+
+    If the formatted string is too long, it truncates it gracefully,
+    preserving scientific notation exponent parts where applicable.
+
+    Parameters:
+    - value: The input value to format. Can be int, float, or string.
+             Strings representing numbers are converted to numeric types if possible.
+    - max_length: Maximum allowed length of the output string.
+                  Longer strings are truncated with an ellipsis ('…').
+
+    Returns:
+    - A string representation of the input value, formatted either
+      in fixed-point or scientific notation, and truncated if too long.
+      Returns "N/A" if the value is invalid (e.g., None or NaN).
+    """
+
+    if value is None:
+        return "N/A"
+
     if isinstance(value, str):
         try:
             if "." in value:
+                # when dot is in the string, we know it's a
+                # float number and convert with "float"
                 value = float(value)
             else:
+                # without dot, we assume it's an integer and convert with "int"
                 value = int(value)
         except ValueError:
-            pass  # Keep as string
-    # 2. If numerical
+            # when conversion fails, the string is neither legit float or int,
+            # then assume it's invalid and display "N/A"
+            return "N/A"
+
     if isinstance(value, (int, float)):
-        value = abs(value)
-        if value >= 1000000000:
-            value = f"{value/1000000000:.1f}B"
-        elif value >= 1000000:
-            value = f"{value/1000000:.1f}M"
-        elif value >= 1000:
-            value = f"{value/1000:.1f}K"
-        elif value == int(value):
-            value = str(int(value))
+        is_negative = value < 0
+        abs_val = abs(value)
+
+        if isinstance(abs_val, float):
+            if value != value:
+                return "N/A"
+
+            if abs_val.is_integer():
+                normal = str(int(abs_val))
+            else:
+                normal = f"{abs_val:.1f}"
         else:
-            value = f"{value:.1f}"
+            normal = str(abs_val)
+
+        sci = format_scientific_notation_if_needed(
+            abs_val,
+            align=">",
+            width_align=8,
+            precision=1,
+            fmt_type_align="e",
+            max_length=max_length,
+        ).strip()
+
+        # Choose shorter notation or if normal too long
+        if len(sci) < len(normal) or len(normal) > max_length:
+            value = sci
+        else:
+            value = normal
+
+        if is_negative:
+            value = "-" + value
+
     else:
         value = str(value)
 
-    # 3. Truncate if needed
+    # Custom truncation logic:
     if len(value) > max_length:
-        value = value[: max_length - 1] + "…"
+        if "e" in value.lower():
+            e_index = value.lower().index("e")
+            mantissa = value[:e_index]
+            exponent = value[e_index:]
+            max_mantissa_len = max_length - len(exponent)
+            if max_mantissa_len < 1:
+                value = exponent[: max_length - 1] + "…"
+            else:
+                truncated_mantissa = mantissa[:max_mantissa_len]
+                value = truncated_mantissa + exponent
+        else:
+            value = value[: max_length - 1] + "…"
 
     return value

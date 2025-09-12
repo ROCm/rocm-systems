@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,22 +10,23 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import os
 import shutil
-from importlib.machinery import SourceFileLoader
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -42,12 +43,18 @@ indirs = [
     "tests/workloads/vcopy/MI350",
 ]
 
+time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
+
 
 @pytest.mark.misc
 def test_valid_path(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -57,38 +64,34 @@ def test_valid_path(binary_handler_analyze_rocprof_compute):
 def test_list_kernels(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--list-stats"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-stats",
+        ])
         assert code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
 def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx90a"])
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-metrics",
+        "gfx90a",
+    ])
     assert code == 1
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--list-metrics", "gfx90a"]
-        )
-        assert code == 0
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
-def test_list_metrics_gfx906(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx906"])
-    assert code == 1
-
-    for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--list-metrics", "gfx906"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-metrics",
+            "gfx90a",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -96,15 +99,103 @@ def test_list_metrics_gfx906(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.list_metrics
 def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx908"])
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-metrics",
+        "gfx908",
+    ])
     assert code == 1
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--list-metrics", "gfx908"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-metrics",
+            "gfx908",
+        ])
         assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-metrics",
+        "gfx908",
+        "--block",
+        "1",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-metrics",
+            "gfx908",
+            "--block",
+            "1",
+        ])
+        assert code == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-available-metrics",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-available-metrics",
+        ])
+        assert code == 0
+
+        # Test output
+        output = capsys.readouterr().out
+        assert "0. Top Stats" in output
+        assert "1. System Info" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_available_metrics_with_block(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--list-available-metrics",
+        "--block",
+        "1",
+    ])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-available-metrics",
+            "--block",
+            "1",
+        ])
+        assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -113,9 +204,13 @@ def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
 def test_filter_block_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--block", "1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "1",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -125,9 +220,13 @@ def test_filter_block_1(binary_handler_analyze_rocprof_compute):
 def test_filter_block_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--block", "5"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "5",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -137,9 +236,13 @@ def test_filter_block_2(binary_handler_analyze_rocprof_compute):
 def test_filter_block_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--block", "5.2.2"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "5.2.2",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -149,9 +252,13 @@ def test_filter_block_3(binary_handler_analyze_rocprof_compute):
 def test_filter_block_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--block", "6.1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "6.1",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -161,9 +268,13 @@ def test_filter_block_4(binary_handler_analyze_rocprof_compute):
 def test_filter_block_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--block", "10"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "10",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -173,9 +284,13 @@ def test_filter_block_5(binary_handler_analyze_rocprof_compute):
 def test_filter_block_6(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--block", "100"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "100",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -185,9 +300,13 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute):
 def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel", "0"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel",
+            "0",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -197,9 +316,13 @@ def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
 def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel", "1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel",
+            "1",
+        ])
         assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -209,9 +332,14 @@ def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
 def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel", "0", "1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel",
+            "0",
+            "1",
+        ])
         assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -221,9 +349,13 @@ def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
 def test_dispatch_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--dispatch", "0"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--dispatch",
+            "0",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -233,9 +365,13 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
 def test_dispatch_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--dispatch", "1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--dispatch",
+            "1",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -245,9 +381,13 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
 def test_dispatch_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--dispatch", "2"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--dispatch",
+            "2",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -257,9 +397,14 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
 def test_dispatch_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--dispatch", "1", "4"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--dispatch",
+            "1",
+            "4",
+        ])
         assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -269,9 +414,14 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
 def test_dispatch_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--dispatch", "5", "6"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--dispatch",
+            "5",
+            "6",
+        ])
         assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -280,14 +430,18 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        if dir.endswith("MI350"):
+        if dir == "tests/workloads/vcopy/MI350":
             gpu_id = "0"
         else:
             gpu_id = "2"
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--gpu-id", gpu_id]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--gpu-id",
+            gpu_id,
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -297,9 +451,13 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
 def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--normal-unit", "per_wave"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--normal-unit",
+            "per_wave",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -309,9 +467,13 @@ def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
 def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--normal-unit", "per_cycle"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--normal-unit",
+            "per_cycle",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -321,9 +483,13 @@ def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
 def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--normal-unit", "per_second"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--normal-unit",
+            "per_second",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -333,9 +499,13 @@ def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
 def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--normal-unit", "per_kernel"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--normal-unit",
+            "per_kernel",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -345,9 +515,13 @@ def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
 def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--max-stat-num", "0"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--max-stat-num",
+            "0",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -357,9 +531,13 @@ def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
 def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--max-stat-num", "5"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--max-stat-num",
+            "5",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -369,9 +547,13 @@ def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
 def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--max-stat-num", "10"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--max-stat-num",
+            "10",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -381,9 +563,13 @@ def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
 def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--max-stat-num", "15"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--max-stat-num",
+            "15",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -393,9 +579,13 @@ def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
 def test_time_unit_s(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--time-unit", "s"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--time-unit",
+            "s",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -405,9 +595,13 @@ def test_time_unit_s(binary_handler_analyze_rocprof_compute):
 def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--time-unit", "ms"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--time-unit",
+            "ms",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -417,9 +611,13 @@ def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
 def test_time_unit_us(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--time-unit", "us"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--time-unit",
+            "us",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -429,9 +627,13 @@ def test_time_unit_us(binary_handler_analyze_rocprof_compute):
 def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--time-unit", "ns"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--time-unit",
+            "ns",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -441,9 +643,13 @@ def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
 def test_decimal_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--decimal", "0"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--decimal",
+            "0",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -453,9 +659,13 @@ def test_decimal_1(binary_handler_analyze_rocprof_compute):
 def test_decimal_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--decimal", "1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--decimal",
+            "1",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -465,9 +675,13 @@ def test_decimal_2(binary_handler_analyze_rocprof_compute):
 def test_decimal_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--decimal", "4"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--decimal",
+            "4",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -475,54 +689,41 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.misc
 def test_save_dfs(binary_handler_analyze_rocprof_compute):
-    output_path = "tests/workloads/vcopy/saved_analysis"
+    output_path = test_utils.get_output_dir()
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--save-dfs", output_path]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--output-format",
+            "csv",
+            "--output-name",
+            output_path,
+        ])
         assert code == 0
 
         files_in_workload = os.listdir(output_path)
-        single_row_tables = [
-            "0.1_Top_Kernels.csv",
-            "13.3_Instruction_Cache_-_L2_Interface.csv",
-            "18.1_Aggregate_Stats_(All_channels).csv",
-        ]
         for file_name in files_in_workload:
             df = pd.read_csv(output_path + "/" + file_name)
-            if file_name in single_row_tables:
-                assert len(df.index) == 1
-            else:
-                assert len(df.index) >= 3
+            assert len(df.index) >= 1
 
         shutil.rmtree(output_path)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
-    code = binary_handler_analyze_rocprof_compute(
-        ["analyze", "--path", workload_dir, "--save-dfs", output_path]
-    )
-    assert code == 0
-
-    files_in_workload = os.listdir(output_path)
-    for file_name in files_in_workload:
-        df = pd.read_csv(output_path + "/" + file_name)
-        if file_name in single_row_tables:
-            assert len(df.index) == 1
-        else:
-            assert len(df.index) >= 3
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], output_path)
 
 
 @pytest.mark.col
 def test_col_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--cols", "0"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--cols",
+            "0",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -532,9 +733,15 @@ def test_col_1(binary_handler_analyze_rocprof_compute):
 def test_col_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--cols", "2"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--cols",
+            "2",
+            "--include-cols",
+            "Description",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -544,9 +751,14 @@ def test_col_2(binary_handler_analyze_rocprof_compute):
 def test_col_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--cols", "0", "2"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--cols",
+            "0",
+            "2",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -556,9 +768,12 @@ def test_col_3(binary_handler_analyze_rocprof_compute):
 def test_g(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "-g"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "-g",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -568,9 +783,13 @@ def test_g(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "0"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "0",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -580,9 +799,13 @@ def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "1"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "1",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -592,9 +815,13 @@ def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "2"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "2",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -604,9 +831,13 @@ def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "3"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "3",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -616,9 +847,13 @@ def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "4"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "4",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -628,9 +863,13 @@ def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "5"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "5",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -640,9 +879,13 @@ def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
 def test_kernel_verbose_6(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--kernel-verbose", "6"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel-verbose",
+            "6",
+        ])
         assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -650,37 +893,31 @@ def test_kernel_verbose_6(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.misc
 def test_baseline(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute(
-        [
-            "analyze",
-            "--path",
-            "tests/workloads/vcopy/MI200",
-            "--path",
-            "tests/workloads/vcopy/MI100",
-        ]
-    )
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        "tests/workloads/vcopy/MI200",
+        "--path",
+        "tests/workloads/vcopy/MI100",
+    ])
     assert code == 0
 
-    code = binary_handler_analyze_rocprof_compute(
-        [
-            "analyze",
-            "--path",
-            "tests/workloads/vcopy/MI200",
-            "--path",
-            "tests/workloads/vcopy/MI200",
-        ]
-    )
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        "tests/workloads/vcopy/MI200",
+        "--path",
+        "tests/workloads/vcopy/MI200",
+    ])
     assert code == 1
 
-    code = binary_handler_analyze_rocprof_compute(
-        [
-            "analyze",
-            "--path",
-            "tests/workloads/vcopy/MI100",
-            "--path",
-            "tests/workloads/vcopy/MI100",
-        ]
-    )
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        "tests/workloads/vcopy/MI100",
+        "--path",
+        "tests/workloads/vcopy/MI100",
+    ])
     assert code == 1
 
 
@@ -693,9 +930,12 @@ def test_baseline(binary_handler_analyze_rocprof_compute):
 def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--dependency"]
-        )
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--dependency",
+        ])
         assert code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -704,7 +944,6 @@ def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
 def test_parser_utility_functions():
     """Test parser utility functions edge cases"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -712,7 +951,6 @@ def test_parser_utility_functions():
     import pandas as pd
 
     from utils.parser import (
-        to_avg,
         to_concat,
         to_int,
         to_max,
@@ -814,49 +1052,18 @@ def test_parser_utility_functions():
 def test_parser_error_handling():
     """Test parser error handling paths"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
 
     try:
-        build_eval_string("AVG(SQ_WAVES)", None)
+        build_eval_string("AVG(SQ_WAVES)", None, config={})
         assert False, "Should have raised exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
 
-    assert build_eval_string("", "pmc_perf") == ""
-    assert update_denom_string("", "per_wave") == ""
-
-    class MockSysInfo:
-        total_l2_chan = 32
-
-    sys_info = MockSysInfo()
-    try:
-        calc_builtin_var("$unsupported_var", sys_info)
-        assert False, "Should have raised exception for unsupported var"
-    except SystemExit:
-        pass
-
-
-@pytest.mark.misc
-def test_parser_error_handling():
-    """Test parser error handling paths"""
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-    from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
-
-    try:
-        build_eval_string("AVG(SQ_WAVES)", None)
-        assert False, "Should have raised exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
-
-    assert build_eval_string("", "pmc_perf") == ""
+    assert build_eval_string("", "pmc_perf", config={}) == ""
     assert update_denom_string("", "per_wave") == ""
 
     class MockSysInfo:
@@ -873,7 +1080,6 @@ def test_parser_error_handling():
 @pytest.mark.misc
 def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
     """Test handling of missing files"""
-    import os
     import tempfile
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -885,7 +1091,6 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
 def test_ast_transformer_edge_cases():
     """Simplified test focusing on the actual code paths"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -906,9 +1111,9 @@ def test_ast_transformer_edge_cases():
         if hasattr(result.func, "id") and result.func.id == "UNKNOWN_FUNCTION":
             assert False, "Function name should have been changed or exception raised"
     except Exception as e:
-        assert "Unknown call" in str(
-            e
-        ), f"Expected 'Unknown call' in error, got: {str(e)}"
+        assert "Unknown call" in str(e), (
+            f"Expected 'Unknown call' in error, got: {str(e)}"
+        )
 
     supported_call = ast.Call(
         func=ast.Name(id="MIN", ctx=ast.Load()),
@@ -927,24 +1132,20 @@ def test_ast_transformer_edge_cases():
 def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     """Test analyze to cover debug paths in eval_metric - using direct function call"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    import numpy as np
     import pandas as pd
 
     from utils.parser import eval_metric
 
     mock_dfs = {
-        1: pd.DataFrame(
-            {
-                "Metric_ID": ["1.1.0"],
-                "Metric": ["Test Metric"],
-                "Expr": ["AVG(SQ_WAVES)"],
-                "coll_level": ["pmc_perf"],
-            }
-        ).set_index("Metric_ID")
+        1: pd.DataFrame({
+            "Metric_ID": ["1.1.0"],
+            "Metric": ["Test Metric"],
+            "Expr": ["AVG(SQ_WAVES)"],
+            "coll_level": ["pmc_perf"],
+        }).set_index("Metric_ID")
     }
 
     mock_dfs_type = {1: "metric_table"}
@@ -970,19 +1171,19 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     sys_info = MockSysInfo()
 
     raw_pmc_df = {
-        "pmc_perf": pd.DataFrame(
-            {
-                "SQ_WAVES": [100, 200, 150],
-                "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
-                "End_Timestamp": [1000000, 2000000, 1500000],
-                "Start_Timestamp": [0, 1000000, 500000],
-            }
-        )
+        "pmc_perf": pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+            "End_Timestamp": [1000000, 2000000, 1500000],
+            "Start_Timestamp": [0, 1000000, 500000],
+        })
     }
 
     try:
-        eval_metric(mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True)
-    except Exception as e:
+        eval_metric(
+            mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True, config={}
+        )
+    except Exception:
         pass
 
 
@@ -993,14 +1194,20 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
         if os.path.exists(dir):
             workload_dir = test_utils.setup_workload_dir(dir)
 
-            code = binary_handler_analyze_rocprof_compute(
-                ["analyze", "--path", workload_dir]
-            )
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_dir,
+            ])
             assert code == 0
 
-            code = binary_handler_analyze_rocprof_compute(
-                ["analyze", "--path", workload_dir, "--block", "SQ"]
-            )
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_dir,
+                "--block",
+                "SQ",
+            ])
             assert code == 0
 
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1011,7 +1218,6 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
 def test_apply_filters_direct():
     """Test apply_filters function directly to cover filter branches"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1021,19 +1227,17 @@ def test_apply_filters_direct():
 
     class MockWorkload:
         def __init__(self):
-            self.raw_pmc = pd.DataFrame(
-                {
-                    ("pmc_perf", "GPU_ID"): [0, 0, 1, 1],
-                    ("pmc_perf", "Kernel_Name"): [
-                        "vecCopy",
-                        "vecAdd",
-                        "vecCopy",
-                        "vecMul",
-                    ],
-                    ("pmc_perf", "Dispatch_ID"): [0, 1, 2, 3],
-                    ("pmc_perf", "Node"): ["node0", "node0", "node1", "node1"],
-                }
-            )
+            self.raw_pmc = pd.DataFrame({
+                ("pmc_perf", "GPU_ID"): [0, 0, 1, 1],
+                ("pmc_perf", "Kernel_Name"): [
+                    "vecCopy",
+                    "vecAdd",
+                    "vecCopy",
+                    "vecMul",
+                ],
+                ("pmc_perf", "Dispatch_ID"): [0, 1, 2, 3],
+                ("pmc_perf", "Node"): ["node0", "node0", "node1", "node1"],
+            })
             self.raw_pmc.columns = pd.MultiIndex.from_tuples(self.raw_pmc.columns)
 
         filter_nodes = None
@@ -1076,9 +1280,11 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
                     if os.path.exists(csv_path):
                         os.remove(csv_path)
 
-                code = binary_handler_analyze_rocprof_compute(
-                    ["analyze", "--path", workload_dir]
-                )
+                code = binary_handler_analyze_rocprof_compute([  # noqa: F841
+                    "analyze",
+                    "--path",
+                    workload_dir,
+                ])
             break
 
 
@@ -1086,7 +1292,6 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
 def test_pc_sampling_basic_coverage():
     """Test PC sampling functions with minimal data"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1118,7 +1323,6 @@ def test_pc_sampling_basic_coverage():
 def test_build_dfs_edge_cases():
     """Test build_dfs and gen_counter_list with various configurations"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1148,7 +1352,6 @@ def test_build_dfs_edge_cases():
 def test_update_functions_coverage():
     """Test update_denom_string and update_normUnit_string branches"""
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -1170,3 +1373,252 @@ def test_update_functions_coverage():
     result = update_normUnit_string("(Prefix + $normUnit)", "per_wave")
     assert "per wave" in result.lower()
     assert result[0].isupper()
+
+
+@pytest.fixture
+def sample_time_data():
+    return pd.DataFrame({
+        "Metric_ID": ["7.2.0", "7.2.1", "7.2.2"],
+        "Metric": [
+            "Kernel Time",
+            "Kernel Time (Cycles)",
+            "Non-Time Metric",
+        ],
+        "Avg": [3446.64, 64499.39, 1000.0],
+        "Min": [1769.25, 17269.25, 500.0],
+        "Max": [12532.12, 337030.50, 2000.0],
+        "Unit": ["ns", "Cycle", "Count"],
+    })
+
+
+@pytest.fixture
+def original_ns_values():
+    return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
+
+
+@pytest.mark.time_unit_conversion
+def test_has_time_data_detection(sample_time_data):
+    from utils.tty import has_time_data
+
+    assert has_time_data(sample_time_data)
+
+    no_time_data = pd.DataFrame({
+        "Metric": ["Non-Time Metric"],
+        "Avg": [1000.0],
+        "Unit": ["Count"],
+    })
+    assert not has_time_data(no_time_data)
+
+    no_unit_column = pd.DataFrame({"Metric": ["Some Metric"], "Avg": [1000.0]})
+    assert not has_time_data(no_unit_column)
+
+
+@pytest.mark.time_unit_conversion
+def test_default_unit_is_nanoseconds(sample_time_data):
+    time_rows = sample_time_data["Unit"].str.lower().str.contains("ns", na=False)
+    assert time_rows.any()
+    assert sample_time_data.loc[0, "Unit"] == "ns"
+
+
+@pytest.mark.time_unit_conversion
+def test_time_unit_conversion_to_seconds(sample_time_data, original_ns_values):
+    from utils.tty import convert_time_columns
+
+    converted_df = convert_time_columns(sample_time_data, "s")
+
+    assert converted_df.loc[0, "Unit"] == "s"
+
+    expected_avg = original_ns_values["Avg"] / time_units["s"]
+    expected_min = original_ns_values["Min"] / time_units["s"]
+    expected_max = original_ns_values["Max"] / time_units["s"]
+
+    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
+    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
+    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
+
+    assert converted_df.loc[1, "Unit"] == "Cycle"
+    assert converted_df.loc[2, "Unit"] == "Count"
+
+
+@pytest.mark.time_unit_conversion
+def test_time_unit_conversion_to_milliseconds(sample_time_data, original_ns_values):
+    from utils.tty import convert_time_columns
+
+    converted_df = convert_time_columns(sample_time_data, "ms")
+
+    assert converted_df.loc[0, "Unit"] == "ms"
+
+    expected_avg = original_ns_values["Avg"] / time_units["ms"]
+    expected_min = original_ns_values["Min"] / time_units["ms"]
+    expected_max = original_ns_values["Max"] / time_units["ms"]
+
+    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
+    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-6
+    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-6
+
+
+@pytest.mark.time_unit_conversion
+def test_time_unit_conversion_to_microseconds(sample_time_data, original_ns_values):
+    from utils.tty import convert_time_columns
+
+    converted_df = convert_time_columns(sample_time_data, "us")
+
+    assert converted_df.loc[0, "Unit"] == "us"
+
+    expected_avg = original_ns_values["Avg"] / time_units["us"]
+    expected_min = original_ns_values["Min"] / time_units["us"]
+    expected_max = original_ns_values["Max"] / time_units["us"]
+
+    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-3
+    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-3
+    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-3
+
+
+@pytest.mark.time_unit_conversion
+def test_time_unit_conversion_to_nanoseconds(sample_time_data, original_ns_values):
+    from utils.tty import convert_time_columns
+
+    converted_df = convert_time_columns(sample_time_data, "ns")
+
+    assert converted_df.loc[0, "Unit"] == "ns"
+
+    assert abs(converted_df.loc[0, "Avg"] - original_ns_values["Avg"]) < 1e-10
+    assert abs(converted_df.loc[0, "Min"] - original_ns_values["Min"]) < 1e-10
+    assert abs(converted_df.loc[0, "Max"] - original_ns_values["Max"]) < 1e-10
+
+
+@pytest.mark.time_unit_conversion
+def test_non_time_rows_unchanged(sample_time_data):
+    from utils.tty import convert_time_columns
+
+    converted_df = convert_time_columns(sample_time_data, "ms")
+
+    assert converted_df.loc[1, "Unit"] == "Cycle"
+    assert converted_df.loc[2, "Unit"] == "Count"
+    assert converted_df.loc[1, "Avg"] == 64499.39
+    assert converted_df.loc[2, "Avg"] == 1000.0
+
+
+@pytest.mark.time_unit_conversion
+def test_invalid_time_unit_handling(sample_time_data):
+    from utils.tty import convert_time_columns
+
+    original_df = sample_time_data.copy()
+    converted_df = convert_time_columns(sample_time_data, "invalid_unit")
+
+    pd.testing.assert_frame_equal(converted_df, original_df)
+
+
+@pytest.mark.time_unit_conversion
+def test_missing_unit_column():
+    from utils.tty import convert_time_columns
+
+    df_no_unit = pd.DataFrame({"Metric": ["Test Metric"], "Avg": [1000.0]})
+    converted_df = convert_time_columns(df_no_unit, "ms")
+
+    pd.testing.assert_frame_equal(converted_df, df_no_unit)
+
+
+@pytest.mark.time_unit_conversion
+def test_conversion_with_missing_columns(sample_time_data, original_ns_values):
+    from utils.tty import convert_time_columns
+
+    df_partial = sample_time_data[["Metric_ID", "Metric", "Avg", "Unit"]].copy()
+    converted_df = convert_time_columns(df_partial, "ms")
+
+    assert converted_df.loc[0, "Unit"] == "ms"
+    expected_avg = original_ns_values["Avg"] / time_units["ms"]
+    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
+
+
+@pytest.mark.time_unit_conversion
+def test_mathematical_correctness_all_units(sample_time_data, original_ns_values):
+    from utils.tty import convert_time_columns
+
+    test_cases = [
+        ("s", 10**9),  # 1 second = 10^9 nanoseconds
+        ("ms", 10**6),  # 1 millisecond = 10^6 nanoseconds
+        ("us", 10**3),  # 1 microsecond = 10^3 nanoseconds
+        ("ns", 1),  # 1 nanosecond = 1 nanosecond
+    ]
+
+    for target_unit, divisor in test_cases:
+        converted_df = convert_time_columns(sample_time_data, target_unit)
+
+        expected_avg = original_ns_values["Avg"] / divisor
+        expected_min = original_ns_values["Min"] / divisor
+        expected_max = original_ns_values["Max"] / divisor
+
+        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
+        assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
+        assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
+        assert converted_df.loc[0, "Unit"] == target_unit
+
+
+# Integration tests with show_all functionality
+@pytest.mark.time_unit_integration
+def test_integration_conversion_flow():
+    from utils.tty import convert_time_columns, has_time_data
+
+    mock_args = Mock()
+    mock_args.time_unit = "ms"
+    mock_args.decimal = 2
+
+    sample_df = pd.DataFrame({
+        "Metric_ID": ["7.2.0"],
+        "Metric": ["Kernel Time"],
+        "Avg": [3446640.0],  # 3.44664 ms in nanoseconds
+        "Min": [1769250.0],  # 1.76925 ms in nanoseconds
+        "Max": [12532120.0],  # 12.53212 ms in nanoseconds
+        "Unit": ["ns"],
+    })
+
+    if has_time_data(sample_df):
+        converted_df = convert_time_columns(sample_df, mock_args.time_unit)
+    else:
+        converted_df = sample_df
+
+    assert converted_df.loc[0, "Unit"] == "ms"
+    assert abs(converted_df.loc[0, "Avg"] - 3.44664) < 1e-5
+    assert abs(converted_df.loc[0, "Min"] - 1.76925) < 1e-5
+    assert abs(converted_df.loc[0, "Max"] - 12.53212) < 1e-5
+
+
+@pytest.mark.time_unit_integration
+def test_show_all_with_time_unit_conversion():
+    from utils.tty import convert_time_columns
+
+    test_data = pd.DataFrame({
+        "Metric_ID": ["7.2.0"],
+        "Metric": ["Kernel Time"],
+        "Avg": [3446.64],
+        "Min": [1769.25],
+        "Max": [12532.12],
+        "Unit": ["Ns"],
+    })
+
+    for time_unit in ["s", "ms", "us", "ns"]:
+        converted_df = convert_time_columns(test_data, time_unit)
+
+        assert converted_df.loc[0, "Unit"] == time_unit
+
+        expected_avg = 3446.64 / time_units[time_unit]
+        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
+
+
+@pytest.mark.time_unit_edge_cases
+def test_edge_cases_and_error_handling():
+    from utils.tty import convert_time_columns
+
+    empty_df = pd.DataFrame()
+    result = convert_time_columns(empty_df, "ms")
+    assert result.empty
+
+    nan_df = pd.DataFrame({"Avg": [float("nan"), 1000.0], "Unit": ["ns", "Count"]})
+    result = convert_time_columns(nan_df, "ms")
+    assert result.loc[0, "Unit"] == "ms"
+
+    mixed_case_df = pd.DataFrame({"Avg": [1000.0, 2000.0], "Unit": ["ns", "NS"]})
+    result = convert_time_columns(mixed_case_df, "ms")
+    assert result.loc[0, "Unit"] == "ms"
+    assert result.loc[1, "Unit"] == "ms"

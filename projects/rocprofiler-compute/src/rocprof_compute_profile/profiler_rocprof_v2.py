@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,19 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
-import os
+##############################################################################
+
 import shlex
 from pathlib import Path
 
@@ -33,8 +33,8 @@ from utils.utils import replace_timestamps, store_app_cmd
 
 
 class rocprof_v2_profiler(RocProfCompute_Base):
-    def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
-        super().__init__(profiling_args, profiler_mode, soc, supported_archs)
+    def __init__(self, profiling_args, profiler_mode, soc):
+        super().__init__(profiling_args, profiler_mode, soc)
         self.ready_to_profile = (
             self.get_args().roof_only
             and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
@@ -42,7 +42,6 @@ class rocprof_v2_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        fbase = Path(fname).stem
         app_cmd = shlex.split(self.get_args().remaining)
 
         args = []
@@ -89,10 +88,12 @@ class rocprof_v2_profiler(RocProfCompute_Base):
     @demarcate
     def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
-        super().post_processing()
-
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
+            # Run roofline microbenchmark
+            super().post_processing()
             # Replace timestamp data to solve a known rocprof bug
             replace_timestamps(self.get_args().path)
+        else:
+            console_log("roofline", "Detected existing pmc_perf.csv")

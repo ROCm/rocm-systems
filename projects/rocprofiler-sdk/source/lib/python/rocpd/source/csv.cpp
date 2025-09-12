@@ -75,15 +75,11 @@ CsvManager::CsvManager(rocprofiler::tool::output_config output_cfg)
     this->csv_configs = {
         {CsvType::KERNEL_DISPATCH,
          {"kernel_trace.csv",
-          "\"Guid\",\"Kind\",\"Agent_Id\",\"Queue_Id\","
-          "\"Stream_Id\",\"Thread_Id\",\"Dispatch_Id\","
-          "\"Kernel_Id\",\"Kernel_Name\",\"Correlation_Id\","
-          "\"Start_Timestamp\",\"End_"
-          "Timestamp\",\"Private_Segment_Size\",\"Group_"
-          "Segment_Size\",\"Workgroup_Size_X\","
-          "\"Workgroup_Size_Y\",\"Workgroup_Size_Z\",\"Grid_"
-          "Size_X\",\"Grid_Size_Y\",\"Grid_Size_"
-          "Z\""}},
+          "\"Guid\",\"Kind\",\"Agent_Id\",\"Queue_Id\",\"Stream_Id\",\"Thread_Id\",\"Dispatch_Id\","
+          "\"Kernel_Id\",\"Kernel_Name\",\"Correlation_Id\",\"Start_Timestamp\",\"End_Timestamp\","
+          "\"LDS_Block_Size\",\"Scratch_Size\",\"VGPR_Count\",\"Accum_VGPR_Count\",\"SGPR_Count\","
+          "\"Workgroup_Size_X\",\"Workgroup_Size_Y\",\"Workgroup_Size_Z\","
+          "\"Grid_Size_X\",\"Grid_Size_Y\",\"Grid_Size_Z\""}},
         {CsvType::MEMORY_COPY,
          {"memory_copy_trace.csv",
           "\"Guid\",\"Kind\",\"Direction\",\"Stream_Id\",\"Source_Agent_Id\","
@@ -109,7 +105,7 @@ CsvManager::CsvManager(rocprofiler::tool::output_config output_cfg)
         {CsvType::ROCJPEG_API, {"rocjpeg_api_trace.csv", API_TRACE_HEADER}},
 
         {CsvType::COUNTER,
-         {"counter_trace.csv",
+         {"counter_collection.csv",
           "\"Pid\",\"Correlation_Id\",\"Dispatch_Id\",\"Agent_Id\",\"Queue_Id\","
           "\"Process_Id\","
           "\"Thread_Id\","
@@ -238,8 +234,8 @@ write_kernel_csv(
         CsvType::KERNEL_DISPATCH,
         kernel_dispatch_gen,
         [](CsvManager& cm, CsvType type, const rocpd::types::kernel_dispatch& kernel) {
-            std::string kernel_identifier = cm.config.kernel_rename ? kernel.region : kernel.name;
-
+            std::string kernel_identifier =
+                (cm.config.kernel_rename && !kernel.region.empty()) ? kernel.region : kernel.name;
             std::string agent_identifier = create_agent_index(cm.config.agent_index_value,
                                                               kernel.agent_abs_index,
                                                               kernel.agent_log_index,
@@ -260,8 +256,11 @@ write_kernel_csv(
                           kernel.stack_id,
                           kernel.start,
                           kernel.end,
-                          kernel.scratch_size,
                           kernel.lds_size,
+                          kernel.scratch_size,
+                          kernel.vgpr_count,
+                          kernel.accum_vgpr_count,
+                          kernel.sgpr_count,
                           kernel.workgroup_size.x,
                           kernel.workgroup_size.y,
                           kernel.workgroup_size.z,
@@ -319,7 +318,13 @@ write_memory_allocation_csv(
         CsvType::MEMORY_ALLOCATION,
         memory_alloc_gen,
         [](CsvManager& cm, CsvType type, const rocpd::types::memory_allocation& malloc) {
-            std::string operation = fmt::format("MEMORY_ALLOCATION_{}", malloc.type);
+            std::string normalized_type = malloc.type;
+            if(normalized_type == "ALLOC")
+            {
+                normalized_type = "ALLOCATE";
+            }
+
+            std::string operation = fmt::format("MEMORY_ALLOCATION_{}", normalized_type);
 
             std::string agent_identifier = create_agent_index(cm.config.agent_index_value,
                                                               malloc.agent_abs_index,

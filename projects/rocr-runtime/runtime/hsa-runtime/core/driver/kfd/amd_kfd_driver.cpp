@@ -241,6 +241,12 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
             ? 1
             : kmt_alloc_flags.ui32.Uncached);
 
+  if (kmt_alloc_flags.ui32.Uncached) {
+    /* Uncached overwrites CoarseGrain and ExtendedCoherent */
+    kmt_alloc_flags.ui32.CoarseGrain = 0;
+    kmt_alloc_flags.ui32.ExtendedCoherent = 0;
+  }
+
   kmt_alloc_flags.ui32.ExecuteBlit =
     !!(alloc_flags & core::MemoryRegion::AllocateExecutableBlitKernelObject);
 

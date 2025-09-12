@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <iomanip>

@@ -82,7 +82,7 @@ struct comm_data : base<comm_data, void>
     static void preinit();
     static void configure();
     static void global_finalize();
-    static void start() {}
+    static void start();
     static void stop() {}
 
 #if defined(ROCPROFSYS_USE_MPI)

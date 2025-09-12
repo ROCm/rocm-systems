@@ -81,6 +81,93 @@ get_kernel(MQDependencyTest::CodeObject& code_object,
     return copy;
 }
 
+hsa_signal_t
+create_completion_signal()
+{
+    hsa_signal_t signal = {};
+    hsa_status_t status = hsa_signal_create(1, 0, nullptr, &signal);
+    RET_IF_HSA_ERR(status)
+    return signal;
+}
+
+hsa_queue_t*
+create_queue(hsa_agent_t agent)
+{
+    hsa_queue_t* queue  = nullptr;
+    hsa_status_t status = hsa_queue_create(
+        agent, 1024, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue);
+    RET_IF_HSA_ERR(status)
+    return queue;
+}
+
+void
+submit_kernel_packet(MQDependencyTest&               obj,
+                     hsa_queue_t*                    queue,
+                     const MQDependencyTest::Kernel& kernel,
+                     void*                           args,
+                     hsa_signal_t                    completion_signal)
+{
+    MQDependencyTest::Aql packet{};
+    packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.header.barrier = 1;
+    packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
+    packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
+
+    packet.dispatch.setup            = 1;
+    packet.dispatch.workgroup_size_x = 64;
+    packet.dispatch.workgroup_size_y = 1;
+    packet.dispatch.workgroup_size_z = 1;
+    packet.dispatch.grid_size_x      = 64;
+    packet.dispatch.grid_size_y      = 1;
+    packet.dispatch.grid_size_z      = 1;
+
+    packet.dispatch.group_segment_size   = kernel.group;
+    packet.dispatch.private_segment_size = kernel.scratch;
+    packet.dispatch.kernel_object        = kernel.handle;
+    packet.dispatch.kernarg_address      = args;
+    packet.dispatch.completion_signal    = completion_signal;
+
+    obj.submit_packet(queue, packet);
+}
+
+void
+submit_barrier_packet(MQDependencyTest& obj, hsa_queue_t* queue, hsa_signal_t dependency_signal)
+{
+    MQDependencyTest::Aql packet{};
+    packet.header.type    = HSA_PACKET_TYPE_BARRIER_AND;
+    packet.header.barrier = 1;
+    packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
+    packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
+
+    packet.barrier_and.dep_signal[0] = dependency_signal;
+    obj.submit_packet(queue, packet);
+}
+
+/**
+ * Expected Execution Pattern with Serialization:
+ *
+ * This test validates that the profiler's serialization mechanism can handle
+ * inter-queue dependencies without deadlock. The execution should follow this pattern:
+ *
+ * Phase 1:
+ *   Queue1: Kernel A executes → sets signal_1 = 0
+ *   Queue1: Barrier blocks (waiting for signal_2)
+ *   [Serializer switches to Queue2]
+ *   Queue2: Barrier proceeds (signal_1 = 0) → Kernel B executes → sets signal_2 = 0
+ *   [Serializer switches back to Queue1]
+ *   Queue1: Barrier proceeds (signal_2 = 0) → Kernel C executes
+ *
+ * Phase 2:
+ *   Queue1: Kernel D executes → sets signal_4 = 0
+ *   Queue1: Barrier blocks (waiting for signal_5)
+ *   [Serializer switches to Queue2]
+ *   Queue2: Barrier proceeds (signal_4 = 0) → Kernel E executes → sets signal_5 = 0
+ *   [Serializer switches back to Queue1]
+ *   Queue1: Barrier proceeds (signal_5 = 0) → Kernel F executes
+ *
+ * Key: Dependencies flow forward without cycles, allowing the serializer to make
+ * progress by switching between queues when one blocks on a barrier.
+ */
 int
 main()
 {
@@ -128,275 +215,59 @@ main()
     memset(c, 0, 64 * sizeof(uint32_t));
     memset(d, 1, 64 * sizeof(uint32_t));
 
-    // Create queue in gpu agent and prepare a kernel dispatch packet
-    hsa_queue_t* queue1 = nullptr;
-    status              = hsa_queue_create(obj.gpu[0].agent,
-                              1024,
-                              HSA_QUEUE_TYPE_SINGLE,
-                              nullptr,
-                              nullptr,
-                              UINT32_MAX,
-                              UINT32_MAX,
-                              &queue1);
-    RET_IF_HSA_ERR(status)
+    // Create queues
+    hsa_queue_t* queue1 = create_queue(obj.gpu[0].agent);
+    hsa_queue_t* queue2 = create_queue(obj.gpu[0].agent);
 
-    // Create a signal with a value of 1 and attach it to the first kernel
-    // dispatch packet
-    hsa_signal_t completion_signal_1 = {};
-    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_1);
-    RET_IF_HSA_ERR(status)
+    // Create completion signals
+    hsa_signal_t completion_signal_1 = create_completion_signal();
 
-    // First dispath packet on queue 1, Kernel A
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
+    // Set up arguments for first batch
+    args->a = a;
+    args->b = b;
 
-        packet.dispatch.setup            = 1;
-        packet.dispatch.workgroup_size_x = 64;
-        packet.dispatch.workgroup_size_y = 1;
-        packet.dispatch.workgroup_size_z = 1;
-        packet.dispatch.grid_size_x      = 64;
-        packet.dispatch.grid_size_y      = 1;
-        packet.dispatch.grid_size_z      = 1;
+    // Create more completion signals
+    hsa_signal_t completion_signal_2 = create_completion_signal();
+    hsa_signal_t completion_signal_3 = create_completion_signal();
 
-        packet.dispatch.group_segment_size   = copyA.group;
-        packet.dispatch.private_segment_size = copyA.scratch;
-        packet.dispatch.kernel_object        = copyA.handle;
+    // First dispatch packet on queue 1, Kernel A
+    submit_kernel_packet(obj, queue1, copyA, args, completion_signal_1);
 
-        packet.dispatch.kernarg_address   = args;
-        packet.dispatch.completion_signal = completion_signal_1;
+    // Barrier on queue 1 waiting for signal_2 (from queue2's Kernel B)
+    submit_barrier_packet(obj, queue1, completion_signal_2);
 
-        args->a = a;
-        args->b = b;
-        // Tell packet processor of A to launch the first kernel dispatch packet
-        obj.submit_packet(queue1, packet);
-    }
+    // Barrier on queue 2 waiting for signal_1 (from queue1's Kernel A)
+    submit_barrier_packet(obj, queue2, completion_signal_1);
 
-    // Create a signal with a value of 1 and attach it to the second kernel
-    // dispatch packet
-    hsa_signal_t completion_signal_2 = {};
-    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_2);
-    RET_IF_HSA_ERR(status)
+    // Kernel B on queue 2 (waits for barrier above)
+    submit_kernel_packet(obj, queue2, copyB, args, completion_signal_2);
 
-    hsa_signal_t completion_signal_3 = {};
-    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_3);
-    RET_IF_HSA_ERR(status)
+    // Second dispatch packet on queue 1, Kernel C (waits for barrier above)
+    submit_kernel_packet(obj, queue1, copyC, args, completion_signal_3);
 
-    // Create barrier-AND packet that is enqueued in queue 1
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_BARRIER_AND;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
+    // Set up arguments for second batch
+    args_memory->a = c;
+    args_memory->b = d;
 
-        packet.barrier_and.dep_signal[0] = completion_signal_2;
-        obj.submit_packet(queue1, packet);
-    }
+    // Create signals for second batch
+    hsa_signal_t completion_signal_4 = create_completion_signal();
+    hsa_signal_t completion_signal_5 = create_completion_signal();
+    hsa_signal_t completion_signal_6 = create_completion_signal();
+    // Second batch: Kernel D on queue 1
+    submit_kernel_packet(obj_memory, queue1, copyD, args_memory, completion_signal_4);
 
-    // Second dispath packet on queue 1, Kernel C
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
+    // Barrier on queue 1 waiting for signal_5 (from queue2's Kernel E)
+    submit_barrier_packet(obj_memory, queue1, completion_signal_5);
 
-        packet.dispatch.setup            = 1;
-        packet.dispatch.workgroup_size_x = 64;
-        packet.dispatch.workgroup_size_y = 1;
-        packet.dispatch.workgroup_size_z = 1;
-        packet.dispatch.grid_size_x      = 64;
-        packet.dispatch.grid_size_y      = 1;
-        packet.dispatch.grid_size_z      = 1;
+    // Barrier on queue 2 waiting for signal_4 (from queue1's Kernel D)
+    submit_barrier_packet(obj_memory, queue2, completion_signal_4);
 
-        packet.dispatch.group_segment_size   = copyC.group;
-        packet.dispatch.private_segment_size = copyC.scratch;
-        packet.dispatch.kernel_object        = copyC.handle;
-        packet.dispatch.completion_signal    = completion_signal_3;
-        packet.dispatch.kernarg_address      = args;
+    // Kernel E on queue 2 (waits for barrier above)
+    submit_kernel_packet(obj_memory, queue2, copyE, args_memory, completion_signal_5);
 
-        args->a = a;
-        args->b = b;
-        // Tell packet processor to launch the second kernel dispatch packet
-        obj.submit_packet(queue1, packet);
-    }
+    // Kernel F on queue 1 (waits for barrier above)
+    submit_kernel_packet(obj_memory, queue1, copyF, args_memory, completion_signal_6);
 
-    // Create queue 2
-    hsa_queue_t* queue2 = nullptr;
-    status              = hsa_queue_create(obj.gpu[0].agent,
-                              1024,
-                              HSA_QUEUE_TYPE_SINGLE,
-                              nullptr,
-                              nullptr,
-                              UINT32_MAX,
-                              UINT32_MAX,
-                              &queue2);
-    RET_IF_HSA_ERR(status)
-
-    // Create barrier-AND packet that is enqueued in queue 2
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_BARRIER_AND;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.barrier_and.dep_signal[0] = completion_signal_1;
-        obj.submit_packet(queue2, packet);
-    }
-
-    // Third dispath packet on queue 2, Kernel B
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.dispatch.setup            = 1;
-        packet.dispatch.workgroup_size_x = 64;
-        packet.dispatch.workgroup_size_y = 1;
-        packet.dispatch.workgroup_size_z = 1;
-        packet.dispatch.grid_size_x      = 64;
-        packet.dispatch.grid_size_y      = 1;
-        packet.dispatch.grid_size_z      = 1;
-
-        packet.dispatch.group_segment_size   = copyB.group;
-        packet.dispatch.private_segment_size = copyB.scratch;
-        packet.dispatch.kernel_object        = copyB.handle;
-
-        packet.dispatch.kernarg_address   = args;
-        packet.dispatch.completion_signal = completion_signal_2;
-
-        args->a = a;
-        args->b = b;
-        // Tell packet processor to launch the third kernel dispatch packet
-        obj.submit_packet(queue2, packet);
-    }
-    // Create a signal with a value of 1 and attach it to the first kernel
-    // dispatch packet
-    hsa_signal_t completion_signal_4 = {};
-    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_4);
-    RET_IF_HSA_ERR(status)
-    // First dispath packet on queue 1, Kernel D
-    {
-        [[maybe_unused]] MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.dispatch.setup            = 1;
-        packet.dispatch.workgroup_size_x = 64;
-        packet.dispatch.workgroup_size_y = 1;
-        packet.dispatch.workgroup_size_z = 1;
-        packet.dispatch.grid_size_x      = 64;
-        packet.dispatch.grid_size_y      = 1;
-        packet.dispatch.grid_size_z      = 1;
-
-        packet.dispatch.group_segment_size   = copyD.group;
-        packet.dispatch.private_segment_size = copyD.scratch;
-        packet.dispatch.kernel_object        = copyD.handle;
-
-        packet.dispatch.kernarg_address   = args_memory;
-        packet.dispatch.completion_signal = completion_signal_4;
-
-        args_memory->a = c;
-        args_memory->b = d;
-        // Tell packet processor of A to launch the first kernel dispatch packet
-        obj_memory.submit_packet(queue1, packet);
-    }
-
-    // Create a signal with a value of 1 and attach it to the second kernel
-    // dispatch packet
-    hsa_signal_t completion_signal_5 = {};
-    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_5);
-    RET_IF_HSA_ERR(status)
-    hsa_signal_t completion_signal_6 = {};
-    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_6);
-    RET_IF_HSA_ERR(status)
-
-    // Create barrier-AND packet that is enqueued in queue 1
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_BARRIER_AND;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.barrier_and.dep_signal[0] = completion_signal_5;
-        obj_memory.submit_packet(queue1, packet);
-    }
-    // Second dispath packet on queue 1, Kernel F
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.dispatch.setup            = 1;
-        packet.dispatch.workgroup_size_x = 64;
-        packet.dispatch.workgroup_size_y = 1;
-        packet.dispatch.workgroup_size_z = 1;
-        packet.dispatch.grid_size_x      = 64;
-        packet.dispatch.grid_size_y      = 1;
-        packet.dispatch.grid_size_z      = 1;
-
-        packet.dispatch.group_segment_size   = copyF.group;
-        packet.dispatch.private_segment_size = copyF.scratch;
-        packet.dispatch.kernel_object        = copyF.handle;
-        packet.dispatch.completion_signal    = completion_signal_6;
-        packet.dispatch.kernarg_address      = args_memory;
-
-        args_memory->a = c;
-        args_memory->b = d;
-        // Tell packet processor to launch the second kernel dispatch packet
-        obj_memory.submit_packet(queue1, packet);
-    }
-    // Create barrier-AND packet that is enqueued in queue 2
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_BARRIER_AND;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.barrier_and.dep_signal[0] = completion_signal_4;
-        obj_memory.submit_packet(queue2, packet);
-    }
-    // Third dispath packet on queue 2, Kernel
-    {
-        MQDependencyTest::Aql packet{};
-        packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-        packet.header.barrier = 1;
-        packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
-        packet.header.release = HSA_FENCE_SCOPE_SYSTEM;
-
-        packet.dispatch.setup            = 1;
-        packet.dispatch.workgroup_size_x = 64;
-        packet.dispatch.workgroup_size_y = 1;
-        packet.dispatch.workgroup_size_z = 1;
-        packet.dispatch.grid_size_x      = 64;
-        packet.dispatch.grid_size_y      = 1;
-        packet.dispatch.grid_size_z      = 1;
-
-        packet.dispatch.group_segment_size   = copyE.group;
-        packet.dispatch.private_segment_size = copyE.scratch;
-        packet.dispatch.kernel_object        = copyE.handle;
-
-        packet.dispatch.kernarg_address   = args_memory;
-        packet.dispatch.completion_signal = completion_signal_5;
-
-        args_memory->a = c;
-        args_memory->b = d;
-        // Tell packet processor to launch the third kernel dispatch packet
-        obj_memory.submit_packet(queue2, packet);
-    }
     // Wait on the completion signal
     hsa_signal_wait_relaxed(
         completion_signal_1, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);

@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,18 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
@@ -65,7 +66,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                 children=[
                                     dbc.DropdownMenu(
                                         [
-                                            dbc.DropdownMenuItem("Overview", header=True),
+                                            dbc.DropdownMenuItem(
+                                                "Overview", header=True
+                                            ),
                                             dbc.DropdownMenuItem(
                                                 "Roofline",
                                                 href="#roofline",
@@ -86,7 +89,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 href="#system_speed-of-light",
                                                 external_link=True,
                                             ),
-                                            dbc.DropdownMenuItem("Compute", header=True),
+                                            dbc.DropdownMenuItem(
+                                                "Compute", header=True
+                                            ),
                                             dbc.DropdownMenuItem(
                                                 "Command Processor (CPF/CPC)",
                                                 href="#command_processor_cpccpf",
@@ -129,8 +134,14 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
-                                                "Address Processing Unit and Data Return Path (TA/TD)",
-                                                href="#address_processing_unit_and_data_return_path_tatd",
+                                                (
+                                                    "Address Processing Unit and "
+                                                    "Data Return Path (TA/TD)"
+                                                ),
+                                                href=(
+                                                    "#address_processing_unit_and"
+                                                    "_data_return_path_tatd"
+                                                ),
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
@@ -197,9 +208,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 ),  # list avail gcd ids
                                                 id="gcd-filt",
                                                 multi=True,
-                                                value=input_filters[
-                                                    "gpu"
-                                                ],  # default to any gpu filters passed as args
+                                                # default to any gpu filters
+                                                # passed as args
+                                                value=input_filters["gpu"],
                                                 placeholder="ALL",
                                                 clearable=False,
                                                 style={"width": "60px"},
@@ -228,9 +239,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 ),
                                                 id="disp-filt",
                                                 multi=True,
-                                                value=input_filters[
-                                                    "dispatch"
-                                                ],  # default to any dispatch filters passed as args
+                                                # default to any dispatch
+                                                # filters passed as args
+                                                value=input_filters["dispatch"],
                                                 placeholder="ALL",
                                                 style={"width": "150px"},
                                             ),
@@ -252,7 +263,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 id="top-n-filt",
                                                 value=input_filters[
                                                     "top_n"
-                                                ],  # default to any dispatch filters passed as args
+                                                ],  # default to any dispatch filters
+                                                # passed as args
                                                 clearable=False,
                                                 style={"width": "50px"},
                                             ),
@@ -285,7 +297,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 optionHeight=150,
                                                 placeholder="ALL",
                                                 style={
-                                                    "width": "600px",  # TODO: Change these widths to % rather than fixed value
+                                                    "width": "600px",
+                                                    # TODO: Change these widths to
+                                                    # % rather than fixed value
                                                 },
                                             ),
                                         ]

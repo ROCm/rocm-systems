@@ -39,8 +39,8 @@ usage()
     echo ""
     echo "Usage: ${BASH_SOURCE[0]} <OPTIONS> -- <build-release.sh OPTIONS>"
     echo "  e.g:"
-    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 20.04 --rocm-versions 5.0 5.1     -- --core +nopython --rocm-mpi +nopython"
-    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 20.04 --python-version 6 7 8 9 10 -- --rocm +python   --rocm-mpi +nopython"
+    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 22.04 --rocm-versions 6.4 6.3     -- --core +nopython --rocm-mpi +nopython"
+    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 22.04 --python-version 6 7 8 9 10 -- --rocm +python   --rocm-mpi +nopython"
 }
 
 send-error()
@@ -98,8 +98,8 @@ reset-last
 
 : ${USER:=$(whoami)}
 : ${DISTRO:=ubuntu}
-: ${VERSIONS:=22.04 20.04}
-: ${ROCM_VERSIONS:=5.0 4.5 4.3}
+: ${VERSIONS:=22.04}
+: ${ROCM_VERSIONS:=6.4 6.3}
 : ${MPI:=0}
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${RETRY:=3}

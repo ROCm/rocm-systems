@@ -1,13 +1,13 @@
 # Apply Patch to Subrepos After Merge (Manual Run)
 # --------------------------------------------------
 # This GitHub Actions workflow lets you manually run the patching logic for
-# previously merged pull requests in the monorepo.
+# previously merged pull requests in the super-repo.
 #
 # It is useful for cases where the automatic patch workflow failed (e.g., due
 # to fork PRs lacking secrets), or if configuration or credentials have changed.
 #
 # Key Steps:
-# 1. Validate that the caller has 'admin' or 'maintain' permission on the monorepo.
+# 1. Validate that the caller has 'admin' or 'maintain' permission on the super-repo.
 # 2. Accept PR number as input.
 # 3. Generate a GitHub App token for authentication.
 # 4. Use a Python script to detect which subtrees were modified.
@@ -15,11 +15,11 @@
 #    - Generate a patch from the merge commit for that subtree.
 #    - Determine the appropriate author (based on PR metadata or fallback).
 #    - Clone the target sub-repo and apply the patch.
-#    - Amend the commit message to include links to the monorepo PR and commit.
+#    - Amend the commit message to include links to the super-repo PR and commit.
 #    - Push the commit directly to the sub-repo.
 #
 # This ensures downstream sub-repositories are updated to reflect changes
-# made in the monorepo, even if the original automated job failed.
+# made in the super-repo, even if the original automated job failed.
 
 name: Manual Patch Rerun
 

@@ -1,6 +1,6 @@
 # Import Issue Workflow
 # ---------------------
-# This workflow imports a single issue from a source repository into this monorepo repository,
+# This workflow imports a single issue from a source repository into this super-repo repository,
 # as part of a migration. It preserves key metadata including title, body, labels, and comment
 # history with timestamps and authorship.
 #
@@ -9,7 +9,7 @@
 #   - issue_number:  Issue number in the source repository to import
 #
 # Steps:
-#   1. Validate that the caller has 'admin' or 'maintain' permission on the monorepo
+#   1. Validate that the caller has 'admin' or 'maintain' permission on the super-repo
 #   2. Fetch the issue body, title, labels, and comments using the GitHub CLI (`gh api`)
 #   3. Create a new issue in the target repo, preserving:
 #      - Original title

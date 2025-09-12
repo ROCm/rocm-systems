@@ -33,6 +33,7 @@
 #include <limits.h>
 
 extern int hsakmt_kfd_fd;
+extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
 extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;

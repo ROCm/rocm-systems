@@ -127,6 +127,7 @@ struct config : output_config
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
+    bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);
     bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
     bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
     bool   pc_sampling_host_trap       = false;
@@ -139,7 +140,8 @@ struct config : output_config
     int      mpi_rank = get_mpi_rank();
     uint64_t att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
-    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x6000000);
+    // 256MB
+    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x10000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
@@ -150,6 +152,7 @@ struct config : output_config
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
     std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
+    std::string att_gpu_index           = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
@@ -225,6 +228,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(truncate);
     CFG_SERIALIZE_MEMBER(minimum_output_bytes);
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
+    CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
 
     CFG_SERIALIZE_MEMBER(counter_groups_random_seed);

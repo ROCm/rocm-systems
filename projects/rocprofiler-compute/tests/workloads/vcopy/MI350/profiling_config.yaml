@@ -1,7 +1,7 @@
 config_dir: /app/src/rocprof_compute_soc/analysis_configs
 device: -1
 dispatch: null
-filter_blocks: {}
+filter_blocks: []
 format_rocprof_output: csv
 hip_trace: false
 join_type: grid

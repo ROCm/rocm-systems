@@ -83,7 +83,11 @@ endif() # if (ROCM_CCACHE_BUILD)
 
 ## Find external dependencies.
 find_package(PkgConfig)
-find_package(LibElf REQUIRED)
+
+find_package(LibElf CONFIG)
+if(NOT LibElf_FOUND)
+  find_package(LibElf REQUIRED)
+endif()
 
 pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
 
@@ -204,6 +208,11 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code.cpp
            libamdhsacode/amd_core_dump.cpp )
 
+if ( BUILD_THUNK_VIRTIO )
+  list(APPEND SRCS core/driver/virtio/amd_kfd_virtio_driver.cpp)
+  target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
+endif()
+
 target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} )
 
 ## Depend on trap handler target.
@@ -302,6 +311,10 @@ target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
 # Link to hsakmt-staticdrm target for static library builds
 if( BUILD_SHARED_LIBS )
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt PkgConfig::drm)
+  if( BUILD_THUNK_VIRTIO )
+    message(STATUS "Building with virtio support")
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt_virtio)
+  endif()
   find_package(rocprofiler-register)
   if(rocprofiler-register_FOUND)
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ROCPROFILER_REGISTER=1

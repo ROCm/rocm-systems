@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > This document is currently in **draft** and may be subject to change.
 
-This document is to detail the various continuous integration (CI) systems that are run on the rocm-systems monorepo.
+This document is to detail the various continuous integration (CI) systems that are run on the rocm-systems super-repo.
 
 ## Table of Contents
 1. [Azure Pipelines](#azure-pipelines)
@@ -25,7 +25,7 @@ This document is to detail the various continuous integration (CI) systems that 
 
 The ROCm Azure Pipelines CI (also known as External CI) is a public-facing CI system that builds and tests against latest public source code. It encompasses almost all of the ROCm stack, typically pulling source code from the `develop` or `amd-staging` branch on a component's GitHub repository. The CI's main source is publically available at [ROCm/ROCm/.azuredevops](https://github.com/ROCm/ROCm/tree/develop/.azuredevops).
 
-See the [Azure monorepo dashboard](https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionScope=%5Cmonorepo) for a full list of pipelines running in the monorepo.
+See the [Azure super-repo dashboard](https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionScope=%5Csuper-repo) for a full list of pipelines running in the super-repo.
 
 For commits, the pipelines will run based on the conditions defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-systems/tree/develop/.azuredevops).
 
@@ -85,7 +85,7 @@ For testing, the majority of components use `ctest` or `gtest`. Component-specif
 
 ### Downstream Job Triggers <a id="az-downstream"></a>
 
-Azure CI runs for a component will trigger runs for downstream components (provided that they are fully migrated onto the monorepo). The end goal is to catch upstream breaking changes before they are merged and to ensure the monorepo is always in a valid state.
+Azure CI runs for a component will trigger runs for downstream components (provided that they are fully migrated onto the super-repo). The end goal is to catch upstream breaking changes before they are merged and to ensure the super-repo is always in a valid state.
 
 For example: a rocPRIM PR will trigger a rocPRIM job. If successful, it will then continue to run hipCUB and rocThrust jobs.
 

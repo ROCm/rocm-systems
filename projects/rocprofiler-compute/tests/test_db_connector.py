@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,28 +10,25 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
+##############################################################################
 
 import logging
-import shutil
-import sys
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
+from db_connector import DatabaseConnector
 
 logging.TRACE = logging.DEBUG - 5
 logging.addLevelName(logging.TRACE, "TRACE")
@@ -43,8 +40,6 @@ def trace_logger(message, *args, **kwargs):
 
 setattr(logging, "trace", trace_logger)
 
-from db_connector import DatabaseConnector
-
 """
 Tests for the DatabaseConnector class that tests almost methods with initialization,
 CSV import, database removal, and error handling.
@@ -53,7 +48,6 @@ The tests use mocks instead of a real MongoDB server for speed and reliability.
 
 
 class TestDatabaseConnector:
-
     @pytest.fixture
     def mock_args_import(self):
         """Mock arguments for import operation"""
@@ -113,9 +107,10 @@ class TestDatabaseConnector:
         mock_path.return_value.joinpath.return_value = "/fake/path/sysinfo.csv"
         mock_path.return_value.is_file.return_value = True
 
-        mock_sysinfo = pd.DataFrame(
-            {"gpu_model": ["MI100 "], "workload_name": [" test_workload"]}
-        )
+        mock_sysinfo = pd.DataFrame({
+            "gpu_model": ["MI100 "],
+            "workload_name": [" test_workload"],
+        })
         mock_read_csv.return_value = mock_sysinfo
 
         connector = DatabaseConnector(mock_args_import)
@@ -240,9 +235,9 @@ class TestDatabaseConnector:
         connector.db_remove()
 
         mock_client.drop_database.assert_called_once_with(mock_db_to_remove)
-        mock_names_col.delete_many.assert_called_once_with(
-            {"name": "rocprofiler-compute_test_team_workload_mi100"}
-        )
+        mock_names_col.delete_many.assert_called_once_with({
+            "name": "rocprofiler-compute_test_team_workload_mi100"
+        })
 
     def test_pre_processing_no_action_specified(self, mock_args_import):
         """Test pre_processing when neither upload nor remove is specified"""
@@ -402,9 +397,10 @@ class TestDatabaseConnectorIntegration:
         )
         mock_path.return_value.is_file.return_value = True
 
-        mock_sysinfo = pd.DataFrame(
-            {"gpu_model": ["MI100"], "workload_name": ["device_filter"]}
-        )
+        mock_sysinfo = pd.DataFrame({
+            "gpu_model": ["MI100"],
+            "workload_name": ["device_filter"],
+        })
         mock_read_csv.return_value = mock_sysinfo
 
         connector = DatabaseConnector(args)

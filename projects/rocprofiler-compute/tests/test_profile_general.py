@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,28 +10,25 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import inspect
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -41,7 +38,6 @@ import test_utils
 
 # TODO: MI350 What are the gpu models in MI 350 series
 SUPPORTED_ARCHS = {
-    "gfx906": {"mi50": ["MI50", "MI60"]},
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
     "gfx940": {"mi300": ["MI300A_A0"]},
@@ -57,7 +53,6 @@ CHIP_IDS = {
     "30112": "MI350",
 }
 
-
 # --
 # Runtime config options
 # --
@@ -65,6 +60,7 @@ CHIP_IDS = {
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config["app_occupancy"] = ["./tests/occupancy"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -77,101 +73,112 @@ DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
-ALL_CSVS_MI100 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "sysinfo.csv",
-    ]
-)
+ALL_CSVS_MI100 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "pmc_perf_6.csv",
+    "sysinfo.csv",
+])
 
-ALL_CSVS_MI200 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-)
-ALL_CSVS_MI300 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-)
-ALL_CSVS_MI350 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
-        "pmc_perf_10.csv",
-        "pmc_perf_11.csv",
-        "pmc_perf_12.csv",
-        "pmc_perf_13.csv",
-        "pmc_perf_14.csv",
-        "sysinfo.csv",
-    ]
-)
+ALL_CSVS_MI200 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+])
+ALL_CSVS_MI300 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+])
+ALL_CSVS_MI350 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "pmc_perf_6.csv",
+    "pmc_perf_7.csv",
+    "pmc_perf_8.csv",
+    "pmc_perf_9.csv",
+    "pmc_perf_10.csv",
+    "pmc_perf_11.csv",
+    "pmc_perf_12.csv",
+    "sysinfo.csv",
+])
 
-ROOF_ONLY_FILES = sorted(
-    [
-        "empirRoof_gpu-0_FP32.pdf",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "roofline.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-)
+ROOF_ONLY_FILES = sorted([
+    "empirRoof_gpu-0_FP32.pdf",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "roofline.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+])
+
+PC_SAMPLING_HOST_TRAP_FILES = sorted([
+    "pmc_perf_0.csv",
+    "pmc_perf.csv",
+    "ps_file_agent_info.csv",
+    "ps_file_pc_sampling_host_trap.csv",
+    "ps_file_results.json",
+    "sysinfo.csv",
+])
+
+PC_SAMPLING_STOCHASTIC_FILES = sorted([
+    "pmc_perf_0.csv",
+    "pmc_perf.csv",
+    "ps_file_agent_info.csv",
+    "ps_file_pc_sampling_stochastic.csv",
+    "ps_file_results.json",
+    "sysinfo.csv",
+])
 
 METRIC_THRESHOLDS = {
     "2.1.12": {"absolute": 0, "relative": 8},
@@ -295,7 +302,9 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
                     # if 0 show absolute difference
                     diff = round(baseline_data - run_data, 2)
                     if diff > threshold:
-                        print(str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff))
+                        print(
+                            str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff)
+                        )
         differences["kernel_name"] = [kernel_name]
         differences["test_name"] = [test_name]
         differences["gpu-id"] = [gpu_id]
@@ -432,7 +441,13 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
             metric_info = re.findall(
                 r"(^"
                 + metric
-                + r")(?: *)([()0-9A-Za-z- ]+ )(?: *)([0-9.-]*)(?: *)([0-9.-]*)(?: *)\(([-0-9.]*)%\)(?: *)([-0-9.e]*)",
+                + (
+                    r")(?: *)([()0-9A-Za-z- ]+ )"
+                    r"(?: *)([0-9.-]*)"
+                    r"(?: *)([0-9.-]*)"
+                    r"(?: *)\(([-0-9.]*)%\)"
+                    r"(?: *)([-0-9.e]*)"
+                ),
                 captured_output,
                 flags=re.MULTILINE,
             )
@@ -492,20 +507,20 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                         # print("logging...")
                         # print(metric_info)
 
-                        new_error = pd.DataFrame.from_dict(
-                            {
-                                "Index": [metric_idx],
-                                "Metric": [metric_name],
-                                "Percent Difference": [relative_diff],
-                                "Absolute Difference": [absolute_diff],
-                                "Baseline": [baseline_val],
-                                "Current": [current_val],
-                                "Test Name": [test_name],
-                            }
-                        )
+                        new_error = pd.DataFrame.from_dict({
+                            "Index": [metric_idx],
+                            "Metric": [metric_name],
+                            "Percent Difference": [relative_diff],
+                            "Absolute Difference": [absolute_diff],
+                            "Baseline": [baseline_val],
+                            "Current": [current_val],
+                            "Test Name": [test_name],
+                        })
                         error_df = pd.concat([error_df, new_error])
                         counts = error_df.groupby(["Index"]).cumcount()
-                        reoccurring_metrics = error_df.loc[counts > MAX_REOCCURING_COUNT]
+                        reoccurring_metrics = error_df.loc[
+                            counts > MAX_REOCCURING_COUNT
+                        ]
                         reoccurring_metrics["counts"] = counts[
                             counts > MAX_REOCCURING_COUNT
                         ]
@@ -541,7 +556,7 @@ def validate(test_name, workload_dir, file_dict, args=[]):
 # --
 
 
-@pytest.mark.misc
+@pytest.mark.path
 def test_path(binary_handler_profile_rocprof_compute):
     workload_dir = test_utils.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir)
@@ -573,7 +588,27 @@ def test_path(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.path
+def test_path_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    assert (Path(workload_dir) / "pmc_perf.csv").exists()
+    assert test_utils.check_file_pattern(
+        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline
 def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         # roofline is not supported on MI100
@@ -610,7 +645,7 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
     """Test roofline with multiple data types"""
     if soc in ("MI100"):
@@ -653,7 +688,7 @@ def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
     """Test roofline with invalid data type"""
     if soc in ("MI100"):
@@ -683,7 +718,7 @@ def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_file_validation(binary_handler_profile_rocprof_compute):
     """Test file validation paths in roofline"""
     if soc in ("MI100"):
@@ -712,7 +747,53 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.roofline
+def test_roof_rocpd(binary_handler_profile_rocprof_compute):
+    if soc == "MI100":
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
+
+    assert (Path(workload_dir) / "pmc_perf.csv").exists()
+    assert (Path(workload_dir) / "roofline.csv").exists()
+    assert test_utils.check_file_pattern(
+        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.misc
+def test_analyze_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
+
+    db_name = "test"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "db",
+        "--output-name",
+        f"{db_name}",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+    assert os.path.isfile(f"{db_name}.db")
+
+    # Remove test.db
+    os.remove(f"{db_name}.db")
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline
 def test_roofline_workload_dir_not_set_error():
     """
     Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
@@ -771,7 +852,7 @@ def test_roofline_workload_dir_not_set_error():
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -795,7 +876,7 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
     """
     Test empirical_roofline() when num_kernels == 0
@@ -815,14 +896,53 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
+def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
+    """
+    Test roofline multi-attempt profiling with `--kernel`
+    Expect to be able to re-profile from same workload if kernels are valid.
+    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--kernel-names",
+    ]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+    # Don't clean output dir, use same workload
+    options.extend(["--kernel", config["kernel_name_1"]])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    # Test nonexistent kernel on roof profile using existing profiling data
+    # Since already profiled, throw error if non-existent kernel requested for roofline
+    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=False, roof=True
+    )
+    assert returncode == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline
 def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_compute):
     """
     Test datatype validation error in empirical_roofline()
@@ -832,21 +952,31 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
         pytest.skip("Skipping roofline test for MI100")
         return
 
-    options = ["--device", "0", "--roof-only", "--roofline-data-type", "UNSUPPORTED_TYPE"]
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--roofline-data-type",
+        "UNSUPPORTED_TYPE",
+    ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
         return
+
+    # Test `--kernel` filtering outputs are present and labelled correctly
+    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
+    filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
 
     plot_configurations = [
         {
@@ -858,8 +988,15 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
             "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
         },
         {
-            "options": ["--device", "0", "--roof-only", "--kernel-names"],
-            "expected_files": ["kernelName_legend.pdf"],
+            "options": [
+                "--device",
+                "0",
+                "--roof-only",
+                "--kernel-names",
+                "--kernel",
+                config["kernel_name_1"],
+            ],
+            "expected_files": [filter_kernelName, filter_empirRoof],
         },
     ]
 
@@ -879,14 +1016,14 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
         return
 
     try:
-        import plotext as plt
+        import plotext as plt  # noqa: F401
 
         cli_available = True
     except ImportError:
@@ -896,7 +1033,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         options = ["--device", "0", "--roof-only"]
         workload_dir = test_utils.get_output_dir()
 
-        returncode = binary_handler_profile_rocprof_compute(
+        returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
             config, workload_dir, options, check_success=False, roof=True
         )
 
@@ -905,7 +1042,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         pytest.skip("plotext not available for CLI testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -918,14 +1055,14 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if os.path.exists(pmc_perf_path):
         os.remove(pmc_perf_path)
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
     """
     Test handling of missing roofline.csv file
@@ -979,7 +1116,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
     """
     Test CLI plot generation with invalid datatype
@@ -1031,7 +1168,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute):
     """
     Test ceiling data validation in generate_plot()
@@ -1044,7 +1181,7 @@ def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute
     options = ["--device", "0", "--roof-only", "--mem-level", "INVALID_LEVEL"]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -1115,1004 +1252,6 @@ def test_kernel(binary_handler_profile_rocprof_compute):
     else:
         print("Testing isn't supported yet for {}".format(soc))
         assert 0
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQ"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "SQ_IFETCH_LEVEL.csv",
-                "SQ_INST_LEVEL_LDS.csv",
-                "SQ_INST_LEVEL_SMEM.csv",
-                "SQ_INST_LEVEL_VMEM.csv",
-                "SQ_LEVEL_WAVES.csv",
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "sysinfo.csv",
-            ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQC(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQC"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_TA(binary_handler_profile_rocprof_compute):
-    options = ["--block", "TA"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "sysinfo.csv",
-    ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_TD(binary_handler_profile_rocprof_compute):
-    options = ["--block", "TD"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "sysinfo.csv",
-        ]
-        if using_v3():
-            expected_csvs = [
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "sysinfo.csv",
-            ]
-    if soc == "MI350":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_TCP(binary_handler_profile_rocprof_compute):
-    options = ["--block", "TCP"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "sysinfo.csv",
-    ]
-
-    if using_v3():
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_11.csv",
-            "pmc_perf_12.csv",
-            "pmc_perf_13.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI100" or soc == "MI200":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "pmc_perf_7.csv",
-                "pmc_perf_8.csv",
-                "pmc_perf_9.csv",
-                "sysinfo.csv",
-            ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_TCC(binary_handler_profile_rocprof_compute):
-    options = ["--block", "TCC"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
-        "pmc_perf_10.csv",
-        "pmc_perf_11.csv",
-        "sysinfo.csv",
-    ]
-
-    if using_v3():
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_11.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_11.csv",
-            "pmc_perf_12.csv",
-            "pmc_perf_13.csv",
-            "pmc_perf_14.csv",
-            "pmc_perf_15.csv",
-            "pmc_perf_16.csv",
-            "pmc_perf_17.csv",
-            "pmc_perf_18.csv",
-            "pmc_perf_19.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI100" or soc == "MI200":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "pmc_perf_10.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "pmc_perf_7.csv",
-                "pmc_perf_8.csv",
-                "pmc_perf_9.csv",
-                "pmc_perf_10.csv",
-                "sysinfo.csv",
-            ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SPI(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SPI"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "sysinfo.csv",
-    ]
-
-    if using_v3():
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_CPC(binary_handler_profile_rocprof_compute):
-    options = ["--block", "CPC"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "sysinfo.csv",
-    ]
-
-    if using_v3():
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_CPF(binary_handler_profile_rocprof_compute):
-    options = ["--block", "CPF"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "sysinfo.csv",
-    ]
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_CPC(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQ", "CPC"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "SQ_IFETCH_LEVEL.csv",
-                "SQ_INST_LEVEL_LDS.csv",
-                "SQ_INST_LEVEL_SMEM.csv",
-                "SQ_INST_LEVEL_VMEM.csv",
-                "SQ_LEVEL_WAVES.csv",
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "sysinfo.csv",
-            ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_TA(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQ", "TA"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "SQ_IFETCH_LEVEL.csv",
-                "SQ_INST_LEVEL_LDS.csv",
-                "SQ_INST_LEVEL_SMEM.csv",
-                "SQ_INST_LEVEL_VMEM.csv",
-                "SQ_LEVEL_WAVES.csv",
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "sysinfo.csv",
-            ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_SPI(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQ", "SPI"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "SQ_IFETCH_LEVEL.csv",
-                "SQ_INST_LEVEL_LDS.csv",
-                "SQ_INST_LEVEL_SMEM.csv",
-                "SQ_INST_LEVEL_VMEM.csv",
-                "SQ_LEVEL_WAVES.csv",
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "sysinfo.csv",
-            ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_SQC_TCP_CPC(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQ", "SQC", "TCP", "CPC"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "sysinfo.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "SQ_IFETCH_LEVEL.csv",
-                "SQ_INST_LEVEL_LDS.csv",
-                "SQ_INST_LEVEL_SMEM.csv",
-                "SQ_INST_LEVEL_VMEM.csv",
-                "SQ_LEVEL_WAVES.csv",
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "sysinfo.csv",
-            ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_SPI_TA_TCC_CPF(binary_handler_profile_rocprof_compute):
-    options = ["--block", "SQ", "SPI", "TA", "TCC", "CPF"]
-    workload_dir = test_utils.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "sysinfo.csv",
-    ]
-
-    if soc == "MI100":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "sysinfo.csv",
-        ]
-
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "sysinfo.csv",
-        ]
-
-        if using_v3():
-            expected_csvs = [
-                "SQ_IFETCH_LEVEL.csv",
-                "SQ_INST_LEVEL_LDS.csv",
-                "SQ_INST_LEVEL_SMEM.csv",
-                "SQ_INST_LEVEL_VMEM.csv",
-                "SQ_LEVEL_WAVES.csv",
-                "pmc_perf.csv",
-                "pmc_perf_0.csv",
-                "pmc_perf_1.csv",
-                "pmc_perf_2.csv",
-                "pmc_perf_3.csv",
-                "pmc_perf_4.csv",
-                "pmc_perf_5.csv",
-                "pmc_perf_6.csv",
-                "sysinfo.csv",
-            ]
-
-    if soc == "MI350":
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_11.csv",
-            "pmc_perf_12.csv",
-            "pmc_perf_13.csv",
-            "pmc_perf_14.csv",
-            "sysinfo.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -2454,8 +1593,8 @@ def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.section
-def test_instmix_section(binary_handler_profile_rocprof_compute):
-    options = ["--block", "10"]
+def test_lds_section(binary_handler_profile_rocprof_compute):
+    options = ["--block", "12"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
@@ -2469,11 +1608,9 @@ def test_instmix_section(binary_handler_profile_rocprof_compute):
     )
 
     assert test_utils.check_file_pattern(
-        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+        "- '12'", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern(
-        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
-    )
+    assert test_utils.check_file_pattern("SQ_INSTS_LDS", f"{workload_dir}/pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2493,10 +1630,10 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     )
 
     assert test_utils.check_file_pattern(
-        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+        "- '10'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "'3': metric_id", f"{workload_dir}/profiling_config.yaml"
+        "- '3'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
         "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
@@ -2508,8 +1645,8 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.section
-def test_instmix_section_TA_block(binary_handler_profile_rocprof_compute):
-    options = ["--block", "10", "TA"]
+def test_lds_sol_section(binary_handler_profile_rocprof_compute):
+    options = ["--block", "12.1"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
@@ -2523,18 +1660,11 @@ def test_instmix_section_TA_block(binary_handler_profile_rocprof_compute):
     )
 
     assert test_utils.check_file_pattern(
-        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+        "- '12.1'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "TA: hardware_block", f"{workload_dir}/profiling_config.yaml"
+        "SQ_ACTIVE_INST_LDS", f"{workload_dir}/pmc_perf.csv"
     )
-    assert test_utils.check_file_pattern(
-        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
-    )
-    assert not test_utils.check_file_pattern(
-        "SQC_TC_DATA_READ_REQ", f"{workload_dir}/pmc_perf.csv"
-    )
-    assert test_utils.check_file_pattern("", f"{workload_dir}/pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2559,7 +1689,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     )
 
     assert test_utils.check_file_pattern(
-        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+        "- '10'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
         "- global_write", f"{workload_dir}/profiling_config.yaml"
@@ -2576,7 +1706,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 
 @pytest.mark.section
 def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics"]
+    options = ["--list-metrics", "gfx90a"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
@@ -2586,7 +1716,54 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.section
+def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
+    options = ["--list-metrics", "gfx90a", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-metrics
+    assert code == 1
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
+    options = ["--list-available-metrics"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "0 -> Top Stats" in output
+    assert "1 -> System Info" in output
+
+
+@pytest.mark.section
+def test_list_available_metrics_with_block(
+    binary_handler_profile_rocprof_compute, capsys
+):
+    options = ["--list-available-metrics", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-available-metrics
+    assert code == 1
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
     import sys
@@ -2622,7 +1799,191 @@ def test_comprehensive_error_paths():
     assert result == 16
 
     try:
-        build_eval_string("test", None)
+        build_eval_string("test", None, config={})
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
+
+
+@pytest.mark.pc_sampling
+def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
+    if soc in ("MI100"):
+        assert True
+        return
+
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "1048576",
+    ]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_occupancy",
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.pc_sampling
+def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
+    if soc in ("MI100") or soc in ("MI200"):
+        assert True
+        return
+
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "stochastic",
+        "--pc-sampling-interval",
+        "1048576",
+    ]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_occupancy",
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.sets_func
+class TestSetsIntegration:
+    def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "mem_thruput"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        memory_metrics = ["16.1.2", "17.1.0"]
+        for metric_id in memory_metrics:
+            assert metric_id in open(Path(workload_dir) / "log.txt", "r").read(), (
+                f"Expected memory metric {metric_id} not found"
+            )
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_launch_stats_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "launch_stats"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_compute_thruput_util_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_util"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        assert test_utils.check_file_pattern(
+            "- 11.2.3", f"{workload_dir}/profiling_config.yaml"
+        )
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_compute_thruput_flops_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_flops"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "nonexistent_set"]
+        workload_dir = test_utils.get_output_dir()
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=False,
+            roof=False,
+        )
+
+        assert returncode == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_set_and_block_mutual_exclusion(
+        self, binary_handler_profile_rocprof_compute
+    ):
+        options = ["--set", "compute_thruput_util", "--block", "12"]
+        workload_dir = test_utils.get_output_dir()
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=False
+        )
+
+        assert returncode == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_list_sets_functionality(self, binary_handler_profile_rocprof_compute):
+        options = ["--list-sets"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=False,
+            roof=False,
+        )
+        # workload dir should be empty
+        assert not os.listdir(workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)

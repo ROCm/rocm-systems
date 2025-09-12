@@ -20,16 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <optional>
 #define TIMEMORY_KOKKOSP_POSTFIX ROCPROFSYS_PUBLIC_API
 
 #include "api.hpp"
+#include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/defines.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto.hpp"
+#include "core/rocpd/json.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <optional>
 
 #include <timemory/api/kokkosp.hpp>
 #include <timemory/backends/process.hpp>
@@ -150,6 +157,46 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
 }
 }  // namespace
 
+namespace
+{
+void
+metadata_initialize_kokkos_category()
+{
+    rocprofsys::trace_cache::get_metadata_registry().add_string(
+        rocprofsys::trait::name<category::kokkos>::value);
+}
+
+void
+metadata_initialize_kokkos_track()
+{
+    rocprofsys::trace_cache::get_metadata_registry().add_track(
+        { rocprofsys::trait::name<category::kokkos>::value, std::nullopt, "{}" });
+}
+
+void
+cache_kokkos_event(const char* name, const char* event_type, const char* target,
+                   uint64_t timestamp_ns)
+{
+    auto event_metadata = rocpd::json::create();
+
+    event_metadata->set("name", name);
+    event_metadata->set("event_type", event_type);
+    event_metadata->set("target", target);
+
+    const size_t stack_id        = 0;
+    const size_t parent_stack_id = 0;
+    const size_t correlation_id  = 0;
+    const char*  call_stack      = "{}";
+    const char*  line_info       = "{}";
+
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::entry_type::in_time_sample,
+        rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
+        event_metadata->to_string().c_str(), stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info);
+}
+
+}  // namespace
 //--------------------------------------------------------------------------------------//
 
 extern "C"
@@ -256,6 +303,9 @@ extern "C"
             rocprofsys_set_mpi_hidden(false, false);
             rocprofsys_init_hidden(_mode.c_str(), false, _arg0.c_str());
             rocprofsys_push_trace_hidden("kokkos_main");
+
+            metadata_initialize_kokkos_category();
+            metadata_initialize_kokkos_track();
         }
 
         setup_kernel_logger();
@@ -545,6 +595,8 @@ extern "C"
     {
         if(violates_name_rules(label)) return;
 
+        auto timestamp = tim::get_clock_real_now<uint64_t, std::nano>();
+
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(rocprofsys::config::get_use_perfetto())
         {
@@ -559,12 +611,16 @@ extern "C"
                 "", label, " [dual_view_sync][", (is_device) ? "device" : "host", "]")));
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
+
+        cache_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(), "[dual_view_sync]",
+                           (is_device) ? "device" : "host", timestamp);
     }
 
     void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
     {
         if(violates_name_rules(label)) return;
 
+        auto timestamp = tim::get_clock_real_now<uint64_t, std::nano>();
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(rocprofsys::config::get_use_perfetto())
         {
@@ -580,6 +636,9 @@ extern "C"
                                       (is_device) ? "device" : "host", "]")));
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
+
+        cache_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(), "[dual_view_modify]",
+                           (is_device) ? "device" : "host", timestamp);
     }
 
     //----------------------------------------------------------------------------------//

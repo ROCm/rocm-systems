@@ -2,6 +2,25 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
+## RDC for ROCm 7.0.0
+
+### Added
+
+- More profiling and monitoring metrics, especially for AMD Instinct MI300 and newer GPUs.
+- Advanced logging and debugging options, including new log levels and troubleshooting guidance.
+
+### Changed
+
+- Completed migration from legacy [ROCProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/) to [ROCprofiler-SDK](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/).
+- Reorganized the configuration files internally and improved [README/installation](https://github.com/ROCm/rdc/blob/amd-staging/README.md) instructions.
+- Updated metrics and monitoring support for the latest AMD data center GPUs.
+
+### Optimized
+
+- Integration with [ROCprofiler-SDK](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/) for performance metrics collection.
+- Standalone and embedded operating modes, including streamlined authentication and configuration options.
+- Support and documentation for diagnostic commands and GPU group management.
+- [RVS](https://rocm.docs.amd.com/projects/ROCmValidationSuite/en/latest/) test integration and reporting.
 ## RDC for ROCm 6.4.0
 
 ### Added

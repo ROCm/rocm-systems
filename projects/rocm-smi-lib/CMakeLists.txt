@@ -21,7 +21,7 @@ find_package(PkgConfig)
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 if (NOT DEFINED CPACK_RESOURCE_FILE_LICENSE)
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 endif()
 
 set(ROCM_SMI "rocm_smi")
@@ -44,7 +44,7 @@ pkg_check_modules(DRM REQUIRED libdrm)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
-get_package_version_number("7.6.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("7.8.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${ROCM_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(${ROCM_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
@@ -280,11 +280,11 @@ set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
 # install license file in share/doc/rocm-smi-lib-asan folder
 if( ENABLE_ASAN_PACKAGING )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
-	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.txt
+	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.md
         COMPONENT asan)
 endif()
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
-	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.txt
+	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.md
         COMPONENT dev)
 
 ###########################

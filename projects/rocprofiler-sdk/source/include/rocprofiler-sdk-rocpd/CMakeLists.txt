@@ -10,7 +10,7 @@ set(ROCPD_HEADER_FILES
     # core headers
     rocpd.h
     # secondary headers
-    defines.h types.h ${CMAKE_CURRENT_BINARY_DIR}/version.h)
+    defines.h sql.h types.h ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 
 install(
     FILES ${ROCPD_HEADER_FILES}

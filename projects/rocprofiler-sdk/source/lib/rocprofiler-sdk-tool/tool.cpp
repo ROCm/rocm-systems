@@ -32,6 +32,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/simple_timer.hpp"
 #include "lib/common/static_object.hpp"
@@ -487,11 +488,9 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
     // Check whether services are enabled
     const bool kernel_rename_service_enabled =
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
-        tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
-        !thread_dispatch_rename->empty();
+        thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty();
 
-    const bool hip_stream_enabled =
-        !tool::get_config().group_by_queue && rocprofiler::tool::stream::stream_stack_not_null();
+    const bool hip_stream_enabled = rocprofiler::tool::stream::stream_stack_not_null();
 
     if(!kernel_rename_service_enabled && !hip_stream_enabled) return 1;
 
@@ -565,7 +564,7 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 data)
 {
-    if(!tool::get_config().kernel_rename || thread_dispatch_rename == nullptr) return;
+    if(thread_dispatch_rename == nullptr) return;
 
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
@@ -616,8 +615,7 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t*              user_data,
                             void*                                 data)
 {
-    if(tool::get_config().group_by_queue || record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM)
-        return;
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
     // Extract stream ID from record
     auto* stream_handle_data =
         static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
@@ -940,12 +938,14 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 auto kernel_filter_exclude = tool::get_config().kernel_filter_exclude;
                 auto kernel_filter_range   = tool::get_config().kernel_filter_range;
 
-                std::regex include_regex(kernel_filter_include);
-                std::regex exclude_regex(kernel_filter_exclude);
-                if(std::regex_search(kernel_info->formatted_kernel_name, include_regex))
+                std::string_view include_regex(kernel_filter_include);
+                std::string_view exclude_regex(kernel_filter_exclude);
+                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                            include_regex))
                 {
                     if(kernel_filter_exclude.empty() ||
-                       !std::regex_search(kernel_info->formatted_kernel_name, exclude_regex))
+                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                                 exclude_regex))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
             }
@@ -1535,6 +1535,83 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
 }
 
 void
+wait_peer_finished(const pid_t& pid, const pid_t& ppid)
+{
+    auto this_func = std::string_view{__FUNCTION__};
+
+    auto get_peer_pid = [&ppid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", ppid, ppid);
+        auto ifs      = std::ifstream{fname};
+        auto peer_pid = std::vector<pid_t>{};
+        while(ifs)
+        {
+            pid_t val = 0;
+            ifs >> val;
+            if(ifs && !ifs.eof() && val > 0) peer_pid.emplace_back(val);
+        }
+        return peer_pid;
+    };
+
+    auto _peers_pid = get_peer_pid();
+
+    if(_peers_pid.size() <= 1)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}] has no peer process and no need to wait ", ppid, pid);
+
+        // if no peer process no need to wait
+        return;
+    }
+
+    ROCP_WARNING << fmt::format("[PPID={}][PID={}] rocprofv3 will wait for all {} peer processes "
+                                "under same parent finished to exit",
+                                ppid,
+                                pid,
+                                _peers_pid.size());
+
+    // Create a POSIX semaphore for synchronization
+    // Processes under the same parent share a same semaphore
+    ROCP_INFO << fmt::format(
+        "[PPID={}][PID={}] Creating existing semaphore in {}", ppid, pid, this_func);
+
+    const std::string _sem_name = "/rocprofv3_sync_pid_" + std::to_string(ppid);
+    auto              guard     = SemaphoreGuard{_sem_name};
+
+    if(!guard.open_or_create())
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}] Failed to initialize semaphore, skipping sync", ppid, pid);
+        return;
+    }
+
+    // Signal completion and wait for peers
+    if(sem_post(guard.sem) == -1)
+    {
+        ROCP_WARNING << fmt::format("[PPID={}][PID={}] Failed to signal completion", ppid, pid);
+        return;
+    }
+
+    // Wait for all peers to signal completion
+    int _sem_val = 0;
+    do
+    {
+        if(sem_getvalue(guard.sem, &_sem_val) == -1)
+        {
+            ROCP_WARNING << fmt::format(
+                "[PPID={}][PID={}] failed to wait on semaphore in {}", ppid, pid, this_func);
+        }
+        ROCP_TRACE << fmt::format(
+            "{} shows current sem_pid_group name: {} semaphore value: {}, peer size(): {}",
+            this_func,
+            _sem_name,
+            _sem_val,
+            _peers_pid.size());
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    } while(static_cast<unsigned long>(_sem_val) < _peers_pid.size());
+}
+
+void
 finalize_rocprofv3(std::string_view context)
 {
     ROCP_INFO << "invoked: finalize_rocprofv3";
@@ -1941,9 +2018,27 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ROCP_FATAL << "ATT Perf requires setting both perfcounter_ctrl and perfcounter list!";
         }
 
+        auto gpu_idx_set = std::set<uint64_t>{};
+
+        for(const auto& entry :
+            rocprofiler::sdk::parse::tokenize(tool::get_config().att_gpu_index, ","))
+        {
+            try
+            {
+                gpu_idx_set.insert(std::stoi(entry));
+            } catch(std::exception& e)
+            {
+                ROCP_FATAL << "Invalid GPU Id string: " << entry << " - " << e.what();
+            }
+        }
+
+        const auto selecting_by_gpuid = !gpu_idx_set.empty();
+
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
             if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            if(selecting_by_gpuid && gpu_idx_set.erase(agent.gpu_index) == 0) continue;
 
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
@@ -1959,6 +2054,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                     tool_data),
                 "thread trace service configure");
         }
+
+        // Any agent not removed by above loop was not in the agents_map list
+        for(const auto& entry : gpu_idx_set)
+            ROCP_ERROR << "Invalid GPU Device Index: " << entry;
     }
 
     if(tool::get_config().counter_collection)
@@ -1976,67 +2075,60 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(counter_collection_ctx, "counter collection");
     }
 
-    if(tool::get_config().kernel_rename)
-    {
-        auto rename_ctx            = rocprofiler_context_id_t{0};
-        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
-            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
-            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
-        };
+    auto rename_ctx            = rocprofiler_context_id_t{0};
+    auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
+    };
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             rename_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
-                             marker_core_api_kinds.data(),
-                             marker_core_api_kinds.size(),
-                             callbacks.kernel_rename,
-                             nullptr),
-                         "callback tracing service failed to configure");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         rename_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                         marker_core_api_kinds.data(),
+                         marker_core_api_kinds.size(),
+                         callbacks.kernel_rename,
+                         nullptr),
+                     "callback tracing service failed to configure");
 
-        start_context(rename_ctx, "kernel rename");
-    }
+    start_context(rename_ctx, "kernel rename");
 
-    if(!tool::get_config().group_by_queue)
-    {
-        // Track stream ID information via callback service
-        auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
+    // Track stream ID information via callback service
+    auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
-                         "failed to create hip stream context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
+                     "failed to create hip stream context");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                           nullptr,
-                                                           0,
-                                                           callbacks.hip_stream,
-                                                           nullptr),
-            "hip stream tracing configure failed");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                       nullptr,
+                                                       0,
+                                                       callbacks.hip_stream,
+                                                       nullptr),
+        "hip stream tracing configure failed");
 
-        start_context(hip_stream_display_ctx, "hip stream");
+    start_context(hip_stream_display_ctx, "hip stream");
 
-        // Track if HIP runtime has been initialized via runtime_intialization service
-        auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
+    // Track if HIP runtime has been initialized via runtime_intialization service
+    auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
-                         "failed to create runtime initialization context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
+                     "failed to create runtime initialization context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             runtime_initialization_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
-                             nullptr,
-                             0,
-                             runtime_initialization_callback,
-                             nullptr),
-                         "runtime initialization tracing configure failed");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         runtime_initialization_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                         nullptr,
+                         0,
+                         runtime_initialization_callback,
+                         nullptr),
+                     "runtime initialization tracing configure failed");
 
-        start_context(runtime_initialization_ctx, "runtime initialization");
-    }
+    start_context(runtime_initialization_ctx, "runtime initialization");
 
-    if((tool::get_config().kernel_rename || !tool::get_config().group_by_queue) &&
-       tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
+    if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
             std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
@@ -2098,8 +2190,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     // Handle kernel id of zero
-    bool include = std::regex_search("0", std::regex(tool::get_config().kernel_filter_include));
-    bool exclude = std::regex_search("0", std::regex(tool::get_config().kernel_filter_exclude));
+    bool include =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_include);
+    bool exclude =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_exclude);
     if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
         add_kernel_target(0, tool::get_config().kernel_filter_range);
 
@@ -2828,6 +2922,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             signo);
 
         finalize_rocprofv3(this_func);
+        if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
         ROCP_INFO << fmt::format(
             "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",

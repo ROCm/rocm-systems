@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,21 +10,22 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import getpass
 import os
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 
 import pandas as pd
@@ -73,7 +74,8 @@ class DatabaseConnector:
                 name = sys_info["workload_name"][0].strip()
             except KeyError as e:
                 console_error(
-                    f"Outdated workload. Cannot find {e} field. Please reprofile to update."
+                    f"Outdated workload. "
+                    f"Cannot find {e} field. Please reprofile to update."
                 )
         else:
             console_error(
@@ -138,7 +140,6 @@ class DatabaseConnector:
         db_to_remove = self.client[self.connection_info["workload"]]
 
         # check the collection names on the database
-        col_list = db_to_remove.list_collection_names()
         self.client.drop_database(db_to_remove)
         db = self.client["workload_names"]
         col = db["names"]
@@ -164,15 +165,17 @@ class DatabaseConnector:
             is_full_workload_name = self.args.workload.count("_") >= 3
             if not is_full_workload_name:
                 console_error(
-                    "-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. rocprofiler-compute_asw_vcopy_mi200)"
+                    "-w/--workload is not valid. Please use full workload name "
+                    "as seen in GUI when removing (i.e. "
+                    "rocprofiler-compute_asw_vcopy_mi200)"
                 )
             if (
                 self.connection_info["host"] == None
                 or self.connection_info["username"] == None
             ):
                 console_error(
-                    "-H/--host and -u/--username are required when interaction type is set to %s"
-                    % self.interaction_type
+                    "-H/--host and -u/--username are required when "
+                    "interaction type is set to %s" % self.interaction_type
                 )
             if (
                 self.connection_info["workload"] == "admin"
@@ -190,7 +193,8 @@ class DatabaseConnector:
                 or self.connection_info["workload"] == None
             ):
                 console_error(
-                    "-H/--host, -w/--workload, -u/--username, and -t/--team are all required when interaction type is set to %s"
+                    "-H/--host, -w/--workload, -u/--username, and -t/--team are all "
+                    "required when interaction type is set to %s"
                     % self.interaction_type
                 )
 
@@ -218,7 +222,7 @@ class DatabaseConnector:
             else:
                 console_log("database", "Password received")
         else:
-            password = self.connection_info["password"]
+            pass
 
         # Establish client connection
         connection_str = (
@@ -237,5 +241,5 @@ class DatabaseConnector:
         )
         try:
             self.client.server_info()
-        except:
+        except Exception:
             console_error("database", "Unable to connect to the DB server.")

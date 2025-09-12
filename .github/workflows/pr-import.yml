@@ -1,26 +1,26 @@
 # Import Subrepo PR Workflow
 # --------------------------
-# This workflow imports an open PR from a sub-repository into the monorepo.
+# This workflow imports an open PR from a sub-repository into the super-repo.
 # It is intended for maintainers to migrate pending pull requests from
-# the subrepos, to help developers onboard to the monorepo sooner.
+# the subrepos, to help developers onboard to the super-repo sooner.
 #
 # Trigger: Manually via `workflow_dispatch` with the following inputs:
-#   - subrepo-prefix:     Path within the monorepo where the subrepo lives (e.g., "projects/rocblas")
+#   - subrepo-prefix:     Path within the super-repo where the subrepo lives (e.g., "projects/rocblas")
 #   - subrepo-pr-number:  PR number in the subrepo to import
 #   - subrepo-repo:       Full subrepo or fork name (e.g., "ROCm/rocBLAS" or "user/rocBLAS-fork")
 #   - subrepo-upstream:   Canonical subrepo repo name (e.g., "ROCm/rocBLAS")
 #
 # Steps:
-#   1. Validate that the caller has 'admin' or 'maintain' permission on the monorepo
+#   1. Validate that the caller has 'admin' or 'maintain' permission on the super-repo
 #   2. Generate a GitHub App token for authenticated API access
-#   3. Checkout only the necessary parts of the monorepo (sparse checkout)
+#   3. Checkout only the necessary parts of the super-repo (sparse checkout)
 #   4. Fetch PR metadata from the subrepo using GitHub CLI
 #   5. Create a new branch and import the PR using `git subtree pull`
-#   6. Create a corresponding draft PR in the monorepo with metadata preserved
+#   6. Create a corresponding draft PR in the super-repo with metadata preserved
 #
 # Notes:
 # - This workflow requires GitHub App credentials (APP_ID and APP_PRIVATE_KEY)
-# - The resulting monorepo PR is a draft and includes attribution to the original author
+# - The resulting super-repo PR is a draft and includes attribution to the original author
 
 name: Import Subrepo PR
 
@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       subrepo-prefix:
-        description: "Monorepo path prefix (e.g., projects/rocblas)"
+        description: "super-repo path prefix (e.g., projects/rocblas)"
         required: true
       subrepo-pr-number:
         description: "Subrepo PR number to import"
@@ -39,8 +39,8 @@ on:
       subrepo-upstream:
         description: "Canonical subrepo repo (e.g., ROCm/rocBLAS)"
         required: true
-      monorepo-target-branch:
-        description: "Target branch in the monorepo (default: develop)"
+      super-repo-target-branch:
+        description: "Target branch in the super-repo (default: develop)"
         required: false
         default: "develop"
 
@@ -113,9 +113,9 @@ jobs:
       - name: Create new branch for import
         id: import-branch
         run: |
-          git fetch origin ${{ github.event.inputs.monorepo-target-branch }}
-          git checkout ${{ github.event.inputs.monorepo-target-branch }}
-          SANITIZED_BASE=$(echo "${{ github.event.inputs.monorepo-target-branch }}" | sed 's|/|_|g')
+          git fetch origin ${{ github.event.inputs.super-repo-target-branch }}
+          git checkout ${{ github.event.inputs.super-repo-target-branch }}
+          SANITIZED_BASE=$(echo "${{ github.event.inputs.super-repo-target-branch }}" | sed 's|/|_|g')
           SANITIZED_REPO=$(echo "${{ github.event.inputs.subrepo-repo }}" | sed 's|/|_|g')
           SANITIZED_REF=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
           IMPORT_BRANCH="import/${SANITIZED_BASE}/${SANITIZED_REPO}/${SANITIZED_REF}"
@@ -127,7 +127,7 @@ jobs:
           git subtree pull --prefix=${{ github.event.inputs.subrepo-prefix }} https://github.com/${{ github.event.inputs.subrepo-repo }} ${{ steps.prdata.outputs.head_ref }}
           git push origin ${{ steps.import-branch.outputs.import_branch }}
 
-      - name: Create monorepo PR
+      - name: Create super-repo PR
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
@@ -153,7 +153,7 @@ jobs:
           fi
 
           gh pr create \
-            --base "${{ github.event.inputs.monorepo-target-branch }}" \
+            --base "${{ github.event.inputs.super-repo-target-branch }}" \
             --head "${{ steps.import-branch.outputs.import_branch }}" \
             --title "$PR_TITLE" \
             --label "imported pr" \

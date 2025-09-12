@@ -1,4 +1,7 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(NOT OMP_TARGET_COMPILER)
     find_program(
@@ -30,69 +33,88 @@ project(rocprofiler-systems-example-openmp-target-lib LANGUAGES CXX)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx940"
-    "gfx941"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
+find_package(Threads REQUIRED)
+
+function(add_offload_flags tgt)
+    foreach(arch IN LISTS GPU_TARGETS)
+        target_compile_options(${tgt} PRIVATE --offload-arch=${arch})
+        target_link_options(${tgt} PUBLIC --offload-arch=${arch})
+    endforeach()
+endfunction()
+
+# Derive the ROCm root
+get_filename_component(_omp_bin_dir "${OMP_TARGET_COMPILER}" DIRECTORY)
+get_filename_component(ROCM_ROOT_DIR "${_omp_bin_dir}" DIRECTORY)
+
+message(STATUS "Using OpenMP target compiler: ${OMP_TARGET_COMPILER}")
+message(STATUS "ROCm root inferred from compiler: ${ROCM_ROOT_DIR}")
+
+# Candidate lib directories for libomptarget across ROCm layouts
+set(_LLVM_LIB_HINTS
+    "${ROCM_ROOT_DIR}/lib"
+    "${ROCM_ROOT_DIR}/llvm/lib"
+    "$ENV{ROCM_PATH}/llvm/lib"
+    "$ENV{ROCM_PATH}/lib/llvm/lib"
+    "/opt/rocm/llvm/lib"
+    "/opt/rocm/lib/llvm/lib"
 )
 
-set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
+# Find libomptarget
+find_library(LIBOMPTARGET_SO NAMES omptarget HINTS ${_LLVM_LIB_HINTS})
 
-find_package(Threads REQUIRED)
+if(NOT LIBOMPTARGET_SO)
+    message(FATAL_ERROR "Could not find libomptarget in any of:\n  ${_LLVM_LIB_HINTS}")
+endif()
+
+# Use the directory that actually contains the library we found
+get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
+set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib}")
+list(REMOVE_DUPLICATES _COMMON_RPATH)
+
+message(STATUS "libomptarget found at: ${LIBOMPTARGET_SO}")
+message(STATUS "LLVM libdir: ${_rocm_llvm_lib}")
+message(STATUS "Clang libdir: ${_rocm_clang_lib}")
+
+# Shared library
 
 add_library(openmp-target-lib SHARED)
 target_sources(openmp-target-lib PRIVATE library.cpp)
 target_link_libraries(openmp-target-lib PUBLIC Threads::Threads)
 target_compile_options(openmp-target-lib PRIVATE -fopenmp -ggdb)
 target_link_options(openmp-target-lib PUBLIC -fopenmp)
+add_offload_flags(openmp-target-lib)
 
-foreach(_TARGET ${GPU_TARGETS})
-    target_compile_options(openmp-target-lib PRIVATE --offload-arch=${_TARGET})
-    target_link_options(openmp-target-lib PUBLIC --offload-arch=${_TARGET})
-endforeach()
-
-message(STATUS "Using OpenMP target compiler: ${OMP_TARGET_COMPILER}")
-
-get_filename_component(OMP_TARGET_COMPILER_DIR ${OMP_TARGET_COMPILER} PATH)
-get_filename_component(OMP_TARGET_COMPILER_DIR ${OMP_TARGET_COMPILER_DIR} PATH)
-
-message(STATUS "Using OpemMP target compiler directory: ${OMP_TARGET_COMPILER_DIR}")
-
-if(NOT EXISTS ${OMP_TARGET_COMPILER_DIR}/llvm/lib)
-    message(FATAL_ERROR "${OMP_TARGET_COMPILER_DIR}/llvm/lib does not exist")
-endif()
-set_target_properties(
-    openmp-target-lib
-    PROPERTIES
-        BUILD_RPATH "${OMP_TARGET_COMPILER_DIR}/llvm/lib:${OMP_TARGET_COMPILER_DIR}/lib"
-        OUTPUT_NAME "openmp-target"
-        POSITION_INDEPENDENT_CODE ON
-)
-
-rocprofiler_systems_custom_compilation(TARGET openmp-target-lib
-                                       COMPILER ${OMP_TARGET_COMPILER}
-)
+# Executable
 
 add_executable(openmp-target)
 target_sources(openmp-target PRIVATE main.cpp)
 target_link_libraries(openmp-target PRIVATE openmp-target-lib)
-target_compile_options(openmp-target PRIVATE -ggdb)
+target_compile_options(openmp-target PRIVATE -fopenmp -ggdb)
+target_link_options(openmp-target PUBLIC -fopenmp)
+add_offload_flags(openmp-target)
 
-set_target_properties(
-    openmp-target
-    PROPERTIES
-        BUILD_RPATH "${OMP_TARGET_COMPILER_DIR}/llvm/lib:${OMP_TARGET_COMPILER_DIR}/lib"
-        POSITION_INDEPENDENT_CODE ON
+foreach(tgt openmp-target-lib openmp-target)
+    set_target_properties(
+        ${tgt}
+        PROPERTIES
+            BUILD_RPATH "${_COMMON_RPATH}"
+            INSTALL_RPATH "${_COMMON_RPATH}"
+            INSTALL_RPATH_USE_LINK_PATH TRUE
+            POSITION_INDEPENDENT_CODE ON
+    )
+    target_link_options(
+        ${tgt}
+        PUBLIC
+            "-L${_rocm_llvm_lib}"
+            "-Wl,-rpath,${_rocm_llvm_lib}"
+            "-Wl,-rpath,${_rocm_clang_lib}"
+    )
+endforeach()
+
+rocprofiler_systems_custom_compilation(
+    TARGET   openmp-target-lib
+    COMPILER ${OMP_TARGET_COMPILER}
 )
 
 rocprofiler_systems_custom_compilation(TARGET openmp-target

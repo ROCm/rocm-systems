@@ -86,7 +86,7 @@ include(utils)
 set(PKG_VERSION_GIT_TAG_PREFIX "rdc_pkg_ver")
 # Provide git to utilities
 find_program(GIT NAMES git)
-get_version_from_tag("1.1.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.2.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${VERSION_STRING}")
 
@@ -169,7 +169,7 @@ set(CPACK_PACKAGE_DESCRIPTION
     ""
 )
 set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE PATH "Default packaging prefix.")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE INTERNAL "")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" CACHE INTERNAL "")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE INTERNAL "")
 set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
@@ -401,7 +401,7 @@ install(EXPORT rdcTargets DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COM
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    RENAME LICENSE.txt
+    RENAME LICENSE.md
     COMPONENT dev
 )
 

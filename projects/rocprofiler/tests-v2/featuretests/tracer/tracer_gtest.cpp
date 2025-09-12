@@ -303,7 +303,8 @@ class AsyncCopyTest : public Tracertest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // tracer output
-TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCopyOutputIsGenerated) {
+// This test is disabled because it is not compatible with Navi architecture.
+TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCopyOutputIsGenerated) {
   // kernel info in current profler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 

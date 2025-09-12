@@ -24,6 +24,15 @@ Profiling with ROCm Compute Profiler yields the following benefits.
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
+* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profile can adjust the
+  output format of underlying rocprof tool which changes the output format of raw performance
+  counter data in the workload folder created during profiling. Supported output formats are
+  ``json``, ``csv``, and ``rocpd``. The default output format is ``csv``.
+
+.. note::
+
+   The default output format will be changed to ``rocpd`` in a future release of ROCm Compute Profiler.
+
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -217,6 +226,32 @@ an Instinct MI210 vs an Instinct MI250.
    -rw-r--r-- 1 auser agroup   650 Mar  1 15:15 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar  1 15:15 timestamps.csv
 
+.. _profiling-output-format:
+
+Profiling output format
+-----------------------
+
+Use the ``--format-rocprof-output <format>`` profile mode option to specify the output format
+of the underlying ``rocprof`` tool. The following formats are supported:
+
+* ``csv`` format:
+   * Ask underlying rocprof tool to dump raw performance counter data in csv format.
+   * The generated csv files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
+   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+
+* ``json`` format:
+   * Ask underlying rocprof tool to dump raw performance counter data in json format.
+   * The generated json files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
+   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+
+* ``rocpd`` format:
+   * Ask underlying rocprof tool to dump raw performance counter data in rocpd format.
+   * Multiple ``rocpd`` database files containding counter collection data are merged into a single csv under the workload folder.
+     The database files are then removed.
+   * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder.
+     This is useful for custom analysis of profiling data.
+
+
 .. _filtering:
 
 Filtering
@@ -232,8 +267,9 @@ Filtering options
 -----------------
 
 ``-b``, ``--block <block-name>``
-   Allows system profiling on one or more selected hardware report blocks to speed
+   Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
@@ -253,11 +289,11 @@ Filtering options
 
 .. _profiling-hw-component-filtering:
 
-Hardware report block filtering
+Analysis report block filtering
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You can profile specific hardware report blocks to speed up the profiling process.
-In ROCm Compute Profiler, the term hardware report block refers to a section of the
+In ROCm Compute Profiler, the term analysis report block refers to a section of the
 analysis report which focuses on metrics associated with a hardware component or
 a group of hardware components. All profiling results are accumulated in the same
 target directory without overwriting those for other hardware components.
@@ -294,11 +330,41 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    ...
 
 
-To see a list of available hardware report blocks, use the ``--list-metrics`` option.
+It is also possible to collect individual metrics from the analysis report by providing metric ids.
+The following example only collects the counters required to calculate ``Total VALU FLOPs`` (metric id 11.1.0) and ``LDS Utilization`` (metric id 12.1.0).
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --list-metrics
+   $ rocprof-compute profile --name vcopy -b 11.1.1 12.1.1 -- ./vcopy -n 1048576 -b 256
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   rocprofiler-compute version: 2.0.0
+   Profiler choice: rocprofv1
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
+   Target: MI200
+   Command: ./vcopy -n 1048576 -b 256
+   Kernel Selection: None
+   Dispatch Selection: None
+   Hardware Blocks: []
+   Report Sections: ['11.1.0', '12.1.0']
+
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Collecting Performance Counters
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ...
+
+
+To see a list of available hardware report blocks, use the ``--list-available-metrics`` option.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --list-available-metrics
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -332,54 +398,6 @@ To see a list of available hardware report blocks, use the ``--list-metrics`` op
                   6.1.2 -> Workgroup Manager Utilization
 
 
-It is also possible to filter counter collection by hardware component such as Shader Sequencer (SQ)
-and L2 cache (TCC) as shown below.
-
-.. code-block:: shell-session
-
-   $ rocprof-compute profile --name vcopy -b 10 7 -- ./vcopy -n 1048576 -b 256
-
-                                    __                                       _
-    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-
-   fname: pmc_cpc_perf: Skipped
-   fname: pmc_spi_perf: Skipped
-   fname: pmc_cpf_perf: Skipped
-   fname: pmc_tcp_perf: Skipped
-   fname: pmc_sq_perf4: Added
-   fname: pmc_tcc_perf: Added
-   fname: pmc_sq_perf8: Added
-   fname: pmc_ta_perf: Skipped
-   fname: pmc_sq_perf1: Added
-   fname: pmc_sq_perf3: Added
-   fname: pmc_td_perf: Skipped
-   fname: pmc_tcc2_perf: Skipped
-   fname: pmc_sqc_perf1: Skipped
-   fname: pmc_sq_perf6: Added
-   fname: pmc_sq_perf2: Added
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: None
-   Hardware Blocks: ['sq', 'tcc']
-   Report Sections: []
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   ...
-
-.. warning::
-
-   Filtering by hardware components (e.g. SQ, TCC) will soon be deprecated.
-   It is recommended to use hardware report block based filtering.
 
 .. _profiling-kernel-filtering:
 
@@ -457,9 +475,13 @@ of the application (note zero-based indexing).
 Standalone roofline
 ===================
 
-If you are only interested in generating roofline analysis data try using
-``--roof-only``. This will only collect counters relevant to roofline, as well
-as generate a standalone ``.pdf`` output of your roofline plot.
+Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
+You don't need to include any additional roofline-specific options for roofline analysis.
+If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
+This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
+	a) If found, uses the data files with the provided arguments to create another roofline PDF output; otherwise,
+	b) Profile mode runs but is limited to collecting only roofline performance counters.
+Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
 Roofline options
 ----------------
@@ -475,6 +497,10 @@ Roofline options
 ``--device <gpu_id>``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
+
+``-k``, ``--kernel <kernel-substr>``
+   Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
+   utility. See :ref:`profiling-kernel-filtering`.
 
 ``--roofline-data-type <datatype>``
    Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
@@ -526,7 +552,6 @@ successfully.
 .. note::
 
    * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the PDF outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same PDF. To generate results in separate PDFs for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
-   * Roofline feature is currently not enabled on AMD Instinct MI350.
 
 The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
 plot.

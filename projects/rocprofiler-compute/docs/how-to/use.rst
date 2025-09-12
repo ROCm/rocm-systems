@@ -57,17 +57,18 @@ Common filters to customize data collection include:
    Enables filtering based on dispatch ID.
 
 ``-b``, ``--block``
-   Enables collection metrics for only the specified hardware report blocks.
+   Enables collection metrics for only the specified analysis report blocks.
 
 See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 
-To view available metrics by hardware block, use the ``profile`` mode ``--list-metrics``
-option with an optional system architecture argument (inferred if not provided):
+To view available metrics by hardware block, use the ``--list-metrics``
+option with a system architecture argument or ``--list-available-metrics``
+to view the metrics for current system architecture:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile --list-metrics
-   $ rocprof-compute profile --list-metrics <sys_arch>
+   $ rocprof-compute --list-metrics <sys_arch>
+   $ rocprof-compute profile --list-available-metrics
 
 .. _basic-analyze-cli:
 
@@ -80,7 +81,7 @@ interface with profiling results. View different metrics derived from your
 profiled results and get immediate access all metrics organized by hardware
 blocks.
 
-If you don't apply kernel, dispatch, or hardware report block filters at this stage,
+If you don't apply kernel, dispatch, or analysis report block filters at this stage,
 analysis is reflective of the entirety of the profiling data.
 
 To interact with profiling results from a different session, provide the
@@ -152,14 +153,6 @@ Analyze mode
    To generate a lightweight GUI interface, you can add the ``--gui`` flag to your
    analysis command.
 
-   Analyze mode now supports a lightweight Text-based User Interface (TUI) that
-   provides an interactive terminal experience for enhanced usability. To enable TUI mode,
-   use the ``--tui`` flag when running the analyze command:
-
-   .. code-block:: shell
-
-      $ rocprof-compute analyze --tui
-
    This mode is a middle ground to the highly detailed ROCm Compute Profiler Grafana GUI and
    is great if you want immediate access to a hardware component you’re already
    familiar with.
@@ -168,7 +161,15 @@ Analyze mode
 
       $ rocprof-compute analyze --help
 
-See :doc:`analyze/mode` to learn about this mode in depth and to get started
+   Analyze mode now supports a lightweight Text-based User Interface (TUI) that
+   provides an interactive terminal experience for enhanced usability. To enable TUI mode,
+   use the ``--tui`` flag when running the analyze command:
+
+   .. code-block:: shell
+
+      $ rocprof-compute analyze --tui
+
+See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
 
 .. _modes-database:

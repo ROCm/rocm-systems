@@ -7,13 +7,12 @@ repos:
       - id: check-yaml
       - id: end-of-file-fixer
       - id: trailing-whitespace
-  # Python import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 6.0.1
+    # Python import sorting and formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version. Check https://github.com/astral-sh/ruff-pre-commit#version-compatibility,
+    # for the latest ruff version supported by the hook.
+    rev: v0.12.7
     hooks:
-      - id: isort
-  # Python formatting (Using this mirror lets us use mypyc-compiled black, which is about 2x faster)
-  - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 25.1.0
-    hooks:
-      - id: black
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format

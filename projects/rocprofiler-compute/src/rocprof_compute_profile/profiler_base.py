@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,28 +10,31 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
+##############################################################################
+
+import csv
 import glob
-import logging
 import os
 import re
+import shlex
 import shutil
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from utils.logger import (
     console_debug,
@@ -51,19 +54,10 @@ from utils.utils import (
 
 
 class RocProfCompute_Base:
-    def __init__(self, args, profiler_mode, soc, supported_archs):
+    def __init__(self, args, profiler_mode, soc):
         self.__args = args
         self.__profiler = profiler_mode
-        self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
-        self.__filter_hardware_blocks = [
-            name for name, type in args.filter_blocks.items() if type == "hardware_block"
-        ]
-        self.__filter_metric_ids = [
-            name for name, type in args.filter_blocks.items() if type == "metric_id"
-        ]
-        # Fixme: remove the hack code "21" after we could enable pc sampling as default
-        self.__pc_sampling = True if "21" in self.__filter_metric_ids else False
 
     def get_args(self):
         return self.__args
@@ -74,14 +68,83 @@ class RocProfCompute_Base:
         return []
 
     @demarcate
+    def sanitize(self):
+        """Perform sanitization of inputs"""
+        args = self.get_args()
+
+        if (
+            sum((
+                bool(args.filter_blocks),
+                bool(args.set_selected),
+                bool(args.roof_only),
+            ))
+            > 1
+        ):
+            console_error(
+                "--block, --set, and --roof-only are mutually exclusive options. "
+                "Please use only one of them."
+            )
+
+        # verify not accessing parent directories
+        if ".." in str(args.path):
+            console_error(
+                "Access denied. Cannot access parent directories in path (i.e. ../)"
+            )
+
+        # verify correct formatting for application binary
+        args.remaining = args.remaining[1:]
+        if args.remaining:
+            # Ensure that command points to an executable
+            if not shutil.which(args.remaining[0]):
+                console_error(
+                    f"Your command {args.remaining[0]} doesn't point to a executable. "
+                    "Please verify."
+                )
+            args.remaining = " ".join(args.remaining)
+        else:
+            console_error(
+                (
+                    "Profiling command required. Pass application executable after -- "
+                    "at the end of options.\n"
+                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                    "./vcopy -n 1048576 -b 256"
+                )
+            )
+
+    @demarcate
     def join_prof(self, out=None):
         """Manually join separated rocprof runs"""
+        if self.get_args().format_rocprof_output == "rocpd":
+            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
+            result_files = glob.glob(self.get_args().path + "/results_*.csv")
+            if out is None:
+                out = self.__args.path + "/pmc_perf.csv"
+            with open(out, "w", newline="") as outfile:
+                writer = None
+                for file in result_files:
+                    with open(file, "r", newline="") as infile:
+                        reader = csv.reader(infile)
+                        header = next(reader)
+                        # Write header only once
+                        if writer is None:
+                            writer = csv.writer(outfile)
+                            writer.writerow(header)
+                        for row in reader:
+                            writer.writerow(row)
+            console_debug(f"Created file: {out}")
+            # Delete results_*.csv files
+            for file in result_files:
+                os.remove(file)
+                console_debug(f"Deleted file: {file}")
+            return
+
         # Set default output directory if not specified
-        if type(self.__args.path) == str:
+        if isinstance(self.__args.path, str):
             if out is None:
                 out = self.__args.path + "/pmc_perf.csv"
             files = glob.glob(self.__args.path + "/" + "pmc_perf_*.csv")
             files.extend(glob.glob(self.__args.path + "/" + "SQ_*.csv"))
+            files.extend(glob.glob(self.__args.path + "/" + "SQC_*.csv"))
 
             if self.get_args().hip_trace:
                 # remove hip api trace ouputs from this list
@@ -102,7 +165,7 @@ class RocProfCompute_Base:
                         os.path.basename(f)
                     )
                 ]
-        elif type(self.__args.path) == list:
+        elif isinstance(self.__args.path, list):
             files = self.__args.path
         else:
             console_error(
@@ -111,7 +174,7 @@ class RocProfCompute_Base:
 
         df = None
         for i, file in enumerate(files):
-            _df = pd.read_csv(file) if type(self.__args.path) == str else file
+            _df = pd.read_csv(file) if isinstance(self.__args.path, str) else file
             if self.__args.join_type == "kernel":
                 key = _df.groupby("Kernel_Name").cumcount()
                 _df["key"] = _df.Kernel_Name + " - " + key.astype(str)
@@ -126,7 +189,8 @@ class RocProfCompute_Base:
                 )
             else:
                 console_error(
-                    "%s is an unrecognized option for --join-type" % self.__args.join_type
+                    "%s is an unrecognized option for --join-type"
+                    % self.__args.join_type
                 )
 
             if df is None:
@@ -155,7 +219,9 @@ class RocProfCompute_Base:
         }
         # Check for vgpr counter in ROCm < 5.3
         if "vgpr" in df.columns:
-            duplicate_cols["vgpr"] = [col for col in df.columns if col.startswith("vgpr")]
+            duplicate_cols["vgpr"] = [
+                col for col in df.columns if col.startswith("vgpr")
+            ]
         # Check for vgpr counter in ROCm >= 5.3
         else:
             duplicate_cols["Arch_VGPR"] = [
@@ -216,7 +282,8 @@ class RocProfCompute_Base:
                 )
             ]
         ]
-        #   B) any timestamps that are _not_ the duration, which is the one we care about
+        #   B) any timestamps that are _not_ the duration,
+        #      which is the one we care about
         df = df[
             [
                 k
@@ -256,13 +323,14 @@ class RocProfCompute_Base:
         df["End_Timestamp"] = endNs
         # finally, join the drop key
         df = df.drop(columns=["key"])
-        # save to file and delete old file(s), skip if we're being called outside of rocprof-compute
-        if type(self.__args.path) == str:
+        # save to file and delete old file(s)
+        # skip if we're being called outside of rocprof-compute
+        if isinstance(self.__args.path, str):
             df.to_csv(out, index=False)
             if not self.__args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
-                    if "SQ_" not in file:
+                    if "SQ_" not in file or "SQC_" not in file:
                         os.remove(file)
         else:
             return df
@@ -275,6 +343,16 @@ class RocProfCompute_Base:
         """Perform any pre-processing steps prior to profiling."""
         console_debug("profiling", "pre-processing using %s profiler" % self.__profiler)
 
+        self._filter_blocks = self._soc.profiling_setup()
+
+        # Write profiling configuration as yaml file
+        with open(Path(self.__args.path).joinpath("profiling_config.yaml"), "w") as f:
+            args_dict = vars(self.__args)
+            # Override filter_blocks when writing profiling config yaml
+            args_dict["filter_blocks"] = self._filter_blocks
+            args_dict["config_dir"] = str(args_dict["config_dir"])
+            yaml.dump(args_dict, f)
+
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
             console_error(
@@ -285,38 +363,12 @@ class RocProfCompute_Base:
                     self._soc.get_compatible_profilers(),
                 )
             )
-        # verify not accessing parent directories
-        if ".." in str(self.__args.path):
-            console_error(
-                "Access denied. Cannot access parent directories in path (i.e. ../)"
-            )
-
-        # verify correct formatting for application binary
-        self.__args.remaining = self.__args.remaining[1:]
-        if self.__args.remaining:
-            # Ensure that command points to an executable
-            if not shutil.which(self.__args.remaining[0]):
-                console_error(
-                    "Your command %s doesn't point to a executable. Please verify."
-                    % self.__args.remaining[0]
-                )
-            self.__args.remaining = " ".join(self.__args.remaining)
-        else:
-            console_error(
-                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256"
-            )
 
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            ip_blocks=[
-                name
-                for name, type in self.__args.filter_blocks.items()
-                if type == "hardware_block"
-            ],
             app_cmd=self.__args.remaining,
             skip_roof=self.__args.no_roof,
-            roof_only=self.__args.roof_only,
             mspec=self._soc._mspec,
             soc=self._soc,
         )
@@ -336,14 +388,10 @@ class RocProfCompute_Base:
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
-        if self.__filter_hardware_blocks == None:
-            console_log("Hardware Blocks: All")
+        if self._filter_blocks:
+            console_log(f"Filtered sections: {str(self._filter_blocks)}")
         else:
-            console_log("Hardware Blocks: " + str(self.__filter_hardware_blocks))
-        if self.__filter_metric_ids == None:
-            console_log("Report Sections: All")
-        else:
-            console_log("Report Sections: " + str(self.__filter_metric_ids))
+            console_log("Filtered sections: All")
 
         msg = "Collecting Performance Counters"
         (
@@ -367,27 +415,28 @@ class RocProfCompute_Base:
                 time_left_seconds = (total_runs - run_number) * avg_profiling_time
                 time_left = format_time(time_left_seconds)
                 console_log(
-                    f"[Run {run_number}/{total_runs}][Approximate profiling time left: {time_left}]..."
+                    f"[Run {run_number}/{total_runs}]"
+                    f"[Approximate profiling time left: {time_left}]..."
                 )
             else:
                 console_log(
-                    f"[Run {run_number}/{total_runs}][Approximate profiling time left: pending first measurement...]"
+                    f"[Run {run_number}/{total_runs}]"
+                    "[Approximate profiling time left: "
+                    "pending first measurement...]"
                 )
 
             # Kernel filtering (in-place replacement)
             if not self.__args.kernel == None:
-                success, output = capture_subprocess_output(
-                    [
-                        "sed",
-                        "-i",
-                        "-r",
-                        "s%^(kernel:).*%"
-                        + "kernel: "
-                        + ",".join(self.__args.kernel)
-                        + "%g",
-                        fname,
-                    ]
-                )
+                success, output = capture_subprocess_output([
+                    "sed",
+                    "-i",
+                    "-r",
+                    "s%^(kernel:).*%"
+                    + "kernel: "
+                    + ",".join(self.__args.kernel)
+                    + "%g",
+                    fname,
+                ])
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -396,18 +445,16 @@ class RocProfCompute_Base:
 
             # Dispatch filtering (inplace replacement)
             if not self.__args.dispatch == None:
-                success, output = capture_subprocess_output(
-                    [
-                        "sed",
-                        "-i",
-                        "-r",
-                        "s%^(range:).*%"
-                        + "range: "
-                        + " ".join(self.__args.dispatch)
-                        + "%g",
-                        fname,
-                    ]
-                )
+                success, output = capture_subprocess_output([
+                    "sed",
+                    "-i",
+                    "-r",
+                    "s%^(range:).*%"
+                    + "range: "
+                    + " ".join(self.__args.dispatch)
+                    + "%g",
+                    fname,
+                ])
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -430,6 +477,7 @@ class RocProfCompute_Base:
                     mspec=self._soc._mspec,
                     loglevel=self.get_args().loglevel,
                     format_rocprof_output=self.get_args().format_rocprof_output,
+                    retain_rocpd_output=self.get_args().retain_rocpd_output,
                 )
                 end_run_prof = time.time()
                 actual_profiling_duration = end_run_prof - start_run_prof
@@ -443,25 +491,30 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
-        if self.__pc_sampling == True and self.__profiler in (
+        # PC sampling data is only collected when block "21" is specified
+        if "21" in self.get_args().filter_blocks and self.__profiler in (
             "rocprofv3",
             "rocprofiler-sdk",
         ):
-            console_log(f"[Run {total_runs+1}/{total_runs+1}][PC sampling profile run]")
+            console_log(
+                f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]"
+            )
             start_run_prof = time.time()
             pc_sampling_prof(
                 method=self.get_args().pc_sampling_method,
                 interval=self.get_args().pc_sampling_interval,
                 workload_dir=self.get_args().path,
-                appcmd=self.get_args().remaining,
+                appcmd=shlex.split(
+                    self.get_args().remaining
+                ),  # FIXME: the right solution is applying it when argparsing once!
                 rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()
             pc_sampling_duration = end_run_prof - start_run_prof
             console_debug(
                 "The time of pc sampling profiling is {} m {} sec".format(
-                    int((end_run_prof - start_run_prof) / 60),
-                    str((end_run_prof - start_run_prof) % 60),
+                    int((pc_sampling_duration) / 60),
+                    str((pc_sampling_duration) % 60),
                 )
             )
 
@@ -472,6 +525,7 @@ class RocProfCompute_Base:
             "profiling",
             "performing post-processing using %s profiler" % self.__profiler,
         )
+        self._soc.post_profiling()
 
 
 def test_df_column_equality(df):

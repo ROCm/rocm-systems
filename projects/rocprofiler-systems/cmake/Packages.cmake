@@ -53,6 +53,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-python
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
                                           "Enables Perfetto support"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
+                                          "Use SQLite3 for rocpd data storage"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
                                           "Provides timemory libraries"
 )
@@ -534,6 +537,14 @@ include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #
+# SQLite3
+#
+# ----------------------------------------------------------------------------------------#
+
+include(SQLite3)
+
+# ----------------------------------------------------------------------------------------#
+#
 # ELFIO
 #
 # ----------------------------------------------------------------------------------------#
@@ -619,12 +630,7 @@ set(TIMEMORY_QUIET_CONFIG ON CACHE BOOL "Make timemory configuration quieter")
 # timemory feature settings
 set(TIMEMORY_USE_GOTCHA ON CACHE BOOL "Enable GOTCHA support in timemory")
 set(TIMEMORY_USE_PERFETTO OFF CACHE BOOL "Disable perfetto support in timemory")
-set(TIMEMORY_USE_OMPT
-    ${ROCPROFSYS_USE_OMPT}
-    CACHE BOOL
-    "Enable OMPT support in timemory"
-    FORCE
-)
+set(TIMEMORY_USE_OMPT OFF CACHE BOOL "Enable OMPT support in timemory" FORCE)
 set(TIMEMORY_USE_PAPI
     ${ROCPROFSYS_USE_PAPI}
     CACHE BOOL

@@ -93,8 +93,8 @@ namespace AMD {
 const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
 
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
-                   uint32_t index)
-    : GpuAgentInt(node),
+                   uint32_t index, core::DriverType driver_type)
+    : GpuAgentInt(node, driver_type),
       properties_(node_props),
       current_coherency_type_(HSA_AMD_COHERENCY_TYPE_COHERENT),
       scratch_used_large_(0),
@@ -106,7 +106,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       memory_max_frequency_(0),
       enum_index_(index),
       ape1_base_(0),
-      ape1_size_(0),
       pending_copy_req_ref_(0),
       pending_copy_stat_check_ref_(0),
       sdma_blit_used_mask_(0),
@@ -492,6 +491,12 @@ void GpuAgent::InitRegionList() {
 }
 
 void GpuAgent::InitScratchPool() {
+
+  if (!core::Runtime::runtime_singleton_->flag().enable_scratch()) {
+    scratch_pool_. ~SmallHeap();
+    return;
+  }
+
   scratch_per_thread_ =
       core::Runtime::runtime_singleton_->flag().scratch_mem_size();
   if (scratch_per_thread_ == 0)
@@ -712,10 +717,6 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   const size_t copy_size_overrides[2] = {0x3fffff, 0x3fffffff};
 
   switch (isa_->GetMajorVersion()) {
-    case 7:
-    case 8:
-      sdma = new BlitSdmaV2V3();
-      break;
     case 9:
       sdma = new BlitSdmaV4();
       copy_size_override = (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10) ?
@@ -728,7 +729,11 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       break;
     case 11:
     case 12:
-      sdma = new BlitSdmaV5();
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        sdma = new BlitSdmaV4();
+      } else {
+        sdma = new BlitSdmaV5();
+      }
       copy_size_override = copy_size_overrides[1];
       break;
     default:
@@ -743,7 +748,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   rec_eng = uses_rec_sdma_eng_id_mask_ || !use_xgmi ? rec_eng : -1;
 
   if (sdma->Initialize(*this, use_xgmi, copy_size_override, rec_eng) != HSA_STATUS_SUCCESS) {
-    sdma->Destroy(*this);
+    sdma->Destroy();
     delete sdma;
     sdma = nullptr;
   }
@@ -755,7 +760,7 @@ core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
   AMD::BlitKernel* kernl = new AMD::BlitKernel(queue);
 
   if (kernl->Initialize(*this) != HSA_STATUS_SUCCESS) {
-    kernl->Destroy(*this);
+    kernl->Destroy();
     delete kernl;
     kernl = NULL;
   }
@@ -917,7 +922,7 @@ void GpuAgent::ReleaseResources() {
     this->Disable();
     for (auto& blit : blits_) {
       if (!blit.empty()) {
-        hsa_status_t status = blit->Destroy(*this);
+        hsa_status_t status = blit->Destroy();
         assert(status == HSA_STATUS_SUCCESS);
       }
     }
@@ -1249,11 +1254,30 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                           uint32_t *recommended_ids_mask) {
-  assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
-          (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
-         ("Both devices are CPU agents which is not expected"));
+  // From the collected data, gfx94x performance is better only for first 3 SDMA engines
+  bool isGfx94x = (isa_->GetMajorVersion() == 9 &&
+                  (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
 
-  *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
+  if (isGfx94x &&
+      ((src_agent.device_type() == core::Agent::kAmdCpuDevice &&
+        dst_agent.device_type() == core::Agent::kAmdGpuDevice) ||
+        (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+        dst_agent.device_type() == core::Agent::kAmdCpuDevice))) {
+
+    if (src_agent.device_type() == core::Agent::kAmdCpuDevice) {
+      // Host to Device: Use SDMA engine 0 if available
+      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_0;
+    } else {
+      // Device to Host: Use SDMA engines 1 and 2 if available
+      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
+
+      if (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines > 2) {
+        *recommended_ids_mask |= HSA_AMD_SDMA_ENGINE_2;
+      }
+    }
+  } else {
+    *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1743,6 +1767,8 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   const uint32_t num_cu = properties_.NumFComputeCores / properties_.NumSIMDPerCU;
   scratch.main_size = scratch.main_size_per_thread * properties_.MaxSlotsScratchCU *
       scratch.main_lanes_per_wave * num_cu;
+  scratch.main_size =
+      (core::Runtime::runtime_singleton_->flag().enable_scratch()) ? scratch.main_size : 0;
   scratch.main_queue_base = nullptr;
   scratch.main_queue_process_offset = 0;
 
@@ -3093,6 +3119,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   const uint32_t atomic_ex_cmd_sz = 9;
   const uint32_t wait_reg_mem_cmd_sz = 7;
+  const uint32_t acquire_mem_cmd_sz = 8;
   const uint32_t dma_data_cmd_sz = 7;
   const uint32_t copy_data_cmd_sz = 6;
   const uint32_t write_data_cmd_sz = 5;
@@ -3224,6 +3251,20 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = 0xFFFFFFFF;
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
+
+  // For GFX1200 and GFX1201 only - add an ACQUIRE_MEM packet to flush L2 cache before DMA.
+  // This ensures that any data written by the trap handler is visible to the DMA engine.
+  if ((isa_->GetMajorVersion() == 12) && (isa_->GetMinorVersion() == 0)) {
+    cmd_data[i++] =
+        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[i++] = 0;                                // DW1: COHER_CNTL
+    cmd_data[i++] = 0;                                // DW2: COHER_SIZE
+    cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
+    cmd_data[i++] = 0;                                // DW4: COHER_BASE_LO
+    cmd_data[i++] = 0;                                // DW5: COHER_BASE_HI
+    cmd_data[i++] = 4;                                // DW6: POLL_INTERVAL
+    cmd_data[i++] = PM4_ACQUIRE_MEM_GCR_CNTL_GL2_WB;  // DW7: GCR_CNTL (GL2_WB=1, RANGE=ALL)
+  }
 
   uint8_t* buffer_temp = buffer[which_buffer];
 

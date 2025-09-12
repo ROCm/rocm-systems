@@ -1,9 +1,10 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-fork LANGUAGES CXX)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
+list(APPEND _FLAGS -fno-inline)
 
 find_package(Threads REQUIRED)
 find_package(rocprofiler-systems REQUIRED COMPONENTS user)

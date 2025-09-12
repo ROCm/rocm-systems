@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,28 +10,31 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import copy
+import textwrap
 from pathlib import Path
 
 import pandas as pd
 from tabulate import tabulate
 
-from config import HIDDEN_COLUMNS, HIDDEN_SECTIONS
+import config
 from utils import mem_chart, parser
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import convert_metric_id_to_panel_idx
+from utils.utils import convert_metric_id_to_panel_info, get_uuid
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -51,12 +54,71 @@ def string_multiple_lines(source, width, max_rows):
 
 
 def get_table_string(df, transpose=False, decimal=2):
+    """
+    Convert DataFrame to a formatted table string, wrapping specified columns.
+    """
+    df_to_show = df.transpose() if transpose else df
+    wrap_columns = ["Description"]
+    wrap_width = 40
+    for col in wrap_columns:
+        if col in df_to_show.columns:
+            df_to_show[col] = (
+                df_to_show[col]
+                .astype(str)
+                .apply(lambda x: textwrap.fill(x, width=wrap_width))
+            )
     return tabulate(
-        df.transpose() if transpose else df,
+        df_to_show,
         headers="keys",
         tablefmt="fancy_grid",
         floatfmt="." + str(decimal) + "f",
     )
+
+
+def convert_time_columns(df, time_unit):
+    """
+    Convert time column values based on the specified time unit.
+    Uses the Unit column to identify which columns contain time data.
+    """
+    if time_unit not in config.TIME_UNITS or "Unit" not in df.columns:
+        return df
+
+    # Avoid modifying the original
+    df_copy = df.copy()
+
+    time_rows = df_copy["Unit"].str.lower().str.contains("ns", na=False)
+
+    time_value_columns = ["Avg", "Min", "Max"]
+
+    for col in time_value_columns:
+        if col in df_copy.columns:
+            mask = time_rows
+            if mask.any():
+                try:
+                    numeric_values = pd.to_numeric(
+                        df_copy.loc[mask, col], errors="coerce"
+                    )
+                    df_copy.loc[mask, col] = (
+                        numeric_values / config.TIME_UNITS[time_unit]
+                    )
+                except Exception:
+                    pass
+
+    # Update the Unit column
+    if time_rows.any():
+        df_copy.loc[time_rows, "Unit"] = time_unit
+
+    return df_copy
+
+
+def has_time_data(df):
+    """
+    Check if the dataframe contains time data by looking at the Unit column.
+    """
+    if "Unit" not in df.columns:
+        return False
+    # NOTE: "ns" / "NS" / "nS" / "Ns" are reserved for Nanosec time unit
+    return df["Unit"].str.lower().str.contains("ns", na=False).any()
 
 
 def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
@@ -64,29 +126,147 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
-    filter_panel_ids = [
-        convert_metric_id_to_panel_idx(section)
-        for section in [
-            name
-            for name, type in profiling_config.get("filter_blocks", {}).items()
-            if type == "metric_id"
+    filter_panel_ids = profiling_config.get("filter_blocks", [])
+    if isinstance(filter_panel_ids, dict):
+        # For backward compatibility
+        filter_panel_ids = [
+            name for name, type in filter_panel_ids.items() if type == "metric_id"
         ]
+    filter_panel_ids = [
+        int(convert_metric_id_to_panel_info(metric_id)[0])
+        for metric_id in filter_panel_ids
     ]
-    comparable_columns = parser.build_comparable_columns(args.time_unit)
+    if args.include_cols:
+        hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
+    else:
+        hidden_cols = config.HIDDEN_COLUMNS_CLI
+
+    if args.output_format == "csv":
+        if args.output_name:
+            csv_dir = Path(f"{args.output_name}")
+        else:
+            csv_dir = Path(f"rocprof_compute_{get_uuid()}")
+        if not csv_dir.exists():
+            csv_dir.mkdir()
 
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
-        if len(args.path) > 1 and panel_id in HIDDEN_SECTIONS:
+        if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
         ss = ""  # store content of all data_source from one panel
 
+        if panel_id == 400:
+            has_roofline_style = any(
+                data_source.get(type, {}).get("cli_style") == "Roofline"
+                for data_source in panel["data source"]
+                for type in data_source
+            )
+
+            if has_roofline_style and (
+                not args.filter_metrics or "4" in args.filter_metrics
+            ):
+                print("\n" + "=" * 80, file=output)
+                print("4. Roofline", file=output)
+                print("=" * 80, file=output)
+
+                for run_path, workload in runs.items():
+                    if (
+                        hasattr(workload, "roofline_metrics")
+                        and workload.roofline_metrics
+                    ):
+                        print(
+                            "\n(4.1) Per-Kernel Roofline Metrics and "
+                            "(4.2) AI Plot Points",
+                            file=output,
+                        )
+                        print("-" * 80, file=output)
+
+                        kernel_top_df = workload.dfs.get(1, pd.DataFrame())
+                        if not kernel_top_df.empty:
+                            kernel_name_shortener(kernel_top_df, args.kernel_verbose)
+
+                        for i, (kernel_id, metrics) in enumerate(
+                            workload.roofline_metrics.items()
+                        ):
+                            if (
+                                not kernel_top_df.empty
+                                and kernel_id in kernel_top_df.index
+                            ):
+                                kernel_name = kernel_top_df.loc[
+                                    kernel_id, "Kernel_Name"
+                                ]
+                                kernel_pct = (
+                                    kernel_top_df.loc[kernel_id, "Pct"]
+                                    if "Pct" in kernel_top_df.columns
+                                    else 0
+                                )
+                            else:
+                                kernel_name = metrics.get("name", f"Kernel {kernel_id}")
+                                kernel_pct = 0
+
+                            display_name = (
+                                kernel_name[:80] + "..."
+                                if len(kernel_name) > 80
+                                else kernel_name
+                            )
+                            print(
+                                f"\nKernel {kernel_id}: "
+                                f"{display_name} "
+                                f"({kernel_pct:.1f}%)",
+                                file=output,
+                            )
+
+                            base_indent = "  "
+                            table_indent_prefix = f"{base_indent}|   "
+
+                            tables = {
+                                401: (
+                                    "4.1 Roofline Rate Metrics:",
+                                    metrics.get("ai_table", pd.DataFrame()),
+                                ),
+                                402: (
+                                    "4.2 Roofline AI Plot Points:",
+                                    metrics.get("calc_table", pd.DataFrame()),
+                                ),
+                            }
+
+                            print(f"{base_indent}|")
+
+                            for table_id, (table_name, df) in tables.items():
+                                if df.empty:
+                                    continue
+
+                                print(f"{base_indent}├─ {table_name}", file=output)
+
+                                display_df = df.copy()
+
+                                for col in hidden_cols:
+                                    if col in display_df.columns:
+                                        display_df = display_df.drop(columns=[col])
+
+                                table_string = get_table_string(
+                                    display_df, transpose=False, decimal=args.decimal
+                                )
+                                indented_table_string = textwrap.indent(
+                                    table_string, table_indent_prefix
+                                )
+                                print(indented_table_string, file=output)
+
+                    else:
+                        print("\nNo per-kernel metrics available", file=output)
+
+                # Show the roofline plot
+                if roof_plot:
+                    show_roof_plot(roof_plot)
+                continue
+
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
-                # If block filtering was used during analysis, then dont use profiling config
-                # If block filtering was used in profiling config, only show those panels
-                # If block filtering not used in profiling config, show all panels
-                # Skip this table if table id or panel id is not present in block filters
-                # However, always show panel id <= 100
+                # If block filtering was used during analysis, then don't use profiling
+                # config. If block filtering was used in profiling config, only show
+                # those panels. If block filtering not used in profiling config, show
+                # all panels. Skip this table if table id or panel id is not present
+                # in block filters. However, always show panel id <= 100.
                 if (
                     not args.filter_metrics
                     and filter_panel_ids
@@ -100,32 +280,62 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         + str(table_config["id"] % 100)
                     )
                     console_log(
-                        f"Not showing table not selected during profiling: {table_id_str} {table_config['title']}"
+                        f"Not showing table not selected during profiling: "
+                        f"{table_id_str} "
+                        f"{table_config['title']}"
                     )
                     continue
 
-                # Show roofline
-                # Check if we have filter_metrics for analyze stage:
-                # no filter_metrics = show all, filter_metrics containing "4" = user requesting roofline chart
-                if panel_id == 400 and (
-                    not args.filter_metrics or "4" in args.filter_metrics
+                # Metrics baseline comparison mode
+                # We cannot guarantee that all runs have the same metrics.
+                # Only show common metrics.
+                if (
+                    type == "metric_table"
+                    and "Metric" in table_config["header"].values()
+                    and len(runs) > 1
                 ):
-                    show_roof_plot(roof_plot)
-                    continue
+                    # Common metrics across all runs
+                    common_metrics = set()
+                    for _, data in runs.items():
+                        if not common_metrics:
+                            common_metrics = set(data.dfs[table_config["id"]]["Metric"])
+                        else:
+                            common_metrics &= set(
+                                data.dfs[table_config["id"]]["Metric"]
+                            )
+                    # Apply common metrics across all runs
+                    # Reindex all runs based on first run
+                    initial_index = None
+                    for key in runs.keys():
+                        runs[key].dfs[table_config["id"]] = (
+                            runs[key]
+                            .dfs[table_config["id"]]
+                            .loc[lambda d: d["Metric"].isin(common_metrics)]
+                        )
+                        if initial_index is None:
+                            initial_index = runs[key].dfs[table_config["id"]].index
+                        else:
+                            runs[key].dfs[table_config["id"]].index = initial_index
 
                 # take the 1st run as baseline
                 base_run, base_data = next(iter(runs.items()))
                 base_df = base_data.dfs[table_config["id"]]
 
+                if args.time_unit and has_time_data(base_df):
+                    base_df = convert_time_columns(base_df, args.time_unit)
+
                 df = pd.DataFrame(index=base_df.index)
 
                 for header in list(base_df.keys()):
+                    # For raw csv table, columns cannot be filtered
+                    # If columns are filtered, then skip the headers not in
+                    # filtered columns
                     if (
-                        (not args.cols)
-                        or (args.cols and base_df.columns.get_loc(header) in args.cols)
-                        or (type == "raw_csv_table")
+                        type == "raw_csv_table"
+                        or not args.cols
+                        or base_df.columns.get_loc(header) in args.cols
                     ):
-                        if header in HIDDEN_COLUMNS:
+                        if header in hidden_cols:
                             pass
                         elif header not in comparable_columns:
                             if (
@@ -136,7 +346,8 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                 )
                                 and header == "Kernel_Name"
                             ):
-                                # NB: the width of kernel name might depend on the header of the table.
+                                # NB: the width of kernel name might depend
+                                # on the header of the table.
                                 if table_config["source"] == "pmc_kernel_top.csv":
                                     adjusted_name = base_df["Kernel_Name"].apply(
                                         lambda x: string_multiple_lines(x, 40, 3)
@@ -155,9 +366,15 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         else:
                             for run, data in runs.items():
                                 cur_df = data.dfs[table_config["id"]]
+
+                                if args.time_unit and has_time_data(base_df):
+                                    cur_df = convert_time_columns(
+                                        cur_df, args.time_unit
+                                    )
+
                                 if (type == "raw_csv_table") or (
                                     type == "metric_table"
-                                    and (not header in HIDDEN_COLUMNS)
+                                    and (not header in hidden_cols)
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline
@@ -203,9 +420,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                             + "%)"
                                         )
                                         df = pd.concat([df, t_df], axis=1)
-
                                         # DEBUG: When in a CI setting and flag is set,
-                                        #       then verify metrics meet threshold requirement
+                                        #       then verify metrics meet threshold
+                                        #       requirement
                                         if (
                                             header in ["Value", "Count", "Avg"]
                                             and t_df_pretty.abs()
@@ -218,14 +435,15 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                                     t_df_pretty.abs() > args.report_diff
                                                 ]
                                                 console_warning(
-                                                    "Dataframe diff exceeds %s threshold requirement\nSee metric %s"
+                                                    "Dataframe diff exceeds %s "
+                                                    "threshold requirement\n"
+                                                    "See metric %s"
                                                     % (
                                                         str(args.report_diff) + "%",
                                                         violation_idx.to_numpy(),
                                                     )
                                                 )
                                                 console_warning(df)
-
                                     else:
                                         cur_df_copy = copy.deepcopy(cur_df)
                                         cur_df_copy[header] = [
@@ -236,7 +454,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                             )
                                             for x in base_df[header]
                                         ]
-                                        df = pd.concat([df, cur_df_copy[header]], axis=1)
+                                        df = pd.concat(
+                                            [df, cur_df_copy[header]], axis=1
+                                        )
 
                 if not df.empty:
                     # subtitle for each table in a panel if existing
@@ -247,22 +467,23 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     )
 
                     # Check if any column in df is empty
-                    is_empty_columns_exist = any(
-                        [
-                            df.columns[col_idx]
-                            for col_idx in range(len(df.columns))
-                            if df.replace("", None).iloc[:, col_idx].isnull().all()
-                        ]
-                    )
+                    is_empty_columns_exist = any([
+                        df.columns[col_idx]
+                        for col_idx in range(len(df.columns))
+                        if df.replace("", None).iloc[:, col_idx].isnull().all()
+                    ])
                     # Do not print the table if any column is empty
                     if is_empty_columns_exist:
                         if "title" in table_config:
                             console_log(
-                                f"Not showing table with empty column(s): {table_id_str} {table_config['title']}"
+                                f"Not showing table with empty column(s): "
+                                f"{table_id_str} "
+                                f"{table_config['title']}"
                             )
                         else:
                             console_log(
-                                f"Not showing table with empty column(s): {table_id_str}"
+                                f"Not showing table with empty column(s): "
+                                f"{table_id_str}"
                             )
                     if (
                         "title" in table_config
@@ -271,18 +492,17 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     ):
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
-                    if args.df_file_dir:
-                        p = Path(args.df_file_dir)
-                        if not p.exists():
-                            p.mkdir()
-                        if p.is_dir():
-                            if "title" in table_config and table_config["title"]:
-                                table_id_str += "_" + table_config["title"]
-                            df.to_csv(
-                                p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
-                                index=False,
-                            )
-                    # Only show top N kernels (as specified in --max-kernel-num) in "Top Stats" section
+                    if args.output_format == "csv" and csv_dir.is_dir():
+                        if "title" in table_config and table_config["title"]:
+                            table_id_str += "_" + table_config["title"]
+                        csv_filename = str(
+                            csv_dir.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                        )
+                        df.to_csv(csv_filename, index=False)
+                        console_warning(f"Created file: {csv_filename}")
+
+                    # Only show top N kernels (as specified in --max-kernel-num)
+                    # in "Top Stats" section
                     if type == "raw_csv_table" and (
                         table_config["source"] == "pmc_kernel_top.csv"
                         or table_config["source"] == "pmc_dispatch_info.csv"
@@ -297,17 +517,17 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     transpose = (
                         type != "raw_csv_table"
                         and "columnwise" in table_config
-                        and table_config["columnwise"] == True
+                        and table_config["columnwise"]
                     )
                     if not is_empty_columns_exist:
-
                         # enable mem_chart only with single run
                         if (
                             "cli_style" in table_config
                             and table_config["cli_style"] == "mem_chart"
                             and len(runs) == 1
                         ):
-                            # NB: to avoid broken test with arbitrary number with "--cols" option
+                            # NB: to avoid broken test with
+                            # arbitrary number with "--cols" option
                             if "Metric" in df.columns and "Value" in df.columns:
                                 ss += mem_chart.plot_mem_chart(
                                     "",
@@ -336,12 +556,13 @@ def show_roof_plot(roof_plot):
     # TODO: short term solution to display roofline plot
     print("\n" + "-" * 80)
     print("4. Roofline")
-    print("4.1 Roofline")
+    print("4.3 Roofline Plot")
     if roof_plot:
         print(roof_plot)
     else:
         console_error(
-            "Cannot create roofline plot for CLI with incomplete/missing roofline profiling data.",
+            "Cannot create roofline plot for CLI with incomplete/missing "
+            "roofline profiling data.",
             exit=False,
         )
 

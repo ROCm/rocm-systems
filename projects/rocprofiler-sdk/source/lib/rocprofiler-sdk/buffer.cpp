@@ -168,7 +168,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         while(buff->syncer.test_and_set())
         {
             std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            std::this_thread::sleep_for(std::chrono::microseconds{10});
         }
     }
 

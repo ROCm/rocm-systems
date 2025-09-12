@@ -64,6 +64,7 @@ class RdcConfigSettingsImpl : public RdcConfigSettings {
   void monitorSettings();
   uint64_t wattsToMicrowatts(uint64_t watts) const;
   uint64_t microwattsToWatts(int microwatts) const;
+  uint64_t mHzToHz(uint64_t mhz) const;
   rdc_status_t get_group_info(rdc_gpu_group_t group_id, rdc_group_info_t* rdc_group_info);
 };
 

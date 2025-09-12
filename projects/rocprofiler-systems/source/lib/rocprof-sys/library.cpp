@@ -27,18 +27,24 @@
 #include "api.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
+#include "core/agent.hpp"
+#include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/cpu.hpp"
 #include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
@@ -50,7 +56,6 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
-#include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -77,6 +82,11 @@
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
+#if ROCPROFSYS_USE_ROCM > 0
+#    include <rocprofiler-sdk/agent.h>
+#    include <rocprofiler-sdk/registration.h>
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -86,6 +96,7 @@
 #include <pthread.h>
 #include <stdexcept>
 #include <string_view>
+#include <unistd.h>
 #include <utility>
 
 using namespace rocprofsys;
@@ -297,6 +308,46 @@ namespace
 bool                  _set_mpi_called   = false;
 std::function<void()> _preinit_callback = []() { get_preinit_bundle()->start(); };
 
+std::vector<std::string>
+read_command_line(pid_t _pid)
+{
+    auto _cmdline = std::vector<std::string>{};
+    auto fcmdline = std::stringstream{};
+    fcmdline << "/proc/" << _pid << "/cmdline";
+    auto ifs = std::ifstream{ fcmdline.str().c_str() };
+    if(ifs)
+    {
+        std::string sarg;
+        while(std::getline(ifs, sarg, '\0'))
+        {
+            _cmdline.push_back(sarg);
+        }
+        ifs.close();
+    }
+
+    return _cmdline;
+}
+
+void
+rocprofsys_preinit_cache()
+{
+    auto _cmd_line = read_command_line(getpid());
+
+    if(_cmd_line.empty())
+    {
+        _cmd_line.emplace_back("rocprofiler-systems");
+    }
+
+    trace_cache::get_metadata_registry().set_process(
+        { getpid(), getppid(), _cmd_line.at(0) });
+}
+
+void
+rocprofsys_preinit_cpu_agents()
+{
+    cpu::query_cpu_agents();
+}
+
 void
 rocprofsys_preinit_hidden()
 {
@@ -358,6 +409,22 @@ rocprofsys_init_library_hidden()
 
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
+
+    int _selinux_mode = 0;
+    {
+        std::ifstream _fenforcing{ "/sys/fs/selinux/enforce" };
+        if(!(_fenforcing >> _selinux_mode)) _selinux_mode = 0;
+        _fenforcing.close();
+    }
+
+    if(_selinux_mode == 1)
+    {
+        ROCPROFSYS_BASIC_VERBOSE(0, "/sys/fs/selinux/enforce has a value of %i. \n",
+                                 _selinux_mode);
+        std::cerr << "SELinux enforcing mode detected. Consider disabling SELinux "
+                  << "or configure permissive mode with 'sudo setenforce 0'. Aborting.\n";
+        std::exit(EXIT_FAILURE);
+    }
 
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
@@ -423,17 +490,17 @@ rocprofsys_init_tooling_hidden(void)
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
 #endif
 
-    static bool _once       = false;
-    static auto _debug_init = get_debug_init();
+    static pid_t _once       = 0;
+    static auto  _debug_init = get_debug_init();
 
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once)
+    if(get_state() != State::PreInit || get_state() == State::Init || _once == getpid())
     {
         return false;
     }
-    _once = true;
+    _once = getpid();
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -460,6 +527,12 @@ rocprofsys_init_tooling_hidden(void)
     auto _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
+
+#if !(ROCPROFSYS_USE_ROCM > 0)
+        rocprofsys_preinit_cpu_agents();
+#endif
+        rocprofsys_preinit_cache();
+
         if(get_use_process_sampling())
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -543,12 +616,6 @@ rocprofsys_init_tooling_hidden(void)
         {
             tim::trait::runtime_enabled<project::rocprofsys>::set(false);
         }
-    }
-
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up OMPT...\n");
-        ompt::setup();
     }
 
     if(get_use_perfetto())
@@ -681,7 +748,6 @@ rocprofsys_finalize_hidden(void)
     threading::remove_callback(&ensure_initialization);
 
     bool _is_child = is_child_process();
-
     set_thread_state(ThreadState::Completed);
 
     // return if not active
@@ -693,6 +759,24 @@ rocprofsys_finalize_hidden(void)
     }
     else if(_is_child)
     {
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+        // Flush buffered traces in case of child process
+        if(get_use_rocm())
+        {
+            ROCPROFSYS_VERBOSE_F(1, "Shutting down ROCm...\n");
+            rocprofiler_sdk::shutdown();
+        }
+#endif
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process();
+
+#if ROCPROFSYS_USE_ROCM > 0
+        if(get_use_rocpd())
+        {
+            rocpd::data_processor::get_instance().flush();
+        }
+#endif
         set_state(State::Finalized);
         std::quick_exit(EXIT_SUCCESS);
         return;
@@ -779,12 +863,6 @@ rocprofsys_finalize_hidden(void)
         component::vaapi_gotcha::shutdown();
     }
 
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down OMPT...\n");
-        ompt::shutdown();
-    }
-
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     if(get_use_rocm())
     {
@@ -792,6 +870,12 @@ rocprofsys_finalize_hidden(void)
         rocprofiler_sdk::shutdown();
     }
 #endif
+
+    {
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process();
+    }
 
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
@@ -983,6 +1067,12 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
+#if ROCPROFSYS_USE_ROCM > 0
+    if(get_use_rocpd())
+    {
+        rocpd::data_processor::get_instance().flush();
+    }
+#endif
 }
 
 //======================================================================================//

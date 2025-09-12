@@ -51,6 +51,7 @@ if(${NAME}_FOUND AND NOT TARGET ${NAME}::${NAME})
     find_package(hipblaslt REQUIRED)
     find_package(hsakmt REQUIRED)
     find_package(hip REQUIRED)
+    find_package(hiprand REQUIRED)
     find_package(hsa-runtime64 REQUIRED)
     find_package(amd_smi REQUIRED)
     target_link_libraries(
@@ -62,6 +63,7 @@ if(${NAME}_FOUND AND NOT TARGET ${NAME}::${NAME})
             roc::hipblaslt
             hsakmt::hsakmt
             hip::amdhip64
+            hip::hiprand
             hsa-runtime64::hsa-runtime64
             amd_smi
     )

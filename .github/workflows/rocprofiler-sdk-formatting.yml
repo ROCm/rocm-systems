@@ -1,0 +1,172 @@
+
+name: rocprofiler-sdk Formatting
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/.github/workflows/pull_*.yml'
+      - '!projects/rocprofiler-sdk/.github/workflows/linting.yml'
+      - '!projects/rocprofiler-sdk/.github/workflows/markdown_lint.yml'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cmake:
+    runs-on: ubuntu-22.04
+    env:
+      ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Install dependencies
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        python3 -m pip install -r requirements.txt
+
+    - name: Run cmake-format
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        FORMAT_FILES=$(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        command -v cmake-format
+        cmake-format --version
+        set +e
+        cmake-format -i ${FORMAT_FILES}
+        if [ $(git diff | wc -l) -ne 0 ]; then
+          echo -e "\nError! CMake code not formatted. Run cmake-format...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
+  source:
+    runs-on: ubuntu-22.04
+    env:
+      ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Install dependencies
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common python3 python3-pip
+        python3 -m pip install -r requirements.txt
+
+    - name: Run clang-format
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        FORMAT_FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        command -v git
+        command -v clang-format
+        git --version
+        clang-format --version
+        set +e
+        FORMAT_OUT=$(clang-format -i ${FORMAT_FILES})
+        git status
+        if [ $(git diff | wc -l) -ne 0 ]; then
+          echo -e "\nError! Code not formatted. Run clang-format (version 11)...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
+  python:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ['3.10']
+    env:
+      ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+
+    - name: black format
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        black .
+        if [ $(git diff | wc -l) -ne 0 ]; then
+          echo -e "\nError! Python code not formatted. Run black...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
+  missing-new-line:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Find missing new line
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        OUTFILE=missing_newline.txt
+        for i in $(find source tests samples benchmark docker cmake -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
+        if [[ -f ${OUTFILE} && $(cat ${OUTFILE} | wc -l) -gt 0 ]]; then
+          echo -e "\nError! Source code missing new line at end of file...\n"
+          echo -e "\nFiles:\n"
+          cat ${OUTFILE}
+          exit 1
+        fi

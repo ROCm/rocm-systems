@@ -36,10 +36,10 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief Handle containing a loaded rocprof-trace-decoder and a decoder state.
  */
-typedef struct rocprofiler_thread_trace_decoder_handle_t
+typedef struct rocprofiler_thread_trace_decoder_id_t
 {
     uint64_t handle;
-} rocprofiler_thread_trace_decoder_handle_t;
+} rocprofiler_thread_trace_decoder_id_t;
 
 /**
  * @brief Initializes Trace Decoder library with a library search path
@@ -51,7 +51,7 @@ typedef struct rocprofiler_thread_trace_decoder_handle_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Handle created
  */
 rocprofiler_status_t
-rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_handle_t* handle,
+rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_id_t* handle,
                                         const char* path) ROCPROFILER_API ROCPROFILER_NONNULL(1, 2);
 
 /**
@@ -59,7 +59,7 @@ rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_handle_
  * @param[in] handle Handle to destroy
  */
 void
-rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_handle_t handle)
+rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_id_t handle)
     ROCPROFILER_API;
 
 /**
@@ -83,11 +83,11 @@ rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_handle
  * @retval ::ROCPROFILER_STATUS_SUCCESS Code object loaded
  */
 rocprofiler_status_t
-rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_handle_t handle,
-                                              uint64_t                                  load_id,
-                                              uint64_t                                  load_addr,
-                                              uint64_t                                  load_size,
-                                              const void*                               data,
+rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_id_t handle,
+                                              uint64_t                              load_id,
+                                              uint64_t                              load_addr,
+                                              uint64_t                              load_size,
+                                              const void*                           data,
                                               uint64_t size) ROCPROFILER_API ROCPROFILER_NONNULL(5);
 
 /**
@@ -100,7 +100,7 @@ rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_h
  * @retval ::ROCPROFILER_STATUS_SUCCESS Code object unloaded
  */
 rocprofiler_status_t
-rocprofiler_thread_trace_decoder_codeobj_unload(rocprofiler_thread_trace_decoder_handle_t handle,
+rocprofiler_thread_trace_decoder_codeobj_unload(rocprofiler_thread_trace_decoder_id_t handle,
                                                 uint64_t load_id) ROCPROFILER_API;
 
 /**
@@ -135,7 +135,7 @@ typedef void (*rocprofiler_thread_trace_decoder_callback_t)(
  * @retval ::ROCPROFILER_STATUS_SUCCESS on success
  */
 rocprofiler_status_t
-rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_handle_t   handle,
+rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_id_t       handle,
                          rocprofiler_thread_trace_decoder_callback_t callback,
                          void*                                       data,
                          uint64_t                                    size,
@@ -148,8 +148,8 @@ rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_handle_t   handle,
  * @retval null terminated string as description of "info".
  */
 const char*
-rocprofiler_thread_trace_decoder_info_string(rocprofiler_thread_trace_decoder_handle_t handle,
-                                             rocprofiler_thread_trace_decoder_info_t   info)
+rocprofiler_thread_trace_decoder_info_string(rocprofiler_thread_trace_decoder_id_t   handle,
+                                             rocprofiler_thread_trace_decoder_info_t info)
     ROCPROFILER_API;
 
 /** @} */

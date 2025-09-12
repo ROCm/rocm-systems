@@ -1,13 +1,13 @@
-# How to cherry-pick monorepo changes into release-staging branches
+# How to cherry-pick super-repo changes into release-staging branches
 
 > [!IMPORTANT]
 > This document is currently in **draft** and may be subject to change.
 
-When a project has been migrated into the ROCm monorepo, day-to-day work happens on the monorepo’s `develop` branch.
-Down-stream teams, however, still consume the original (pre-monorepo) repositories, particularly their `release-staging/rocm-rel-x.y` branches, through a variety of mechanisms.
-This document explains how to move a change from the monorepo into those release-staging branches while guaranteeing that every commit on a release-staging branch also exists in the monorepo.
+When a project has been migrated into the ROCm super-repo, day-to-day work happens on the super-repo’s `develop` branch.
+Down-stream teams, however, still consume the original (pre-super-repo) repositories, particularly their `release-staging/rocm-rel-x.y` branches, through a variety of mechanisms.
+This document explains how to move a change from the super-repo into those release-staging branches while guaranteeing that every commit on a release-staging branch also exists in the super-repo.
 
-## 1. Land the change in the monorepo's develop branch
+## 1. Land the change in the super-repo's develop branch
 
 1. Create a pull request in `ROCm/rocm-systems` that targets `develop`.
 2. When merging, choose **Squash & Merge** (if the change can be represented as a single logical commit).
@@ -15,7 +15,7 @@ This document explains how to move a change from the monorepo into those release
 
 Result: The commit is now on `ROCm/rocm-systems:develop`.
 
-## 2. Cherry-pick into the monorepo's release-staging branch
+## 2. Cherry-pick into the super-repo's release-staging branch
 
 1. Create a local branch based on the release-staging branch:
 
@@ -35,17 +35,17 @@ $ git cherry-pick abcd1234
 
 ## 3. Wait for the automatic “fan-out” sync
 
-Every ~15 minutes, a CI job copies new commits from the monorepo back into the corresponding standalone repositories.
+Every ~15 minutes, a CI job copies new commits from the super-repo back into the corresponding standalone repositories.
 
 After merging your PR:
 
 1. Monitor the CI job or simply wait ~15 minutes.
-2. Go to the original (pre-monorepo) repository and verify the commits have been reflected onto the `develop` and `release-staging/rocm-rel-x.y` branches.
+2. Go to the original (pre-super-repo) repository and verify the commits have been reflected onto the `develop` and `release-staging/rocm-rel-x.y` branches.
 
 ## FAQ
 
 Q : Can I cherry-pick multiple commits at once?
-A : Yes, but prefer a squash merge in the monorepo so you only need to pick one.
+A : Yes, but prefer a squash merge in the super-repo so you only need to pick one.
 
 Q : What if the auto-sync hasn’t copied the commit?
 A : Verify the CI status in `rocm-systems`. If failed, ask the infra team; the commit will re-sync after a successful run.
@@ -60,8 +60,8 @@ A : It's likely that this fix/change will also be landed in develop at some poin
 
 In short:
 
-1. Merge change to monorepo `develop`.
-2. Cherry-pick to monorepo `release-staging/rocm-rel-x.y`.
+1. Merge change to super-repo `develop`.
+2. Cherry-pick to super-repo `release-staging/rocm-rel-x.y`.
 3. Wait for the fan-out sync and verify the changes are reflected in the original repository.
 
-Following this process keeps release branches in sync with the monorepo while allowing critical fixes to flow to down-stream consumers.
+Following this process keeps release branches in sync with the super-repo while allowing critical fixes to flow to down-stream consumers.

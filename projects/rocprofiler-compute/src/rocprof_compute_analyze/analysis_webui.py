@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,20 +10,20 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import copy
-import os
 import random
 from pathlib import Path
 
@@ -36,7 +36,7 @@ from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser
 from utils.gui import build_bar_chart, build_table_chart
-from utils.logger import console_debug, console_error, demarcate
+from utils.logger import console_debug, console_error, console_warning, demarcate
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -48,12 +48,14 @@ class webui_analysis(OmniAnalyze_Base):
         self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch = None
 
-        self.__hidden_sections = ["Memory Chart", "Roofline"]
+        self.__hidden_sections = ["Memory Chart"]
         self.__hidden_columns = HIDDEN_COLUMNS
         # define different types of bar charts
         self.__barchart_elements = {
             "instr_mix": [1001, 1002],
-            "multi_bar": [1604, 1704],
+            # 1604: L1D - L2 Transactions
+            # 1705: L2 - Fabric Interface Stalls
+            "multi_bar": [1604, 1705],
             "sol": [1101, 1201, 1301, 1401, 1601, 1701],
             # "l2_cache_per_chan": [1802, 1803]
         }
@@ -118,6 +120,7 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 self.get_args().verbose,
+                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:
@@ -148,7 +151,7 @@ class webui_analysis(OmniAnalyze_Base):
             # Only display basic metrics if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
                 temp = {}
-                keep = [1, 2, 101, 201, 301, 401]
+                keep = [1, 2, 101, 201, 301, 401, 402]
                 for key in base_data[base_run].dfs:
                     if keep.count(key) != 0:
                         temp[key] = base_data[base_run].dfs[key]
@@ -166,6 +169,7 @@ class webui_analysis(OmniAnalyze_Base):
                 dir=self.dest_dir,
                 is_gui=True,
                 args=self.get_args(),
+                config=self._profiling_config,
             )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
@@ -189,6 +193,7 @@ class webui_analysis(OmniAnalyze_Base):
                         "include_kernel_names": False,
                         "is_standalone": False,
                         "roofline_data_type": self.__roofline_data_type,
+                        "kernel_filter": False,
                     }
                 )
                 roof_obj = self.get_socs()[self.arch].roofline_obj
@@ -215,14 +220,16 @@ class webui_analysis(OmniAnalyze_Base):
                     .lower()
                 )
                 html_section = []
-
                 if panel["title"] not in self.__hidden_sections:
                     # Iterate over each table per section
                     for data_source in panel["data source"]:
                         for t_type, table_config in data_source.items():
                             original_df = base_data[base_run].dfs[table_config["id"]]
                             # The sys info table need to add index back
-                            if t_type == "raw_csv_table" and "Info" in original_df.keys():
+                            if (
+                                t_type == "raw_csv_table"
+                                and "Info" in original_df.keys()
+                            ):
                                 original_df.reset_index(inplace=True)
 
                             content = determine_chart_type(
@@ -273,7 +280,13 @@ class webui_analysis(OmniAnalyze_Base):
                         id="popup",
                         children=[
                             html.Div(
-                                children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied.",
+                                children=(
+                                    "To dive deeper, use the top drop down menus to "
+                                    "isolate particular kernel(s) or dispatch(s). "
+                                    "You will then see the web page update with "
+                                    "additional low-level metrics specific to the "
+                                    "filter you've applied."
+                                ),
                             ),
                         ],
                     )
@@ -298,10 +311,13 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 args.verbose,
+                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:
-                self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
+                self._runs[
+                    self.dest_dir
+                ].raw_pmc = self.spatial_multiplex_merge_counters(
                     self._runs[self.dest_dir].raw_pmc
                 )
 
@@ -371,12 +387,15 @@ def determine_chart_type(
 
     # Determine chart type:
     # a) Barchart
-    if table_config["id"] in [x for i in barchart_elements.values() for x in i]:
+    if original_df.empty:
+        console_warning(
+            f"The dataframe with id={table_config['id']} is empty! Not displaying it."
+        )
+    elif table_config["id"] in [x for i in barchart_elements.values() for x in i]:
         d_figs = build_bar_chart(display_df, table_config, barchart_elements, norm_filt)
         # Smaller formatting if barchart yeilds several graphs
         if (
-            len(d_figs)
-            > 2
+            len(d_figs) > 2
             # and not table_config["id"]
             # in barchart_elements["l2_cache_per_chan"]
         ):

@@ -41,35 +41,20 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_async_correlation_id_t /* correlation_id */,
                   rocprofiler_kernel_id_t kernel_id,
                   rocprofiler_dispatch_id_t /* dispatch_id */,
-                  void*                    userdata,
-                  rocprofiler_user_data_t* dispatch_userdata)
+                  void* /* userdata  */,
+                  rocprofiler_user_data_t* /* dispatch_userdata */)
 {
-    C_API_BEGIN
-    assert(userdata && "Dispatch callback passed null!");
-    auto& tool             = *reinterpret_cast<Callbacks::ToolData*>(userdata);
-    dispatch_userdata->ptr = userdata;
+    static rocprofiler_kernel_id_t target_kernel_id = kernel_id;
+    if(target_kernel_id == kernel_id) return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 
-    static std::string_view desired_func_name = "branching_kernel";
-
-    try
-    {
-        auto& kernel_name = tool.kernel_id_to_kernel_name.at(kernel_id);
-        if(kernel_name.find(desired_func_name) == std::string::npos)
-            return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
-
-        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
-    } catch(...)
-    {
-        std::cerr << "Could not find kernel id: " << kernel_id << std::endl;
-    }
-
-    C_API_END
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
 int
-tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
+tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 {
+    Callbacks::init();
+
     static rocprofiler_context_id_t client_ctx = {0};
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
@@ -80,7 +65,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
                                                        nullptr,
                                                        0,
                                                        Callbacks::tool_codeobj_tracing_callback,
-                                                       tool_data),
+                                                       nullptr),
         "code object tracing service configure");
 
     std::vector<rocprofiler_agent_id_t> agents{};
@@ -110,7 +95,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
                                                                 0,
                                                                 dispatch_callback,
                                                                 Callbacks::shader_data_callback,
-                                                                tool_data),
+                                                                nullptr),
             "thread trace service configure");
     }
 
@@ -129,13 +114,6 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 
     // no errors
     return 0;
-}
-
-void
-tool_fini(void* tool_data)
-{
-    Callbacks::finalize_json(tool_data);
-    delete static_cast<Callbacks::ToolData*>(tool_data);
 }
 
 }  // namespace Single
@@ -157,11 +135,11 @@ rocprofiler_configure(uint32_t /* version */,
     ATTTest::Single::client_id = id;
 
     // create configure data
-    static auto cfg = rocprofiler_tool_configure_result_t{
-        sizeof(rocprofiler_tool_configure_result_t),
-        &ATTTest::Single::tool_init,
-        &ATTTest::Single::tool_fini,
-        reinterpret_cast<void*>(new Callbacks::ToolData{"att_single_test/"})};
+    static auto cfg =
+        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
+                                            &ATTTest::Single::tool_init,
+                                            &Callbacks::finalize,
+                                            nullptr};
 
     // return pointer to configure data
     return &cfg;

@@ -224,6 +224,58 @@ set_tests_properties(
 
 #########################################################################################
 #
+# Summary generate
+#
+#########################################################################################
+add_test(
+    NAME rocprofv3-test-rocpd-summary-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-summary-generation
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-execute"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-rocpd-generation
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd)
+
+add_test(
+    NAME rocprofv3-test-rocpd-summary-generation-multiproc
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary -o out_mp -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-summary-generation-multiproc
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${MULTIPROC_IS_DISABLED}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-multiproc)
+
+#########################################################################################
+#
 # Validation
 #
 #########################################################################################

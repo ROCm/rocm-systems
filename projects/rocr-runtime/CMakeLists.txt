@@ -108,11 +108,19 @@ if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
 endif()
 
+if (NOT DEFINED BUILD_THUNK_VIRTIO)
+  set(BUILD_THUNK_VIRTIO OFF)
+endif()
+
 add_rocm_subdir(libhsakmt "${THUNK_DEFINITIONS}")
 set_target_properties(hsakmt PROPERTIES
                                 ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/archive"
                                 LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/lib"
                                 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/runtime")
+
+if (BUILD_THUNK_VIRTIO)
+  add_rocm_subdir(libhsakmt/src/virtio "${THUNK_VIRTIO_DEFINITIONS}")
+endif()
 
 if (BUILD_ROCR)
   add_rocm_subdir(runtime/hsa-runtime "${ROCR_DEFINITIONS}")
@@ -123,6 +131,9 @@ if (BUILD_ROCR)
 
   if (BUILD_SHARED_LIBS)
     add_dependencies(hsa-runtime64 hsakmt)
+    if (BUILD_THUNK_VIRTIO)
+      add_dependencies(hsa-runtime64 hsakmt_virtio)
+    endif()
   else()
     add_dependencies(hsa-runtime64 hsakmt-staticdrm)
   endif()
@@ -166,7 +177,7 @@ set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION_STRING})
 set(CPACK_PACKAGE_CONTACT "AMD HSA Support <dl.HSA-Runtime-Support@amd.com>")
-set(CPACK_COMPONENT_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms\nIncludes HSAKMT, the user-mode API interfaces used to interact with the ROCk driver.\n Contains the headers, pkgonfig and\n cmake files for ROCT.")
+set(CPACK_COMPONENT_DESCRIPTION "Includes HSAKMT, the ROCk driver, headers, pkgonfig and cmake files for ROCT.")
 set(CPACK_COMPONENT_BINARY_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms")
 set(CPACK_COMPONENT_DEV_DESCRIPTION "AMD Heterogeneous System Architecture HSA development package.\n This package contains the headers and cmake files for the rocr-runtime package.")
 set(CPACK_COMPONENT_ASAN_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA instrumented libraries for Boltzmann (ROCm) platforms")

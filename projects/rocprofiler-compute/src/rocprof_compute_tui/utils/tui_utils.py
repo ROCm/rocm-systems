@@ -1,87 +1,50 @@
-import copy
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 import logging
-import os
-import re
-from collections import defaultdict
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 
 import pandas as pd
 
-from config import HIDDEN_COLUMNS, HIDDEN_SECTIONS
-
-supported_field = [
-    "Value",
-    "Minimum",
-    "Maximum",
-    "Average",
-    "Median",
-    "Min",
-    "Max",
-    "Avg",
-    "Pct of Peak",
-    "Peak",
-    "Count",
-    "Mean",
-    "Pct",
-    "Std Dev",
-    "Q1",
-    "Q3",
-    "Expression",
-    # Special keywords for L2 channel
-    "Channel",
-    "L2 Cache Hit Rate",
-    "Requests",
-    "L2 Read",
-    "L2 Write",
-    "L2 Atomic",
-    "L2-Fabric Requests",
-    "L2-Fabric Read",
-    "L2-Fabric Write and Atomic",
-    "L2-Fabric Atomic",
-    "L2 Read Req",
-    "L2 Write Req",
-    "L2 Atomic Req",
-    "L2-Fabric Read Req",
-    "L2-Fabric Write and Atomic Req",
-    "L2-Fabric Atomic Req",
-    "L2-Fabric Read Latency",
-    "L2-Fabric Write Latency",
-    "L2-Fabric Atomic Latency",
-    "L2-Fabric Read Stall (PCIe)",
-    "L2-Fabric Read Stall (Infinity Fabric™)",
-    "L2-Fabric Read Stall (HBM)",
-    "L2-Fabric Write Stall (PCIe)",
-    "L2-Fabric Write Stall (Infinity Fabric™)",
-    "L2-Fabric Write Stall (HBM)",
-    "L2-Fabric Write Starve",
-]
+import config
 
 
 class LogLevel(str, Enum):
-    """Log levels for consistent logging."""
-
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
-    SUCCESS = "success"  # Maintained for UI compatibility
+    SUCCESS = "success"
 
 
 class Logger:
-    """Centralized logging handler for the application."""
-
     def __init__(self, output_area=None):
-        """
-        Initialize the logger.
-        """
         self.output_area = output_area
         self._setup_logger()
 
     def _setup_logger(self):
-        """
-        Setup the Python logger with proper formatting.
-        """
         self.logger = logging.getLogger("app")
         self.logger.setLevel(logging.INFO)
 
@@ -94,202 +57,63 @@ class Logger:
             self.logger.addHandler(handler)
 
     def set_output_area(self, output_area):
-        """
-        Set or update the output area for displaying logs.
-        """
         self.output_area = output_area
 
-    def log(self, message, level=LogLevel.INFO, update_ui=True):
-        """
-        Log a message with the specified level.
-        """
+    def log(self, message, level="INFO", update_ui=True):
         level_map = {
-            LogLevel.INFO: logging.INFO,
-            LogLevel.SUCCESS: logging.INFO,
-            LogLevel.WARNING: logging.WARNING,
-            LogLevel.ERROR: logging.ERROR,
+            "INFO": logging.INFO,
+            "SUCCESS": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
         }
-
         self.logger.log(level_map[level], message)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-
-        if update_ui and self.output_area:
-            if level == LogLevel.ERROR:
-                formatted_msg = f"[{timestamp}] [ERROR] {message}"
-            elif level == LogLevel.WARNING:
-                formatted_msg = f"[{timestamp}] [WARNING] {message}"
-            elif level == LogLevel.SUCCESS:
-                formatted_msg = f"[{timestamp}] [SUCCESS] {message}"
-            else:
-                formatted_msg = f"[{timestamp}] [INFO] {message}"
-
-            if hasattr(self.output_area, "text"):
-                current_text = self.output_area.text
-                self.output_area.text = (
-                    f"{current_text}\n{formatted_msg}" if current_text else formatted_msg
-                )
-                # HACK: moving curson to end of outpu (Is there a better way to achieve this?)
-                self.output_area.cursor_location = (999999, 0)
+        if update_ui and self.output_area and hasattr(self.output_area, "text"):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted_msg = f"[{timestamp}] [{level}] {message}"
+            self.output_area.text = (
+                f"{self.output_area.text}\n{formatted_msg}"
+                if self.output_area.text
+                else formatted_msg
+            )
+            self.output_area.cursor_location = (999999, 0)
 
     def info(self, message, update_ui=True):
-        self.log(message, LogLevel.INFO, update_ui)
+        self.log(message, "INFO", update_ui)
 
     def success(self, message, update_ui=True):
-        self.log(message, LogLevel.SUCCESS, update_ui)
+        self.log(message, "SUCCESS", update_ui)
 
     def warning(self, message, update_ui=True):
-        self.log(message, LogLevel.WARNING, update_ui)
+        self.log(message, "WARNING", update_ui)
 
     def error(self, message, update_ui=True):
-        self.log(message, LogLevel.ERROR, update_ui)
+        self.log(message, "ERROR", update_ui)
 
 
-def split_table_line(line):
-    """
-    Splits a table row line into a list of cell strings (trimmed). For example:
+def get_top_kernels_and_dispatch_ids(runs):
+    if not runs:
+        return None
 
-    │    │ Kernel_Name                              │   Count │ ...
-    """
+    base_run = next(iter(runs.values()))
+    if not hasattr(base_run, "dfs"):
+        return None
 
-    cells = line.split("│")
-    if cells and cells[0] == "":
-        cells = cells[1:]
-    if cells and cells[-1] == "":
-        cells = cells[:-1]
-    return [cell.strip() for cell in cells]
+    top_kernel_df = base_run.dfs.get(1)
+    dispatch_id_df = base_run.dfs.get(2)
 
+    if top_kernel_df is None or dispatch_id_df is None:
+        return None
 
-def parse_ascii_table(table_lines):
-    """
-    Given a list of lines belonging to one ASCII table (including border rows),
-    return a tuple (header, data_rows) where header is a list of column names and
-    data_rows is a list of rows (each a list of cell strings).
+    merged_df = pd.merge(
+        top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
+    ).sort_values("Pct", ascending=False)
 
-    Skips border/separator lines and also checks for continuation
-    rows (which have an empty first cell). Continuation rows get merged into the previous row.
-    """
-
-    header = None
-    data_rows = []
-
-    for line in table_lines:
-        if re.match(r"^[╒╞╘├└─]+", line):
-            continue
-        if "│" not in line:
-            continue
-
-        cells = split_table_line(line)
-
-        if header is None:
-            header = cells
-            continue
-
-        if cells and cells[0] == "":
-            if data_rows:  # There should be at least one row already.
-                for i, cell in enumerate(cells):
-                    if cell:
-                        data_rows[-1][i] += " " + cell
-            else:
-                continue
-        else:
-            data_rows.append(cells)
-    return header, data_rows
+    merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
+    return merged_df.to_dict("records")
 
 
-def parse_file(filename):
-    """
-    Returns nested structure:
-    {
-        "0. Top Stats": {
-            "0.1 Top Kernels": {header: [...], data: [...]},
-            "0.2 Dispatch List": {header: [...], data: [...]}
-        },
-        "1. System Info": {
-            "1.1 System Information": {header: [...], data: [...]}
-        },
-        ...
-    }
-    """
-    with open(filename, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    sections = {}
-    current_section = None
-    current_subsection = None
-    table_lines = []
-    in_table = False
-
-    for line in lines:
-        line = line.rstrip("\n")
-
-        # Skip separator lines
-        if line.startswith(
-            "--------------------------------------------------------------------------------"
-        ):
-            continue
-
-        # Check for section header (e.g., "0. Top Stats")
-        section_match = re.match(r"^\s*(\d+\. .+)$", line)
-        if section_match:
-            current_section = section_match.group(1).strip()
-            sections[current_section] = {}
-            continue
-
-        # Check for subsection header (e.g., "0.1 Top Kernels")
-        # FIXME: 1. System Info is an exception, no subsection
-        subsection_match = re.match(r"^\s*(\d+\.\d+ .+)$", line)
-        if subsection_match:
-            current_subsection = subsection_match.group(1).strip()
-            if current_section is None:
-                current_section = "Uncategorized"
-                sections[current_section] = {}
-            continue
-
-        # Table parsing logic
-        if line.startswith("╒"):
-            in_table = True
-            table_lines = [line]
-            continue
-
-        if in_table:
-            table_lines.append(line)
-            if line.startswith("╘"):
-                if current_section and current_subsection:
-                    header, data = parse_ascii_table(table_lines)
-                    sections[current_section][current_subsection] = {
-                        "header": header,
-                        "data": data,
-                    }
-                in_table = False
-                table_lines = []
-
-    return sections
-
-
-def get_table_dfs():
-    filename = str(Path(os.getcwd()).joinpath("analyze_output.csv"))
-    sections_info = parse_file(filename)
-
-    # Convert to DataFrames while maintaining nested structure
-    section_dfs = {}
-    for section_name, subsections in sections_info.items():
-        section_dfs[section_name] = {}
-        for subsection_name, table_data in subsections.items():
-            if table_data and table_data["data"]:
-                try:
-                    df = pd.DataFrame(table_data["data"], columns=table_data["header"])
-                    section_dfs[section_name][subsection_name] = df
-                except Exception as e:
-                    print(f"Error creating DataFrame for {subsection_name}: {e}")
-                    continue
-
-    return section_dfs
-
-
-def process_panels_to_dataframes(
-    args, runs, archConfigs, profiling_config, roof_plot=None
-):
+def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
     """
     Process panel data into pandas DataFrames.
     Returns a nested dictionary structure with DataFrames and tui_style information.
@@ -305,283 +129,81 @@ def process_panels_to_dataframes(
         }
     """
 
-    comparable_columns = build_comparable_columns(args.time_unit)
-    filter_panel_ids = [
-        convert_metric_id_to_panel_idx(section)
-        for section in [
-            name
-            for name, type in profiling_config.get("filter_blocks", {}).items()
-            if type == "metric_id"
-        ]
-    ]
+    # TODO: add individual kernel roofline logic
+    # TODO: implement args logic:
+    #       args.filter_metrics
+    #       args.cols
+    #       args.max_stat_num
+    #       dfs file dir
 
-    # Initialize the result structure
-    result_structure = defaultdict(dict)
+    result_structure = {}
+    decimal_precision = getattr(args, "decimal", 2) if args else 2
 
     for panel_id, panel in archConfigs.panel_configs.items():
-        # Skip panels that don't support baseline comparison
-        if panel_id in HIDDEN_SECTIONS:
+        if panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        # Get section name (e.g., "0. Top Stats")
         section_name = f"{panel_id // 100}. {panel['title']}"
+        section_data = {}
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
-                # Check for filtering conditions
+                table_id = table_config["id"]
+
                 if (
-                    not args.filter_metrics
-                    and filter_panel_ids
-                    and table_config["id"] not in filter_panel_ids
-                    and panel_id not in filter_panel_ids
-                    and panel_id > 100
+                    table_id not in kernel_df
+                    or kernel_df[table_id] is None
+                    or kernel_df[table_id].empty
                 ):
-                    table_id_str = (
-                        str(table_config["id"] // 100)
-                        + "."
-                        + str(table_config["id"] % 100)
-                    )
                     continue
 
-                # Process the data
-                base_run, base_data = next(iter(runs.items()))
-                base_df = base_data.dfs[table_config["id"]]
+                base_df = kernel_df[table_id]
 
                 df = pd.DataFrame(index=base_df.index)
 
-                # Process columns
-                for header in list(base_df.keys()):
-                    if should_process_column(header, args, type):
-                        if header in HIDDEN_COLUMNS:
-                            pass
-                        elif header not in comparable_columns:
-                            df = process_non_comparable_column(
-                                df, header, base_df, type, table_config, runs
-                            )
-                        else:
-                            df = process_comparable_column(
-                                df,
-                                header,
-                                base_df,
-                                table_config,
-                                runs,
-                                base_run,
-                                type,
-                                args,
-                                HIDDEN_COLUMNS,
-                            )
+                for header in list(base_df.columns):
+                    if header in config.HIDDEN_COLUMNS_TUI:
+                        continue
+                    else:
+                        df[header] = base_df[header]
 
-                if not df.empty:
-                    # Check for empty columns
-                    is_empty_columns_exist = check_empty_columns(df)
+                df = apply_rounding_logic(df, decimal_precision)
 
-                    if not is_empty_columns_exist:
-                        # Get subsection name
-                        table_id_str = (
-                            str(table_config["id"] // 100)
-                            + "."
-                            + str(table_config["id"] % 100)
-                        )
-                        subsection_name = table_id_str
-                        if "title" in table_config and table_config["title"]:
-                            subsection_name += " " + table_config["title"]
-
-                        # Handle special cases for top stats
-                        if type == "raw_csv_table" and (
-                            table_config["source"] == "pmc_kernel_top.csv"
-                            or table_config["source"] == "pmc_dispatch_info.csv"
-                        ):
-                            df = df.head(args.max_stat_num)
-
-                        # Check for transpose requirement
-                        transpose = (
-                            type != "raw_csv_table"
-                            and "columnwise" in table_config
-                            and table_config.get("columnwise") == True
-                        )
-
-                        if transpose:
-                            df = df.T
-
-                        # Store the DataFrame with tui_style as separate keys
-                        result_structure[section_name][subsection_name] = {
-                            "df": df,
-                            "tui_style": None,
-                        }
-
-                        # Set tui_style if available
-                        if type == "metric_table" and "tui_style" in table_config:
-                            result_structure[section_name][subsection_name][
-                                "tui_style"
-                            ] = table_config["tui_style"]
-
-                        # Save to CSV if requested
-                        if args.df_file_dir:
-                            save_dataframe_to_csv(df, table_id_str, table_config, args)
-    result_structure["4. Roofline"] = roof_plot
-    return dict(result_structure)
-
-
-def should_process_column(header, args, type):
-    """Check if a column should be processed based on arguments."""
-    return (
-        (not args.cols)
-        or (
-            args.cols and header in args.cols
-        )  # Assuming args.cols is now a list of column names
-        or (type == "raw_csv_table")
-    )
-
-
-def process_non_comparable_column(df, header, base_df, type, table_config, runs):
-    """Process columns that are not comparable across runs."""
-    if (
-        type == "raw_csv_table"
-        and (
-            table_config["source"] == "pmc_kernel_top.csv"
-            or table_config["source"] == "pmc_dispatch_info.csv"
-        )
-        and header == "Kernel_Name"
-    ):
-        # Adjust kernel name width based on source
-        if table_config["source"] == "pmc_kernel_top.csv":
-            adjusted_name = base_df["Kernel_Name"].apply(
-                lambda x: string_multiple_lines(x, 40, 3)
-            )
-        else:
-            adjusted_name = base_df["Kernel_Name"].apply(
-                lambda x: string_multiple_lines(x, 80, 4)
-            )
-        df = pd.concat([df, adjusted_name], axis=1)
-    elif type == "raw_csv_table" and header == "Info":
-        for run, data in runs.items():
-            cur_df = data.dfs[table_config["id"]]
-            df = pd.concat([df, cur_df[header]], axis=1)
-    else:
-        df = pd.concat([df, base_df[header]], axis=1)
-
-    return df
-
-
-def process_comparable_column(
-    df, header, base_df, table_config, runs, base_run, type, args, hidden_columns
-):
-    """Process columns that can be compared across runs."""
-    for run, data in runs.items():
-        cur_df = data.dfs[table_config["id"]]
-        if (type == "raw_csv_table") or (
-            type == "metric_table" and (header not in hidden_columns)
-        ):
-            if run != base_run:
-                # Calculate percentage over the baseline
-                base_values = [float(x) if x != "" else float(0) for x in base_df[header]]
-                cur_values = [float(x) if x != "" else float(0) for x in cur_df[header]]
-
-                base_df[header] = base_values
-                cur_df[header] = cur_values
-
-                t_df = pd.concat(
-                    [base_df[header], cur_df[header]],
-                    axis=1,
+                subsection_name = (
+                    f"{table_config['id'] // 100}.{table_config['id'] % 100}"
                 )
-                absolute_diff = (t_df.iloc[:, 1] - t_df.iloc[:, 0]).round(args.decimal)
-                t_df = absolute_diff / t_df.iloc[:, 0].replace(0, 1)
+                if table_config.get("title"):
+                    subsection_name += " " + table_config["title"]
 
-                t_df_pretty = t_df.astype(float).mul(100).round(args.decimal)
+                section_data[subsection_name] = {
+                    "df": df,
+                    "tui_style": (
+                        table_config.get("tui_style")
+                        if type == "metric_table"
+                        else None
+                    ),
+                }
 
-                # Show value + percentage
-                t_df = (
-                    cur_df[header].astype(float).round(args.decimal).map(str).astype(str)
-                    + " ("
-                    + t_df_pretty.map(str)
-                    + "%)"
-                )
-                df = pd.concat([df, t_df], axis=1)
+        if section_data:
+            result_structure[section_name] = section_data
 
-                # Check for threshold violations
-                if (
-                    header in ["Value", "Count", "Avg"]
-                    and t_df_pretty.abs().gt(args.report_diff).any()
-                ):
-                    df["Abs Diff"] = absolute_diff
-                    if args.report_diff:
-                        violation_idx = t_df_pretty.index[
-                            t_df_pretty.abs() > args.report_diff
-                        ]
-            else:
-                cur_df_copy = copy.deepcopy(cur_df)
-                cur_df_copy[header] = [
-                    (round(float(x), args.decimal) if x != "" else x)
-                    for x in base_df[header]
-                ]
-                df = pd.concat([df, cur_df_copy[header]], axis=1)
-
-    return df
+    return result_structure
 
 
-def check_empty_columns(df):
-    """Check if any column in the DataFrame is empty."""
-    return any(
-        [
-            df.columns[col_idx]
-            for col_idx in range(len(df.columns))
-            if df.replace("", None).iloc[:, col_idx].isnull().all()
-        ]
-    )
+def apply_rounding_logic(df, decimal_precision):
+    if df.empty:
+        return df
 
+    df_rounded = df.copy()
 
-def save_dataframe_to_csv(df, table_id_str, table_config, args):
-    """Save DataFrame to CSV file if directory is specified."""
-    p = Path(args.df_file_dir)
-    if not p.exists():
-        p.mkdir()
-    if p.is_dir():
-        filename = table_id_str
-        if "title" in table_config and table_config["title"]:
-            filename += "_" + table_config["title"]
-        df.to_csv(
-            p.joinpath(filename.replace(" ", "_") + ".csv"),
-            index=False,
-        )
+    float_cols = df_rounded.select_dtypes(include=["float"]).columns
+    if len(float_cols) > 0:
+        df_rounded[float_cols] = df_rounded[float_cols].round(decimal_precision)
 
+    other_cols = df_rounded.select_dtypes(exclude=["float"]).columns
+    for col in other_cols:
+        numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
+        if numeric_series.notna().any():
+            df_rounded[col] = numeric_series.round(decimal_precision)
 
-def string_multiple_lines(source, width, max_rows):
-    """
-    Adjust string with multiple lines by inserting '\n'
-    """
-    idx = 0
-    lines = []
-    while idx < len(source) and len(lines) < max_rows:
-        lines.append(source[idx : idx + width])
-        idx += width
-
-    if idx < len(source):
-        last = lines[-1]
-        lines[-1] = last[0:-3] + "..."
-    return "\n".join(lines)
-
-
-def convert_metric_id_to_panel_idx(metric_id):
-    # "4.02" -> 402
-    # "4.23" -> 423
-    # "4" -> 400
-    tokens = metric_id.split(".")
-    if len(tokens) == 1:
-        return int(tokens[0]) * 100
-    elif len(tokens) == 2:
-        return int(tokens[0]) * 100 + int(tokens[1])
-    else:
-        raise Exception(f"Invalid metric id: {metric_id}")
-
-
-def build_comparable_columns(time_unit):
-    """
-    Build comparable columns/headers for display
-    """
-    comparable_columns = supported_field
-    top_stat_base = ["Count", "Sum", "Mean", "Median", "Standard Deviation"]
-
-    for h in top_stat_base:
-        comparable_columns.append(h + "(" + time_unit + ")")
-
-    return comparable_columns
+    return df_rounded

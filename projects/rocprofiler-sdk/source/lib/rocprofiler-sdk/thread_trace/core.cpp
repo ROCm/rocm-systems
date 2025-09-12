@@ -57,8 +57,7 @@ namespace rocprofiler
 namespace thread_trace
 {
 constexpr size_t   QUEUE_SIZE      = 128;
-constexpr uint64_t MIN_BUFFER_SIZE = 1 << 18;                              // 2 pages per SE
-constexpr uint64_t MAX_BUFFER_SIZE = std::numeric_limits<int32_t>::max();  // aqlprofile limit
+constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB
 
 struct cbdata_t
 {
@@ -74,15 +73,15 @@ thread_trace_parameter_pack::are_params_valid() const
 {
     if(shader_cb_fn == nullptr)
     {
-        ROCP_WARNING << "Callback cannot be null!";
+        ROCP_CI_LOG(WARNING) << "Callback cannot be null!";
         return false;
     }
 
     if(shader_engine_mask == 0) return false;
 
-    if(buffer_size > MAX_BUFFER_SIZE || buffer_size < MIN_BUFFER_SIZE)
+    if(buffer_size < MIN_BUFFER_SIZE)
     {
-        ROCP_WARNING << "Invalid buffer size: " << buffer_size;
+        ROCP_CI_LOG(WARNING) << "Invalid buffer size: " << buffer_size;
         return false;
     }
 

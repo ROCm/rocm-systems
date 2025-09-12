@@ -1,9 +1,0 @@
----
-Panel Config:
-  id: 100
-  title: System Info
-  data source:
-    - raw_csv_table:
-        id: 101
-        source: sysinfo.csv
-        columnwise: True

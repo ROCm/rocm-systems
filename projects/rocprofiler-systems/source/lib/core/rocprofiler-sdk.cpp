@@ -372,6 +372,22 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     for(const auto& itr : buffered_tracing_info)
         _add_operation_settings(itr.name, itr, buffered_operation_option_names);
+
+    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is present
+    // in supported ROCProfiler-SDK domains.
+    auto _has_hip_stream = std::find(_domain_choices.begin(), _domain_choices.end(),
+                                     "hip_stream") != _domain_choices.end();
+
+    if(_has_hip_stream)
+    {
+        ROCPROFSYS_CONFIG_SETTING(
+            bool, "ROCPROFSYS_ROCM_GROUP_BY_QUEUE",
+            "By default, Perfetto trace will show the HIP streams to which kernel "
+            "and memory copy operations submitted. With the "
+            "`ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the trace will display HSA queues "
+            "to which these kernel and memory operations were submitted.",
+            false, "rocm", "perfetto");
+    }
 }
 
 std::unordered_set<rocprofiler_callback_tracing_kind_t>
@@ -398,6 +414,7 @@ get_callback_domains()
     {
         // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
     }
 #    endif
@@ -420,6 +437,15 @@ get_callback_domains()
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
     }
 
+#    if ROCPROFILER_VERSION >= 600
+    if(config::get_use_ompt() && _version.formatted >= 600)
+    {
+        // Translate some configuration settings to rocprofiler domains
+        _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
+    }
+#    endif
+
+    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
 
@@ -479,6 +505,9 @@ get_buffered_domains()
     const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+#    if(ROCPROFILER_VERSION >= 600)
+        ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+#    endif
 #    if(ROCPROFILER_VERSION < 10000)
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
@@ -524,6 +553,16 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API);
         }
+#    if(ROCPROFILER_VERSION >= 600)
+        else if(itr == "memory_allocation")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+        }
+#    endif
+        else if(itr == "memory_copy")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
+        }
         else
         {
             for(size_t idx = 0; idx < buffer_tracing_info.size(); ++idx)
@@ -548,6 +587,16 @@ get_rocm_events()
     return tim::delimit(
         get_setting_value<std::string>("ROCPROFSYS_ROCM_EVENTS").value_or(std::string{}),
         " ,;\t\n");
+}
+
+bool
+get_group_by_queue(void)
+{
+    std::optional<bool> _group_by_queue =
+        config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE");
+    bool _ret = _group_by_queue.value_or(true);
+
+    return _ret;
 }
 
 std::vector<int32_t>

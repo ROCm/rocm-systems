@@ -1,0 +1,44 @@
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+parameters:
+- name: pipelinesRepoRef
+  type: string
+  default: refs/heads/develop
+- name: triggerDownstreamJobs
+  type: boolean
+  default: true
+
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+    ref: ${{ parameters.pipelinesRepoRef }}
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/roctracer
+    exclude:
+    - projects/roctracer/.github
+    - projects/roctracer/doc
+    - projects/roctracer/LICENSE
+    - projects/roctracer/README.md
+
+pr: none
+
+stages:
+- stage: roctracer
+  jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/roctracer.yml@pipelines_repo
+    parameters:
+      sparseCheckoutDir: projects/roctracer
+      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

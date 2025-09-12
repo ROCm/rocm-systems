@@ -1,7 +1,7 @@
 # Azure CI Dispatcher
 # ------------------
 # This workflow allows Azure CI to be centralized in a single PR check.
-# It detects which subtrees (from a monorepo structure) were changed in a
+# It detects which subtrees (from a super-repo structure) were changed in a
 # pull request, and automatically requests Azure CI runs for the corresponding
 # subtrees.
 #
@@ -34,7 +34,7 @@ concurrency:
 jobs:
   dispatch-azure-ci:
     name: Trigger Azure CI
-    if: github.repository == 'ROCm/rocm-systems'
+    if: github.repository == 'ROCm/rocm-systems' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
     - name: Generate a token
@@ -108,7 +108,7 @@ jobs:
         res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        runs=$(echo "$res" | jq -r ".value[] | select(.status == \"inProgress\" or .status == \"notStarted\") | .id")
+        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\") | .id")
 
         if [ -z "$runs" ]; then
           echo "No in-progress/not-started runs found for ROCm/rocm-systems PR #$pr_number"
@@ -262,6 +262,7 @@ jobs:
     - name: Create summary check
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        PR_TITLE: ${{ toJSON(github.event.pull_request.title) }}
       run: |
         if [[ -n "${{ steps.dispatch.outputs.run_ids }}" && -n "${{ steps.dispatch.outputs.project_names }}" ]]; then             # If new runs were started
           run_ids=(${{ steps.dispatch.outputs.run_ids }})
@@ -272,8 +273,7 @@ jobs:
           success_run_ids=(${{ steps.rerun-failed.outputs.success_run_ids }})
           success_project_names=(${{ steps.rerun-failed.outputs.success_project_names }})
         else
-          echo "No run IDs or project names found, skipping summary check creation."
-          exit 0
+          echo "No run IDs or project names found, creating empty summary check."
         fi
 
         pr_number=${{ github.event.pull_request.number }}
@@ -282,9 +282,24 @@ jobs:
 
         newline=$'\n'
 
-        summary="PR: [${{ github.event.pull_request.title }} #$pr_number](${{ github.event.pull_request.html_url }})${newline}${newline}"
+        summary="PR: [$PR_TITLE #$pr_number](${{ github.event.pull_request.html_url }})${newline}${newline}"
         summary+="HEAD: [$pr_head_sha](https://github.com/ROCm/rocm-systems/commit/$pr_head_sha)${newline}${newline}"
         summary+="MERGE: [$pr_merge_sha](https://github.com/ROCm/rocm-systems/commit/$pr_merge_sha)${newline}${newline}"
+
+        if [[ -z "${run_ids[*]}" && -z "${success_run_ids[*]}" ]]; then
+          summary+="### No Azure CI runs were started for this PR.${newline}${newline}"
+          gh_output=$(gh api repos/ROCm/rocm-systems/check-runs \
+            -f "name=Azure CI Summary" \
+            -f "head_sha=$pr_head_sha" \
+            -f "status=completed" \
+            -f "conclusion=neutral" \
+            -f "output[title]=Azure CI Summary" \
+            -f "output[summary]=$summary")
+          echo "Created empty summary check with ID: $(echo "$gh_output" | jq -r '.id')"
+          echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/$pr_number/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
+          exit 0
+        fi
+
         summary+="### Pipelines triggered for this PR${newline}${newline}"
         summary+="| Project | Run ID | Status |${newline}"
         summary+="|--------------|--------|--------|${newline}"
@@ -327,4 +342,4 @@ jobs:
           -f "output[text]=$text")
 
         echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
-        echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
+        echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/$pr_number/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"

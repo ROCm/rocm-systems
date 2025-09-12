@@ -1,14 +1,14 @@
 import os
 from pathlib import Path
 
-# Determine monorepo root and output CODEOWNERS path
-monorepo_root = Path(__file__).resolve().parents[2]
-output_path = monorepo_root / ".github" / "CODEOWNERS"
+# Determine super-repo root and output CODEOWNERS path
+super_repo_root = Path(__file__).resolve().parents[2]
+output_path = super_repo_root / ".github" / "CODEOWNERS"
 
 merged_entries = []
 
 # Walk top-level directories (excluding .github/.git/etc.)
-for subdir in monorepo_root.iterdir():
+for subdir in super_repo_root.iterdir():
     if subdir.name.startswith(".") or not subdir.is_dir():
         continue
 

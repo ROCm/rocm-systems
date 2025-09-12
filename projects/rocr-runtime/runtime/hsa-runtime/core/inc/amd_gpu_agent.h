@@ -73,10 +73,11 @@ typedef ScratchCache::ScratchInfo ScratchInfo;
 class GpuAgentInt : public core::Agent {
  public:
   // @brief Constructor
-   GpuAgentInt(uint32_t node_id)
-       : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(
-                         core::DriverType::KFD),
-                     node_id, core::Agent::DeviceType::kAmdGpuDevice) {}
+  // @param [in] node_id Node id.
+  // @param [in] driver_type Driver type. Default is KFD.
+  GpuAgentInt(uint32_t node_id, core::DriverType driver_type)
+      : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(driver_type), node_id,
+      core::Agent::DeviceType::kAmdGpuDevice) {}
 
    // @brief Ensure blits are ready (performance hint).
    virtual void PreloadBlits() {}
@@ -231,7 +232,10 @@ class GpuAgent : public GpuAgentInt {
   // id.
   // @param [in] node_props Node property.
   // @param [in] xnack_mode XNACK mode of device.
-  GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode, uint32_t index);
+  // @param [in] index Index of the GPU device.
+  // @param [in] driver_type Driver type. Default is KFD.
+  GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode, uint32_t index,
+           core::DriverType driver_type = core::DriverType::KFD);
 
   // @brief GPU agent destructor.
   ~GpuAgent();
@@ -720,9 +724,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Alternative aperture base address. Only on KV.
   uintptr_t ape1_base_;
-
-  // @brief Alternative aperture size. Only on KV.
-  size_t ape1_size_;
 
   // @brief Queue with GWS access.
   struct {

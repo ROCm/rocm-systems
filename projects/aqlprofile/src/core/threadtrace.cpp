@@ -76,7 +76,7 @@ typedef union {
 
 inline att_header_packet_t getHeaderPacket(int SE, int CU, int SIMD) {
   att_header_packet_t header{.raw = 0};
-  header.legacy_version = 0x11;  // The thread trace viewer only sees gfx9 for 0x11
+  header.legacy_version = 0x11;
   header.gfx9_version2 = 4;
   header.SEID = SE;
   header.DCU = CU;
@@ -126,7 +126,6 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     size_t wptr_mask = sqttbuilder->GetWritePtrMask();
     size_t sample_size = (control_ptr[se_index].wptr & wptr_mask) * sqttbuilder->GetWritePtrBlk();
 
-    // GFX11 hardware bug workaround
     if (pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID) {
       sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
       sample_size &= (1ull << 29) - 1;
@@ -187,10 +186,11 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
     trace_config.vmIdMask = 0;
     trace_config.simd_sel = 0xF;
     trace_config.perfMASK = ~0u;
-    trace_config.se_mask = 0x11111111;
+    trace_config.se_mask = 0x11;
+    trace_config.enable_rt_timestamp = true;
 
   const size_t se_number_total = pm4_factory->GetShaderEnginesNumber();
-  size_t buffer_size = DEFAULT_TRACE_BUFFER_SIZE;
+  uint64_t buffer_size = DEFAULT_TRACE_BUFFER_SIZE;
 
   if (profile.parameters)
     for (const auto* p = profile.parameters; p < profile.parameters + profile.parameter_count; p++)
@@ -204,32 +204,6 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
                 "ThreadTraceConfig: CuId must be between 0 and 15, TargetCu", p->value);
           trace_config.targetCu = p->value;
           break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK:
-          trace_config.vmIdMask = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK:
-          if ((p->value & 0x50) != 0)
-            throw aql_profile::aql_profile_exc_val<uint32_t>(
-                "ThreadTraceConfig: Mask should have bits [4,6] set to Zero, Mask", p->value);
-          trace_config.deprecated_mask = p->value;
-          trace_config.targetCu = p->value & 0xF;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK:
-          if ((p->value & 0xFF000000) != 0)
-            throw aql_profile::aql_profile_exc_val<uint32_t>(
-                "ThreadTraceConfig: TokenMask should have bits [31:25] set to Zero, TokenMask",
-                p->value);
-          trace_config.deprecated_tokenMask = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2:
-          trace_config.deprecated_tokenMask2 = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE:
-          trace_config.sampleRate = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT:
-          trace_config.concurrent = p->value;
-          break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION:
           trace_config.simd_sel = p->value & 0xF;
           break;
@@ -237,13 +211,20 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
           trace_config.occupancy_mode = p->value ? 1 : 0;
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE:
-          buffer_size = p->value;
+          buffer_size = (buffer_size & ~static_cast<uint64_t>(UINT32_MAX)) | p->value;
+          break;
+        case AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH:
+          buffer_size = (buffer_size & UINT32_MAX) | (uint64_t(p->value) << 32);  // High 32 bits
+          break;
+        case AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP:
+          trace_config.enable_rt_timestamp = p->value != static_cast<uint32_t>(AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE);
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK:
           trace_config.perfMASK = p->value;
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_CTRL:
           trace_config.perfCTRL = ((p->value & 0x1F) << 8) | 0xFFFF007F;
+          trace_config.perfPeriod = p->value + 1;
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_NAME:
           if (trace_config.perfcounters.size() >= 8) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -298,7 +279,7 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
     hsa_ext_amd_aql_pm4_packet_t* packet, aqlprofile_handle_t* handle,
     aqlprofile_att_codeobj_data_t data, aqlprofile_memory_alloc_callback_t alloc_cb,
     aqlprofile_memory_dealloc_callback_t dealloc_cb, void* userdata) {
-  static auto* mut = new std::shared_mutex{};
+  static auto mut = new std::shared_mutex{};
   static auto* factory_cache = new std::map<uint64_t, aql_profile::Pm4Factory*>{};
 
   auto _slk = std::shared_lock{*mut};
@@ -318,10 +299,10 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
   pm4_builder::CmdBuffer commands;
 
   if (!data.isUnload) {
-    sqttbuilder->InsertMarker(&commands, uint32_t(data.addr), ATT_MARKER_ADDR_LO_CHANNEL);
-    sqttbuilder->InsertMarker(&commands, data.addr >> 32, ATT_MARKER_ADDR_HI_CHANNEL);
-    sqttbuilder->InsertMarker(&commands, uint32_t(data.size), ATT_MARKER_SIZE_LO_CHANNEL);
-    sqttbuilder->InsertMarker(&commands, data.size >> 32, ATT_MARKER_SIZE_HI_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.addr), ATT_MARKER_ADDR_LO_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.addr >> 32, ATT_MARKER_ADDR_HI_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.size), ATT_MARKER_SIZE_LO_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.size >> 32, ATT_MARKER_SIZE_HI_CHANNEL);
   }
 
   aqlprofile_att_header_marker_t header{};
@@ -329,12 +310,12 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
   header.isUnload = data.isUnload;
 
   if (data.id >= (1 << 30)) {
-    sqttbuilder->InsertMarker(&commands, uint32_t(data.id), ATT_MARKER_ID_LO_CHANNEL);
-    sqttbuilder->InsertMarker(&commands, data.id >> 32, ATT_MARKER_ID_HI_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.id), ATT_MARKER_ID_LO_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.id >> 32, ATT_MARKER_ID_HI_CHANNEL);
   } else
     header.legacy_id = data.id;
 
-  sqttbuilder->InsertMarker(&commands, header.raw, ATT_MARKER_HEADER_CHANNEL);
+  sqttbuilder->InsertCodeobjMarker(&commands, header.raw, ATT_MARKER_HEADER_CHANNEL);
 
   auto memorymgr = std::make_shared<CodeobjMemoryManager>(data.agent, alloc_cb, dealloc_cb,
                                                           commands.Size(), userdata);

@@ -42,3 +42,4 @@
 
 # VSCode Workspaces
 *.code-workspace
+/rocprofiler-sdk-build

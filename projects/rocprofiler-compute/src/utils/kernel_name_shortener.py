@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,18 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import re
 import subprocess
@@ -68,7 +69,8 @@ def kernel_name_shortener(df, level):
                     r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?"
                 )
 
-                # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
+                # works for name:
+                # Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
                 if names_and_args.search(demangled_name):
                     matches = names_and_args.findall(demangled_name)
                 else:
@@ -80,7 +82,8 @@ def kernel_name_shortener(df, level):
 
                 current_level = 0
                 for name in matches:
-                    ##can cause errors if a function name or argument is equal to 'clone'
+                    # can cause errors if a function name-
+                    # or argument is equal to 'clone'
                     if name[0] == "clone":
                         continue
                     if len(name) == 3:
@@ -99,7 +102,8 @@ def kernel_name_shortener(df, level):
                         current_level += name[1].count("<")
 
                     curr_index = 0
-                    # cases include '>'  '> >, ' have to go in depth here to not lose account of commas and current level
+                    # cases include '>'  '> >, ' have to go in depth here to-
+                    # not lose account of commas and current level
                     while name[1].count(">") > 0 and curr_index < len(name[1]):
                         if current_level < level:
                             new_name += name[1][curr_index:]

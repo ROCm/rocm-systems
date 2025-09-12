@@ -705,6 +705,16 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         Note: glog still installs signal handlers which provide backtraces""",
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--process-sync",
+        help="""Enables the process synchronization in the rocprofv3 tool finalization stage.
+        When --process-sync is set to true,
+        and rocprofv3 tool will force process to wait for its peer processes finishing write the trace data,
+        then they proceed.
+        Note: some workloads will teminate the process group when one of the process is finished""",
+    )
+
     advanced_options.add_argument(
         "--minimum-output-data",
         help="""Output files are generated only if output data size > minimum output data".
@@ -769,7 +779,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 96MB",
+        help="Thread trace buffer size. Default 256MB",
         default=None,
         type=str,
     )
@@ -777,6 +787,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     att_options.add_argument(
         "--att-shader-engine-mask",
         help="Bitmask of shader engines to enable. Default 0x1",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
+        "--att-gpu-index",
+        help="Comma-separated list of GPU index(es) to enable thread trace. Default: All",
         default=None,
         type=str,
     )
@@ -1502,6 +1519,9 @@ def run(app_args, args, **kwargs):
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
 
+    if args.process_sync is not None:
+        update_env("ROCPROF_PROCESS_SYNC", args.process_sync)
+
     if args.minimum_output_data:
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
@@ -1551,6 +1571,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
                 args.att_serialize_all,
+                overwrite=True,
+            )
+        if args.att_gpu_index:
+            update_env(
+                "ROCPROF_ATT_PARAM_GPU_INDEX",
+                args.att_gpu_index,
                 overwrite=True,
             )
         if check_att_capability(args):
@@ -1634,6 +1660,11 @@ def main(argv=None):
     if cmd_args.version:
         for key, itr in CONST_VERSION_INFO.items():
             print(f"    {key:>16}: {itr}")
+        return 0
+
+    # If no arguments provided, show help and exit
+    if (argv is None and len(sys.argv) == 1) or (argv is not None and len(argv) == 0):
+        parse_arguments(["--help"])
         return 0
 
     inp_args = (

@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,18 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import os
 from dataclasses import dataclass
@@ -46,7 +47,6 @@ MI_CONSTANS = {
     MI350: "mi350",
 }
 
-
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information
 # ----------------------------
@@ -62,9 +62,11 @@ class MIGPUSpecs:
     _chip_id_dict = {}  # key: chip_id (int)
     _perfmon_config = {}  # key: gpu_arch
 
-    _gpu_arch_to_compute_partition_dict = (
-        {}
-    )  # key: gpu_arch, used for gpu archs containing only one gpu model and thus one compute partition
+    _gpu_arch_to_compute_partition_dict = {}  # key: gpu_arch, used for gpu archs
+    # containing only one gpu model and
+    # thus one compute partition
+
+    _all_gpu_models = []
 
     _initialized = False
 
@@ -107,7 +109,8 @@ class MIGPUSpecs:
             console_error(f"Error parsing YAML file '{file_path}': {exc}")
         except Exception as e:
             console_error(
-                f"An unexpected error occurred while loading YAML file '{file_path}': {e}"
+                f"An unexpected error occurred while loading YAML "
+                f"file '{file_path}': {e}"
             )
 
     @classmethod
@@ -143,6 +146,7 @@ class MIGPUSpecs:
                 cls._gpu_model_dict[curr_gpu_arch] = []
                 for models in archs["models"]:
                     curr_gpu_model = models["gpu_model"]
+                    cls._all_gpu_models.append(curr_gpu_model)
                     cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
                     cls._num_xcds_dict[curr_gpu_model] = (
                         models.get("partition_mode", {})
@@ -150,9 +154,13 @@ class MIGPUSpecs:
                         .get("num_xcds", {})
                     )
                     if "chip_ids" in models and "physical" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["physical"]] = curr_gpu_model
+                        cls._chip_id_dict[models["chip_ids"]["physical"]] = (
+                            curr_gpu_model
+                        )
                     if "chip_ids" in models and "virtual" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = curr_gpu_model
+                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
+                            curr_gpu_model
+                        )
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -169,10 +177,12 @@ class MIGPUSpecs:
                 compute_partition = cls._num_xcds_dict.get(single_model)
 
                 if compute_partition is not None:
-                    cls._gpu_arch_to_compute_partition_dict[gpu_arch] = compute_partition
+                    cls._gpu_arch_to_compute_partition_dict[gpu_arch] = (
+                        compute_partition
+                    )
                     console_debug(
-                        "[populate_single_arch_partition_dict] Single model arch found: "
-                        "%s -> %s (partition: %s)"
+                        "[populate_single_arch_partition_dict] Single model "
+                        "arch found: %s -> %s (partition: %s)"
                         % (gpu_arch, single_model, compute_partition)
                     )
 
@@ -228,7 +238,7 @@ class MIGPUSpecs:
         gpu_arch_lower = gpu_arch_.lower()
 
         # Handle gfx942 with chip_id mapping
-        if gpu_arch_lower not in ("gfx906", "gfx908", "gfx90a"):
+        if gpu_arch_lower not in ("gfx908", "gfx90a"):
             if chip_id_ and int(chip_id_) in cls._chip_id_dict:
                 gpu_model = cls._chip_id_dict.get(int(chip_id_))
             else:
@@ -252,14 +262,16 @@ class MIGPUSpecs:
     @classmethod
     def set_default_gpu_settings(self, gpu_arch, gpu_model, compute_partition):
         """
-        Set default GPU settings when model is unknown or cannot be determined.
-        NOTE: This is a fallback to gfx942 settings - consider making this architecture-specific.
+        Set default GPU settings when model is unknown or cannot be
+        determined. NOTE: This is a fallback to gfx942 settings -
+        consider making this architecture-specific.
         """
         DEFAULT_COMPUTE_PARTITION = "SPX"
         DEFAULT_NUM_XCD = 8
         console_warning(
-            f"Unable to determine xcd count from:\n\t"
-            f"GPU arch: '{gpu_arch}', model: '{gpu_model}', partition: '{compute_partition}'"
+            "Unable to determine xcd count from:\n\t"
+            f"GPU arch: '{gpu_arch}', model: '{gpu_model}',\n\t"
+            f"partition: '{compute_partition}'"
         )
         console_warning(
             f"Applying default gfx942 settings:\n"
@@ -274,7 +286,8 @@ class MIGPUSpecs:
         cls, gpu_arch: str = None, gpu_model: str = None, compute_partition: str = None
     ):
         """
-        Retrieve the number of XCDs based on GPU architecture, model, and compute partition.
+        Retrieve the number of XCDs based on GPU architecture, model,
+        and compute partition.
 
         Priority order:
         1. Legacy GPU check (returns 1 XCD for older architectures/models)
@@ -283,7 +296,7 @@ class MIGPUSpecs:
         4. Default settings (last resort)
         """
         # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx906", "gfx908", "gfx90a"}
+        LEGACY_ARCHS = {"gfx908", "gfx90a"}
         LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison
@@ -305,7 +318,8 @@ class MIGPUSpecs:
                     return num_xcds
                 else:
                     console_warning(
-                        f"No compute partition data found for architecture '{gpu_arch.upper()}'"
+                        f"No compute partition data found for "
+                        f"architecture '{gpu_arch.upper()}'"
                     )
 
         # 3. Fall back to model + partition-based lookup
@@ -313,7 +327,8 @@ class MIGPUSpecs:
             # Validate XCD dictionary is populated
             if not hasattr(cls, "_num_xcds_dict") or not cls._num_xcds_dict:
                 console_error(
-                    "mi300_num_xcds_dict not populated. Did you run parse_mi_gpu_spec()?"
+                    "mi300_num_xcds_dict not populated. "
+                    "Did you run parse_mi_gpu_spec()?"
                 )
             elif gpu_model_norm not in cls._num_xcds_dict:
                 console_warning(
@@ -328,7 +343,9 @@ class MIGPUSpecs:
                     )
                 elif partition_norm not in model_dict:
                     console_warning(
-                        f"Unknown compute partition '{compute_partition}' for model '{gpu_model}'"
+                        f"Unknown compute partition "
+                        f"'{compute_partition}' for model "
+                        f"'{gpu_model}'"
                     )
                 else:
                     num_xcds = model_dict[partition_norm]
@@ -336,8 +353,10 @@ class MIGPUSpecs:
                         return num_xcds
                     else:
                         console_warning(
-                            f"Unknown compute partition found for {compute_partition} / {gpu_model}"
+                            "Unknown compute partition found "
+                            f"for {compute_partition} / {gpu_model}"
                         )
+
         else:
             console_warning("No gpu model provided for num xcds lookup.")
 
@@ -361,6 +380,10 @@ class MIGPUSpecs:
     @classmethod
     def get_gpu_arch_to_compute_partition_dict(cls):
         return cls._gpu_arch_to_compute_partition_dict
+
+    @classmethod
+    def get_all_gpu_models(cls):
+        return cls._all_gpu_models
 
 
 # pre-initialize the instance when module loads

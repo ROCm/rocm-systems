@@ -1,56 +1,42 @@
 # ROCm Systems
 
-Welcome to the ROCm Systems monorepo. This repository consolidates multiple ROCm systems projects into a single repository to streamline development, CI, and integration. The first set of projects focuses on requirements for building PyTorch.
+Welcome to the ROCm Systems super-repo. This repository consolidates multiple ROCm systems projects into a single repository to streamline development, CI, and integration. The first set of projects focuses on requirements for building PyTorch.
 
-# Monorepo Status and CI Health
+# Super-repo Status and CI Health
 
 This table provides the current status of the migration of specific ROCm systems projects as well as a pointer to their current CI health.
 
 **Key:**
-- **Completed**: Fully migrated and integrated. This monorepo should be considered the source of truth for this project. The old repo may still be used for release activities.
-- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the monorepo.
+- **Completed**: Fully migrated and integrated. This super-repo should be considered the source of truth for this project. The old repo may still be used for release activities.
+- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the super-repo.
 - **Pending**: Not yet started or in the early planning stages. The individual repo should be considered the source of truth for this project.
 
 | Component              | Source of Truth | Migration Status | Azure CI Status                       | Component CI Status                   |
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
-| `aqlprofile`           | EMU             | Pending          |                                       |                                       |
-| `clr`                  | EMU             | Pending          |                                       |                                       |
-| `hip`                  | EMU             | Pending          |                                       |                                       |
-| `hipother`             | EMU             | Pending          |                                       |                                       |
-| `hip-tests`            | EMU             | Pending          |                                       |                                       |
-| `rccl`                 | Public          | Pending          |                                       |                                       |
-| `rdc`                  | EMU             | Pending          |                                       |                                       |
-| `rocm-core`            | EMU             | Pending          |                                       |                                       |
-| `rocminfo`             | EMU             | Pending          |                                       |                                       |
-| `rocm-smi-lib`           | EMU             | Pending          |                                       |                                       |
-| `rocprofiler`          | EMU             | Pending          |                                       |                                       |
-| `rocprofiler-compute`  | Public          | Pending          |                                       |                                       |
-| `rocprofiler-register` | EMU             | Pending          |                                       |                                       |
-| `rocprofiler-sdk`      | EMU             | Pending          |                                       |                                       |
-| `rocprofiler-systems`  | Public          | Pending          |                                       |                                       |
-| `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
-| `rocshmem`             | Public          | Pending          |                                       |                                       |
-| `roctracer`            | EMU             | Pending          |                                       |                                       |
+| `aqlprofile`           | Public          | Completed        |                                       | [![CodeQL](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml) <br> [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml) |
+| `clr`                  | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Fhip-clr?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=335&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
+| `hip`                  | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Fhip-clr?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=335&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
+| `hipother`             | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Fhip-clr?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=335&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
+| `hip-tests`            | Public          | Completed        |                                       |                                       |
+| `rdc`                  | Public          | Completed        |                                       |                                       |
+| `rocm-core`            | Public          | Completed        |                                       |                                       |
+| `rocminfo`             | Public          | Completed        |                                       |                                       |
+| `rocm-smi-lib`         | Public          | Completed        |                                       |                                       |
+| `rocprofiler`          | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Frocprofiler?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=329&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
+| `rocprofiler-compute`  | Public          | Completed        |                                       | [![Formatting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-formatting.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-formatting.yml) <br> [![ rhel-8](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-rhel-8.yml/badge.svg)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-rhel-8.yml) <br> [![tarball](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-tarball.yml/badge.svg)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-tarball.yml) <br> [![ubuntu jammy](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-compute-ubuntu-jammy.yml) |
+| `rocprofiler-register` | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Frocprofiler-register?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=327&repoName=ROCm%2Frocm-systems&branchName=develop) | [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-register-continuous-integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-register-continuous-integration.yml) |
+| `rocprofiler-sdk`      | Public          | Completed        |                                       | [![Code Coverage Integration](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-code_coverage.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-code_coverage.yml) <br> [![CodeQL](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-codeql.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-codeql.yml) <br> [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-continuous_integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-continuous_integration.yml) <br> [![Documentation](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-docs.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-docs.yml) <br> [![Formatting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-formatting.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-formatting.yml) <br> [![Python Linting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-python.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-python.yml) <br> [![Restrictions](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-restrictions.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-restrictions.yml) <br> [![Release Compatibility](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-rocm_release_compatibility.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-rocm_release_compatibility.yml) |
+| `rocprofiler-systems`  | Public          | Completed        |                                       | [![Containers](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-containers.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-containers.yml) <br> [![CPack](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-cpack.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-cpack.yml) <br> [![Formatting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-formatting.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-formatting.yml) <br> [![OpenSUSE](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-opensuse.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-opensuse.yml) <br> [![Python Linting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-python.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-python.yml) <br> [![RedHat Linux](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-redhat.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-redhat.yml) <br> [![Ubuntu Jammy](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-jammy.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-jammy.yml) <br> [![Ubuntu Noble](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-noble.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-noble.yml) |
+| `rocr-runtime`         | Public          | Completed        |                                       |                                       |
+| `roctracer`            | Public          | Completed        |                                       |                                       |
 
 
 ## Tentative migration schedule
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `aqlprofile`           | 8/5            |
-| `rocprofiler`          | 8/5            |
-| `rocprofiler-compute`  | 8/5            |
-| `rocprofiler-register` | 8/5            |
-| `rocprofiler-sdk`      | 8/5            |
-| `rocprofiler-systems`  | 8/5            |
-| `roctracer`            | 8/5            |
-| `amdsmi`               | 8/8            |
-| `rdc`                  | 8/8            |
-| `rocm-smi-lib`           | 8/8            |
-| `rocminfo`             | 8/11           |
-| `rocr-runtime`         | 8/11           |
-| `rocm-core`            | 8/12           |
+
 
 *Remaining schedule to be determined.
 
@@ -108,9 +94,10 @@ To begin contributing or building, see the [CONTRIBUTING.md](./CONTRIBUTING.md) 
 
 ## License
 
-This monorepo contains multiple subprojects, each of which retains the license under which it was originally published.
+This super-repo contains multiple subprojects, each of which retains the license under which it was originally published.
 
 📁 Refer to the `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file within each `projects/` or `shared/` directory for specific license terms.
+📄 Refer to the header notice in individual files outside `projects/` or `shared/` folders for their specific license terms.
 
 > **Note**: The root of this repository does not define a unified license across all components.
 

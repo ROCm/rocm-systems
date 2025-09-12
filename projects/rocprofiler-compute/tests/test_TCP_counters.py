@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,34 +10,31 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
 
 import csv
-import inspect
-import os
 import re
-import shutil
 import subprocess
-import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from unittest.mock import patch
 
-import pandas as pd
 import pytest
 import test_utils
 
-rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -46,7 +43,6 @@ config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
-
 
 SUPPORTED_ARCHS = {
     "gfx940": {"mi300": ["MI300A_A0"]},
@@ -144,15 +140,15 @@ def test_L1_cache_counters(
 
     # set up two apps: sequential and random access
     app_names = ["vseq", "vrand"]
-    options = ["-b", "TCP"]
+    options = ["-b", "16"]
 
     result = {}
     metrics = ["Read Req", "Write Req", "Cache Hit Rate"]
     base = Path(test_utils.get_output_dir())
 
     for app_name in app_names:
-
-        workload_dir = str(base / app_name)
+        workload_dir = f"{base}/{app_name}"
+        workload_dir_output = f"{base}_{app_name}"
 
         # 1. profile the app
         return_code = binary_handler_profile_rocprof_compute(
@@ -166,15 +162,23 @@ def test_L1_cache_counters(
         assert return_code == 0
 
         # 2. analyze the results
-        return_code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "-b", "16.3", "--save-dfs", workload_dir]
-        )
+        return_code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "-b",
+            "16.3",
+            "--output-format",
+            "csv",
+            "--output-name",
+            workload_dir_output,
+        ])
         assert return_code == 0
 
         # 3. save results in local
 
         # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir + "/16.3_L1D_Cache_Accesses.csv"
+        csv_path = workload_dir_output + "/16.3_vL1D_cache_access_metrics.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:
@@ -184,6 +188,7 @@ def test_L1_cache_counters(
 
         # 4. clean local output
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir_output)
     test_utils.clean_output_dir(config["cleanup"], base)
 
     # 5. check results are expected
