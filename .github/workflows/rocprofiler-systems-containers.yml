@@ -99,7 +99,6 @@ jobs:
             DISTRO=${{ steps.setup_vars.outputs.distro_image }}
             VERSION=${{ matrix.version }}
             NJOBS=2
-            PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
             ELFUTILS_DOWNLOAD_VERSION=0.188
             BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
