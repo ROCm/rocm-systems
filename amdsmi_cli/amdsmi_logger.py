@@ -1029,23 +1029,19 @@ class AMDSMILogger():
         # print GPU info
         print(default_line_1)
         # Split the version line into 3 lines, each wrapping to the same width
-        print("| AMD-SMI {0:40s} {1:28s}|".format(amd_smi_version.ljust(40), ""))
+        print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
         if amdgpu_version != "N/A":
-            print("| amdgpu version: {0:40s} {1:20s}|".format(amdgpu_version, ""))
+            print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
         if rocm_version != "N/A":
-            print("| ROCm version:   {0:40s} {1:28s}|".format(rocm_version, ""))
+            print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
 
-        # adjust format depending on whether vbios or fw pldm version is present
-        if vbios_version != "N/A" and fw_pldm_version != "N/A":
-            print("| VBIOS version: {0:22s}  {1:12s}  FW PLDM: {2:15s}|".format(vbios_version, "", fw_pldm_version))
-        elif vbios_version != "N/A" and fw_pldm_version == "N/A":
-            print("| VBIOS version: {0:22s}  {1:37s} |".format(vbios_version, ""))
-        elif fw_pldm_version != "N/A" and vbios_version == "N/A":
-            print("| FW PLDM: {0:15s}  {1:50s} |".format(fw_pldm_version, ""))
-        else:
-            pass  # Both VBIOS and FW PLDM versions are "N/A" so skip this line
+        # only print if the version is not "N/A"
+        if vbios_version != "N/A":
+            print("| VBIOS Version:   {0:22s}  {1:35s} |".format(vbios_version, ""))
+        if fw_pldm_version != "N/A":
+            print("| FW PLDM:         {0:15s}  {1:42s} |".format(fw_pldm_version, ""))
 
-        print("| Platform: {0:25.25s} {1:41s}|".format(str(self.helpers.os_info()), ""))
+        print("| Platform:        {0:25.25s} {1:34s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
