@@ -86,7 +86,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
   //  Currently we do not support Pinned memory
   if (handle == nullptr || size == 0 || flags != 0 || prop == nullptr ||
-      prop->type != hipMemAllocationTypePinned || prop->location.type != hipMemLocationTypeDevice) {
+      (prop->type != hipMemAllocationTypePinned && prop->type != hipMemAllocationTypeUncached) ||
+      prop->location.type != hipMemLocationTypeDevice) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -97,6 +98,12 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   if (prop->requestedHandleTypes != hipMemHandleTypeNone
       && prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor) {
     HIP_RETURN(hipErrorNotSupported);
+  }
+
+  // When ROCCLR_MEM_PHYMEM is set, ROCr impl gets and stores unique hsa handle. Flag no-op on PAL.
+  unsigned int ihipFlags = ROCCLR_MEM_PHYMEM;
+  if (prop->type == hipMemAllocationTypeUncached) {
+    ihipFlags |= CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
   }
 
   // Device info validation
@@ -111,8 +118,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
   amd::Context* amdContext = g_devices[prop->location.id]->asContext();
 
-  // When ROCCLR_MEM_PHYMEM is set, ROCr impl gets and stores unique hsa handle. Flag no-op on PAL.
-  void* ptr = amd::SvmBuffer::malloc(*amdContext, ROCCLR_MEM_PHYMEM, size,
+  void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size,
                                      dev_info.memBaseAddrAlign_, nullptr);
 
   // Handle out of memory cases,
@@ -197,7 +203,8 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
                                           hipMemAllocationGranularity_flags option) {
   HIP_INIT_API(hipMemGetAllocationGranularity, granularity, prop, option);
 
-  if (granularity == nullptr || prop == nullptr || prop->type != hipMemAllocationTypePinned ||
+  if (granularity == nullptr || prop == nullptr || (prop->type != hipMemAllocationTypePinned &&
+      prop->type != hipMemAllocationTypeUncached) ||
       prop->location.type != hipMemLocationTypeDevice || prop->location.id >= g_devices.size() ||
       (option != hipMemAllocationGranularityMinimum &&
        option != hipMemAllocationGranularityRecommended)) {
