@@ -580,7 +580,7 @@ def test_path(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("This test is not supported for {}".format(soc))
+        print(f"This test is not supported for {soc}")
         assert 0
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
@@ -821,7 +821,7 @@ def test_roofline_workload_dir_not_set_error():
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": None,
@@ -1090,7 +1090,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1144,7 +1144,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),
@@ -1212,7 +1212,7 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     # TODO - verify expected device id in results
@@ -1250,7 +1250,7 @@ def test_kernel(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1286,7 +1286,7 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1326,7 +1326,7 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1363,7 +1363,7 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1403,7 +1403,7 @@ def test_join_type_grid(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1440,7 +1440,7 @@ def test_join_type_kernel(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1887,7 +1887,7 @@ class TestSetsIntegration:
 
         memory_metrics = ["16.1.2", "17.1.0"]
         for metric_id in memory_metrics:
-            assert metric_id in open(Path(workload_dir) / "log.txt", "r").read(), (
+            assert metric_id in open(Path(workload_dir) / "log.txt").read(), (
                 f"Expected memory metric {metric_id} not found"
             )
 
