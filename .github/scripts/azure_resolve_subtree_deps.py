@@ -80,6 +80,7 @@ def main(argv=None) -> None:
         "projects/hip": 335,
         "projects/hipother": 335,
         "projects/rocprofiler-compute": 344,
+        "projects/rocprofiler-systems": 345,
         "projects/rocm-core": 349,
         "projects/rocr-runtime": 354
         "projects/rocminfo": 356,
