@@ -798,7 +798,7 @@ def run_prof(
             if retain_rocpd_output:
                 shutil.copyfile(
                     glob.glob(f"{workload_dir}/out/pmc_1/*/*.db")[0],
-                    "f{workload_dir}/{fbase}.db",
+                    f"{workload_dir}/{fbase}.db",
                 )
                 console_warning(
                     f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
@@ -853,6 +853,7 @@ def run_prof(
                 f"Cannot write results for {fbase}.csv due to no counter "
                 "csv files generated."
             )
+            return
 
         # Combine results into single CSV file
         combined_results = pd.concat(

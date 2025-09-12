@@ -22,8 +22,6 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
-import os
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -56,20 +54,18 @@ def load_panel_configs(
     """
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
-        for root, _, files in os.walk(dir_path):
-            for file_name in files:
-                if file_name.endswith(".yaml"):
-                    with open(Path(root) / file_name) as file:
-                        config_yml = yaml.safe_load(file)
-                        # metric key can be None due to some metric-
-                        # tables not having any metrics
-                        # metric key should be empty dict instead of None
-                        panel_config = config_yml["Panel Config"]
-                        for data_source in panel_config["data source"]:
-                            metric_table = data_source.get("metric_table")
-                            if metric_table and metric_table["metric"] is None:
-                                metric_table["metric"] = {}
-                        configs[panel_config["id"]] = panel_config
+        for yaml_file in Path(dir_path).rglob("*.yaml"):
+            with open(yaml_file) as file:
+                config_yml = yaml.safe_load(file)
+                # metric key can be None due to some metric-
+                # tables not having any metrics
+                # metric key should be empty dict instead of None
+                panel_config = config_yml["Panel Config"]
+                for data_source in panel_config["data source"]:
+                    metric_table = data_source.get("metric_table")
+                    if metric_table and metric_table["metric"] is None:
+                        metric_table["metric"] = {}
+                configs[panel_config["id"]] = panel_config
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order
@@ -207,33 +203,32 @@ def create_df_pmc(
         dfs: list[pd.DataFrame] = []
         coll_levels: list[str] = []
 
-        for root, _, files in os.walk(raw_data_dir):
-            for file_name in files:
-                # Process SQ*.csv or pmc_perf.csv files
-                is_sq_file = file_name.endswith(".csv") and file_name.startswith("SQ")
-                is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        for csv_file in Path(raw_data_dir).rglob("*.csv"):
+            file_name = csv_file.name
 
-                if is_sq_file or is_pmc_perf:
-                    file_path = Path(root) / file_name
-                    tmp_df = pd.read_csv(file_path)
+            is_sq_file = file_name.startswith("SQ")
+            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
 
-                    if config_dict.get("format_rocprof_output") == "rocpd":
-                        tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
+            if is_sq_file or is_pmc_perf:
+                tmp_df = pd.read_csv(csv_file)
 
-                    # Demangle original KernelNames
-                    kernel_name_shortener(tmp_df, kernel_verbose)
+                if config_dict.get("format_rocprof_output") == "rocpd":
+                    tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
 
-                    # NB:
-                    #   Idealy, the Node column should be added out of
-                    #   multiindexing level. Here, we add it into pmc_perf
-                    #   as it is the main sub-df which can be handled easily
-                    #   later.
-                    if file_name == "pmc_perf.csv" and node_name is not None:
-                        tmp_df.insert(0, "Node", node_name)
+                # Demangle original KernelNames
+                kernel_name_shortener(tmp_df, kernel_verbose)
 
-                    dfs.append(tmp_df)
-                    # Remove .csv extension for collection level
-                    coll_levels.append(file_name[:-4])
+                # NB:
+                #   Idealy, the Node column should be added out of
+                #   multiindexing level. Here, we add it into pmc_perf
+                #   as it is the main sub-df which can be handled easily
+                #   later.
+                if file_name == "pmc_perf.csv" and node_name is not None:
+                    tmp_df.insert(0, "Node", node_name)
+
+                dfs.append(tmp_df)
+                # Remove .csv extension for collection level
+                coll_levels.append(csv_file.stem)
 
         if not dfs:
             return pd.DataFrame()

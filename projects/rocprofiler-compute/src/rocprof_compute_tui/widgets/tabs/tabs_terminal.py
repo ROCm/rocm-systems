@@ -26,6 +26,7 @@
 import os
 import platform
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 from rich.text import Text
@@ -43,7 +44,7 @@ class Terimnal(Container):
         classes: Optional[str] = None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
-        self.current_directory = os.getcwd()
+        self.current_directory = Path.cwd()
         self.output_text: str = ""
         self.input_text: str = ""
         self.input_prompt: str = ""
@@ -80,9 +81,7 @@ class Terimnal(Container):
     def update_prompt(self) -> None:
         """Update the command prompt in the input field."""
         input_widget = self.query_one("#terminal-input")
-        current_path = (
-            os.path.basename(self.current_directory) or self.current_directory
-        )
+        current_path = Path(self.current_directory).name or self.current_directory
 
         if platform.system() != "Windows":
             prompt = f"{current_path} $ "
@@ -156,15 +155,21 @@ class Terimnal(Container):
                 path = command[3:].strip()
                 if not path:
                     # Just "cd" usually goes to home directory
-                    path = os.path.expanduser("~")
+                    new_path = Path.home()
+                else:
+                    new_path = Path(path)
 
-                # Handle relative paths
-                if not os.path.isabs(path):
-                    path = os.path.join(self.current_directory, path)
+                    # Handle relative paths
+                    if not new_path.is_absolute():
+                        new_path = Path(self.current_directory) / new_path
+
+                # Resolve any symlinks and normalize the path
+                new_path = new_path.resolve()
 
                 # Change to the new directory
-                os.chdir(path)
-                self.current_directory = os.getcwd()
+                new_path_str = str(new_path)
+                os.chdir(new_path_str)
+                self.current_directory = new_path_str
                 self.add_output(f"Changed directory to {self.current_directory}\n")
                 self.update_prompt()
             except Exception as e:

@@ -24,7 +24,6 @@
 ##############################################################################
 
 import argparse
-import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -153,10 +152,10 @@ Examples:
         metavar="",
         type=str,
         dest="path",
-        default=str(Path(os.getcwd()) / "workloads"),
+        default=str(Path.cwd() / "workloads"),
         required=False,
         help=(
-            f"\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {os.getcwd()}/workloads/<name>)"  # noqa: E501
+            f"\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)"  # noqa: E501
         ),
     )
     profile_group.add_argument(
