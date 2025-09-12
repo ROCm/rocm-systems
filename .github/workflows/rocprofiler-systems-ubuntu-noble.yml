@@ -126,7 +126,7 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;lulesh" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;lulesh" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
           -DUSE_CLANG_OMP=OFF \
           $CMAKE_PREFIX_PATH_ARG \
