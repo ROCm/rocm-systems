@@ -25,11 +25,11 @@ env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
 jobs:
-  prepare_matrix_ci:
+  prepare_matrix_ci_base:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+      matrix_data: ${{ steps.generate_matrix_ci_base.outputs.matrix_data }}
 
     steps:
       - uses: actions/checkout@v4
@@ -37,19 +37,19 @@ jobs:
           sparse-checkout: projects/rocprofiler-systems/docker
 
       - name: Output data for containers matrix
-        id: generate_matrix_ci
+        id: generate_matrix_ci_base
         run: |
           MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci-base:
-    needs: prepare_matrix_ci
+    needs: prepare_matrix_ci_base
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        include: ${{ fromJSON(needs.prepare_matrix_ci_base.outputs.matrix_data) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -102,15 +102,32 @@ jobs:
             BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
             ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}/rocprofiler-systems:ci-base-${{ matrix.distro }}-${{ matrix.version }}
-          
+  
+  prepare_matrix_ci_gfx:
+    if: github.repository == 'ROCm/rocm-systems'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix_ci_gfx.outputs.matrix_data }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems/docker
+
+      - name: Output data for containers matrix
+        id: generate_matrix_ci_gfx
+        run: |
+          MATRIX_CONTENT=$(cat containers-ci-gfx.yml | yq '.matrix' -I=0 -o=json)
+          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+
   rocprofiler-systems-ci-gfx:
-    needs: prepare_matrix_ci
+    needs: prepare_matrix_ci_gfx
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        include: ${{ fromJSON(needs.prepare_matrix_ci_gfx.outputs.matrix_data) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -141,26 +158,10 @@ jobs:
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key")
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
           KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; }
-          echo "gfx120X=${KEY}" >> $GITHUB_OUTPUT
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
-          echo "gfx94X=${KEY}" >> $GITHUB_OUTPUT
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; }
-          echo "gfx110X=${KEY}" >> $GITHUB_OUTPUT
+          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
           
       - name: Build CI Container (PR - No Push)
         if: github.event_name == 'pull_request'
@@ -176,10 +177,9 @@ jobs:
               --distro ${{ matrix.distro }} \
               --versions ${{ matrix.version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
-              --type gfx \
-              --therock-gfx94x ${{ steps.therock.outputs.gfx94X }} \
-              --therock-gfx110x ${{ steps.therock.outputs.gfx110x }} \
-              --therock-gfx120x ${{ steps.therock.outputs.gfx120x }} \
+              --type ${{ matrix.gpu }} \
+              --gpu-type ${{ matrix.gpu }} \
+              --gpu-tarball ${{ steps.therock.outputs.tarball }} \
               --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
             popd
       
@@ -197,10 +197,9 @@ jobs:
               --distro ${{ matrix.distro }} \
               --versions ${{ matrix.version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
-              --type gfx \
-              --therock-gfx94x ${{ steps.therock.outputs.gfx94X }} \
-              --therock-gfx110x ${{ steps.therock.outputs.gfx110x }} \
-              --therock-gfx120x ${{ steps.therock.outputs.gfx120x }} \
+              --type ${{ matrix.gpu }} \
+              --gpu-type ${{ matrix.gpu }} \
+              --gpu-tarball ${{ steps.therock.outputs.tarball }} \
               --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0 \
               --push 
             popd

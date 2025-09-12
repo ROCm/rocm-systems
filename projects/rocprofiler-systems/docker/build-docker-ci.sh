@@ -12,9 +12,8 @@ set -e
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
-: ${THEROCK_GFX94X:=""}
-: ${THEROCK_GFX110X:=""}
-: ${THEROCK_GFX120X:=""}
+: ${GPU_TYPE:=""}
+: ${GPU_TARBALL:=""}
 
 verbose-run()
 {
@@ -49,7 +48,7 @@ usage()
     print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
-    print_default_option type "[base|gfx]" "Type of image to create" "${TYPE}"
+    print_default_option type "[base|gfxXXX]" "Type of image to create" "${TYPE}"
 }
 
 send-error()
@@ -109,19 +108,14 @@ do
             BOOST_VERSION=${1}
             reset-last
             ;;
-        "--therock-gfx94x")
+        "--gpu-type")
             shift
-            THEROCK_GFX94X=${1}
+            GPU_TYPE=${1}
             reset-last
             ;;
-        "--therock-gfx110x")
+        "--gpu-tarball")
             shift
-            THEROCK_GFX110X=${1}
-            reset-last
-            ;;
-        "--therock-gfx120x")
-            shift
-            THEROCK_GFX120X=${1}
+            GPU_TARBALL=${1}
             reset-last
             ;;
         --user|-u)
@@ -188,15 +182,14 @@ do
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
         --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION} \
-        --build-arg THEROCK_GFX94X=${THEROCK_GFX94X} \
-        --build-arg THEROCK_GFX110X=${THEROCK_GFX110X} \
-        --build-arg THEROCK_GFX120X=${THEROCK_GFX120X}
+        --build-arg GPU_TYPE=${GPU_TYPE} \
+        --build-arg GPU_TARBALL=${GPU_TARBALL} 
 done
 
 if [ "${PUSH}" -gt 0 ]; then
     for VERSION in ${VERSIONS}
     do
-        verbose-run docker push ${USER}/rocprofiler-systems:ci-base-${DISTRO}-${VERSION}
+        verbose-run docker push ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION}
     done
 fi
 
