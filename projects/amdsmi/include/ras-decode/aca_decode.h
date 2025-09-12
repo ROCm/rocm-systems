@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -21,20 +20,16 @@
  * THE SOFTWARE.
  */
 
- /**
+/**
  * @file aca_decode.h
  * @brief Internal decoder interface and data structures
  */
+#ifndef RAS_DECODE_DECODE_H
+#define RAS_DECODE_DECODE_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#ifndef ACA_DECODE_H
-#define ACA_DECODE_H
-
-#include "aca_api.h"
+#include "ras_decode_api.h"
 #include "aca_fields.h"
+#include "json_util.h"
 
 /**
  * @brief Internal decoder structure with parsed register fields
@@ -67,13 +62,10 @@ typedef struct
 } aca_raw_data_t;
 
 /**
- * @brief Main decode function that processes raw ACA error data
+ * @brief Main decode function that processes raw ACA error data and returns JSON
  * @param[in] raw_data Pointer to structure containing raw ACA error data
- * @return Decoded error information structure
+ * @return JsonValue* containing the decoded error information, or NULL on failure
  */
-aca_error_info_t aca_decode(const aca_raw_data_t *raw_data);
+JsonValue* aca_decode(const aca_raw_data_t *raw_data);
 
-#ifdef __cplusplus
-}
-#endif
-#endif /* ACA_DECODE_H */
+#endif /* RAS_DECODE_DECODE_H */
