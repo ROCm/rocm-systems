@@ -802,6 +802,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   ~GraphExec() {
     for (auto stream : parallel_streams_) {
       if (stream != nullptr) {
+        stream->finish();
         constexpr bool kForceDestroy = true;
         hip::Stream::Destroy(stream, kForceDestroy);
       }
