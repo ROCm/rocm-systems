@@ -478,6 +478,53 @@ class GraphNode : public hipGraphNodeDOTAttribute {
                 //!< when explicitly added)
 };
 
+class GraphEventWaitNode : public GraphNode {
+  hipEvent_t event_;
+
+ public:
+  GraphEventWaitNode(hipEvent_t event)
+      : GraphNode(hipGraphNodeTypeWaitEvent, "solid", "rectangle", "EVENT_WAIT"), event_(event) {}
+
+  ~GraphEventWaitNode() {}
+
+  GraphEventWaitNode(const GraphEventWaitNode& rhs) : GraphNode(rhs) { event_ = rhs.event_; }
+
+  GraphNode* clone() const override { return new GraphEventWaitNode(*this); }
+
+  hipError_t CreateCommand(hip::Stream* stream) override {
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
+    hip::Event* e = reinterpret_cast<hip::Event*>(event_);
+    commands_.reserve(1);
+    amd::Command* command;
+    status = e->streamWaitCommand(command, stream);
+    commands_.emplace_back(command);
+    return status;
+  }
+
+  void EnqueueCommands(hip::Stream* stream) override {
+    if (!commands_.empty()) {
+      hip::Event* e = reinterpret_cast<hip::Event*>(event_);
+      commands_[0]->enqueue();
+      commands_[0]->release();
+    }
+  }
+
+  void GetParams(hipEvent_t* event) const { *event = event_; }
+
+  hipError_t SetParams(hipEvent_t event) {
+    event_ = event;
+    return hipSuccess;
+  }
+
+  hipError_t SetParams(GraphNode* node) override {
+    const GraphEventWaitNode* eventWaitNode = static_cast<GraphEventWaitNode const*>(node);
+    return SetParams(eventWaitNode->event_);
+  }
+};
+
 class Graph {
  public:
   //!< Contains mem alloc dptrs whose corresponding free node is not added to the graph.
@@ -532,6 +579,16 @@ class Graph {
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
 
   std::unordered_set<GraphNode*> GetManualNodesDuringCapture() { return capturedNodes_; }
+
+  GraphNode* AddExternalEventWaitNode(hip::GraphNode* pDependencies, size_t numDependencies,
+    hipEvent_t event) {
+    GraphNode* node = new GraphEventWaitNode(event);
+    for (size_t i = 0; i < numDependencies; i++) {
+      pDependencies[i].AddEdgeDep(node);
+    }
+    AddNode(node);
+    return node;
+  }
 
   void RemoveManualNodesDuringCapture() {
     capturedNodes_.erase(capturedNodes_.begin(), capturedNodes_.end());
@@ -2164,53 +2221,6 @@ class GraphEventRecordNode : public GraphNode {
   hipError_t SetParams(GraphNode* node) override {
     const GraphEventRecordNode* eventRecordNode = static_cast<GraphEventRecordNode const*>(node);
     return SetParams(eventRecordNode->event_);
-  }
-};
-
-class GraphEventWaitNode : public GraphNode {
-  hipEvent_t event_;
-
- public:
-  GraphEventWaitNode(hipEvent_t event)
-      : GraphNode(hipGraphNodeTypeWaitEvent, "solid", "rectangle", "EVENT_WAIT"), event_(event) {}
-
-  ~GraphEventWaitNode() {}
-
-  GraphEventWaitNode(const GraphEventWaitNode& rhs) : GraphNode(rhs) { event_ = rhs.event_; }
-
-  GraphNode* clone() const override { return new GraphEventWaitNode(*this); }
-
-  hipError_t CreateCommand(hip::Stream* stream) override {
-    hipError_t status = GraphNode::CreateCommand(stream);
-    if (status != hipSuccess) {
-      return status;
-    }
-    hip::Event* e = reinterpret_cast<hip::Event*>(event_);
-    commands_.reserve(1);
-    amd::Command* command;
-    status = e->streamWaitCommand(command, stream);
-    commands_.emplace_back(command);
-    return status;
-  }
-
-  void EnqueueCommands(hip::Stream* stream) override {
-    if (!commands_.empty()) {
-      hip::Event* e = reinterpret_cast<hip::Event*>(event_);
-      commands_[0]->enqueue();
-      commands_[0]->release();
-    }
-  }
-
-  void GetParams(hipEvent_t* event) const { *event = event_; }
-
-  hipError_t SetParams(hipEvent_t event) {
-    event_ = event;
-    return hipSuccess;
-  }
-
-  hipError_t SetParams(GraphNode* node) override {
-    const GraphEventWaitNode* eventWaitNode = static_cast<GraphEventWaitNode const*>(node);
-    return SetParams(eventWaitNode->event_);
   }
 };
 
