@@ -67,11 +67,21 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
   if constexpr (operation == AtomicOperation::kMin) {
     return atomicMin(mem, val);
   } else if constexpr (operation == AtomicOperation::kMinSystem) {
-    return atomicMin_system(mem, val);
+    if (allocType == LinearAllocs::hipHostMalloc)
+      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
+      return atomicMin_system(mem, val);
+    } else {
+      return atomicMin_system(mem, val);
+    }
   } else if constexpr (operation == AtomicOperation::kMax) {
     return atomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kMaxSystem) {
-    return atomicMax_system(mem, val);
+    if (allocType == LinearAllocs::hipHostMalloc)
+      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
+      return atomicMax_system(mem, val);
+    } else {
+      return atomicMax_system(mem, val);
+    }
   } else if constexpr (operation == AtomicOperation::kUnsafeMin) {
     return unsafeAtomicMin(mem, val);
   } else if constexpr (operation == AtomicOperation::kSafeMin) {
@@ -81,14 +91,14 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
   } else if constexpr (operation == AtomicOperation::kSafeMax) {
     return safeAtomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kBuiltinMin) {
-    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
+    if (std::is_floating_point_v<TestType> || allocType == LinearAllocs::hipHostMalloc)
       HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
       return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
     } else {
       return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
     }
   } else if constexpr (operation == AtomicOperation::kBuiltinMax) {
-    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
+    if (std::is_floating_point_v<TestType> || allocType == LinearAllocs::hipHostMalloc)
       HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
       return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
     } else {
@@ -301,8 +311,7 @@ void TestCore(const TestParams& p) {
       const auto& stream = streams[i * p.kernel_count + j].stream();
       const auto old_vals = old_vals_devs[i].ptr() + j * p.ThreadCount();
       LaunchKernel<TestType, operation, use_shared_mem, memory_scope>(p, stream,
-          mem_devs[p.num_devices - i -1].ptr(), // P2P
-          old_vals);
+          mem_devs[i].ptr(), old_vals);
     }
   }
   for (auto i = 0; i < p.num_devices; ++i) {
@@ -431,16 +440,7 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
   for (const auto alloc_type : {LA::hipMalloc, LA::hipHostMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      if (alloc_type == LA::hipMalloc) {
-        if (!HipTest::enableP2P(num_devices)) {
-          HipTest::HIP_SKIP_TEST("Test requires support for P2P");
-          return;
-        }
-      }
       TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);
-      if (alloc_type == LA::hipMalloc) {
-        HipTest::disableP2P(num_devices);
-      }
     }
   }
 }

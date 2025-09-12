@@ -376,45 +376,8 @@ inline bool isP2PSupported(int& d1, int& d2) {
   return supported;
 }
 
-inline bool enableP2P(int num_devices) {
-  for (auto i = 0u; i < num_devices; ++i) {
-    int canAccess  = 0;
-    HIP_CHECK(hipSetDevice(i));
-    for (auto j = 0u; j < num_devices; ++j) {
-      if (i != j) {
-        HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-        if(canAccess == 0) {
-          std::string msg = "P2P access check failed between dev1:" +
-              std::to_string(i) + ",dev2:" + std::to_string(j);
-          INFO(msg.c_str());
-          return false;
-        }
-        HIP_CHECK(hipDeviceEnablePeerAccess(j, 0));
-      }
-    }
-  }
-  if (num_devices > 1) {
-    HIP_CHECK(hipSetDevice(0));
-  }
-  return true;
-}
-
-inline void disableP2P(int num_devices) {
-  for (auto i = 0u; i < num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    for (auto j = 0u; j < num_devices; ++j) {
-      if (i != j) {
-        HIP_CHECK(hipDeviceDisablePeerAccess(j));
-      }
-    }
-  }
-  if (num_devices > 1) {
-    HIP_CHECK(hipSetDevice(0));
-  }
-}
-
 inline bool checkConcurrentKernels(int num_devices) {
-  for (auto i = 0u; i < num_devices; ++i) {
+  for (auto i = 0; i < num_devices; ++i) {
     HIP_CHECK(hipSetDevice(i));
     int concurrent_kernels = 0;
     HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
