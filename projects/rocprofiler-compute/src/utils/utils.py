@@ -853,6 +853,7 @@ def run_prof(
                 f"Cannot write results for {fbase}.csv due to no counter "
                 "csv files generated."
             )
+            return
 
         # Combine results into single CSV file
         combined_results = pd.concat(
