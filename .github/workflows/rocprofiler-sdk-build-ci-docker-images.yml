@@ -39,7 +39,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk/requirements.txt
-            projects/rocprofiler-sdk/Docker/Dockerfile.ci
+            projects/rocprofiler-sdk/docker/Dockerfile.ci
 
       - name: Get the latest therock build
         id: therock
