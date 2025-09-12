@@ -25,7 +25,7 @@ env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
 jobs:
-  prepare_matrix_ci_base:
+  prepare_matrix_ci:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
@@ -44,13 +44,13 @@ jobs:
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci-base:
-    needs: prepare_matrix_ci_base
+    needs: prepare_matrix_ci
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.prepare_matrix_ci_base.outputs.matrix_data) }}
+        include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -105,13 +105,13 @@ jobs:
             ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}/rocprofiler-systems:ci-base-${{ matrix.distro }}-${{ matrix.version }}
 
   rocprofiler-systems-ci-gfx:
-    needs: prepare_matrix_ci_base
+    needs: prepare_matrix_ci
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        system: ${{ fromJSON(needs.prepare_matrix_ci_base.outputs.matrix_data) }}
+        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
         gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
 
     steps:
@@ -132,6 +132,25 @@ jobs:
           username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
 
+      - name: Set up Docker variables
+        id: setup_vars_gfx
+        run: |
+          if [ ${{ matrix.system.distro }} = "opensuse" ]; then
+            DISTRO_IMAGE="opensuse/leap"
+          elif [ ${{ matrix.system.distro }} = "rhel" ]; then
+            DISTRO_IMAGE="rockylinux/rockylinux"
+          else
+            DISTRO_IMAGE=${{ matrix.system.distro }}
+          fi
+          echo "distro_image=${DISTRO_IMAGE}" >> $GITHUB_OUTPUT
+
+          if [ ${{ matrix.system.distro }} = "debian" ]; then
+            DOCKER_FILE=Dockerfile.ubuntu.ci
+          else
+            DOCKER_FILE=Dockerfile.${{ matrix.system.distro }}.ci
+          fi
+          echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
+      
       - name: Get the latest build of The Rock tarball
         id: therock
         run: |
@@ -147,47 +166,24 @@ jobs:
           KEY=${KEY//\"/}
           test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
-          
-      - name: Build CI Container (PR - No Push)
-        if: github.event_name == 'pull_request'
-        timeout-minutes: 45
-        uses: nick-fields/retry@v3
-        with:
-          retry_wait_seconds: 60
-          timeout_minutes: 45
-          max_attempts: 3
-          command: |
-            pushd projects/rocprofiler-systems/docker
-            ./build-docker-ci.sh \
-              --distro ${{ matrix.system.distro }} \
-              --versions ${{ matrix.system.version }} \
-              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
-              --type ${{ matrix.gpu }} \
-              --gpu-type ${{ matrix.gpu }} \
-              --gpu-tarball ${{ steps.therock.outputs.tarball }} \
-              --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
-            popd
       
-      - name: Build CI Container (Push)
-        if: github.event_name != 'pull_request'
-        timeout-minutes: 45
-        uses: nick-fields/retry@v3
+      - name: Build CI GFX Container (Does not Push on PR)
+        uses: docker/build-push-action@v6
         with:
-          retry_wait_seconds: 60
-          timeout_minutes: 45
-          max_attempts: 3
-          command: |
-            pushd projects/rocprofiler-systems/docker
-            ./build-docker-ci.sh \ 
-              --distro ${{ matrix.system.distro }} \
-              --versions ${{ matrix.system.version }} \
-              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
-              --type ${{ matrix.gpu }} \
-              --gpu-type ${{ matrix.gpu }} \
-              --gpu-tarball ${{ steps.therock.outputs.tarball }} \
-              --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0 \
-              --push 
-            popd
+          file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
+            VERSION=${{ matrix.system.version }}
+            TYPE=${{ matrix.gpu }}
+            GPU_TYPE=${{ matrix.gpu }}
+            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
+            NJOBS=2
+            ELFUTILS_DOWNLOAD_VERSION=0.188
+            BOOST_DOWNLOAD_VERSION=1.79.0
+          tags: |
+            ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}/rocprofiler-systems:ci-${{ matrix.gpu }}-${{ matrix.system.distro }}-${{ matrix.system.version }}
 
   prepare_matrix_release:
     if: github.repository == 'ROCm/rocm-systems'

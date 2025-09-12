@@ -57,8 +57,8 @@ ARG GPU_TARBALL=""
 RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
         pip install --upgrade pip; \
         pip install awscli --break-system-packages; \
-        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${$GPU_TYPE}.tar.gz --no-sign-request; \
-        mv rocm-${$GPU_TYPE}.tar.gz /opt/rocm-${$GPU_TYPE}.tar.gz; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz; \
     fi
 
 ENV LC_ALL=C.UTF-8
