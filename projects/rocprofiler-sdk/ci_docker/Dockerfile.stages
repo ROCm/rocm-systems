@@ -1,0 +1,305 @@
+ARG BASE_IMAGE
+
+# -----------------------------
+# Stage 2: ROCm base (therock)
+# -----------------------------
+# Purpose:
+# - Prepare a ROCm-capable base by configuring AMDGPU/ROCm package repos
+#   and installing core ROCm components required by downstream builds.
+# - Download the latest "therock" ROCm tarball (per GPU type) and expand
+#   it directly into /opt/rocm so that bin/, lib/, include/ are present.
+# - Establish common ROCm environment variables used by later stages.
+#
+# Inputs:
+# - BASE_IMAGE: Stage-1 OS dependencies image to build from
+# - GPU_TYPE:   GPU family identifier (e.g., gfx94X, gfx110X, gfx120X)
+# - TARBALL_KEY: S3 object key for the therock tarball to retrieve
+#
+# Outputs:
+# - Populated /opt/rocm tree with ROCm toolchain and libs
+# - ROCm env (HIP/LLVM/CMAKE vars) set for child stages
+#
+# Notes:
+# - Ubuntu codename is detected to select the correct amdgpu-install .deb
+# - Only ROCm/AMDGPU packages are installed here; generic tooling lives
+#   in Stage 1 to maximize layer reuse across flows.
+FROM ${BASE_IMAGE} AS stage2
+
+SHELL ["/bin/bash","-lc"]
+
+# GPU type and S3 object key (therock nightly tarball)
+ARG GPU_TYPE
+ENV GPU_TYPE=${GPU_TYPE}
+ARG TARBALL_KEY
+ENV TARBALL_KEY=${TARBALL_KEY}
+
+# Install ROCm/AMDGPU repos and prerequisite ROCm packages (per-distro), plus awscli
+RUN set -euo pipefail; \
+    if [ -f /etc/debian_version ]; then \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        curl wget gpg ca-certificates tar gzip && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends awscli || true && \
+      mkdir -p /etc/apt/keyrings && \
+      UBUNTU_CODENAME=$(source /etc/os-release && echo ${UBUNTU_CODENAME:-$VERSION_CODENAME}); \
+      case "$UBUNTU_CODENAME" in \
+        jammy) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb" ;; \
+        noble) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0/ubuntu/noble/amdgpu-install_7.0.70000-1_all.deb" ;; \
+        *) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb" ;; \
+      esac; \
+      wget -N -P /tmp/ "$AMDGPU_DEB_URL" && \
+      apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb && \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev; \
+    elif grep -qi "rhel" /etc/os-release; then \
+      dnf clean all || true; \
+      dnf install -y perl-ExtUtils-MakeMaker python3-pip ca-certificates gzip tar || true; \
+      if grep -qi 'VERSION_ID="8.10"' /etc/os-release; then \
+        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/rhel8/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/7.0.1/rhel/8.10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+      else \
+        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/rhel10/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/7.0.1/rhel/10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+      fi; \
+      dnf clean all; \
+      dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
+      python3 -m pip install -U awscli; \
+    else \
+      echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
+      echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/7.0.1/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
+      zypper --gpg-auto-import-keys refresh || true; \
+      zypper --non-interactive install -y python3-pip ca-certificates gzip tar rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel || true; \
+      python3 -m pip install -U awscli; \
+      zypper clean --all || true; \
+    fi
+
+# Download therock tarball into /opt and extract to /opt/rocm
+RUN set -euo pipefail; \
+    aws s3 cp "s3://therock-nightly-tarball/${TARBALL_KEY}" "/opt/rocm-${GPU_TYPE}.tar.gz" --no-sign-request; \
+    TARBALL="/opt/rocm-${GPU_TYPE}.tar.gz"; \
+    DEST_DIR="/opt/rocm-7.0.0"; \
+    mkdir -p "${DEST_DIR}"; \
+    EXTRACT_DIR="$(mktemp -d)"; \
+    tar --no-same-owner --no-same-permissions --delay-directory-restore -xzf "${TARBALL}" -C "${EXTRACT_DIR}"; \
+    if [ -d "${EXTRACT_DIR}/opt/rocm" ]; then \
+      SRC_DIR="${EXTRACT_DIR}/opt/rocm"; \
+    else \
+      SRC_DIR="${EXTRACT_DIR}"; \
+    fi; \
+    shopt -s dotglob; \
+    mkdir -p "${DEST_DIR}"; \
+    cp -r "${SRC_DIR}"/* "${DEST_DIR}/"; \
+    shopt -u dotglob; \
+    rm -rf "${EXTRACT_DIR}" "${TARBALL}"; \
+    ln -s -f /opt/rocm-7.0.0 /opt/rocm
+
+# Common environment
+ENV CMAKE_HIP_PLATFORM=amd
+ENV HIP_PLATFORM=amd
+ENV HIP_RUNTIME=rocclr
+ENV HIP_COMPILER=amdclang++
+ENV LLVM_PATH=/opt/rocm/llvm
+ENV ROCM_PATH=/opt/rocm
+ENV CMAKE_PREFIX_PATH="${LLVM_PATH};${ROCM_PATH}"
+ENV PATH="/usr/local/bin:${ROCM_PATH}/bin:${LLVM_PATH}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LLVM_PATH}/lib:${LD_LIBRARY_PATH}"
+
+
+# ----------------------------------------
+# Stage 3: rocm-systems dependencies build (includes optional media deps)
+# ----------------------------------------
+FROM stage2 AS stage3
+
+SHELL ["/bin/bash","-lc"]
+
+# Common environment
+ENV CMAKE_HIP_PLATFORM=amd
+ENV HIP_PLATFORM=amd
+ENV HIP_RUNTIME=rocclr
+ENV HIP_COMPILER=amdclang++
+ENV LLVM_PATH=/opt/rocm/llvm
+ENV ROCM_PATH=/opt/rocm
+ENV CMAKE_PREFIX_PATH="${LLVM_PATH};${ROCM_PATH}"
+ENV PATH="/usr/local/bin:${ROCM_PATH}/bin:${LLVM_PATH}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LLVM_PATH}/lib:${LD_LIBRARY_PATH}"
+
+# Build toggles
+#
+# Projects built in this stage:
+#
+# Core rocm-systems dependencies (sourced from /workspace/projects):
+# - rocprofiler-register:
+#   Lightweight registration/dispatch helper used by rocprofiler-sdk and
+#   interacting tools to discover/register profiling components. It installs
+#   headers and libraries into ${ROCM_PATH} required at build and runtime by
+#   rocprofiler-sdk.
+#
+# - rocr-runtime (ROCr / HSA runtime):
+#   Core user-mode runtime providing the HSA API implementation for AMD GPUs.
+#   rocprofiler-sdk links against ROCr to interact with the driver stack and
+#   GPU devices. We build libhsakmt and the hsa-runtime components.
+#
+# - aqlprofile:
+#   Library for command-based profiling using AQL packets, enabling hardware
+#   counter collection and event-based profiling. rocprofiler-sdk uses it for
+#   profiling backends on supported GPUs.
+#
+# Optional media dependencies (external repos under /workspace):
+# - rocDecode:
+#   Video decode components used by ROCm media pipelines. This repository is
+#   built and installed into ${ROCM_PATH} to satisfy media-related optional
+#   dependencies for downstream consumers and tests.
+#
+# - rocJPEG:
+#   JPEG encode/decode support components complementing rocDecode for image
+#   processing. Also installed into ${ROCM_PATH} and referenced by media tests.
+#
+# You can toggle each component via the BUILD_* args below.
+ARG BUILD_ROCPROFILER_REGISTER=true
+ENV BUILD_ROCPROFILER_REGISTER=${BUILD_ROCPROFILER_REGISTER}
+ARG BUILD_ROCR_RUNTIME=true
+ENV BUILD_ROCR_RUNTIME=${BUILD_ROCR_RUNTIME}
+ARG BUILD_AQLPROFILE=true
+ENV BUILD_AQLPROFILE=${BUILD_AQLPROFILE}
+ARG BUILD_ROCDECODE=true
+ENV BUILD_ROCDECODE=${BUILD_ROCDECODE}
+ARG BUILD_ROCJPEG=true
+ENV BUILD_ROCJPEG=${BUILD_ROCJPEG}
+
+# Cache-busting refs/revs for external repos
+# - *_REF can be a branch/tag (default: release/rocm-rel-7.0)
+# - *_REV can pin to an exact commit SHA (optional)
+ARG ROCDECODE_REF=release/rocm-rel-7.0
+ARG ROCDECODE_REV
+ARG ROCJPEG_REF=release/rocm-rel-7.0
+ARG ROCJPEG_REV
+
+WORKDIR /workspace
+RUN git config --global --add safe.directory /workspace
+
+# Ensure modern CMake
+RUN python3 -m pip install --upgrade pip || true && \
+    python3 -m pip install --upgrade cmake && \
+    python3 -m pip install --upgrade ninja && \
+    python3 -m pip install --upgrade awscli || true
+
+# Build and install rocprofiler-register (registration/dispatch helper for rocprofiler-sdk)
+RUN set -euo pipefail; \
+    if [ "${BUILD_ROCPROFILER_REGISTER}" = "true" ]; then \
+      echo "Building rocprofiler-register..."; \
+      cd /workspace/projects/rocprofiler-register; \
+      cmake -G Ninja -B build-rocprofiler-register \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_PREFIX_PATH="${LLVM_PATH};${ROCM_PATH}" \
+        -DCMAKE_INSTALL_PREFIX=${ROCM_PATH}; \
+      cmake --build build-rocprofiler-register --target all --parallel 16; \
+      cmake --build build-rocprofiler-register --target install; \
+      echo "rocprofiler-register installed"; \
+    else \
+      echo "Skipping rocprofiler-register"; \
+    fi
+
+# Build and install rocr-runtime (ROCr / HSA runtime used by rocprofiler-sdk)
+RUN set -euo pipefail; \
+    if [ "${BUILD_ROCR_RUNTIME}" = "true" ]; then \
+      echo "Building rocr-runtime..."; \
+      cd /workspace/projects/rocr-runtime; \
+      cmake -B build \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
+        -DCMAKE_INSTALL_PREFIX=${ROCM_PATH}; \
+      cmake --build build --target all --parallel 16; \
+      cmake --build build --target install; \
+      echo "rocr-runtime installed"; \
+    else \
+      echo "Skipping rocr-runtime"; \
+    fi
+
+# Build and install aqlprofile (AQL packet-based profiling backend used by rocprofiler-sdk)
+RUN set -euo pipefail; \
+    if [ "${BUILD_AQLPROFILE}" = "true" ]; then \
+      echo "Building aqlprofile..."; \
+      cd /workspace/projects/aqlprofile; \
+      cmake -G Ninja -B build-aqlprofile \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
+        -DClang_DIR=${LLVM_PATH}/lib/cmake/clang \
+        -DLLVM_DIR=${LLVM_PATH}/lib/cmake/llvm \
+        -DCMAKE_C_COMPILER=${LLVM_PATH}/bin/amdclang \
+        -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++ \
+        -DCMAKE_INSTALL_PREFIX=${ROCM_PATH}; \
+      cmake --build build-aqlprofile --target all --parallel 16; \
+      cmake --build build-aqlprofile --target install; \
+      echo "aqlprofile installed"; \
+    else \
+      echo "Skipping aqlprofile"; \
+    fi
+
+# Clone external repos for media dependencies
+# - Clones are shallow (depth 1) at the requested ref; use *_REV to pin.
+RUN set -euo pipefail; \
+    if [ "${BUILD_ROCDECODE}" = "true" ]; then \
+      if [ ! -d rocDecode ]; then mkdir -p rocDecode; fi; \
+      cd rocDecode; git init .; \
+      git remote add origin https://github.com/ROCm/rocDecode.git || true; \
+      git fetch --depth 1 origin ${ROCDECODE_REF}; \
+      git checkout ${ROCDECODE_REV:-FETCH_HEAD}; \
+      cd /workspace; \
+    fi; \
+    if [ "${BUILD_ROCJPEG}" = "true" ]; then \
+      if [ ! -d rocJPEG ]; then mkdir -p rocJPEG; fi; \
+      cd rocJPEG; git init .; \
+      git remote add origin https://github.com/ROCm/rocJPEG.git || true; \
+      git fetch --depth 1 origin ${ROCJPEG_REF}; \
+      git checkout ${ROCJPEG_REV:-FETCH_HEAD}; \
+      cd /workspace; \
+    fi
+
+# Build and install ROCDecode
+# - Uses ROCm LLVM toolchain (amdclang++) and installs into ${ROCM_PATH}
+RUN set -euo pipefail; \
+    if [ "${BUILD_ROCDECODE}" = "true" ]; then \
+      echo "Building ROCDecode..."; \
+      cd /workspace/rocDecode; \
+      cmake -G Ninja -B build-rocdecode \
+        -DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
+        -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
+        -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++; \
+      cmake --build build-rocdecode --target all --parallel 16; \
+      cmake --build build-rocdecode --target install; \
+      echo "ROCDecode installed"; \
+    else \
+      echo "Skipping ROCDecode"; \
+    fi
+
+# Build and install ROCJPEG
+# - Uses ROCm LLVM toolchain (amdclang++) and installs into ${ROCM_PATH}
+RUN set -euo pipefail; \
+    if [ "${BUILD_ROCJPEG}" = "true" ]; then \
+      echo "Building ROCJPEG..."; \
+      cd /workspace/rocJPEG; \
+      cmake -G Ninja -B build-rocjpeg \
+        -DGPU_TARGETS="gfx942" \
+        -DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
+        -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
+        -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++; \
+      cmake --build build-rocjpeg --target all --parallel 16; \
+      cmake --build build-rocjpeg --target install; \
+      echo "ROCJPEG installed"; \
+    else \
+      echo "Skipping ROCJPEG"; \
+    fi
+
+WORKDIR /workspace
+
+# Common environment
+ENV CMAKE_HIP_PLATFORM=amd
+ENV HIP_PLATFORM=amd
+ENV HIP_RUNTIME=rocclr
+ENV HIP_COMPILER=amdclang++
+ENV LLVM_PATH=/opt/rocm/llvm
+ENV ROCM_PATH=/opt/rocm
+ENV CMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}"
+ENV PATH="/usr/local/bin:${ROCM_PATH}/bin:${LLVM_PATH}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LLVM_PATH}/lib:${LD_LIBRARY_PATH}"
+

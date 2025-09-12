@@ -55,6 +55,8 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
       options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
 
     env:
@@ -62,30 +64,17 @@ jobs:
       INSTALL_PREFIX: /opt/rocprofiler-register
       PACKAGING_INSTALL_PREFIX: /opt/rocm
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      PATH: /usr/bin:$PATH
 
     steps:
-    - name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        tar -xf ${{ env.PACKAGING_INSTALL_PREFIX }}-gfx94X.tar.gz -C ${{ env.PACKAGING_INSTALL_PREFIX }}
-        echo "ROCm installed to: ${{ env.PACKAGING_INSTALL_PREFIX }}"
-
-    - name: Setup Git
-      shell: bash
-      run: |
-        apt-get update
-        apt-get install -y software-properties-common
-        add-apt-repository ppa:git-core/ppa
-        apt update
-        apt install -y git
-
     - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/rocprofiler-register
-        submodules: true
+        submodules: false
         set-safe-directory: true
+
+    - name: Init/Update submodules
+      working-directory: projects/rocprofiler-register
+      run: git submodule update --init --recursive --jobs 16
 
     - name: Install Packages
       timeout-minutes: 25

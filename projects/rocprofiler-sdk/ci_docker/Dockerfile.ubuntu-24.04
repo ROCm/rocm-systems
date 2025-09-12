@@ -1,5 +1,5 @@
-# Dockerfile for rocprofiler-sdk CI dependencies - Ubuntu 22.04
-FROM ubuntu:22.04
+# Dockerfile for rocprofiler-sdk CI dependencies - Ubuntu 24.04
+FROM ubuntu:24.04
 SHELL ["/bin/bash","-lc"]
 
 # Set environment variables for non-interactive installs
@@ -16,12 +16,10 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     curl \
     wget \
-    # Compiler toolchains
-    gcc-11 \
-    g++-11 \
-    gcc-12 \
-    g++-12 \
-    clang-15 \
+    # Compiler toolchains (Ubuntu 24.04 default is gcc-13)
+    gcc-13 \
+    g++-13 \
+    clang-16 \
     # System libraries and development headers
     libdw-dev \
     libsqlite3-dev \
@@ -66,16 +64,21 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/test && \
     apt-get install -y gcc-13 g++-13 && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure compiler alternatives (matching CI setup)
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 \
+# Configure compiler alternatives (only for versions present)
+RUN set -e; \
+    if [ -x /usr/bin/gcc-11 ]; then \
+      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-11 \
-        --slave /usr/bin/gcov gcov /usr/bin/gcov-11 && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 \
+        --slave /usr/bin/gcov gcov /usr/bin/gcov-11; \
+    fi; \
+    if [ -x /usr/bin/gcc-12 ]; then \
+      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-12 \
-        --slave /usr/bin/gcov gcov /usr/bin/gcov-12 && \
+        --slave /usr/bin/gcov gcov /usr/bin/gcov-12; \
+    fi; \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-        --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
-        --slave /usr/bin/gcov gcov /usr/bin/gcov-13
+      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
+      --slave /usr/bin/gcov gcov /usr/bin/gcov-13
 
 # Install ccache for build acceleration
 RUN apt-get update && apt-get install -y ccache && \
@@ -84,9 +87,8 @@ RUN apt-get update && apt-get install -y ccache && \
 # Set up ccache in PATH
 ENV PATH="/usr/lib/ccache:${PATH}"
 
-# Install AWS CLI for later stages
-RUN apt-get update && apt-get install -y awscli && \
-    rm -rf /var/lib/apt/lists/*
+# Install AWS CLI for later stages (use pip on noble to avoid apt candidate issues)
+RUN python3 -m pip install -U awscli
 
 # Configure git for container builds (kept for compatibility)
 RUN git config --global --add safe.directory '*'
@@ -114,15 +116,15 @@ set -euo pipefail
 TARGET_DIR="${1:-/github/workspace}"
 ARCHIVE="/opt/rocprofiler-submodules-cache.tar.gz"
 if [ -f "$ARCHIVE" ]; then
-    mkdir -p "$TARGET_DIR"
-    tar -xzf "$ARCHIVE" -C "$TARGET_DIR"
+  mkdir -p "$TARGET_DIR"
+  tar -xzf "$ARCHIVE" -C "$TARGET_DIR"
 fi
 EOS
 RUN chmod +x /usr/local/bin/restore-submodules-cache.sh
 
 # Install Python requirements for rocprofiler-sdk
-RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
+RUN python3 -m pip install --upgrade pip --break-system-packages && \
+    python3 -m pip install --break-system-packages -r projects/rocprofiler-sdk/requirements.txt
 
 # Set environment variables used by CI
 ENV GIT_DISCOVERY_ACROSS_FILESYSTEM=1
@@ -143,3 +145,4 @@ WORKDIR /workspace
 
 # Default command
 CMD ["/bin/bash"]
+

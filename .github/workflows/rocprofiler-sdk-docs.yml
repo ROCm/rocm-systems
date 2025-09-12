@@ -107,19 +107,15 @@ jobs:
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-sdk
-          submodules: true
+          submodules: false
           set-safe-directory: true
 
-      - name: Setup
-        shell: bash
-        run: |
-          git config --global --add safe.directory '*'
-          rm -rf /usr/local/bin/git
-          ln -s /usr/bin/git /usr/local/bin/git
-          git --version
+      - name: Init/Update submodules
+        working-directory: projects/rocprofiler-sdk
+        run: git submodule update --init --recursive --jobs 16
 
       - name: Create Docs Directory
         shell: bash
