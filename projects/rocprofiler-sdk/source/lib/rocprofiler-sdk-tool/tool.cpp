@@ -1767,6 +1767,313 @@ get_tracing_callbacks()
     return tracing_callbacks_t{use_real_callbacks};
 }
 
+std::map<rocprofiler_buffer_tracing_kind_t, rocprofiler_context_id_t>&
+get_attach_contexts()
+{
+    static std::map<rocprofiler_buffer_tracing_kind_t, rocprofiler_context_id_t> attach_contexts;
+    return attach_contexts;
+}
+
+void
+attach_init(void* tool_data)
+{
+    ROCP_INFO << "attach_init: Initializing contexts for all buffer tracing services";
+
+    // Define null IDs locally
+    static constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
+
+    // Map to store all contexts by tracing kind
+    auto& attach_contexts = get_attach_contexts();
+    attach_contexts.clear();
+
+    // Use the same buffer service structure as the existing tool_init
+    struct attach_buffer_service_config
+    {
+        const char*                       name;
+        rocprofiler_buffer_tracing_kind_t kind;
+        rocprofiler_buffer_id_t&          buffer_id;
+    };
+
+    // Create contexts for ALL buffer tracing services using existing buffers
+    // This mirrors the existing services from line 1777 but uses get_buffers()
+    for(auto&& service :
+        {attach_buffer_service_config{"Kernel Dispatch",
+                                      ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                      get_buffers().kernel_trace},
+         attach_buffer_service_config{"Memory Copy",
+                                      ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                      get_buffers().memory_copy_trace},
+         attach_buffer_service_config{"Scratch Memory",
+                                      ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                      get_buffers().scratch_memory},
+         attach_buffer_service_config{
+             "HSA Core API", ROCPROFILER_BUFFER_TRACING_HSA_CORE_API, get_buffers().hsa_api_trace},
+         attach_buffer_service_config{"HSA AMD Ext API",
+                                      ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                                      get_buffers().hsa_api_trace},
+         attach_buffer_service_config{"HSA Image Ext API",
+                                      ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                      get_buffers().hsa_api_trace},
+         attach_buffer_service_config{"HSA Finalize Ext API",
+                                      ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+                                      get_buffers().hsa_api_trace},
+         attach_buffer_service_config{"HIP Runtime API",
+                                      ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                      get_buffers().hip_api_trace},
+         attach_buffer_service_config{"HIP Compiler API",
+                                      ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
+                                      get_buffers().hip_api_trace},
+         attach_buffer_service_config{
+             "RCCL API", ROCPROFILER_BUFFER_TRACING_RCCL_API, get_buffers().rccl_api_trace},
+         attach_buffer_service_config{"Memory Allocation",
+                                      ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                      get_buffers().memory_allocation_trace},
+         attach_buffer_service_config{"ROCDecode API",
+                                      ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
+                                      get_buffers().rocdecode_api_trace},
+         attach_buffer_service_config{"ROCJpeg API",
+                                      ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
+                                      get_buffers().rocjpeg_api_trace}})
+    {
+        rocprofiler_context_id_t ctx_id = null_context_id;
+
+        // Check if buffer exists and create if needed (same logic as in tool_init)
+        static constexpr auto null_buffer_id = rocprofiler_buffer_id_t{.handle = 0};
+
+        // Create context
+        auto status = rocprofiler_create_context(&ctx_id);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "Failed to create context for " << service.name << ": " << status;
+            continue;
+        }
+
+        if(service.buffer_id == null_buffer_id)
+        {
+            // Buffer configuration
+            constexpr size_t buffer_size      = 16384;
+            constexpr size_t buffer_watermark = buffer_size / 2;
+
+            // Get callbacks
+            auto callbacks = get_tracing_callbacks();
+
+            ROCPROFILER_CALL(rocprofiler_create_buffer(ctx_id,
+                                                       buffer_size,
+                                                       buffer_watermark,
+                                                       ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                       callbacks.buffered_tracing,
+                                                       tool_data,
+                                                       &service.buffer_id),
+                             "buffer creation");
+
+            ROCP_FATAL_IF(service.buffer_id.handle == 0) << "failed to create buffer";
+
+            auto cb_thread = rocprofiler_callback_thread_t{};
+
+            ROCP_INFO << "creating dedicated callback thread for buffer "
+                      << service.buffer_id.handle;
+            ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_thread),
+                             "creating callback thread");
+
+            ROCP_INFO << "assigning buffer " << service.buffer_id.handle << " to callback thread "
+                      << cb_thread.handle;
+            ROCPROFILER_CALL(rocprofiler_assign_callback_thread(service.buffer_id, cb_thread),
+                             "assigning callback thread");
+
+            ROCP_INFO << "Created buffer " << service.buffer_id.handle << " for " << service.name;
+        }
+
+        // Configure the buffer tracing service with the appropriate existing buffer
+        status = rocprofiler_configure_buffer_tracing_service(
+            ctx_id, service.kind, nullptr, 0, service.buffer_id);
+
+        if(status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_TRACE << "Configured " << service.name << " with buffer ID "
+                       << service.buffer_id.handle;
+            attach_contexts[service.kind] = ctx_id;
+        }
+        else
+        {
+            ROCP_WARNING << "Failed to configure " << service.name << ": " << status;
+        }
+    }
+
+    // Add code object callback tracing - always needed for kernel symbol metadata
+    rocprofiler_context_id_t code_obj_ctx = null_context_id;
+    auto                     callbacks    = get_tracing_callbacks();
+
+    auto status = rocprofiler_create_context(&code_obj_ctx);
+    if(status == ROCPROFILER_STATUS_SUCCESS)
+    {
+        status =
+            rocprofiler_configure_callback_tracing_service(code_obj_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                           nullptr,
+                                                           0,
+                                                           callbacks.code_object_tracing,
+                                                           nullptr);
+        if(status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            // Use a special key for callback contexts (negative values to avoid conflicts)
+            attach_contexts[static_cast<rocprofiler_buffer_tracing_kind_t>(-1)] = code_obj_ctx;
+            ROCP_INFO << "Created code object callback tracing context " << code_obj_ctx.handle;
+        }
+        else
+        {
+            ROCP_WARNING << "Failed to configure code object callback tracing: " << status;
+        }
+    }
+    else
+    {
+        ROCP_WARNING << "Failed to create code object callback tracing context: " << status;
+    }
+
+    ROCP_INFO << "attach_init: Created " << attach_contexts.size()
+              << " buffer tracing contexts using existing buffers";
+}
+
+void
+attach_start(void* tool_data)
+{
+    ROCP_INFO << "attach_start: Starting contexts based on configuration";
+
+    auto& attach_contexts = get_attach_contexts();
+    int   started_count   = 0;
+
+    // Use the same buffer service structure to map config options to tracing kinds
+    struct attach_start_service_config
+    {
+        bool                              option;
+        rocprofiler_buffer_tracing_kind_t kind;
+        const char*                       name;
+    };
+
+    // Map each config option to its corresponding tracing kind (same as tool_init line 1777)
+    for(auto&& service :
+        {attach_start_service_config{tool::get_config().kernel_trace,
+                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                     "Kernel Dispatch"},
+         attach_start_service_config{tool::get_config().memory_copy_trace,
+                                     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                     "Memory Copy"},
+         attach_start_service_config{tool::get_config().scratch_memory_trace,
+                                     ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                     "Scratch Memory"},
+         attach_start_service_config{tool::get_config().hsa_core_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+                                     "HSA Core API"},
+         attach_start_service_config{tool::get_config().hsa_amd_ext_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                                     "HSA AMD Ext API"},
+         attach_start_service_config{tool::get_config().hsa_image_ext_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                     "HSA Image Ext API"},
+         attach_start_service_config{tool::get_config().hsa_finalizer_ext_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+                                     "HSA Finalize Ext API"},
+         attach_start_service_config{tool::get_config().hip_runtime_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                     "HIP Runtime API"},
+         attach_start_service_config{tool::get_config().hip_compiler_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
+                                     "HIP Compiler API"},
+         attach_start_service_config{
+             tool::get_config().rccl_api_trace, ROCPROFILER_BUFFER_TRACING_RCCL_API, "RCCL API"},
+         attach_start_service_config{tool::get_config().memory_allocation_trace,
+                                     ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                     "Memory Allocation"},
+         attach_start_service_config{tool::get_config().rocdecode_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
+                                     "ROCDecode API"},
+         attach_start_service_config{tool::get_config().rocjpeg_api_trace,
+                                     ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
+                                     "ROCJpeg API"}})
+    {
+        // Only start context if the config option is enabled AND context exists
+        if(service.option)
+        {
+            auto it = attach_contexts.find(service.kind);
+            if(it != attach_contexts.end())
+            {
+                auto status = rocprofiler_start_context(it->second);
+                if(status == ROCPROFILER_STATUS_SUCCESS)
+                {
+                    ROCP_ERROR << "Started context " << it->second.handle << " for "
+                               << service.name;
+                    started_count++;
+                }
+                else
+                {
+                    ROCP_ERROR << "Failed to start context " << it->second.handle << " for "
+                               << service.name << ": " << status;
+                }
+            }
+            else
+            {
+                ROCP_ERROR << "No context found for " << service.name << " (kind: " << service.kind
+                           << ")";
+            }
+        }
+        else
+        {
+            ROCP_ERROR << "Skipping " << service.name << " - not enabled in configuration";
+        }
+    }
+
+    // Always start code object callback tracing context (needed for kernel symbol metadata)
+    auto code_obj_it = attach_contexts.find(static_cast<rocprofiler_buffer_tracing_kind_t>(-1));
+    if(code_obj_it != attach_contexts.end())
+    {
+        auto status = rocprofiler_start_context(code_obj_it->second);
+        if(status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_INFO << "Started code object callback tracing context "
+                      << code_obj_it->second.handle;
+            started_count++;
+        }
+        else
+        {
+            ROCP_ERROR << "Failed to start code object callback tracing context "
+                       << code_obj_it->second.handle << ": " << status;
+        }
+    }
+    else
+    {
+        ROCP_WARNING << "No code object callback tracing context found";
+    }
+
+    ROCP_INFO << "attach_start: Started " << started_count << " contexts";
+}
+
+int
+tool_attach(rocprofiler_client_finalize_t, void* tool_data)
+{
+    auto _attach_timer = common::simple_timer{"[rocprofv3] tool attachment"};
+
+    // Initialize contexts for all buffer tracing services
+    attach_init(tool_data);
+
+    // Start contexts based on current configuration
+    attach_start(tool_data);
+
+    return 0;  // success
+}
+
+void
+tool_reattach(void* tool_data)
+{
+    // Simply call attach_start to restart contexts based on current configuration
+    attach_start(tool_data);
+}
+
+bool
+is_attach_mode()
+{
+    const char* path = getenv("ROCP_REGISTERED_TOOL_ATTACH");
+    return path != nullptr;
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
@@ -1781,6 +2088,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
     tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
+
+    if(is_attach_mode())
+    {
+        pid_t target_pid = getppid();  // The target process we're attaching to
+        pid_t tool_pid   = getpid();   // The rocprofv3 tool process
+        ROCP_INFO << "Attach mode: Setting process_id to target PID " << target_pid
+                  << " (tool PID: " << tool_pid << ")";
+        tool_metadata->set_process_id(target_pid, 0);  // Set target as main process
+        return tool_attach(fini_func, tool_data);
+    }
+    else
+    {
+        ROCP_ERROR << "NOT ATTACH!";
+    }
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
 
@@ -2224,6 +2545,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     tool_metadata->set_process_id(getpid(), getppid());
+
     // set_process_id should set process_start_ns unless it cannot read from /proc/<pid>/stat
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
@@ -2402,6 +2724,194 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 }
 
 void
+tool_detach(void* /*tool_data*/)
+{
+    auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
+
+    // Stop all contexts that were started by attach_start
+    auto& attach_contexts = get_attach_contexts();
+    int   stopped_count   = 0;
+
+    flush();
+    for(const auto& [kind, ctx_id] : attach_contexts)
+    {
+        auto status = rocprofiler_stop_context(ctx_id);
+        if(status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            stopped_count++;
+        }
+        else
+        {
+            ROCP_WARNING << "Failed to stop context " << ctx_id.handle << " for kind " << kind
+                         << ": " << status;
+        }
+    }
+
+    if(stopped_count <= 1)
+        return;  // nothing was started (other than the code object callback tracing), nothing to do
+
+    // Flush all buffers (same as tool_fini)
+    flush();
+
+    // Set process end timestamp for this detachment cycle
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    // Generate output for all services (similar to tool_fini but without destroying state)
+    auto kernel_dispatch_output =
+        rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
+    auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
+                                                  tool::get_config().hsa_amd_ext_api_trace ||
+                                                  tool::get_config().hsa_image_ext_api_trace ||
+                                                  tool::get_config().hsa_finalizer_ext_api_trace};
+    auto hip_output = tool::hip_buffered_output_t{tool::get_config().hip_runtime_api_trace ||
+                                                  tool::get_config().hip_compiler_api_trace};
+    auto memory_copy_output =
+        tool::memory_copy_buffered_output_ext_t{tool::get_config().memory_copy_trace};
+
+    auto memory_allocation_output =
+        tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
+
+    auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
+
+    auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
+
+    auto counters_output =
+        tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
+
+    auto scratch_memory_output =
+        tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
+
+    auto rocdecode_output =
+        tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
+
+    auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+
+    auto pc_sampling_host_trap_output =
+        tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
+
+    auto pc_sampling_stochastic_output =
+        tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
+
+    auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
+    auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
+    std::sort(agents_output.begin(), agents_output.end(), node_id_sort);
+
+    auto outdata       = output_data{};
+    auto contributions = domain_stats_vec_t{};
+    auto cleanups      = cleanup_vec_t{};
+
+    auto run_cleanup = [&cleanups]() {
+        for(const auto& itr : cleanups)
+        {
+            if(itr) itr();
+        }
+        cleanups.clear();
+    };
+
+    // Generate configuration output if requested
+    if(tool::get_config().output_config_file)
+    {
+        generate_config_output(tool::get_config(), *tool_metadata);
+    }
+    {
+        auto _dtor = common::scope_destructor{run_cleanup};
+
+        // Generate output for all services
+        generate_output(kernel_dispatch_output, outdata, contributions, cleanups);
+
+        generate_output(hsa_output, outdata, contributions, cleanups);
+        generate_output(hip_output, outdata, contributions, cleanups);
+        generate_output(memory_copy_output, outdata, contributions, cleanups);
+        generate_output(memory_allocation_output, outdata, contributions, cleanups);
+        generate_output(marker_output, outdata, contributions, cleanups);
+        generate_output(rccl_output, outdata, contributions, cleanups);
+        generate_output(counters_output, outdata, contributions, cleanups);
+        generate_output(scratch_memory_output, outdata, contributions, cleanups);
+        generate_output(rocdecode_output, outdata, contributions, cleanups);
+        generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
+        generate_output(rocjpeg_output, outdata, contributions, cleanups);
+        generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
+        if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
+        {
+            outdata.num_output += 1;
+        }
+
+        ROCP_INFO << fmt::format("tool_detach: Generated output from {} services ({} kB)",
+                                 outdata.num_output,
+                                 (outdata.num_bytes / 1024));
+
+        // when benchmarking, we do not generate output
+        if(tool::get_config().benchmark_mode != tool::config::benchmark::none) return;
+
+        // Generate output files (same logic as tool_fini)
+        if(tool::get_config().csv_output && outdata.num_output > 0 &&
+           outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+        {
+            tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
+        }
+
+        if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
+           outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+        {
+            tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
+        }
+
+        if(tool::get_config().json_output && outdata.num_output > 0 &&
+           outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+        {
+            auto json_ar = tool::open_json(tool::get_config());
+
+            json_ar.start_process();
+            tool::write_json(json_ar, tool::get_config(), *tool_metadata, getpid());
+            tool::write_json(json_ar,
+                             tool::get_config(),
+                             *tool_metadata,
+                             contributions,
+                             hip_output.get_generator(),
+                             hsa_output.get_generator(),
+                             kernel_dispatch_output.get_generator(),
+                             memory_copy_output.get_generator(),
+                             counters_output.get_generator(),
+                             marker_output.get_generator(),
+                             scratch_memory_output.get_generator(),
+                             rccl_output.get_generator(),
+                             memory_allocation_output.get_generator(),
+                             rocdecode_output.get_generator(),
+                             rocjpeg_output.get_generator(),
+                             pc_sampling_host_trap_output.get_generator(),
+                             pc_sampling_stochastic_output.get_generator());
+            json_ar.finish_process();
+
+            tool::close_json(json_ar);
+        }
+    }
+    // Reset all temp file buffers after generating output for clean reattachment
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_kernel_dispatch_ext_record_t>(
+        domain_type::KERNEL_DISPATCH);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_hsa_api_record_t>(domain_type::HSA);
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_hip_api_ext_record_t>(domain_type::HIP);
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_copy_ext_record_t>(
+        domain_type::MEMORY_COPY);
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_allocation_ext_record_t>(
+        domain_type::MEMORY_ALLOCATION);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_marker_api_record_t>(
+        domain_type::MARKER);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rccl_api_record_t>(domain_type::RCCL);
+    tool::reset_tmp_file_buffer<tool::tool_counter_record_t>(domain_type::COUNTER_COLLECTION);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_scratch_memory_record_t>(
+        domain_type::SCRATCH_MEMORY);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocdecode_api_record_t>(
+        domain_type::ROCDECODE);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocjpeg_api_record_t>(
+        domain_type::ROCJPEG);
+    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_host_trap_record_t>(
+        domain_type::PC_SAMPLING_HOST_TRAP);
+    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_stochastic_record_t>(
+        domain_type::PC_SAMPLING_STOCHASTIC);
+}
+
+void
 tool_fini(void* /*tool_data*/)
 {
     static bool _first = true;
@@ -2410,6 +2920,12 @@ tool_fini(void* /*tool_data*/)
 
     client_identifier = nullptr;
     client_finalizer  = nullptr;
+
+    if(is_attach_mode())
+    {
+        tool_detach(nullptr);
+        return;
+    }
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
@@ -3072,12 +3588,18 @@ rocprofiler_configure(uint32_t                 version,
     ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";
 
-    // create configure data
-    static auto cfg = rocprofiler_tool_configure_result_t{
-        sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
+    // create configure data using experimental struct with attach/detach support
+    static auto cfg = rocprofiler_tool_configure_result_experimental_t{
+        sizeof(rocprofiler_tool_configure_result_experimental_t),
+        &tool_init,
+        &tool_fini,
+        nullptr,
+        &tool_reattach,  // tool_reattach function
+        &tool_detach     // tool_detach function
+    };
 
-    // return pointer to configure data
-    return &cfg;
+    // return pointer to configure data (cast to base type)
+    return reinterpret_cast<rocprofiler_tool_configure_result_t*>(&cfg);
     // data passed around all the callbacks
 }
 

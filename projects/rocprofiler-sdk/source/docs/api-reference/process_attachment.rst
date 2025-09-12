@@ -63,6 +63,17 @@ These functions are exported from the ``librocprofiler-register.so`` library and
        rocprofiler_register_error_code_t 
        rocprofiler_register_detach() 
            ROCPROFILER_REGISTER_PUBLIC_API;
+           
+       // Reattach to previously attached process (experimental)
+       rocprofiler_register_error_code_t 
+       rocprofiler_register_invoke_reattach() 
+           ROCPROFILER_REGISTER_PUBLIC_API;
+           
+       // Client callback functions for reattachment support
+       void rocprofiler_call_client_reattach(void)
+           ROCPROFILER_REGISTER_PUBLIC_API;
+       void rocprofiler_call_client_detach(void)
+           ROCPROFILER_REGISTER_PUBLIC_API;
    }
 
 **Function Details:**
@@ -79,10 +90,24 @@ These functions are exported from the ``librocprofiler-register.so`` library and
   - Calls the tool's detach function and cleans up resources
   - Returns ``rocprofiler_register_error_code_t`` status
 
+- **``rocprofiler_register_invoke_reattach()``**: (EXPERIMENTAL)
+  - Called to reattach profiling to a previously attached process
+  - Invokes client reattach callbacks without full re-initialization
+  - Used for resuming profiling after temporary detachment
+  - Returns ``rocprofiler_register_error_code_t`` status
+
+- **``rocprofiler_call_client_reattach()`` and ``rocprofiler_call_client_detach()``**: 
+  - C wrapper functions for client tool reattachment callbacks
+  - Automatically resolved and called by the registration system
+  - Enable tools to handle dynamic attach/detach cycles
+
 Function Call Sequence
 ======================
 
-The attachment process follows this sequence:
+Initial Attachment Sequence
+---------------------------
+
+The initial attachment process follows this sequence:
 
 .. code-block:: text
 
@@ -102,6 +127,42 @@ The attachment process follows this sequence:
         |
         v
    [Profiling data collection...]
+        |
+        v
+   rocprofiler_register_detach() ← Called via ptrace in target
+        |
+        v
+   detach() ← Your tool calls this
+        |
+        v
+   Cleanup complete
+
+Reattachment Sequence (Experimental)
+------------------------------------
+
+For reattachment to a previously attached process:
+
+.. code-block:: text
+
+   Tool Implementation
+        |
+        v
+   attach(pid) ← Your tool calls this again
+        |
+        v
+   Ptrace attachment & environment setup
+        |
+        v
+   rocprofiler_register_attach(env_buffer) ← Detects previous attachment
+        |
+        v
+   rocprofiler_register_invoke_reattach() ← Calls client reattach callbacks
+        |
+        v
+   Profiling resumed in target process
+        |
+        v
+   [Continued profiling data collection...]
         |
         v
    rocprofiler_register_detach() ← Called via ptrace in target
@@ -241,6 +302,77 @@ Complete Tool Example
        std::cout << "Attachment completed successfully" << std::endl;
        return 0;
    }
+
+Experimental Reattachment API
+=============================
+
+ROCprofiler-SDK now provides experimental support for reattachment, allowing tools to handle dynamic attach/detach cycles more efficiently.
+
+Tool Configuration for Reattachment
+-----------------------------------
+
+Tools that support reattachment should implement the experimental configuration structure:
+
+.. code-block:: cpp
+
+   #include <rocprofiler-sdk/registration.h>
+   
+   // Experimental reattachment callbacks
+   void tool_reattach(void* tool_data) {
+       // Reinitialize contexts and resume profiling
+       // This is called when reattaching to a previously profiled process
+   }
+   
+   void tool_detach(void* tool_data) {  
+       // Suspend profiling operations temporarily
+       // This is called during detachment, but contexts may be preserved
+   }
+   
+   extern "C" rocprofiler_tool_configure_result_experimental_t*
+   rocprofiler_configure_experimental(uint32_t                 version,
+                                      const char*              runtime_version,
+                                      uint32_t                 prio,
+                                      rocprofiler_client_id_t* client_id)
+   {
+       static auto cfg = rocprofiler_tool_configure_result_experimental_t {
+           .size = sizeof(rocprofiler_tool_configure_result_experimental_t),
+           .initialize = &tool_init,
+           .finalize = &tool_fini,
+           .tool_data = nullptr,
+           .tool_reattach = &tool_reattach,  // Experimental reattachment support
+           .tool_detach = &tool_detach       // Experimental detachment support
+       };
+       
+       return &cfg;
+   }
+
+Client Callback Functions
+-------------------------
+
+The registration system automatically provides C wrapper functions:
+
+.. code-block:: cpp
+
+   // These are automatically generated and called by rocprofiler-register
+   extern "C" void rocprofiler_call_client_reattach(void) {
+       // Calls the tool's reattach callback with stored tool_data
+   }
+   
+   extern "C" void rocprofiler_call_client_detach(void) {
+       // Calls the tool's detach callback with stored tool_data  
+   }
+
+Reattachment Environment Variables
+---------------------------------
+
+When using reattachment, set this additional environment variable:
+
+.. code-block:: cpp
+
+   // Indicates that the tool was loaded via attachment (not LD_PRELOAD)
+   setenv("ROCP_REGISTERED_TOOL_ATTACH", "1", 1);
+
+This helps the registration system differentiate between initial attachment and reattachment cycles.
 
 Environment Variable Configuration
 =================================

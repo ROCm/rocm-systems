@@ -38,6 +38,13 @@ rocprofiler_set_api_table(const char* name,
                           uint64_t    lib_instance,
                           void**      tables,
                           uint64_t    num_tables) ROCPROFILER_PUBLIC_API;
+
+// functions for dynamic attach/detach control
+void
+rocprofiler_call_client_reattach() ROCPROFILER_PUBLIC_API;
+
+void
+rocprofiler_call_client_detach() ROCPROFILER_PUBLIC_API;
 }
 
 namespace rocprofiler
@@ -71,5 +78,13 @@ set_init_status(int);
 
 void
 set_fini_status(int);
+
+// call tool_reattach function for all registered clients
+void
+call_client_reattach();
+
+// call tool_detach function for all registered clients
+void
+call_client_detach();
 }  // namespace registration
 }  // namespace rocprofiler

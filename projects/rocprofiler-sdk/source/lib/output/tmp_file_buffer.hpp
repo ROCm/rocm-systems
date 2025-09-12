@@ -85,9 +85,18 @@ struct file_buffer<ring_buffer_t<Tp>>
 
 template <typename Tp>
 file_buffer<Tp>*&
-get_tmp_file_buffer(domain_type type)
+get_tmp_file_buffer(domain_type type, bool recreate = false)
 {
-    static file_buffer<Tp>* val = new file_buffer<Tp>{type};
+    static file_buffer<Tp>* val = nullptr;
+    if(!val)
+    {
+        val = new file_buffer<Tp>{type};
+    }
+    else if(recreate)
+    {
+        delete val;
+        val = new file_buffer<Tp>{type};
+    }
     return val;
 }
 
@@ -104,9 +113,9 @@ offload_buffer(domain_type type)
         return;
     }
 
-    auto                         _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
-    [[maybe_unused]] static auto _success = filebuf->file.open();
-    auto&                        _fs      = filebuf->file.stream;
+    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
+    [[maybe_unused]] auto _success = filebuf->file.open();
+    auto&                 _fs      = filebuf->file.stream;
 
     ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
         << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
@@ -198,6 +207,25 @@ flush_tmp_buffer(domain_type type)
 {
     auto* filebuf = get_tmp_file_buffer<Tp>(type);
     if(filebuf && !filebuf->buffer.is_empty()) offload_buffer<Tp>(type);
+}
+
+template <typename Tp>
+void
+reset_tmp_file_buffer(domain_type type)
+{
+    auto*& static_ptr = get_tmp_file_buffer<Tp>(type);
+
+    if(static_ptr)
+    {
+        auto _lk = std::lock_guard<std::mutex>{static_ptr->file.file_mutex};
+        static_ptr->file.close();
+        static_ptr->file.remove();  // Delete old file
+
+        delete static_ptr;
+        static_ptr = nullptr;
+    }
+
+    static_ptr = new file_buffer<Tp>{type};
 }
 
 template <typename Tp>

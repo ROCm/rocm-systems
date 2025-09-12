@@ -29,5 +29,5 @@
 void
 rocprofiler_detach()
 {
-    rocprofiler::registration::finalize();
+    rocprofiler::registration::call_client_detach();
 }
