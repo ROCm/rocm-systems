@@ -1188,7 +1188,7 @@ class AMDSMIHelpers():
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
             if not getattr(self, "_cper_warning_printed", False):
-               print(f"WARNING:No CPER files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
+               print(f"WARNING: No CPER files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
                self._cper_warning_printed = True
 
             self._print_header(folder)
@@ -1410,6 +1410,43 @@ class AMDSMIHelpers():
             else:
                 raise ValueError("Unexpected Error getting afids from CPER file") from e
 
+    def get_partition_id(self, device_handle, gpu_id = None) -> int:
+        partition_id = -1
+        try:
+            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(device_handle)
+            partition_id = kfd_info['current_partition_id']
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info())
+        return partition_id
+
+    def get_primary_partition_gpu_id(self, device_handle) -> Union[int, None]:
+        try:
+            bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
+            if bdf is None:
+                logging.debug("Failed to get device BDF: BDF is None")
+                return None
+            # Construct primary partition BDF (base + ".0" for function 0)
+            primary_bdf = bdf[:10] + ".0"
+            try:
+                primary_device_handle = amdsmi_interface.amdsmi_get_processor_handle_from_bdf(primary_bdf)
+                partition_id = self.get_partition_id(primary_device_handle)
+                if partition_id == 0:
+                    return self.get_gpu_id_from_device_handle(primary_device_handle)
+                return None
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get primary partition device handle with BDF %s: %s", primary_bdf, e.get_error_info())
+                return None
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get partition device BDF: %s", e.get_error_info())
+            return None
+
+    def is_primary_partition(self, device_handle, gpu_id = None) -> bool:
+        partition_id = self.get_partition_id(device_handle, gpu_id)
+        if partition_id != 0:
+            logging.debug(f"Skipping gpu {gpu_id} on non zero partition {partition_id}")
+            return False
+        return True
+
     def ras_cper(self, args, device_handle, logger, gpu_idx):
         # Parse severity mask dynamically from the --severity option.
         severity_mask = 0
@@ -1437,15 +1474,8 @@ class AMDSMIHelpers():
             print("Press CTRL + C to stop.")
             self._cper_follow_prompted = True
 
-        partition_id = -1
-        try:
-            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(device_handle)
-            partition_id = kfd_info['current_partition_id']
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info())
-
-        if partition_id != 0:
-            logging.debug(f"Skipping gpu {gpu_id} on non zero partition {partition_id}")
+        primary_partition = self.is_primary_partition(device_handle, gpu_id)
+        if not primary_partition:
             return
 
         if args.folder and not getattr(self, "_cper_folder_prompted", False):
