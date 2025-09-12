@@ -221,12 +221,12 @@ struct client_library
     client_library& operator=(const client_library&) = delete;
     client_library& operator=(client_library&&) noexcept = delete;
 
-    std::string                          name               = {};
-    void*                                dlhandle           = nullptr;
-    decltype(::rocprofiler_configure)*   configure_func     = nullptr;
-    rocprofiler_tool_configure_result_t* configure_result   = nullptr;
-    rocprofiler_client_id_t              internal_client_id = {};
-    rocprofiler_client_id_t              mutable_client_id  = {};
+    std::string                                       name               = {};
+    void*                                             dlhandle           = nullptr;
+    decltype(::rocprofiler_configure)*                configure_func     = nullptr;
+    rocprofiler_tool_configure_result_experimental_t* configure_result   = nullptr;
+    rocprofiler_client_id_t                           internal_client_id = {};
+    rocprofiler_client_id_t                           mutable_client_id  = {};
 };
 
 using client_library_vec_t = std::vector<std::optional<client_library>>;
@@ -520,7 +520,28 @@ invoke_client_configures()
 
         if(_result)
         {
-            itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
+            // Create the experimental struct and copy fields based on the size
+            itr->configure_result = new rocprofiler_tool_configure_result_experimental_t{};
+
+            // Check if the returned struct is the experimental version
+            if(_result->size == sizeof(rocprofiler_tool_configure_result_experimental_t))
+            {
+                // It's the experimental struct, copy all fields
+                auto* exp_result =
+                    reinterpret_cast<rocprofiler_tool_configure_result_experimental_t*>(_result);
+                *itr->configure_result = *exp_result;
+            }
+            else
+            {
+                // It's the original struct, copy only the common fields
+                itr->configure_result->size =
+                    sizeof(rocprofiler_tool_configure_result_experimental_t);
+                itr->configure_result->initialize    = _result->initialize;
+                itr->configure_result->finalize      = _result->finalize;
+                itr->configure_result->tool_data     = _result->tool_data;
+                itr->configure_result->tool_reattach = nullptr;
+                itr->configure_result->tool_detach   = nullptr;
+            }
         }
         else
         {
@@ -778,6 +799,48 @@ finalize()
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
+}
+
+void
+call_client_reattach()
+{
+    ROCP_INFO << "Calling tool_reattach for all registered clients";
+
+    if(!get_clients()) return;
+
+    for(auto& client : *get_clients())
+    {
+        if(client->configure_result && client->configure_result->tool_reattach)
+        {
+            ROCP_TRACE << "Calling tool_reattach for client: " << client->name;
+            client->configure_result->tool_reattach(client->configure_result->tool_data);
+        }
+        else
+        {
+            ROCP_TRACE << "Client " << client->name << " does not have tool_reattach function";
+        }
+    }
+}
+
+void
+call_client_detach()
+{
+    ROCP_INFO << "Calling tool_detach for all registered clients";
+
+    if(!get_clients()) return;
+
+    for(auto& client : *get_clients())
+    {
+        if(client->configure_result && client->configure_result->tool_detach)
+        {
+            ROCP_TRACE << "Calling tool_detach for client: " << client->name;
+            client->configure_result->tool_detach(client->configure_result->tool_data);
+        }
+        else
+        {
+            ROCP_TRACE << "Client " << client->name << " does not have tool_detach function";
+        }
+    }
 }
 }  // namespace registration
 }  // namespace rocprofiler
@@ -1106,5 +1169,17 @@ rocprofiler_set_api_table(const char* name,
     (void) num_tables;
 
     return 0;
+}
+
+void
+rocprofiler_call_client_reattach()
+{
+    rocprofiler::registration::call_client_reattach();
+}
+
+void
+rocprofiler_call_client_detach()
+{
+    rocprofiler::registration::call_client_detach();
 }
 }
