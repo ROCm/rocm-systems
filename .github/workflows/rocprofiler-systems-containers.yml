@@ -37,6 +37,7 @@ jobs:
           sparse-checkout: projects/rocprofiler-systems/docker
 
       - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_ci_base
         run: |
           MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
@@ -115,6 +116,7 @@ jobs:
           sparse-checkout: projects/rocprofiler-systems/docker
 
       - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_ci_gfx
         run: |
           MATRIX_CONTENT=$(cat containers-ci-gfx.yml | yq '.matrix' -I=0 -o=json)
@@ -216,9 +218,9 @@ jobs:
           sparse-checkout: projects/rocprofiler-systems
 
       - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_release
         run: |
-          pushd projects/rocprofiler-systems/docker
           MATRIX_CONTENT=$(cat containers.yml | yq '.matrix' -I=0 -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
           
