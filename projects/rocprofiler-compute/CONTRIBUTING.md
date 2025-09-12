@@ -143,7 +143,6 @@ path = "{}/results/{}.csv".format(base_dir, filename)
 
 -----
 
-
 ### Path Handling Guidelines
 
 This project enforces modern Python path handling practices using Ruff's `flake8-use-pathlib` rules (PTH). All new code in `src/` should use `pathlib.Path` methods instead of legacy `os.path` functions for directory operations.
