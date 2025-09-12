@@ -1012,13 +1012,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   uint64_t read = hsa_queue_load_read_index_relaxed(gpu_queue_);
   fence_dirty_ = true;
 
-  if (addSystemScope_) {
-    header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
-                HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
-               HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    addSystemScope_ = false;
+  if (addSystemScope_ & SystemScopeFlags::ScopeAcquire) {
+    header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+    header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
   }
+  if (addSystemScope_ & SystemScopeFlags::ScopeRelease) {
+    header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  }
+  addSystemScope_ = SystemScopeFlags::ScopeNone;
 
   auto expected_fence_state = extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                                              HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
@@ -3563,8 +3565,16 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       aqlHeaderWithOrder &= kAqlHeaderMask;
     }
     if (vcmd->getCommandEntryScope() == amd::Device::kCacheStateSystem) {
-      addSystemScope_ = true;
+      addSystemScope_ = SystemScopeFlags::ScopeAcquireRelease;
     }
+  }
+
+  // System scope acquire on gfx12 is to ensure that the kernel sees the updates
+  // when hostMalloc'ed memory changes on the host.
+  auto& isa = dev().isa();
+  if (isa.versionMajor() == 12 && isa.versionMinor() == 0 &&
+      (isa.versionStepping() == 0 || isa.versionStepping() == 1)) {
+    addSystemScope(SystemScopeFlags::ScopeAcquire);
   }
 
   // Copy scheduler's AQL packet for possible relaunch from the scheduler itself

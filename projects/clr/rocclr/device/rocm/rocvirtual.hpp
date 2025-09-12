@@ -440,8 +440,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   void hasPendingDispatch() { hasPendingDispatch_ = true; }
   bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
-  void addSystemScope() {
-    addSystemScope_ = true;
+  void addSystemScope(SystemScopeFlags scope = VirtualGPU::SystemScopeFlags::ScopeAcquireRelease) {
+    addSystemScope_ = static_cast<SystemScopeFlags>(addSystemScope_ | scope);
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
@@ -565,7 +565,7 @@ class VirtualGPU : public device::VirtualDevice {
       uint32_t hasPendingDispatch_ : 1;     //!< A kernel dispatch is outstanding
       uint32_t profiling_ : 1;              //!< Profiling is enabled
       uint32_t cooperative_ : 1;            //!< Cooperative launch is enabled
-      uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
+      SystemScopeFlags addSystemScope_ : 2; //!< Insert a system scope to the next aql
       uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
       uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
     };
