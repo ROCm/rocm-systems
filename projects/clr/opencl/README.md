@@ -46,3 +46,5 @@ Note: For release build, add "-DCMAKE_BUILD_TYPE=Release" to the cmake command l
 
 ---
 OpenCL™ is registered Trademark of Apple
+
+Force ocl test
