@@ -647,6 +647,11 @@ write_rocpd(
                          itr.demangled_kernel_name,
                          itr.truncated_kernel_name);
 
+    for(const auto& itr : tool_metadata.kernel_rename_map.get())
+    {
+        add_string_entry(_metadata, itr.first);
+    }
+
     for(const auto& itr : tool_metadata.get_code_objects())
         if(itr.uri != nullptr) add_string_entry(_metadata, itr.uri);
 
@@ -1020,10 +1025,12 @@ write_rocpd(
             }
 
             dispatch_evt_ids.at(dispatch_id) = evt_id;
-
+            // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
+            // to use kernel rename option after data has already been collected, so the kernel
+            // rename data needs to be stored in generated db.
             auto region_name =
                 (corr_id.external.value > 0 && (enable_duplicate_check || kernel_id > 0))
-                    ? tool_metadata.get_kernel_name(kernel_id, corr_id.external.value)
+                    ? tool_metadata.get_kernel_name(kernel_id, true, corr_id.external.value)
                     : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
