@@ -1,30 +1,11 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-# -------------------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------- #
 #
 # openmp tests
 #
-# -------------------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------- #
 
 if(ROCmVersion_DIR)
     set(_rocm_root "${ROCmVersion_DIR}")
@@ -52,8 +33,10 @@ endif()
 
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
     set(_OMPT_PASS_REGEX "\\|_omp_")
+    set(_OMPVV_TARGET_PASS_REGEX "_+omp_offloading")
 else()
     set(_OMPT_PASS_REGEX "")
+    set(_OMPVV_OFFLOAD_PASS_REGEX "")
 endif()
 
 rocprofiler_systems_add_test(
@@ -65,7 +48,7 @@ rocprofiler_systems_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_COUT_OUTPUT=ON"
+      "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     RUNTIME_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
@@ -81,7 +64,7 @@ rocprofiler_systems_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+      "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
 )
@@ -93,7 +76,7 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "openmp;openmp-target"
     ENVIRONMENT
-        "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
+      "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -102,20 +85,61 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "openmp;openmp-target"
     ENVIRONMENT "${_rocm_ld_env}"
-    ARGS --label-substrings
-         Z4vmulIiEvPT_S1_S1_i_l51.kd
-         Z4vmulIfEvPT_S1_S1_i_l51.kd
-         Z4vmulIdEvPT_S1_S1_i_l51.kd
-         -c
-         4
-         4
-         4
-         -d
-         0
-         0
-         0
-         -p
+    ARGS
+      --label-substrings
+      Z4vmulIiEvPT_S1_S1_i_l51.kd
+      Z4vmulIfEvPT_S1_S1_i_l51.kd
+      Z4vmulIdEvPT_S1_S1_i_l51.kd
+      -c 4 4 4
+      -d 0 0 0
+      -p
 )
+
+# OpenMP tests generated using OMPVV binaries
+if(ROCPROFSYS_OMPVV_HOST_TESTS)
+    foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
+        rocprofiler_systems_add_test(
+            SKIP_RUNTIME
+            NAME ${HOST_TEST_NAME}
+            TARGET ${HOST_TEST_NAME}
+            LABELS "openmp;ompvv"
+            REWRITE_ARGS
+              -e -v 2 --instrument-loops
+            RUNTIME_ARGS
+              -e -v 1 --label return args -E ^GOMP
+            REWRITE_TIMEOUT 180
+            RUNTIME_TIMEOUT 360
+            ENVIRONMENT
+              "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+            REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
+            REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
+        )
+    endforeach()
+
+    set(_ompvv_offload_environment
+        "${_ompt_environment}"
+        "${_rocm_ld_env}"
+        "ROCPROFSYS_USE_SAMPLING=ON"
+        "ROCPROFSYS_SAMPLING_FREQ=50"
+        "ROCPROFSYS_COUT_OUTPUT=ON"
+        "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
+    )
+
+    foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
+        rocprofiler_systems_add_test(
+            SKIP_RUNTIME
+            NAME ${OFFLOAD_TEST_NAME}
+            TARGET ${OFFLOAD_TEST_NAME}
+            GPU ON
+            LABELS "openmp;ompvv;openmp-target"
+            REWRITE_ARGS -e -v 2
+            ENVIRONMENT
+              "${_ompvv_offload_environment}"
+            REWRITE_RUN_PASS_REGEX
+              "${_OMPVV_OFFLOAD_PASS_REGEX}"
+        )
+    endforeach()
+endif()
 
 set(_ompt_sampling_environ
     "${_ompt_environment}"

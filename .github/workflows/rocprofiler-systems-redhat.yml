@@ -128,7 +128,7 @@ jobs:
           -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
           -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
           -LE "transpose|rccl|videodecode|jpegdecode|network"
