@@ -122,10 +122,11 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
     SECTION("hipExtHostRegisterUncached") {
       HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
     }
-    SECTION("hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached") {
+    SECTION("hipHostRgstrPortable|hipHostRgstrMapped|hipExtHostRgstrUncached|hipHostRgstrIoMemory") {
       HIP_CHECK(hipHostRegister(
           A, sizeBytes,
-          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached));
+          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached | 
+          hipHostRegisterIoMemory));
     }
   }
 #endif
@@ -172,7 +173,8 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
  *    - HIP_VERSION >= 5.6
  */
 TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, float, double) {
-  auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
+  auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
+                        hipHostRegisterIoMemory);
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));

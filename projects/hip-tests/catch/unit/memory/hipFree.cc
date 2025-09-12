@@ -173,7 +173,8 @@ TEST_CASE("Unit_hipFreeNegativeHost") {
   }
   SECTION("hipHostRegister") {
     char* hostPtr = new char;
-    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable,
+                         hipHostRegisterMapped, hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);
     delete hostPtr;
