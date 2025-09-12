@@ -1060,8 +1060,8 @@ def process_rocprofv3_output(
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
-                                f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
-                            )
+        f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
+    )
     existing_marker_files_csv = [f for f in marker_api_trace_csvs if Path(f).is_file()]
 
     # concate and output marker api trace info
