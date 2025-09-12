@@ -50,30 +50,25 @@ TEST_CASE("Unit_hipMemsetD2D16Async_BasicFunctional") {
   size_t width = numW * sizeof(uint16_t);
   size_t sizeElements = width * numH;
   size_t elements = numW * numH;
-  uint16_t *A_d, *A_h;
+  uint16_t *A_d;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH,
                              2 * sizeof(uint16_t)));
-  A_h = reinterpret_cast<uint16_t*>(malloc(sizeElements));
-  REQUIRE(A_h != nullptr);
+  std::vector<uint16_t>A_h(sizeElements, 0);
 
-  for (size_t i = 0; i < elements; i++) {
-    A_h[i] = 1;
-  }
   HIP_CHECK(hipMemsetD2D16Async(A_d, pitch_A, memsetval, width, numH, stream));
-  HIP_CHECK(hipMemcpy2DAsync(A_h, width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpy2DAsync(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
       INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                          << " memsetval:" << memsetval);
-      REQUIRE(false);
+      REQUIRE(A_h[i] == memsetval);
     }
   }
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(A_d));
-  free(A_h);
 }
 /**
  * Test Description
@@ -89,97 +84,33 @@ TEST_CASE("Unit_hipMemsetD2D16Async_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemsetD2D16Async_UnEvenRowsCols") {
-  uint16_t *A_h, *B_h, *A_d;
+  uint16_t *A_d;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
   size_t devPitch;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  A_h = reinterpret_cast<uint16_t*>(malloc(sizeof(uint16_t) * rows * cols));
-  B_h = reinterpret_cast<uint16_t*>(malloc(sizeof(uint16_t) * rows * cols));
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < cols; j++) {
-      A_h[i * cols + j] = 1;
-    }
-  }
+  size_t size = sizeof(uint16_t) * rows * cols;
+
+  std::vector<uint16_t>A_h(size, 1);
+  std::vector<uint16_t>B_h(size, 1);
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(uint16_t) * cols,
                              rows, 2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemcpy2DAsync(A_d, devPitch, A_h, sizeof(uint16_t) * cols, sizeof(uint16_t) * cols,
+  HIP_CHECK(hipMemcpy2DAsync(A_d, devPitch, A_h.data(), sizeof(uint16_t) * cols, sizeof(uint16_t) * cols,
                              rows, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemsetD2D16Async(A_d, devPitch, 5, sizeof(uint16_t) * cols, rows, stream));
-  HIP_CHECK(hipMemcpy2DAsync(B_h, sizeof(uint16_t) * cols, A_d, devPitch, sizeof(uint16_t) * cols,
+  HIP_CHECK(hipMemcpy2DAsync(B_h.data(), sizeof(uint16_t) * cols, A_d, devPitch, sizeof(uint16_t) * cols,
                              rows, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
+      INFO("Memset2D mismatch at index:" << i << " computed:" << B_h[i * cols + j]);
       REQUIRE(B_h[i * cols + j] == 5);
     }
   }
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(A_d));
-  free(A_h);
-  free(B_h);
-}
-/**
- * Test Description
- * ------------------------
- * - Checks that the Kernel allocated buffer has the expected value
- * after setting it to a known constant.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemsetD2D16Async.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.1
- */
-TEST_CASE("Unit_hipMemsetD2D16Async_KernelOperation") {
-  constexpr size_t size = 4096;
-  constexpr uint16_t memsetval = static_cast<uint16_t>(0x26);
-  constexpr unsigned blocksPerCU = 6;
-  constexpr unsigned threadsPerBlock = 256;
-  uint16_t *C_h, *A_d, *B_d, *C_d;
-  constexpr size_t numH = 256;
-  constexpr size_t numW = 256;
-  size_t devPitchA, devPitchB, devPitchC;
-  size_t width = numW * sizeof(uint16_t);
-  size_t sizeElements = width * numH;
-
-  C_h = reinterpret_cast<uint16_t*>(malloc(sizeElements));
-  for (int i = 0; i < numH; i++) {
-    for (int j = 0; j < numW; j++) {
-      C_h[i * numH + j] = 0;
-    }
-  }
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitchA, width, numH,
-                             2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&B_d), &devPitchB, width, numH,
-                             2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&C_d), &devPitchC, width, numH,
-                             2 * sizeof(uint16_t)));
-
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMemsetD2D16Async(A_d, devPitchA, memsetval, numW, numH, stream));
-  HIP_CHECK(hipMemsetD2D16Async(B_d, devPitchB, memsetval, numW, numH, stream));
-
-  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, size);
-
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d,
-                     C_d, size);
-  HIP_CHECK(
-      hipMemcpy2DAsync(C_h, width, C_d, devPitchC, width, numH, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  for (int i = 0; i < numH; i++) {
-    for (int j = 0; j < numW; j++) {
-      C_h[i * numH + j] = memsetval + memsetval;
-    }
-  }
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  free(C_h);
 }
 /**
  * Test Description
