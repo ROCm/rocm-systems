@@ -1832,7 +1832,7 @@ rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
 bool rdc_is_partition_string(const char* s);
 
 /**
- * @brief Parse partition id into physical gpu and partition
+ * @brief Parse partition id into socket and partition
  *
  * @param[in] s - singular partition string
  * @param[out] socket - socket id
