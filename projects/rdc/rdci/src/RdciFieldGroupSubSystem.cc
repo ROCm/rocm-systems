@@ -167,6 +167,12 @@ void RdciFieldGroupSubSystem::process() {
         } else {
           field_ids[i] = static_cast<rdc_field_t>(std::stoi(fields[i]));
         }
+
+        // Validate field compatibility with available devices
+        if (!is_field_valid(field_ids[i])) {
+          throw RdcException(RDC_ST_BAD_PARAMETER,
+                             "Field " + std::to_string(field_ids[i]) + " is not supported");
+        }
       }
       rdc_field_grp_t group_id;
       result = rdc_group_field_create(rdc_handle_, fields.size(), &field_ids[0],
