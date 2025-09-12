@@ -90,7 +90,7 @@ jobs:
           echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
 
       - name: Build CI Container (Does not Push on PR)
-        uses: docker/build-push-action@6
+        uses: docker/build-push-action@v6
         with:
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars.outputs.docker_file }}
           platforms: linux/amd64
