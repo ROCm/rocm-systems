@@ -766,13 +766,16 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus) {
-  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
-
   std::string symbolString = symbol;
-  if (symbol == nullptr || symbolString == "" || pfn == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+  if(symbol == nullptr || symbolString == "" || pfn == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM
+      && flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+    return hipErrorInvalidValue;
   }
 
   if (symbolString == "hipGetDeviceProperties") {
@@ -787,21 +790,44 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
 
   void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
   if (handle == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
+  }
+
+  if (flags == HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+      symbolString += "_spt";
   }
 
   *pfn = amd::Os::getSymbol(handle, symbolString.c_str());
-  if (!(*pfn)) {
-    if (symbolStatus != nullptr) {
-      *symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+  if (*pfn == nullptr) {
+    if (flags == HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+      *pfn = amd::Os::getSymbol(handle, symbol);
     }
-    HIP_RETURN(hipErrorInvalidValue);
+    if (*pfn == nullptr) {
+      if (symbolStatus != nullptr) {
+        *symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+      }
+      return hipErrorInvalidValue;
+    }
   }
 
   if (symbolStatus != nullptr) {
     *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
   }
-  HIP_RETURN(hipSuccess);
+
+  return hipSuccess;
+}
+
+hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                             hipDriverProcAddressQueryResult* symbolStatus) {
+  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
+  HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
+}
+
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                             hipDriverProcAddressQueryResult* symbolStatus) {
+  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
+  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : flags;
+  HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 
 }  // namespace hip

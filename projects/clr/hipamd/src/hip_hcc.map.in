@@ -630,3 +630,10 @@ global:
 local:
     *;
 } hip_6.5;
+
+hip_7.2 {
+global:
+    hipGetProcAddress_spt;
+local:
+    *;
+} hip_7.1;

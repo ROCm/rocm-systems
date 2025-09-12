@@ -789,6 +789,8 @@ hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* 
 hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef);
 hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus = NULL);
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                                 hipDriverProcAddressQueryResult* symbolStatus = NULL);
 hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
@@ -1358,6 +1360,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipTexRefGetBorderColor_fn = hip::hipTexRefGetBorderColor;
   ptrDispatchTable->hipTexRefGetArray_fn = hip::hipTexRefGetArray;
   ptrDispatchTable->hipGetProcAddress_fn = hip::hipGetProcAddress;
+  ptrDispatchTable->hipGetProcAddress_spt_fn = hip::hipGetProcAddress_spt;
   ptrDispatchTable->hipStreamBeginCaptureToGraph_fn = hip::hipStreamBeginCaptureToGraph;
   ptrDispatchTable->hipGetFuncBySymbol_fn = hip::hipGetFuncBySymbol;
   ptrDispatchTable->hipSetValidDevices_fn = hip::hipSetValidDevices;
@@ -2062,15 +2065,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGetDriverEntryPoint_spt_fn, 492);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchAsync_v2_fn, 493);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemAdvise_v2_fn, 494);
 HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetId_fn, 495);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+HIP_ENFORCE_ABI(HipDispatchTable, hipGetProcAddress_spt_fn, 496);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 496)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 497)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 14,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 15,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
