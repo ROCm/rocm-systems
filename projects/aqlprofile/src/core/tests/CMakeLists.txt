@@ -30,7 +30,7 @@ target_include_directories(gfx9-memory-manager-test
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIB_DIR}
         ${LIB_DIR}/core/include
-        $<BUILD_INTERFACE:${AQLPROFILE_BUILD_ROOT}/src/core/include>)
+        $<TARGET_PROPERTY:aqlprofile::aqlprofile-lib,INCLUDE_DIRECTORIES>)
 target_link_libraries(
     gfx9-memory-manager-test
     PRIVATE
@@ -60,8 +60,7 @@ target_include_directories(aqlprofile-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIB_DIR}
-        ${LIB_DIR}/core/include
-        $<BUILD_INTERFACE:${AQLPROFILE_BUILD_ROOT}/src/core/include>)
+        ${LIB_DIR}/core/include)
 target_link_libraries(
     aqlprofile-test
     PRIVATE
@@ -95,7 +94,7 @@ target_include_directories(command-buffer-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIB_DIR}
         ${LIB_DIR}/core/include
-        $<BUILD_INTERFACE:${AQLPROFILE_BUILD_ROOT}/src/core/include>)
+        $<TARGET_PROPERTY:aqlprofile::aqlprofile-lib,INCLUDE_DIRECTORIES>)
 target_link_libraries(
     command-buffer-test
     PRIVATE
@@ -125,7 +124,7 @@ target_include_directories(counters-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIB_DIR}
         ${LIB_DIR}/core/include
-        $<BUILD_INTERFACE:${AQLPROFILE_BUILD_ROOT}/src/core/include>)
+        )
 target_link_libraries(
     counters-test
     PRIVATE
@@ -156,6 +155,7 @@ target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} 
 target_link_libraries(
     pm4-factory-test
     PRIVATE
+            aqlprofile::aqlprofile-lib
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -192,7 +192,7 @@ gtest_add_tests(
     SOURCES ${AQLPROFILE_LOGGER_SOURCES}
     TEST_LIST logger-test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-    
+
 set_tests_properties(
     ${logger-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
@@ -224,6 +224,7 @@ target_include_directories(aql-profile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(
     aql-profile-v2-test
     PRIVATE
+            aqlprofile::aqlprofile-lib
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -235,8 +236,7 @@ gtest_add_tests(
     SOURCES ${AQLPROFILE_V2_SOURCES}
     TEST_LIST aql-profile-v2-test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-    
+
 set_tests_properties(
     ${aql-profile-v2-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
-
