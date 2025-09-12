@@ -23,16 +23,16 @@ THE SOFTWARE.
 __global__ static void DotFunctions(bool* result) {
 // Dot Functions
 #if HT_AMD
-  short2 sa{1}, sb{1};
+  short2 sa{1, 0}, sb{1, 0};
   result[0] = amd_mixed_dot(sa, sb, 1, result[0]) && result[0];
 
-  ushort2 usa{1}, usb{1};
+  ushort2 usa{1, 0}, usb{1, 0};
   result[0] = amd_mixed_dot(usa, usb, (uint)1, result[0]) && result[0];
 
-  char4 ca{1}, cb{1};
+  char4 ca{1, 0, 0, 0}, cb{1, 0, 0, 0};
   result[0] = amd_mixed_dot(ca, cb, 1, result[0]) && result[0];
 
-  uchar4 uca{1}, ucb{1};
+  uchar4 uca{1, 0, 0, 0}, ucb{1, 0, 0, 0};
   result[0] = amd_mixed_dot(uca, ucb, (uint)1, result[0]) && result[0];
 
   int ia{1}, ib{1};

@@ -88,8 +88,8 @@ template <typename T> bool dataTypesRunChar1() {
 
   // initialize the input data
   for (i = 0; i < NUM; i++) {
-    hostB[i] = (T)i;
-    hostC[i] = (T)i;
+    hostB[i] = make_char1(i);
+    hostC[i] = make_char1(i);
   }
 
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
@@ -149,8 +149,8 @@ template <typename T> bool dataTypesRunChar2() {
 
   // initialize the input data
   for (i = 0; i < NUM; i++) {
-    hostB[i] = (T)i;
-    hostC[i] = (T)i;
+    hostB[i] = make_char2(i, i);
+    hostC[i] = make_char2(i, i);
   }
 
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
@@ -210,8 +210,8 @@ template <typename T> bool dataTypesRunChar3() {
 
   // initialize the input data
   for (i = 0; i < NUM; i++) {
-    hostB[i] = (T)i;
-    hostC[i] = (T)i;
+    hostB[i] = make_char3(i, i, i);
+    hostC[i] = make_char3(i, i, i);
   }
 
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
@@ -270,8 +270,8 @@ template <typename T> bool dataTypesRunChar4() {
 
   // initialize the input data
   for (i = 0; i < NUM; i++) {
-    hostB[i] = (T)i;
-    hostC[i] = (T)i;
+    hostB[i] = make_char4(i, i, i, i);
+    hostC[i] = make_char4(i, i, i, i);
   }
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)));

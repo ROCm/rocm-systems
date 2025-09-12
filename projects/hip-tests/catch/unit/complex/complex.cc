@@ -403,7 +403,12 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Host_Sanity_Positive", "", hipFloat
  */
 TEMPLATE_TEST_CASE("Unit_Device_Complex_Constructor_Host", "", hipFloatComplex, hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0.25);
-  TestType input{input_r};
+
+// Turn off clang diagnostics for missing field, as this is what we are testing
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+ TestType input{input_r};
+#pragma clang diagnostic pop
 
   CastType_t<TestType> result = CastComplexType<CastType_t<TestType>>(input);
 

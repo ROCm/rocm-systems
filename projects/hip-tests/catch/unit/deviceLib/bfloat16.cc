@@ -907,7 +907,7 @@ TEST_CASE("Unit_bf162_shfl") {
   auto warp_size = getWarpSize();
   std::vector<float2> in;
   for (size_t i = 1; i <= warp_size; i++) {
-    in.push_back(float2{i, i * 2});
+    in.push_back(float2{(float)i, (float)i * 2});
   }
 
   float2 *d_in, *d_out;
@@ -924,7 +924,7 @@ TEST_CASE("Unit_bf162_shfl") {
     auto res = (warp_size * (warp_size + 1) / 2);
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[0].x << " y: " << out[0].y);
-    REQUIRE(out[0] == float2{res, res * 2});
+    REQUIRE(out[0] == float2{(float)res, (float)res * 2});
   }
 
   SECTION("shfl_up") {
@@ -933,7 +933,7 @@ TEST_CASE("Unit_bf162_shfl") {
     auto res = (warp_size * (warp_size + 1) / 2);
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[warp_size - 1].x << " y: " << out[warp_size - 1].y);
-    REQUIRE(out[warp_size - 1] == float2{res, res * 2});
+    REQUIRE(out[warp_size - 1] == float2{(float)res, (float)res * 2});
   }
 
   SECTION("shfl_xor") {
@@ -942,7 +942,7 @@ TEST_CASE("Unit_bf162_shfl") {
     auto res = (warp_size * (warp_size + 1) / 2);
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[0].x << " y: " << out[0].y);
-    REQUIRE(out[0] == float2{res, res * 2});
+    REQUIRE(out[0] == float2{(float)res, (float)res * 2});
   }
 
   SECTION("shfl_sync") {
@@ -951,7 +951,7 @@ TEST_CASE("Unit_bf162_shfl") {
     auto res = warp_size + 1;
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[warp_size - 1].x << " y: " << out[warp_size - 1].y);
-    REQUIRE(out[0] == float2{res, res * 2});
+    REQUIRE(out[0] == float2{(float)res, (float)res * 2});
   }
 
   HIP_CHECK(hipFree(d_in));

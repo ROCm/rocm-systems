@@ -1390,10 +1390,10 @@ struct __hip_fp8x2_e4m3_fnuz {
 #if HIP_FP8_CVT_FAST_PATH
       return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
-    return float2(internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
+    return float2{internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                       __wm, __we),
                   internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x >> 8),
-                                                      __wm, __we));
+                                                      __wm, __we)};
 #endif
 }
 }
@@ -1498,16 +1498,16 @@ struct __hip_fp8x4_e4m3_fnuz {
   float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
   float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
-    float2 high = float2(internal::cast_from_f8<float, true>(
+    float2 high = float2{internal::cast_from_f8<float, true>(
                              static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we),
                          internal::cast_from_f8<float, true>(
-                             static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8), __wm, __we));
-    float2 low = float2(internal::cast_from_f8<float, true>(
+                             static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8), __wm, __we)};
+    float2 low = float2{internal::cast_from_f8<float, true>(
                             static_cast<__hip_fp8_storage_t>((fp8x2_low << 8) >> 8), __wm, __we),
                         internal::cast_from_f8<float, true>(
-                            static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we));
+                            static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we)};
 #endif
-  return float4(low.x, low.y, high.x, high.y);
+  return float4{low.x, low.y, high.x, high.y};
 }
 }
 ;
@@ -1951,10 +1951,10 @@ struct __hip_fp8x2_e5m2_fnuz {
 #if HIP_FP8_CVT_FAST_PATH
       return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
-    return float2(internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
+    return float2{internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                       __wm, __we),
                   internal::cast_from_f8<float, true>(static_cast<__hip_fp8_storage_t>(__x >> 8),
-                                                      __wm, __we));
+                                                      __wm, __we)};
 #endif
 }
 }
@@ -2059,16 +2059,16 @@ struct __hip_fp8x4_e5m2_fnuz {
   float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
   float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
-    float2 high = float2(internal::cast_from_f8<float, true>(
+    float2 high = float2{internal::cast_from_f8<float, true>(
                              static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we),
                          internal::cast_from_f8<float, true>(
-                             static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8), __wm, __we));
-    float2 low = float2(internal::cast_from_f8<float, true>(
+                             static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8), __wm, __we)};
+    float2 low = float2{internal::cast_from_f8<float, true>(
                             static_cast<__hip_fp8_storage_t>((fp8x2_low << 8) >> 8), __wm, __we),
                         internal::cast_from_f8<float, true>(
-                            static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we));
+                            static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we)};
 #endif
-  return float4(low.x, low.y, high.x, high.y);
+  return float4{low.x, low.y, high.x, high.y};
 }
 }
 ;
@@ -2513,10 +2513,10 @@ struct __hip_fp8x2_e4m3 {
 #if HIP_FP8_CVT_FAST_PATH
       return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
-    return float2(internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
+    return float2{internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                        __wm, __we),
                   internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x >> 8),
-                                                       __wm, __we));
+                                                       __wm, __we)};
 #endif
 }
 }
@@ -2622,16 +2622,16 @@ struct __hip_fp8x4_e4m3 {
   float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
   float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
-    float2 high = float2(internal::cast_from_f8<float, false>(
+    float2 high = float2{internal::cast_from_f8<float, false>(
                              static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we),
                          internal::cast_from_f8<float, false>(
-                             static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8), __wm, __we));
-    float2 low = float2(internal::cast_from_f8<float, false>(
+                             static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8), __wm, __we)};
+    float2 low = float2{internal::cast_from_f8<float, false>(
                             static_cast<__hip_fp8_storage_t>((fp8x2_low << 8) >> 8), __wm, __we),
                         internal::cast_from_f8<float, false>(
-                            static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we));
+                            static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm, __we)};
 #endif
-  return float4(low.x, low.y, high.x, high.y);
+  return float4{low.x, low.y, high.x, high.y};
 }
 }
 ;
@@ -3078,11 +3078,11 @@ struct __hip_fp8x2_e5m2 {
 #if HIP_FP8_CVT_FAST_PATH
       return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
-    return float2(
+    return float2{
         internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF), __wm,
                                              __we, __default_saturation == __HIP_SATFINITE),
         internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x >> 8), __wm, __we,
-                                             __default_saturation == __HIP_SATFINITE));
+                                             __default_saturation == __HIP_SATFINITE)};
 #endif
 }
 }
@@ -3187,20 +3187,20 @@ struct __hip_fp8x4_e5m2 {
   float2 high = internal::cast_to_f32x2_from_f8x2(fp8x2_high, __default_interpret);
   float2 low = internal::cast_to_f32x2_from_f8x2(fp8x2_low, __default_interpret);
 #else
-    float2 high = float2(
+    float2 high = float2{
         internal::cast_from_f8<float, false>(
             static_cast<__hip_fp8_storage_t>((fp8x2_high << 8) >> 8), __wm, __we,
             __default_saturation == __HIP_SATFINITE),
         internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(fp8x2_high >> 8),
-                                             __wm, __we, __default_saturation == __HIP_SATFINITE));
-    float2 low = float2(
+                                             __wm, __we, __default_saturation == __HIP_SATFINITE)};
+    float2 low = float2{
         internal::cast_from_f8<float, false>(
             static_cast<__hip_fp8_storage_t>((fp8x2_low << 8) >> 8), __wm, __we,
             __default_saturation == __HIP_SATFINITE),
         internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(fp8x2_low >> 8), __wm,
-                                             __we, __default_saturation == __HIP_SATFINITE));
+                                             __we, __default_saturation == __HIP_SATFINITE)};
 #endif
-  return float4(low.x, low.y, high.x, high.y);
+  return float4{low.x, low.y, high.x, high.y};
 }
 }
 ;

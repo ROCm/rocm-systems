@@ -387,7 +387,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
 
   /*! \brief return a float2 */
   __BF16_HOST_DEVICE__ operator float2() const {
-    float2 ret(x, y);
+    float2 ret{x, y};
     return ret;
   }
 

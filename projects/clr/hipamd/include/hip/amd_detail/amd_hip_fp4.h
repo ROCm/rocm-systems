@@ -394,7 +394,7 @@ struct __hip_fp4x2_e2m1 {
     auto fp32x2 = __amd_floatx2_storage_t{to_float<float, Encoding::E2M1, true>(__x & 0xFu, 0),
                                           to_float<float, Encoding::E2M1, true>(__x >> 4, 0)};
 #endif
-    return float2(fp32x2[0], fp32x2[1]);
+    return float2{fp32x2[0], fp32x2[1]};
   }
 
   __FP4_HOST_DEVICE__ operator double2() const {
@@ -405,7 +405,7 @@ struct __hip_fp4x2_e2m1 {
     auto fp32x2 = __amd_floatx2_storage_t{to_float<float, Encoding::E2M1, true>(__x & 0xFu, 0),
                                           to_float<float, Encoding::E2M1, true>(__x >> 4, 0)};
 #endif
-    return double2(fp32x2[0], fp32x2[1]);
+    return double2{fp32x2[0], fp32x2[1]};
   }
 #endif  // !defined(__HIP_NO_FP4_CONVERSION_OPERATORS__)
 };
@@ -427,12 +427,12 @@ struct __hip_fp4x4_e2m1 {
             __hip_cvt_bfloat16raw2_to_fp4x2(low, __HIP_E2M1, hipRoundNearest)) {}
 
   __FP4_HOST_DEVICE__ inline explicit __hip_fp4x4_e2m1(const double4 f)
-      : __x(__hip_cvt_double2_to_fp4x2(double2(f.z, f.w), __HIP_E2M1, hipRoundNearest) << 8 |
-            __hip_cvt_double2_to_fp4x2(double2(f.x, f.y), __HIP_E2M1, hipRoundNearest)) {}
+      : __x(__hip_cvt_double2_to_fp4x2(double2{f.z, f.w}, __HIP_E2M1, hipRoundNearest) << 8 |
+            __hip_cvt_double2_to_fp4x2(double2{f.x, f.y}, __HIP_E2M1, hipRoundNearest)) {}
 
   __FP4_HOST_DEVICE__ inline explicit __hip_fp4x4_e2m1(const float4 f)
-      : __x(__hip_cvt_float2_to_fp4x2(float2(f.z, f.w), __HIP_E2M1, hipRoundNearest) << 8 |
-            __hip_cvt_float2_to_fp4x2(float2(f.x, f.y), __HIP_E2M1, hipRoundNearest)) {}
+      : __x(__hip_cvt_float2_to_fp4x2(float2{f.z, f.w}, __HIP_E2M1, hipRoundNearest) << 8 |
+            __hip_cvt_float2_to_fp4x2(float2{f.x, f.y}, __HIP_E2M1, hipRoundNearest)) {}
 #endif  // #if !defined(__HIP_NO_FP4_CONVERSIONS__)
 
 #if !defined(__HIP_NO_FP4_CONVERSION_OPERATORS__)

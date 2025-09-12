@@ -150,7 +150,7 @@ __FP8_DEVICE__ void e4m3_fp8x2_fnuz_device(float2* val) {
   __hip_fp8x2_e4m3_fnuz tmp(*val);
   *val = tmp;
 #else
-  *val = float2(0.0, 0.0);
+  *val = float2{0.0, 0.0};
 #endif
 }
 
@@ -159,7 +159,7 @@ __FP8_DEVICE__ void e5m2_fp8x2_fnuz_device(float2* val) {
   __hip_fp8x2_e5m2_fnuz tmp(*val);
   *val = tmp;
 #else
-  *val = float2(0.0, 0.0);
+  *val = float2{0.0, 0.0};
 #endif
 }
 
@@ -203,7 +203,7 @@ TEST_CASE("Unit_fp8x2_fnuz_compare_host_device") {
   std::vector<float2> numbers;
   numbers.reserve(numbers_input.size());
   for (size_t i = 0, end = numbers_input.size() - 1; i < numbers_input.size(); i++, end--) {
-    float2 ret(numbers_input[i], numbers_input[end]);
+    float2 ret{numbers_input[i], numbers_input[end]};
     numbers.push_back(ret);
   }
 
@@ -245,7 +245,7 @@ TEST_CASE("Unit_fp8x2_fnuz_split_compare") {
   std::vector<float2> numbers;
   numbers.reserve(numbers_input.size());
   for (size_t i = 0, end = numbers_input.size() - 1; i < numbers_input.size(); i++, end--) {
-    float2 ret(numbers_input[i], numbers_input[end]);
+    float2 ret{numbers_input[i], numbers_input[end]};
     numbers.push_back(ret);
   }
 
@@ -263,7 +263,7 @@ TEST_CASE("Unit_fp8x2_fnuz_split_compare") {
       __hip_fp8_e4m3_fnuz t_a(num.x);
       __hip_fp8_e4m3_fnuz t_b(num.y);
       float a = t_a, b = t_b;
-      cpu_result.push_back(float2(a, b));
+      cpu_result.push_back(float2{a, b});
     }
     auto kernel = cvt_float2_fp8x2_float2_fnuz<true>;
     kernel<<<1, numbers.size()>>>(d_numbers, numbers.size());
@@ -276,7 +276,7 @@ TEST_CASE("Unit_fp8x2_fnuz_split_compare") {
       __hip_fp8_e5m2_fnuz t_a(num.x);
       __hip_fp8_e5m2_fnuz t_b(num.y);
       float a = t_a, b = t_b;
-      cpu_result.push_back(float2(a, b));
+      cpu_result.push_back(float2{a, b});
     }
     auto kernel = cvt_float2_fp8x2_float2_fnuz<false>;
     kernel<<<1, numbers.size()>>>(d_numbers, numbers.size());
@@ -298,7 +298,7 @@ __FP8_DEVICE__ void e4m3_fp8x4_fnuz_device(float4* val) {
   __hip_fp8x4_e4m3_fnuz tmp(*val);
   *val = tmp;
 #else
-  *val = float4(0.0, 0.0, 0.0, 0.0);
+  *val = float4{0.0, 0.0, 0.0, 0.0};
 #endif
 }
 
@@ -307,7 +307,7 @@ __FP8_DEVICE__ void e5m2_fp8x4_fnuz_device(float4* val) {
   __hip_fp8x4_e5m2_fnuz tmp(*val);
   *val = tmp;
 #else
-  *val = float4(0.0, 0.0, 0.0, 0.0);
+  *val = float4{0.0, 0.0, 0.0, 0.0};
 #endif
 }
 
@@ -335,7 +335,7 @@ TEST_CASE("Unit_fp8x4_fnuz_split_compare") {
   std::vector<float4> numbers;
   numbers.reserve(numbers_input.size());
   for (size_t i = 0, end = numbers_input.size() - 1; i < numbers_input.size(); i++, end--) {
-    float4 ret(numbers_input[i], numbers_input[end], numbers_input2[i], numbers_input2[end]);
+    float4 ret{numbers_input[i], numbers_input[end], numbers_input2[i], numbers_input2[end]};
     numbers.push_back(ret);
   }
 
@@ -355,7 +355,7 @@ TEST_CASE("Unit_fp8x4_fnuz_split_compare") {
       __hip_fp8_e4m3_fnuz t_c(num.z);
       __hip_fp8_e4m3_fnuz t_d(num.w);
       float a = t_a, b = t_b, c = t_c, d = t_d;
-      cpu_result.push_back(float4(a, b, c, d));
+      cpu_result.push_back(float4{a, b, c, d});
     }
     auto kernel = cvt_float4_fp8x4_float4_fnuz<true>;
     kernel<<<1, numbers.size()>>>(d_numbers, numbers.size());
@@ -370,7 +370,7 @@ TEST_CASE("Unit_fp8x4_fnuz_split_compare") {
       __hip_fp8_e5m2_fnuz t_c(num.z);
       __hip_fp8_e5m2_fnuz t_d(num.w);
       float a = t_a, b = t_b, c = t_c, d = t_d;
-      cpu_result.push_back(float4(a, b, c, d));
+      cpu_result.push_back(float4{a, b, c, d});
     }
     auto kernel = cvt_float4_fp8x4_float4_fnuz<false>;
     kernel<<<1, numbers.size()>>>(d_numbers, numbers.size());
