@@ -347,6 +347,8 @@ Example for file plugin output:
 - Support for kernel name filtering in `rocprofv2`
 - Barrier bit to read and stop packets
 - ROCProfiler support for gfx1150 and gfx1151
+- ATT support for gfx12
+- gfx12 support
 
 ### Changed
 
@@ -391,3 +393,16 @@ Example for file plugin output:
 ### Resolved issues
 
 - Fixed issue where invalid UTF-8 characters in a trace log would crash the program
+
+## ROCProfiler for ROCm 7.1
+
+### Added
+
+### Resolved issues
+
+### Removed
+
+- rocprofv2 doesn't support gfx12, Use rocprofv3 tool.
+
+
+
