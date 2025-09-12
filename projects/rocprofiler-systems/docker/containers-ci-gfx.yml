@@ -4,32 +4,68 @@ matrix:
   # ubuntu
   - distro: "ubuntu"
     version: "22.04"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   - distro: "ubuntu"
     version: "24.04"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   # debian
   - distro: "debian"
     version: "12"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   # opensuse
   - distro: "opensuse"
     version: "15.5"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   - distro: "opensuse"
     version: "15.6"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   # RHEL8
   - distro: "rhel"
     version: "8.10"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   # RHEL9
   - distro: "rhel"
     version: "9.3"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   - distro: "rhel"
     version: "9.4"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X
   - distro: "rhel"
     version: "9.5"
-    gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    gpu:
+      - gfx94X
+      - gfx950
+      - gfx110X
+      - gfx120X

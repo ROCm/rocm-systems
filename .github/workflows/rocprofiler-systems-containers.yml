@@ -71,7 +71,7 @@ jobs:
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
 
       - name: Set up Docker variables
-        id: setup_base_vars
+        id: setup_vars_base
         run: |
           if [ ${{ matrix.distro }} = "opensuse" ]; then
             DISTRO_IMAGE="opensuse/leap"
@@ -92,11 +92,11 @@ jobs:
       - name: Build CI Base Container (Does not Push on PR)
         uses: docker/build-push-action@v6
         with:
-          file: projects/rocprofiler-systems/docker/${{ steps.setup_vars.outputs.docker_file }}
+          file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_base.outputs.docker_file }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
-            DISTRO=${{ steps.setup_vars.outputs.distro_image }}
+            DISTRO=${{ steps.setup_vars_base.outputs.distro_image }}
             VERSION=${{ matrix.version }}
             NJOBS=2
             ELFUTILS_DOWNLOAD_VERSION=0.188
