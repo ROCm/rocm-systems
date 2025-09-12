@@ -229,7 +229,7 @@ class Roofline:
 
         top_kernels_csv = Path(path_str) / "pmc_kernel_top.csv"
         if not top_kernels_csv.is_file():
-            console_error("roofline", f"{str(top_kernels_csv)} does not exist")
+            console_error("roofline", f"{top_kernels_csv} does not exist")
 
         k_df = pd.read_csv(top_kernels_csv)
         k_df = k_df.loc[args.gpu_kernel[0], "Kernel_Name"]
@@ -725,7 +725,7 @@ class Roofline:
         """
         console_debug("roofline", "Generating roofline plot for CLI")
 
-        if not (str(dtype) in SUPPORTED_DATATYPES[self.__mspec.gpu_arch]):
+        if not (str(dtype) in SUPPORTED_DATATYPES[str(self.__mspec.gpu_arch)]):
             console_error(
                 f"{dtype} is not a supported datatype for roofline profiling on "
                 f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: "
@@ -770,11 +770,11 @@ class Roofline:
 
         # if workload is detected, utilize Roofline yamls.
         # If not, fallback to legacy calc_ai
-        if workload is not None:
+        if workload and config and arch_config:
             self.__ai_data = calc_ai_analyze(
                 workload=workload,
                 mspec=self.__mspec,
-                sort_type=self.__run_parameters.get("sort_type"),
+                sort_type=str(self.__run_parameters.get("sort_type")),
                 config=config,
                 arch_config=arch_config,
             )
@@ -785,7 +785,7 @@ class Roofline:
                 console_error("roofline", f"{pmc_perf_csv} does not exist")
 
             t_df = OrderedDict()
-            t_df["pmc_perf"] = pd.read_csv(str(pmc_perf_csv))
+            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
 
             profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
             if profiling_config.get("format_rocprof_output") == "rocpd":
@@ -985,12 +985,12 @@ class Roofline:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        app_path = Path(self.__run_parameters["workload_dir"]) / "pmc_perf.csv"
+        app_path = Path(str(self.__run_parameters["workload_dir"])) / "pmc_perf.csv"
         if not app_path.is_file():
             console_error("roofline", f"{app_path} does not exist")
 
         t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(str(app_path))
+        t_df["pmc_perf"] = pd.read_csv(app_path)
 
         profiling_config = file_io.load_profiling_config(self.__args.path)
         if profiling_config.get("format_rocprof_output") == "rocpd":

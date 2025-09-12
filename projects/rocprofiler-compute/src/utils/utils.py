@@ -848,17 +848,16 @@ def run_prof(
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
 
-        # Combine results into single CSV file
-        if results_files:
-            combined_results = pd.concat(
-                [pd.read_csv(f) for f in results_files], ignore_index=True
-            )
-        else:
+        if not results_files:
             console_warning(
                 f"Cannot write results for {fbase}.csv due to no counter "
                 "csv files generated."
             )
-            return
+
+        # Combine results into single CSV file
+        combined_results = pd.concat(
+            [pd.read_csv(f) for f in results_files], ignore_index=True
+        )
 
         # Overwrite column to ensure unique IDs.
         combined_results["Dispatch_ID"] = range(0, len(combined_results))
@@ -998,18 +997,18 @@ def process_rocprofv3_output(
     results_files_csv: list[str] = []
 
     if rocprof_output == "json":
-        results_files_json = glob.glob(workload_dir + "/out/pmc_1/*/*.json")
+        results_files_json = glob.glob(f"{workload_dir}/out/pmc_1/*/*.json")
 
         for json_file in results_files_json:
             csv_file = str(Path(json_file).with_suffix(".csv"))
             v3_json_to_csv(json_file, csv_file)
-        results_files_csv = glob.glob(workload_dir + "/out/pmc_1/*/*.csv")
+        results_files_csv = glob.glob(f"{workload_dir}/out/pmc_1/*/*.csv")
 
     elif rocprof_output == "csv":
         counter_info_csvs = glob.glob(
-            workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
+            f"{workload_dir}/out/pmc_1/*/*_counter_collection.csv"
         )
-        existing_counter_files_csv = [d for d in counter_info_csvs if Path(d).is_file()]
+        existing_counter_files_csv = [f for f in counter_info_csvs if Path(f).is_file()]
 
         if existing_counter_files_csv:
             for counter_file in existing_counter_files_csv:
@@ -1039,12 +1038,12 @@ def process_rocprofv3_output(
                     )
                     return []
 
-            results_files_csv = glob.glob(workload_dir + "/out/pmc_1/*/*_converted.csv")
+            results_files_csv = glob.glob(f"{workload_dir}/out/pmc_1/*/*_converted.csv")
         elif is_timestamps:
             # when the input is timestamps, we know counter csv file
             # is not generated and will instead parse kernel trace file
             results_files_csv = glob.glob(
-                workload_dir + "/out/pmc_1/*/*_kernel_trace.csv"
+                f"{workload_dir}/out/pmc_1/*/*_kernel_trace.csv"
             )
         else:
             # when the input is not for timestamps, and counter csv file
@@ -1061,9 +1060,9 @@ def process_rocprofv3_output(
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
-        workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
-    )
-    existing_marker_files_csv = [d for d in marker_api_trace_csvs if Path(d).is_file()]
+                                f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
+                            )
+    existing_marker_files_csv = [f for f in marker_api_trace_csvs if Path(f).is_file()]
 
     # concate and output marker api trace info
     combined_results = pd.concat(
@@ -1071,37 +1070,37 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     )
 
     combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
+        f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
         index=False,
     )
 
-    if Path(workload_dir + "/out").exists():
+    if Path(f"{workload_dir}/out").exists():
         shutil.copyfile(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
-            workload_dir + "/" + fbase + "_marker_api_trace.csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
+            f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )
 
 
 @demarcate
 def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
-    # marker api trace csv files are generated for each process
-    hip_api_trace_csvs = glob.glob(workload_dir + "/out/pmc_1/*/*_hip_api_trace.csv")
-    existing_hip_files_csv = [d for d in hip_api_trace_csvs if Path(d).is_file()]
+    # hip api trace csv files are generated for each process
+    hip_api_trace_csvs = glob.glob(f"{workload_dir}/out/pmc_1/*/*_hip_api_trace.csv")
+    existing_hip_files_csv = [f for f in hip_api_trace_csvs if Path(f).is_file()]
 
-    # concate and output marker api trace info
+    # concate and output hip api trace info
     combined_results = pd.concat(
         [pd.read_csv(f) for f in existing_hip_files_csv], ignore_index=True
     )
 
     combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_hip_api_trace.csv",
+        f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
         index=False,
     )
 
-    if Path(workload_dir + "/out").exists():
+    if Path(f"{workload_dir}/out").exists():
         shutil.copyfile(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_hip_api_trace.csv",
-            workload_dir + "/" + fbase + "_hip_api_trace.csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
+            f"{workload_dir}/{fbase}_hip_api_trace.csv",
         )
 
 
@@ -1110,10 +1109,10 @@ def replace_timestamps(workload_dir: str) -> None:
     if not ts_path.is_file():
         return
 
-    df_stamps = pd.read_csv(str(ts_path))
+    df_stamps = pd.read_csv(ts_path)
     if "Start_Timestamp" in df_stamps.columns and "End_Timestamp" in df_stamps.columns:
         # Update timestamps for all *.csv output files
-        for fname in glob.glob(workload_dir + "/" + "*.csv"):
+        for fname in glob.glob(f"{workload_dir}/*.csv"):
             if Path(fname).name != "sysinfo.csv":
                 df_pmc_perf = pd.read_csv(fname)
                 df_pmc_perf["Start_Timestamp"] = df_stamps["Start_Timestamp"]
@@ -1345,7 +1344,7 @@ def is_workload_empty(path: str) -> None:
     """Peek workload directory to verify valid profiling output"""
     pmc_perf_path = Path(path) / "pmc_perf.csv"
     if pmc_perf_path.is_file():
-        temp_df = pd.read_csv(str(pmc_perf_path))
+        temp_df = pd.read_csv(pmc_perf_path)
         if temp_df.dropna().empty:
             console_error(
                 "profiling",

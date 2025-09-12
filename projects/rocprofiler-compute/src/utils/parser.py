@@ -1123,7 +1123,7 @@ def apply_kernel_filter(
     """Apply kernel ID or name filters."""
     if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
         # Handle integer kernel IDs
-        kernels_dataframe = pd.read_csv(str(Path(dir_path_path) / "pmc_kernel_top.csv"))
+        kernels_dataframe = pd.read_csv(Path(dir_path_path) / "pmc_kernel_top.csv")
 
         # Validate kernel IDs
         for kernel_id in workload.filter_kernel_ids:
@@ -1537,7 +1537,7 @@ def load_pc_sampling_data(
 
     # No kernel filter, return grouped and sorted csv dir_pathectly
     if not workload.filter_kernel_ids:
-        df = pd.read_csv(str(csv_file_path))
+        df = pd.read_csv(csv_file_path)
         # Group by 'Instruction_Comment' and count occurrences
         grouped_counts = (
             df.groupby("Instruction_Comment")
@@ -1576,7 +1576,7 @@ def load_pc_sampling_data(
             #   We should find better way to remove the dependency on kernel_top_table
             kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
             file = Path(dir_path) / str(kernel_top_df.loc[0, "from_csv"])
-            kernel_name = pd.read_csv(str(file)).loc[
+            kernel_name = pd.read_csv(file).loc[
                 workload.filter_kernel_ids[0], "Kernel_Name"
             ]
             return load_pc_sampling_data_per_kernel(
@@ -1605,7 +1605,7 @@ def load_non_mertrics_table(
         if "from_csv" in df.columns:
             csv_file = Path(dir_path) / str(df.loc[0, "from_csv"])
             if csv_file.exists():
-                tmp[df_id] = pd.read_csv(str(csv_file))
+                tmp[df_id] = pd.read_csv(csv_file)
             else:
                 console_warning(
                     f"Couldn't load {csv_file.name}. "
@@ -1623,7 +1623,7 @@ def load_non_mertrics_table(
             #   But we need to figure out headers and comparison properly.
             csv_file = Path(dir_path) / str(df.loc[0, "from_csv_columnwise"])
             if csv_file.exists():
-                tmp[df_id] = pd.read_csv(str(csv_file)).transpose()
+                tmp[df_id] = pd.read_csv(csv_file).transpose()
                 # NB:
                 #   All transposed columns should be marked with a general header,
                 #   so tty could detect them and show them correctly in comparison.

@@ -138,7 +138,7 @@ class tui_analysis(OmniAnalyze_Base):
 
         roofline_path = Path(self.path) / "roofline.csv"
         if roofline_path.is_file() and not getattr(self.args, "no_roof", False):
-            w.roofline_peaks = pd.read_csv(str(roofline_path))
+            w.roofline_peaks = pd.read_csv(roofline_path)
 
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)

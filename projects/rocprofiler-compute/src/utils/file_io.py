@@ -215,7 +215,7 @@ def create_df_pmc(
 
                 if is_sq_file or is_pmc_perf:
                     file_path = Path(root) / file_name
-                    tmp_df = pd.read_csv(str(file_path))
+                    tmp_df = pd.read_csv(file_path)
 
                     if config_dict.get("format_rocprof_output") == "rocpd":
                         tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
@@ -302,7 +302,7 @@ def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
         if not file_path.exists():
             continue
 
-        tmp_df = pd.read_csv(str(file_path))
+        tmp_df = pd.read_csv(file_path)
         if tmp_df.empty:
             continue
 
@@ -328,7 +328,7 @@ def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
 
 
 def is_single_panel_config(
-    root_dir: str, supported_archs: dict[str, Any]
+    root_dir: str, supported_archs: dict[str, str]
 ) -> Optional[bool]:
     """
     Check the root configs dir structure to decide using one config set for all

@@ -154,9 +154,12 @@ class RocProfCompute_Base:
 
         # Set default output directory if not specified
         if isinstance(args.path, str):
-            files = glob.glob(args.path + "/" + "pmc_perf_*.csv")
-            files.extend(glob.glob(args.path + "/" + "SQ_*.csv"))
-            files.extend(glob.glob(args.path + "/" + "SQC_*.csv"))
+            csv_patterns = ["pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
+            files = [
+                file
+                for pattern in csv_patterns
+                for file in glob.glob(f"{args.path}/{pattern}")
+            ]
 
             if args.hip_trace:
                 # remove hip api trace ouputs from this list
@@ -185,7 +188,7 @@ class RocProfCompute_Base:
         # Process files and create joined dataframe
         df = None
         for i, file in enumerate(files):
-            current_df = pd.read_csv(str(file))
+            current_df = pd.read_csv(file)
             if args.join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
                 current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)

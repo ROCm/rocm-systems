@@ -115,12 +115,17 @@ class OmniAnalyze_Base:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
             arch_panel_config = [
-                config_dir if single_panel_config else str(Path(config_dir) / arch)
+                config_dir if single_panel_config else str(f"{config_dir}/{arch}")
             ]
             # Use restructured perf metrics in TUI analyze mode
             if self.get_args().tui and arch in ["gfx942", "gfx950"]:
                 arch_panel_config.append(
-                    f"{config.rocprof_compute_home}/rocprof_compute_tui/utils/{arch}"
+                    str(
+                        config.rocprof_compute_home
+                        / "rocprof_compute_tui"
+                        / "utils"
+                        / arch
+                    )
                 )
             ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
@@ -139,7 +144,7 @@ class OmniAnalyze_Base:
         if arch not in self.__supported_archs:
             console_error("analysis", "Unsupported arch")
         if arch not in self._arch_configs:
-            sys_info = file_io.load_sys_info(str(Path(args.path[0][0]) / "sysinfo.csv"))
+            sys_info = file_io.load_sys_info(f"{args.path[0][0]}/sysinfo.csv")
             self.generate_configs(
                 arch,
                 args.config_dir,
@@ -214,9 +219,7 @@ class OmniAnalyze_Base:
         for path_info in args.path:
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                sys_info = file_io.load_sys_info(
-                    str(Path(sysinfo_path) / "sysinfo.csv")
-                )
+                sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
@@ -236,14 +239,10 @@ class OmniAnalyze_Base:
             w = schema.Workload()
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                w.sys_info = file_io.load_sys_info(
-                    str(Path(sysinfo_path) / "sysinfo.csv")
-                )
-
+                w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
                     try:
-                        roofline_csv_path = Path(sysinfo_path) / "roofline.csv"
-                        roofline_df = pd.read_csv(str(roofline_csv_path))
+                        roofline_df = pd.read_csv(f"{sysinfo_path}/roofline.csv")
                         w.roofline_peaks = roofline_df
                     except FileNotFoundError:
                         console_warning("roofline.csv not found.")
@@ -285,12 +284,12 @@ class OmniAnalyze_Base:
         # ensure absolute path
         seen_paths: set[str] = set()
         for dir_info in args.path:
-            full_path = str(Path(dir_info[0]).absolute().resolve())
-            dir_info[0] = full_path
+            full_path = Path(dir_info[0]).absolute().resolve()
+            dir_info[0] = str(full_path)
 
-            if not Path(dir_info[0]).is_dir():
+            if not full_path.is_dir():
                 console_error(
-                    "analysis", f"Invalid directory {dir_info[0]}\nPlease try again."
+                    "analysis", f"Invalid directory {full_path}\nPlease try again."
                 )
             # validate profiling data
 
