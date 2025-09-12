@@ -219,7 +219,7 @@ void Graph::ScheduleNodes() {
     if (node->stream_id_ == -1) {
       ScheduleOneNode(node, stream_id);
       // Find the root nodes
-      if ((node->GetDependencies().size() == 0) && (node->stream_id_ != 0)) {
+      if ((node->GetDependencies().size() == 0) /*&& (node->stream_id_ != 0)*/) {
         // Fill in only the first in the sequence
         if (roots_[node->stream_id_] == nullptr) {
           roots_[node->stream_id_] = node;
@@ -359,11 +359,9 @@ hipError_t GraphExec::Init() {
 
 
   if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
-    if (max_streams_ == 1) {
-      // For graph nodes capture AQL packets to dispatch them directly during graph launch.
-      status = CaptureAQLPackets();
-      DetectGraphTopology();
-    }
+    // For graph nodes capture AQL packets to dispatch them directly during graph launch.
+    status = CaptureAQLPackets();
+    DetectGraphTopology();
   }
   
   instantiateDeviceId_ = hip::getCurrentDevice()->deviceId();
@@ -707,13 +705,23 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     repeatLaunch_ = true;
   }
 
-
   if (isStraightLineKernels_ && max_streams_ == 1 &&
       instantiateDeviceId_ == launch_stream->DeviceId()) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] Using batched submission for straight-line %zu kernels",
             straightLineSequence_.size());
     status = RunStraightLineBatchOptimized(launch_stream);
+  } else if (isParallelStraightLineKernels_  &&
+             instantiateDeviceId_ == launch_stream->DeviceId()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Using parallel batched submission for %zu chains", parallelChains_.size());
+    status = RunParallelStraightLineBatchOptimized(launch_stream);
+  } else if (isMixedWithBatching_ && max_streams_ == 1 &&
+             instantiateDeviceId_ == launch_stream->DeviceId()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Using mixed batched submission for kernels");
+    
+    status = RunMixedBatchOptimized(launch_stream);
   } else if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       // If the graph has kernels that does device side allocation,  during packet capture, heap is
@@ -831,31 +839,10 @@ bool GraphExec::IsAllKernelNodes() const {
 }
 
 // ================================================================================================
-bool GraphExec::IsStraightLineTopology() const {
-  for (size_t i = 0; i < topoOrder_.size(); ++i) {
-    const auto& node = topoOrder_[i];
-    if (i == 0) {
-      // First node should have no dependencies
-      if (!node->GetDependencies().empty()) return false;
-    } else {
-      // Other nodes should have exactly one dependency (the previous node)
-      const auto& dependencies = node->GetDependencies();
-      if (dependencies.size() != 1 || dependencies[0] != topoOrder_[i - 1]) {
-        return false;
-      }
-    }
-    // Each node should have at most one outgoing edge
-    if (node->GetEdges().size() > 1) return false;
-  }
-  return true;
-}
-
-// ================================================================================================
 void GraphExec::CacheNodePackets(GraphKernelNode* kernelNode) {
   std::vector<uint8_t*>& gpuPackets = kernelNode->GetAqlPackets();
   const std::string& kernelName = kernelNode->GetKernelName();
 
-  // Append packets and kernel names to list
   cachedGpuPackets_.insert(cachedGpuPackets_.end(), gpuPackets.begin(), gpuPackets.end());
   for (size_t i = 0; i < gpuPackets.size(); ++i) {
     cachedKernelNames_.push_back(kernelName);
@@ -876,21 +863,158 @@ void GraphExec::BuildStraightLineSequence() {
     }
   }
 }
+// ================================================================================================
+bool GraphExec::IsStraightLineTopology() const {
+  return IsSingleStraightLineTopology() || IsParallelStraightLineTopology();
+}
+// ================================================================================================
+bool GraphExec::IsSingleStraightLineTopology() const {
+  for (size_t i = 0; i < topoOrder_.size(); ++i) {
+    const auto& node = topoOrder_[i];
+    if (i == 0) {
+      // First node should have no dependencies
+      if (!node->GetDependencies().empty()) return false;
+    } else {
+      // Other nodes should have exactly one dependency (the previous node)
+      const auto& dependencies = node->GetDependencies();
+      if (dependencies.size() != 1 || dependencies[0] != topoOrder_[i - 1]) {
+        return false;
+      }
+    }
+    // Each node should have at most one outgoing edge
+    if (node->GetEdges().size() > 1) return false;
+  }
+  return true;
+}
+// ================================================================================================
+bool GraphExec::IsParallelStraightLineTopology() const {
+  if (topoOrder_.empty()) return false;
+  
+  std::vector<GraphNode*> rootNodes;
+  std::unordered_set<GraphNode*> visited;
+  
+  for (const auto& node : topoOrder_) {
+    if (node->GetDependencies().empty()) {
+      rootNodes.push_back(node);
+    }
+  }
+  
+  if (rootNodes.size() < 2) return false;
+  
+  for (auto* root : rootNodes) {
+    if (!IsNodePartOfStraightChain(root, visited)) {
+      return false;
+    }
+  }
+  
+  return visited.size() == topoOrder_.size();
+}
 
+// ================================================================================================
+bool GraphExec::IsNodePartOfStraightChain(GraphNode* startNode, 
+                                           std::unordered_set<GraphNode*>& visited) const {
+  GraphNode* current = startNode;
+  
+  while (current != nullptr) {
+    if (visited.find(current) != visited.end()) {
+      return false;
+    }
+    visited.insert(current);
+    
+    const auto& edges = current->GetEdges();
+    
+    if (edges.empty()) {
+      break;
+    } else if (edges.size() == 1) {
+      GraphNode* nextNode = edges[0];
+      const auto& nextDeps = nextNode->GetDependencies();
+      if (nextDeps.size() != 1 || nextDeps[0] != current) {
+        return false;
+      }
+      current = nextNode;
+    } else {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+void GraphExec::BuildParallelStraightLineSequences() {
+  parallelChains_.clear();
+  parallelChainPackets_.clear();
+  parallelChainKernelNames_.clear();
+  
+  std::vector<GraphNode*> rootNodes;
+  for (const auto& node : topoOrder_) {
+    if (node->GetDependencies().empty()) {
+      rootNodes.push_back(node);
+    }
+  }
+  
+  // Build each chain with separate packet lists
+  for (auto* root : rootNodes) {
+    std::vector<GraphKernelNode*> chain;
+    std::vector<uint8_t*> chainPackets;
+    std::vector<std::string> chainKernelNames;
+    
+    GraphNode* current = root;
+    
+    while (current != nullptr) {
+      auto* kernelNode = static_cast<GraphKernelNode*>(current);
+      chain.push_back(kernelNode);
+      
+      if (kernelNode->GraphCaptureEnabled()) {
+        std::vector<uint8_t*>& gpuPackets = kernelNode->GetAqlPackets();
+        const std::string& kernelName = kernelNode->GetKernelName();
+        
+        chainPackets.insert(chainPackets.end(), gpuPackets.begin(), gpuPackets.end());
+        for (size_t i = 0; i < gpuPackets.size(); ++i) {
+          chainKernelNames.push_back(kernelName);
+        }
+      }
+      
+      const auto& edges = current->GetEdges();
+      current = edges.empty() ? nullptr : edges[0];
+    }
+    
+    parallelChains_.push_back(std::move(chain));
+    parallelChainPackets_.push_back(std::move(chainPackets));
+    parallelChainKernelNames_.push_back(std::move(chainKernelNames));
+  }
+}
 // ================================================================================================
 void GraphExec::DetectGraphTopology() {
   isStraightLineKernels_ = false;
+  isParallelStraightLineKernels_ = false;
   straightLineSequence_.clear();
+  parallelChains_.clear();
+  parallelChainPackets_.clear();
+  parallelChainKernelNames_.clear();
+  cachedGpuPackets_.clear();
+  cachedKernelNames_.clear();
 
-  if (max_streams_ != 1 || topoOrder_.empty()) return;
-
-  if (IsAllKernelNodes() && IsStraightLineTopology()) {
-    isStraightLineKernels_ = true;
-    BuildStraightLineSequence();
+  if (IsAllKernelNodes()) {
+    if (IsSingleStraightLineTopology()) {
+      isStraightLineKernels_ = true;
+      BuildStraightLineSequence();
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] Detected single straight-line kernel sequence with %zu nodes",
+              straightLineSequence_.size());
+    } else if (IsParallelStraightLineTopology()) {
+      isParallelStraightLineKernels_ = true;
+      BuildParallelStraightLineSequences();
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] Detected parallel straight-line topology with %zu chains, %zu total nodes",
+              parallelChains_.size(), topoOrder_.size());
+    }
+  }
+  if (IsMixedWithBatchingOpportunities()) {
+    isMixedWithBatching_ = true;
+    BuildMixedBatches();
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Detected straight-line kernel sequence with %zu nodes for constant-time "
-            "optimization",
-            straightLineSequence_.size());
+            "[hipGraph] Detected mixed topology with %zu batched kernel sequences",
+            mixedBatches_.size());
   }
 }
 
@@ -900,7 +1024,6 @@ hipError_t GraphExec::RunStraightLineBatchOptimized(hip::Stream* stream) {
     return EnqueueGraphWithSingleList(stream);
   }
 
-  // Create AccumulateCommand with all cached packets at once
   amd::AccumulateCommand* accumulate =
       new amd::AccumulateCommand(*stream, cachedGpuPackets_, cachedKernelNames_, {}, nullptr);
 
@@ -911,4 +1034,151 @@ hipError_t GraphExec::RunStraightLineBatchOptimized(hip::Stream* stream) {
   return hipSuccess;
 }
 // ================================================================================================
+hipError_t GraphExec::RunParallelStraightLineBatchOptimized(hip::Stream* stream) {
+  std::vector<hip::Stream*> allStreams;
+  allStreams.push_back(stream);
+  
+  for (auto* parallelStream : parallel_streams_) {
+    if (stream->getQueueID() != parallelStream->getQueueID()) {
+      allStreams.push_back(parallelStream);
+    }
+  }
+  
+  // Submit each chain to a different stream
+  for (size_t i = 0; i < parallelChains_.size(); ++i) {
+    const auto& chainPackets = parallelChainPackets_[i];
+    const auto& chainKernelNames = parallelChainKernelNames_[i];
+    
+    if (!chainPackets.empty()) {
+      hip::Stream* targetStream = allStreams[i % allStreams.size()];
+      
+      amd::AccumulateCommand* accumulate = 
+          new amd::AccumulateCommand(*targetStream, chainPackets, chainKernelNames, {}, nullptr);
+      accumulate->enqueue();
+      accumulate->release();
+    }
+  }
+  return hipSuccess;
+}
+
+// ================================================================================================
+bool GraphExec::IsMixedWithBatchingOpportunities() const {
+  if (topoOrder_.empty()) return false;
+  
+  bool hasKernels = false;
+  bool hasNonKernels = false;
+  
+  for (const auto& node : topoOrder_) {
+    if (node->GetType() == hipGraphNodeTypeKernel) {
+      hasKernels = true;
+    } else {
+      hasNonKernels = true;
+    }
+  }
+
+  if (!hasKernels || !hasNonKernels) return false;
+  
+  // look for consecutive kernel sequences >= 2
+  int consecutiveKernels = 0;
+  bool foundBatchableSequence = false;
+  
+  for (const auto& node : topoOrder_) {
+    if (node->GetType() == hipGraphNodeTypeKernel) {
+      consecutiveKernels++;
+      if (consecutiveKernels >= 2) {
+        foundBatchableSequence = true;
+      }
+    } else {
+      consecutiveKernels = 0;
+    }
+  }
+  
+  return foundBatchableSequence;
+}
+
+// ================================================================================================
+void GraphExec::BuildMixedBatches() {
+  mixedBatches_.clear();
+  mixedBatchPackets_.clear();
+  mixedBatchKernelNames_.clear();
+  
+  std::vector<GraphKernelNode*> currentBatch;
+  std::vector<uint8_t*> currentBatchPackets;
+  std::vector<std::string> currentBatchKernelNames;
+  
+  for (const auto& node : topoOrder_) {
+    if (node->GetType() == hipGraphNodeTypeKernel) {
+      auto* kernelNode = static_cast<GraphKernelNode*>(node);
+      currentBatch.push_back(kernelNode);
+      
+      if (kernelNode->GraphCaptureEnabled()) {
+        std::vector<uint8_t*>& gpuPackets = kernelNode->GetAqlPackets();
+        const std::string& kernelName = kernelNode->GetKernelName();
+        
+        currentBatchPackets.insert(currentBatchPackets.end(), gpuPackets.begin(), gpuPackets.end());
+        for (size_t i = 0; i < gpuPackets.size(); ++i) {
+          currentBatchKernelNames.push_back(kernelName);
+        }
+      }
+    } else {
+      if (currentBatch.size() >= 2) {
+        mixedBatches_.push_back(std::move(currentBatch));
+        mixedBatchPackets_.push_back(std::move(currentBatchPackets));
+        mixedBatchKernelNames_.push_back(std::move(currentBatchKernelNames));
+      }
+      
+      currentBatch.clear();
+      currentBatchPackets.clear();
+      currentBatchKernelNames.clear();
+    }
+  }
+  
+  if (currentBatch.size() >= 2) {
+    mixedBatches_.push_back(std::move(currentBatch));
+    mixedBatchPackets_.push_back(std::move(currentBatchPackets));
+    mixedBatchKernelNames_.push_back(std::move(currentBatchKernelNames));
+  }
+}
+
+// ================================================================================================
+hipError_t GraphExec::RunMixedBatchOptimized(hip::Stream* stream) {
+  #if 0
+  if (!isMixedWithBatching_ || mixedBatches_.empty()) {
+    if (max_streams_ == 1) {
+      return EnqueueGraphWithSingleList(stream);
+    } else {
+      UpdateStreams(stream, parallel_streams_);
+      if (!RunNodes()) {
+        LogError("Failed to launch nodes!");
+        return hipErrorOutOfMemory;
+      }
+      return hipSuccess;
+    }
+  }
+  #endif
+  for (int i = 0; i < mixedBatches_.size(); i++) {
+    if (!mixedBatchPackets_.empty()) {
+      amd::AccumulateCommand* accumulate = new amd::AccumulateCommand(
+          *stream, mixedBatchPackets_[i], mixedBatchKernelNames_[i], {}, nullptr);
+      accumulate->enqueue();
+      accumulate->release();
+    }
+  }
+
+  // Execute remaining nodes normally
+  for (const auto& node : topoOrder_) {
+    if (node->GetType() != hipGraphNodeTypeKernel || 
+        std::find(mixedBatches_[0].begin(), mixedBatches_[0].end(), 
+                  static_cast<GraphKernelNode*>(node)) == mixedBatches_[0].end()) {
+      node->SetStream(stream);
+      hipError_t status = node->CreateCommand(node->GetQueue());
+      if (status != hipSuccess) return status;
+      node->EnqueueCommands(stream);
+    }
+  }
+  
+  return hipSuccess;
+}
+// ================================================================================================
+
 }  // namespace hip

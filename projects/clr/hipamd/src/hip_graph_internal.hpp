@@ -799,9 +799,18 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   bool IsAllKernelNodes() const;
   void CacheNodePackets(GraphKernelNode* kernelNode);
   bool IsStraightLineTopology() const;
+  bool IsSingleStraightLineTopology() const;
+  bool IsParallelStraightLineTopology() const;
+  bool IsNodePartOfStraightChain(GraphNode* startNode, 
+                                 std::unordered_set<GraphNode*>& visited) const;
   void DetectGraphTopology();
-  void BuildStraightLineSequence() ;
+  void BuildStraightLineSequence();
+  void BuildParallelStraightLineSequences();
+  bool IsMixedWithBatchingOpportunities() const;
+  void BuildMixedBatches();
   hipError_t RunStraightLineBatchOptimized(hip::Stream* stream);
+  hipError_t RunParallelStraightLineBatchOptimized(hip::Stream* stream);
+  hipError_t RunMixedBatchOptimized(hip::Stream* stream);
 
  protected:
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
@@ -813,12 +822,21 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
 
-  bool isStraightLineKernels_ = false;
-  std::vector<GraphKernelNode*> straightLineSequence_;
-
   private:
+  bool isStraightLineKernels_ = false;
+  bool isParallelStraightLineKernels_ = false;
+  bool isMixedWithBatching_ = false;
+  std::vector<std::vector<GraphKernelNode*>> parallelStraightLineSequence_;
+  std::vector<GraphKernelNode*> straightLineSequence_;
+  std::vector<std::vector<GraphKernelNode*>> parallelChains_;
   std::vector<uint8_t*> cachedGpuPackets_;
   std::vector<std::string> cachedKernelNames_; 
+  std::vector<std::vector<uint8_t*>> parallelChainPackets_;
+  std::vector<std::vector<std::string>> parallelChainKernelNames_;
+  // Mixed topology batching support
+  std::vector<std::vector<GraphKernelNode*>> mixedBatches_;
+  std::vector<std::vector<uint8_t*>> mixedBatchPackets_;
+  std::vector<std::vector<std::string>> mixedBatchKernelNames_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {

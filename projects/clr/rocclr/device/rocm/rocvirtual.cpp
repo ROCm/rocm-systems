@@ -3746,7 +3746,7 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
-
+#if 0
   if (total_packets == 0) {
     const Settings& settings = dev().settings();
     if (settings.barrier_value_packet_) {
@@ -3764,7 +3764,7 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
     profilingEnd();
     return;
   }
-
+#endif
   uint64_t current_write = hsa_queue_load_write_index_relaxed(gpu_queue_);
   uint64_t current_read = hsa_queue_load_read_index_relaxed(gpu_queue_);
   
