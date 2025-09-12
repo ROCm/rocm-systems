@@ -81,9 +81,7 @@ class Terimnal(Container):
     def update_prompt(self) -> None:
         """Update the command prompt in the input field."""
         input_widget = self.query_one("#terminal-input")
-        current_path = (
-            Path(self.current_directory).name or self.current_directory
-        )
+        current_path = Path(self.current_directory).name or self.current_directory
 
         if platform.system() != "Windows":
             prompt = f"{current_path} $ "

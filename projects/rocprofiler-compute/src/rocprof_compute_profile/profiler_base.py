@@ -161,17 +161,13 @@ class RocProfCompute_Base:
             if args.hip_trace:
                 # remove hip api trace outputs from this list
                 files = [
-                    f
-                    for f in files
-                    if not f.name.endswith("_hip_api_trace.csv")
+                    f for f in files if not f.name.endswith("_hip_api_trace.csv")
                 ]
 
             if args.kokkos_trace:
                 # remove marker api trace outputs from this list
                 files = [
-                    f
-                    for f in files
-                    if not f.name.endswith("_marker_api_trace.csv")
+                    f for f in files if not f.name.endswith("_marker_api_trace.csv")
                 ]
         elif isinstance(args.path, list):
             files = args.path
