@@ -68,11 +68,24 @@ def main(argv=None) -> None:
     """Main function to process the projects and output those to be run."""
     # Systems build+test dependency tree as defined in Azure CI and TheRock
     systems_dependencies = {
+        "projects/clr": {"projects/hip"},
+        "projects/hip": {"projects/hipother"}
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
         "projects/rocprofiler-register": 327,
         "projects/rocprofiler": 329,
+        "projects/roctracer": 331,
+        "projects/clr": 335,
+        "projects/hip": 335,
+        "projects/hipother": 335,
+        "projects/rocprofiler-compute": 344,
+        "projects/rocm-core": 349,
+        "projects/rocr-runtime": 354
+        "projects/rocminfo": 356,
+        "projects/rocm-smi-lib": 358,
+        "projects/hip-tests": 362,
+        "projects/rocprofiler-sdk": 347,
     }
 
     args = parse_arguments(argv)

@@ -289,8 +289,8 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       case 4:
         if (printFloat) {
           const float fArg = size == 2
-              ? amd::half2float(*(reinterpret_cast<const uint16_t*>(argument)))
-              : *(reinterpret_cast<const float*>(argument));
+                                 ? amd::half2float(*(reinterpret_cast<const uint16_t*>(argument)))
+                                 : *(reinterpret_cast<const float*>(argument));
           static const char* fSpecifiers = "eEfgGa";
           std::string fmtF = fmt;
           size_t posS = fmtF.find_first_of("%");
@@ -327,13 +327,12 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
             hhFmt.erase(hhFmt.find_first_of("h"), 2);
             amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
           } else if (hlModifier) {
-            amd::Os::printf(hlFmt.data(),
-                            size == 2 ? *(reinterpret_cast<const uint16_t*>(argument))
-                                      : *(reinterpret_cast<const uint32_t*>(argument)));
+            amd::Os::printf(hlFmt.data(), size == 2
+                                              ? *(reinterpret_cast<const uint16_t*>(argument))
+                                              : *(reinterpret_cast<const uint32_t*>(argument)));
           } else {
-            amd::Os::printf(fmt.data(),
-                            size == 2 ? *(reinterpret_cast<const uint16_t*>(argument))
-                                      : *(reinterpret_cast<const uint32_t*>(argument)));
+            amd::Os::printf(fmt.data(), size == 2 ? *(reinterpret_cast<const uint16_t*>(argument))
+                                                  : *(reinterpret_cast<const uint32_t*>(argument)));
           }
         }
         break;

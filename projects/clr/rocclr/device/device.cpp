@@ -79,9 +79,6 @@ extern const char* BlitImageSourceCode;
 
 bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
 
-#if defined(USE_COMGR_LIBRARY)
-extern amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str);
-#endif
 }  // namespace amd::device
 
 static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone) ==
@@ -339,9 +336,9 @@ const Isa* Isa::findIsa(uint32_t versionMajor, uint32_t versionMinor, uint32_t v
   auto supportedIsas_ = supportedIsas();
   auto isaIter = std::find_if(supportedIsas_.first, supportedIsas_.second, [&](const Isa& isa) {
     return versionMajor == isa.versionMajor_ && versionMinor == isa.versionMinor_ &&
-        versionStepping == isa.versionStepping_ &&
-        (isa.sramecc_ == amd::Isa::Feature::Unsupported || isa.sramecc_ == sramecc) &&
-        (isa.xnack_ == amd::Isa::Feature::Unsupported || isa.xnack_ == xnack);
+           versionStepping == isa.versionStepping_ &&
+           (isa.sramecc_ == amd::Isa::Feature::Unsupported || isa.sramecc_ == sramecc) &&
+           (isa.xnack_ == amd::Isa::Feature::Unsupported || isa.xnack_ == xnack);
   });
   return isaIter == supportedIsas_.second ? nullptr : isaIter;
 }
@@ -349,61 +346,6 @@ const Isa* Isa::findIsa(uint32_t versionMajor, uint32_t versionMinor, uint32_t v
 const Isa* Isa::begin() { return supportedIsas().first; }
 
 const Isa* Isa::end() { return supportedIsas().second; }
-
-#if defined(USE_COMGR_LIBRARY)
-void Isa::setAvailableSgprVgprCached() const {
-  std::call_once(setSgprVgprFlag, [this]() {
-    std::string buf;
-    amd_comgr_metadata_node_t isaMeta;
-    amd_comgr_metadata_node_t sgprMeta;
-    amd_comgr_metadata_node_t vgprMeta;
-    bool hasIsaMeta = false;
-    bool hasSgprMeta = false;
-    bool hasVgprMeta = false;
-
-    amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isaName().c_str(), &isaMeta);
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasIsaMeta = true;
-      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumSGPRs", &sgprMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasSgprMeta = true;
-      status = amd::device::getMetaBuf(sgprMeta, &buf);
-    }
-
-    sgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumVGPRs", &vgprMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasVgprMeta = true;
-      status = amd::device::getMetaBuf(vgprMeta, &buf);
-    }
-
-    vgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-    if (hasVgprMeta) {
-      amd::Comgr::destroy_metadata(vgprMeta);
-    }
-
-    if (hasSgprMeta) {
-      amd::Comgr::destroy_metadata(sgprMeta);
-    }
-
-    if (hasIsaMeta) {
-      amd::Comgr::destroy_metadata(isaMeta);
-    }
-
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      DevLogPrintfError("Failed to set SGPR/VGPR for ISA: %s", isaName().c_str());
-    }
-  });
-}
-#endif
 
 std::vector<Device*>* Device::devices_ = nullptr;
 AppProfile Device::appProfile_;
@@ -584,7 +526,7 @@ bool Device::ValidateVirtualAddressRange(amd::Memory* vaddr_base_obj, amd::Memor
 
 //==================================================================================================
 amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vptr, size_t size,
-                                         int deviceId, bool parent, bool kForceAlloc) {
+                                         int deviceId, int locationType, bool parent, bool kForceAlloc) {
   amd::Memory* vaddr_base_obj = nullptr;
   amd::Memory* vaddr_sub_obj = nullptr;
   constexpr bool kSysMemAlloc = false;
@@ -630,6 +572,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     }
 
     vaddr_sub_obj->getUserData().deviceId = deviceId;
+    vaddr_sub_obj->getUserData().locationType = locationType;
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
@@ -1132,7 +1075,7 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
 
   // Calculate the memory offset from the original base ptr
   *mem_offset = reinterpret_cast<address>(dev_ptr) - reinterpret_cast<address>(orig_dev_ptr) +
-      amd_mem_obj->getOffset();
+                amd_mem_obj->getOffset();
 
   *mem_size = amd_mem_obj->getSize();
 

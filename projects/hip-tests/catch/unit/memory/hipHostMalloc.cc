@@ -297,3 +297,17 @@ TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
   }
 }
 #endif
+
+TEST_CASE("Unit_hipHostMalloc_Capture") {
+  int* host_ptr = nullptr;
+  hipError_t capture_error = hipSuccess;
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), sizeBytes), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (host_ptr != nullptr) {
+    HIP_CHECK(hipHostFree(host_ptr));
+  }
+}

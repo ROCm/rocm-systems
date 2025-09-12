@@ -160,12 +160,12 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     }
 
     if (profilingInfo().enabled_) {
-      ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
               &command(), ((profilingInfo().end_ - epoch) / 1000),
               ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
               ((profilingInfo().end_ - profilingInfo().start_) / 1000));
     } else {
-      ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete", &command());
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete", &command());
     }
     release();
   }
@@ -177,7 +177,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 bool Event::resetStatus(int32_t status) {
   int32_t currentStatus = this->status();
   if (currentStatus != CL_COMPLETE) {
-    ClPrint(LOG_ERROR, LOG_CMD, "command is reset before complete current status :%d",
+    ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :%d",
             currentStatus);
   }
   if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
@@ -191,7 +191,7 @@ bool Event::resetStatus(int32_t status) {
 // ================================================================================================
 bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* data,
                         bool blocking) {
-  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "invalid status");
+  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "Invalid status");
 
   CallBackEntry* entry = new CallBackEntry(status, callback, data, blocking);
   if (entry == NULL) {
@@ -240,8 +240,8 @@ bool Event::awaitCompletion() {
       return false;
     }
 
-    ClPrint(LOG_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d", this,
-            status());
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
+            this, status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
       while (status() > CL_COMPLETE) {
@@ -255,7 +255,7 @@ bool Event::awaitCompletion() {
         lock_.wait();
       }
     }
-    ClPrint(LOG_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
   }
 
   return status() == CL_COMPLETE;
@@ -301,10 +301,9 @@ const Event::EventWaitList Event::nullWaitList(0);
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue,
-            amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
-                queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
-                Agent::shouldPostEventEvents()),
+    : Event(queue, amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
+                       queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
+                       Agent::shouldPostEventEvents()),
       queue_(&queue),
       next_(nullptr),
       type_(type),
@@ -354,7 +353,7 @@ void Command::enqueue() {
     Agent::postEventCreate(as_cl(static_cast<Event*>(this)), type_);
   }
 
-  ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
           amd::activity_prof::getOclCommandKindString(this->type()), this, queue_);
 
   // Direct dispatch logic below will submit the command immediately, but the command status
@@ -604,24 +603,24 @@ bool CopyMemoryCommand::isEntireMemory() const {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         source().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
-          destination().isEntirelyCovered(dstOrigin(), imageSize);
+               destination().isEntirelyCovered(dstOrigin(), imageSize);
     } break;
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         destination().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), imageSize) &&
-          destination().isEntirelyCovered(dstOrigin(), size());
+               destination().isEntirelyCovered(dstOrigin(), size());
     } break;
     case CL_COMMAND_COPY_BUFFER_RECT: {
       Coord3D rectSize(size()[0] * size()[1] * size()[2]);
       Coord3D srcOffs(srcRect().start_);
       Coord3D dstOffs(dstRect().start_);
       result = source().isEntirelyCovered(srcOffs, rectSize) &&
-          destination().isEntirelyCovered(dstOffs, rectSize);
+               destination().isEntirelyCovered(dstOffs, rectSize);
     } break;
     default:
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
-          destination().isEntirelyCovered(dstOrigin(), size());
+               destination().isEntirelyCovered(dstOrigin(), size());
       break;
   }
   return result;

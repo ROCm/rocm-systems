@@ -173,6 +173,85 @@ TEST_CASE("Unit_hipLaunchHostFunc_Positive_Thread") {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
 }
+namespace {
+__global__ void kernelA(double* arrayA, size_t size) {
+  const size_t x = threadIdx.x + blockDim.x * blockIdx.x;
+  if (x < size) {
+    arrayA[x] *= 2.0;
+  }
+}
+
+struct set_vector_args {
+  std::vector<double>& h_array;
+  double value;
+};
+
+static void set_vector(void* args) {
+  set_vector_args h_args{*(reinterpret_cast<set_vector_args*>(args))};
+  std::vector<double>& vec{h_args.h_array};
+  vec.assign(vec.size(), h_args.value);
+}
+}  // namespace
+
+TEST_CASE("Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture") {
+  constexpr int numOfBlocks = 1024;
+  constexpr int threadsPerBlock = 1024;
+  constexpr size_t arraySize = 1U << 20;  // 1,048,576
+  constexpr double initValue = 2.0;
+
+  double* d_arrayA = nullptr;
+  std::vector<double> h_array(arraySize);
+
+  hipStream_t captureStream{};
+  HIP_CHECK(hipStreamCreate(&captureStream));
+
+  // Begin stream capture
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
+
+  // Device alloc (async so it belongs to the captured stream)
+  HIP_CHECK(hipMallocAsync(&d_arrayA, arraySize * sizeof(double), captureStream));
+
+  // Initialize host data via a host function in the stream
+  set_vector_args args{h_array, initValue};
+  HIP_CHECK(hipLaunchHostFunc(captureStream, set_vector, &args));
+
+  // HtoD copy
+  HIP_CHECK(hipMemcpyAsync(d_arrayA, h_array.data(), arraySize * sizeof(double),
+                           hipMemcpyHostToDevice, captureStream));
+
+  // KernelA only
+  kernelA<<<numOfBlocks, threadsPerBlock, 0, captureStream>>>(d_arrayA, arraySize);
+  HIP_CHECK(hipGetLastError());
+
+  // DtoH copy
+  HIP_CHECK(hipMemcpyAsync(h_array.data(), d_arrayA, arraySize * sizeof(double),
+                           hipMemcpyDeviceToHost, captureStream));
+
+  // Free device memory inside the graph
+  HIP_CHECK(hipFreeAsync(d_arrayA, captureStream));
+
+  // End capture -> graph
+  hipGraph_t graph{};
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+
+  // Instantiate and launch
+  hipGraphExec_t graphExec{};
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
+  HIP_CHECK(hipStreamSynchronize(captureStream));
+
+  // Validate: each element should be initValue * 2.0
+  const double expected = initValue * 2.0;
+  for (size_t i = 0; i < arraySize; ++i) {
+    REQUIRE(h_array[i] == expected);
+  }
+
+  // Cleanup
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipStreamDestroy(captureStream));
+}
+
 
 /**
  * End doxygen group GraphTest.

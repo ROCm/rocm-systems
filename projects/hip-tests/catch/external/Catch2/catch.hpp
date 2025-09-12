@@ -734,13 +734,11 @@ constexpr auto operator"" _catch_sr(char const* rawChars, std::size_t size) noex
   f(x) CATCH_DEFER(CATCH_REC_NEXT(peek, CATCH_REC_LIST1))(f, peek, __VA_ARGS__)
 
 #define CATCH_REC_LIST0_UD(f, userdata, x, peek, ...)                                              \
-  ,                                                                                                \
-      f(userdata, x)                                                                               \
-          CATCH_DEFER(CATCH_REC_NEXT(peek, CATCH_REC_LIST1_UD))(f, userdata, peek, __VA_ARGS__)
+  , f(userdata, x)                                                                                 \
+        CATCH_DEFER(CATCH_REC_NEXT(peek, CATCH_REC_LIST1_UD))(f, userdata, peek, __VA_ARGS__)
 #define CATCH_REC_LIST1_UD(f, userdata, x, peek, ...)                                              \
-  ,                                                                                                \
-      f(userdata, x)                                                                               \
-          CATCH_DEFER(CATCH_REC_NEXT(peek, CATCH_REC_LIST0_UD))(f, userdata, peek, __VA_ARGS__)
+  , f(userdata, x)                                                                                 \
+        CATCH_DEFER(CATCH_REC_NEXT(peek, CATCH_REC_LIST0_UD))(f, userdata, peek, __VA_ARGS__)
 #define CATCH_REC_LIST2_UD(f, userdata, x, peek, ...)                                              \
   f(userdata, x)                                                                                   \
       CATCH_DEFER(CATCH_REC_NEXT(peek, CATCH_REC_LIST1_UD))(f, userdata, peek, __VA_ARGS__)
@@ -827,8 +825,8 @@ constexpr auto operator"" _catch_sr(char const* rawChars, std::size_t size) noex
     return {};                                                                                     \
   }                                                                                                \
   template <template <typename...> class...> struct TemplateTypeList {};                           \
-  template <template <typename...> class... Cs>                                                    \
-  constexpr auto get_wrapper() noexcept -> TemplateTypeList<Cs...> {                               \
+  template <template <typename...> class... Cs> constexpr auto get_wrapper() noexcept              \
+      -> TemplateTypeList<Cs...> {                                                                 \
     return {};                                                                                     \
   }                                                                                                \
   template <typename...> struct append;                                                            \
@@ -876,8 +874,8 @@ constexpr auto operator"" _catch_sr(char const* rawChars, std::size_t size) noex
 
 #define INTERNAL_CATCH_NTTP_1(signature, ...)                                                      \
   template <INTERNAL_CATCH_REMOVE_PARENS(signature)> struct Nttp {};                               \
-  template <INTERNAL_CATCH_REMOVE_PARENS(signature)>                                               \
-  constexpr auto get_wrapper() noexcept -> Nttp<__VA_ARGS__> {                                     \
+  template <INTERNAL_CATCH_REMOVE_PARENS(signature)> constexpr auto get_wrapper() noexcept         \
+      -> Nttp<__VA_ARGS__> {                                                                       \
     return {};                                                                                     \
   }                                                                                                \
   template <template <INTERNAL_CATCH_REMOVE_PARENS(signature)> class...>                           \
@@ -950,14 +948,14 @@ constexpr auto operator"" _catch_sr(char const* rawChars, std::size_t size) noex
 
 #define INTERNAL_CATCH_DECLARE_SIG_TEST_METHOD0(TestName, ClassName)
 #define INTERNAL_CATCH_DECLARE_SIG_TEST_METHOD1(TestName, ClassName, signature)                    \
-  template <typename TestType>                                                                     \
-  struct TestName : INTERNAL_CATCH_REMOVE_PARENS(ClassName)<TestType> {                            \
+  template <typename TestType> struct TestName                                                     \
+      : INTERNAL_CATCH_REMOVE_PARENS(ClassName)<TestType> {                                        \
     void test();                                                                                   \
   }
 
 #define INTERNAL_CATCH_DECLARE_SIG_TEST_METHOD_X(TestName, ClassName, signature, ...)              \
-  template <INTERNAL_CATCH_REMOVE_PARENS(signature)>                                               \
-  struct TestName : INTERNAL_CATCH_REMOVE_PARENS(ClassName)<__VA_ARGS__> {                         \
+  template <INTERNAL_CATCH_REMOVE_PARENS(signature)> struct TestName                               \
+      : INTERNAL_CATCH_REMOVE_PARENS(ClassName)<__VA_ARGS__> {                                     \
     void test();                                                                                   \
   }
 
@@ -1123,19 +1121,17 @@ struct is_callable_tester {
 
 template <typename T> struct is_callable;
 
-template <typename Fun, typename... Args>
-struct is_callable<Fun(Args...)> : decltype(is_callable_tester::test<Fun, Args...>(0)) {};
+template <typename Fun, typename... Args> struct is_callable<Fun(Args...)>
+    : decltype(is_callable_tester::test<Fun, Args...>(0)) {};
 
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703
 // std::result_of is deprecated in C++17 and removed in C++20. Hence, it is
 // replaced with std::invoke_result here.
-template <typename Func, typename... U>
-using FunctionReturnType =
+template <typename Func, typename... U> using FunctionReturnType =
     std::remove_reference_t<std::remove_cv_t<std::invoke_result_t<Func, U...>>>;
 #else
 // Keep ::type here because we still support C++11
-template <typename Func, typename... U>
-using FunctionReturnType = typename std::remove_reference<
+template <typename Func, typename... U> using FunctionReturnType = typename std::remove_reference<
     typename std::remove_cv<typename std::result_of<Func(U...)>::type>::type>::type;
 #endif
 
@@ -1556,8 +1552,8 @@ struct AutoReg : NonCopyable {
   CATCH_INTERNAL_SUPPRESS_GLOBALS_WARNINGS                                                         \
   CATCH_INTERNAL_SUPPRESS_ZERO_VARIADIC_WARNINGS                                                   \
   CATCH_INTERNAL_SUPPRESS_UNUSED_TEMPLATE_WARNINGS                                                 \
-  template <typename TestType>                                                                     \
-  struct TestName : INTERNAL_CATCH_REMOVE_PARENS(ClassName<TestType>) {                            \
+  template <typename TestType> struct TestName                                                     \
+      : INTERNAL_CATCH_REMOVE_PARENS(ClassName<TestType>) {                                        \
     void test();                                                                                   \
   };                                                                                               \
   namespace {                                                                                      \
@@ -1632,8 +1628,8 @@ struct AutoReg : NonCopyable {
   CATCH_INTERNAL_START_WARNINGS_SUPPRESSION                                                        \
   CATCH_INTERNAL_SUPPRESS_GLOBALS_WARNINGS                                                         \
   CATCH_INTERNAL_SUPPRESS_UNUSED_TEMPLATE_WARNINGS                                                 \
-  template <typename TestType>                                                                     \
-  struct TestName : INTERNAL_CATCH_REMOVE_PARENS(ClassName<TestType>) {                            \
+  template <typename TestType> struct TestName                                                     \
+      : INTERNAL_CATCH_REMOVE_PARENS(ClassName<TestType>) {                                        \
     void test();                                                                                   \
   };                                                                                               \
   namespace {                                                                                      \
@@ -1813,9 +1809,8 @@ struct IMutableEnumValuesRegistry {
   virtual Detail::EnumInfo const& registerEnum(StringRef enumName, StringRef allEnums,
                                                std::vector<int> const& values) = 0;
 
-  template <typename E>
-  Detail::EnumInfo const& registerEnum(StringRef enumName, StringRef allEnums,
-                                       std::initializer_list<E> values) {
+  template <typename E> Detail::EnumInfo const& registerEnum(StringRef enumName, StringRef allEnums,
+                                                             std::initializer_list<E> values) {
     static_assert(sizeof(int) >= sizeof(E), "Cannot serialize enum to int");
     std::vector<int> intValues;
     intValues.reserve(values.size());
@@ -1892,8 +1887,8 @@ template <typename T> std::string rawMemoryToString(const T& object) {
 }
 
 template <typename T> class IsStreamInsertable {
-  template <typename Stream, typename U>
-  static auto test(int) -> decltype(std::declval<Stream&>() << std::declval<U>(), std::true_type());
+  template <typename Stream, typename U> static auto test(int)
+      -> decltype(std::declval<Stream&>() << std::declval<U>(), std::true_type());
 
   template <typename, typename> static auto test(...) -> std::false_type;
 
@@ -1936,8 +1931,7 @@ template <typename T> std::string clrReferenceToString(T ^ ref) {
 
 // If we decide for C++14, change these to enable_if_ts
 template <typename T, typename = void> struct StringMaker {
-  template <typename Fake = T>
-  static
+  template <typename Fake = T> static
       typename std::enable_if<::Catch::Detail::IsStreamInsertable<Fake>::value, std::string>::type
       convert(const Fake& value) {
     ReusableStringStream rss;
@@ -1947,8 +1941,7 @@ template <typename T, typename = void> struct StringMaker {
     return rss.str();
   }
 
-  template <typename Fake = T>
-  static
+  template <typename Fake = T> static
       typename std::enable_if<!::Catch::Detail::IsStreamInsertable<Fake>::value, std::string>::type
       convert(const Fake& value) {
 #if !defined(CATCH_CONFIG_FALLBACK_STRINGIFIER)
@@ -2534,8 +2527,8 @@ template <typename LhsT> class UnaryExpr : public ITransientExpression {
 
 // Specialised comparison functions to handle equality comparisons between ints and pointers (NULL
 // deduces as an int)
-template <typename LhsT, typename RhsT>
-auto compareEqual(LhsT const& lhs, RhsT const& rhs) -> bool {
+template <typename LhsT, typename RhsT> auto compareEqual(LhsT const& lhs, RhsT const& rhs)
+    -> bool {
   return static_cast<bool>(lhs == rhs);
 }
 template <typename T> auto compareEqual(T* const& lhs, int rhs) -> bool {
@@ -3812,8 +3805,8 @@ namespace Catch {
 namespace Matchers {
 
 namespace Vector {
-template <typename T, typename Alloc>
-struct ContainsElementMatcher : MatcherBase<std::vector<T, Alloc>> {
+template <typename T, typename Alloc> struct ContainsElementMatcher
+    : MatcherBase<std::vector<T, Alloc>> {
   ContainsElementMatcher(T const& comparator) : m_comparator(comparator) {}
 
   bool match(std::vector<T, Alloc> const& v) const override {
@@ -3832,8 +3825,8 @@ struct ContainsElementMatcher : MatcherBase<std::vector<T, Alloc>> {
   T const& m_comparator;
 };
 
-template <typename T, typename AllocComp, typename AllocMatch>
-struct ContainsMatcher : MatcherBase<std::vector<T, AllocMatch>> {
+template <typename T, typename AllocComp, typename AllocMatch> struct ContainsMatcher
+    : MatcherBase<std::vector<T, AllocMatch>> {
   ContainsMatcher(std::vector<T, AllocComp> const& comparator) : m_comparator(comparator) {}
 
   bool match(std::vector<T, AllocMatch> const& v) const override {
@@ -3860,8 +3853,8 @@ struct ContainsMatcher : MatcherBase<std::vector<T, AllocMatch>> {
   std::vector<T, AllocComp> const& m_comparator;
 };
 
-template <typename T, typename AllocComp, typename AllocMatch>
-struct EqualsMatcher : MatcherBase<std::vector<T, AllocMatch>> {
+template <typename T, typename AllocComp, typename AllocMatch> struct EqualsMatcher
+    : MatcherBase<std::vector<T, AllocMatch>> {
   EqualsMatcher(std::vector<T, AllocComp> const& comparator) : m_comparator(comparator) {}
 
   bool match(std::vector<T, AllocMatch> const& v) const override {
@@ -3880,8 +3873,8 @@ struct EqualsMatcher : MatcherBase<std::vector<T, AllocMatch>> {
   std::vector<T, AllocComp> const& m_comparator;
 };
 
-template <typename T, typename AllocComp, typename AllocMatch>
-struct ApproxMatcher : MatcherBase<std::vector<T, AllocMatch>> {
+template <typename T, typename AllocComp, typename AllocMatch> struct ApproxMatcher
+    : MatcherBase<std::vector<T, AllocMatch>> {
   ApproxMatcher(std::vector<T, AllocComp> const& comparator) : m_comparator(comparator) {}
 
   bool match(std::vector<T, AllocMatch> const& v) const override {
@@ -3913,8 +3906,8 @@ struct ApproxMatcher : MatcherBase<std::vector<T, AllocMatch>> {
   mutable Catch::Detail::Approx approx = Catch::Detail::Approx::custom();
 };
 
-template <typename T, typename AllocComp, typename AllocMatch>
-struct UnorderedEqualsMatcher : MatcherBase<std::vector<T, AllocMatch>> {
+template <typename T, typename AllocComp, typename AllocMatch> struct UnorderedEqualsMatcher
+    : MatcherBase<std::vector<T, AllocMatch>> {
   UnorderedEqualsMatcher(std::vector<T, AllocComp> const& target) : m_target(target) {}
   bool match(std::vector<T, AllocMatch> const& vec) const override {
     if (m_target.size() != vec.size()) {
@@ -4082,8 +4075,7 @@ struct IGeneratorTracker {
 
 namespace Catch {
 #if !defined(CATCH_CONFIG_DISABLE_EXCEPTIONS)
-template <typename Ex>
-[[noreturn]]
+template <typename Ex> [[noreturn]]
 void throw_exception(Ex const& e) {
   throw e;
 }
@@ -4233,8 +4225,7 @@ template <typename T> class Generators : public IGenerator<T> {
   }
 };
 
-template <typename... Ts>
-GeneratorWrapper<std::tuple<Ts...>> table(
+template <typename... Ts> GeneratorWrapper<std::tuple<Ts...>> table(
     std::initializer_list<std::tuple<typename std::decay<Ts>::type...>> tuples) {
   return values<std::tuple<Ts...>>(tuples);
 }
@@ -4249,8 +4240,8 @@ auto makeGenerators(GeneratorWrapper<T>&& generator, Gs&&... moreGenerators) -> 
 template <typename T> auto makeGenerators(GeneratorWrapper<T>&& generator) -> Generators<T> {
   return Generators<T>(std::move(generator));
 }
-template <typename T, typename... Gs>
-auto makeGenerators(T&& val, Gs&&... moreGenerators) -> Generators<T> {
+template <typename T, typename... Gs> auto makeGenerators(T&& val, Gs&&... moreGenerators)
+    -> Generators<T> {
   return makeGenerators(value(std::forward<T>(val)), std::forward<Gs>(moreGenerators)...);
 }
 template <typename T, typename U, typename... Gs>
@@ -4342,8 +4333,7 @@ template <typename T, typename Predicate> class FilterGenerator : public IGenera
   Predicate m_predicate;
 
  public:
-  template <typename P = Predicate>
-  FilterGenerator(P&& pred, GeneratorWrapper<T>&& generator)
+  template <typename P = Predicate> FilterGenerator(P&& pred, GeneratorWrapper<T>&& generator)
       : m_generator(std::move(generator)), m_predicate(std::forward<P>(pred)) {
     if (!m_predicate(m_generator.get())) {
       // It might happen that there are no values that pass the
@@ -4437,8 +4427,7 @@ template <typename T, typename U, typename Func> class MapGenerator : public IGe
   T m_cache;
 
  public:
-  template <typename F2 = Func>
-  MapGenerator(F2&& function, GeneratorWrapper<U>&& generator)
+  template <typename F2 = Func> MapGenerator(F2&& function, GeneratorWrapper<U>&& generator)
       : m_generator(std::move(generator)),
         m_function(std::forward<F2>(function)),
         m_cache(m_function(m_generator.get())) {}
@@ -5099,7 +5088,7 @@ struct EndsWith : StringHolder {
 
   bool match(NSString* str) const override {
     return (str != nil || m_substr == nil) &&
-        [str rangeOfString:m_substr].location == [str length] - [m_substr length];
+           [str rangeOfString:m_substr].location == [str length] - [m_substr length];
   }
 
   std::string describe() const override {
@@ -6490,8 +6479,8 @@ class XmlReporter : public StreamingReporterBase<XmlReporter> {
 namespace Catch {
 namespace Benchmark {
 template <typename Clock> using ClockDuration = typename Clock::duration;
-template <typename Clock>
-using FloatDuration = std::chrono::duration<double, typename Clock::period>;
+template <typename Clock> using FloatDuration =
+    std::chrono::duration<double, typename Clock::period>;
 
 template <typename Clock> using TimePoint = typename Clock::time_point;
 
@@ -6542,14 +6531,12 @@ inline void optimizer_barrier() { std::atomic_thread_fence(std::memory_order_seq
 
 template <typename T> inline void deoptimize_value(T&& x) { keep_memory(&x); }
 
-template <typename Fn, typename... Args>
-inline auto invoke_deoptimized(Fn&& fn, Args&&... args) ->
+template <typename Fn, typename... Args> inline auto invoke_deoptimized(Fn&& fn, Args&&... args) ->
     typename std::enable_if<!std::is_same<void, decltype(fn(args...))>::value>::type {
   deoptimize_value(std::forward<Fn>(fn)(std::forward<Args...>(args...)));
 }
 
-template <typename Fn, typename... Args>
-inline auto invoke_deoptimized(Fn&& fn, Args&&... args) ->
+template <typename Fn, typename... Args> inline auto invoke_deoptimized(Fn&& fn, Args&&... args) ->
     typename std::enable_if<std::is_same<void, decltype(fn(args...))>::value>::type {
   std::forward<Fn>(fn)(std::forward<Args...>(args...));
 }
@@ -6822,8 +6809,7 @@ template <typename Duration, typename Result> struct Timing {
   Result result;
   int iterations;
 };
-template <typename Clock, typename Func, typename... Args>
-using TimingOf =
+template <typename Clock, typename Func, typename... Args> using TimingOf =
     Timing<ClockDuration<Clock>, Detail::CompleteType_t<FunctionReturnType<Func, Args...>>>;
 }  // namespace Benchmark
 }  // namespace Catch
@@ -6865,8 +6851,7 @@ TimingOf<Clock, Fun, Chronometer> measure_one(Fun&& fun, int iters, std::true_ty
   return {meter.elapsed(), std::move(result), iters};
 }
 
-template <typename Clock, typename Fun>
-using run_for_at_least_argument_t =
+template <typename Clock, typename Fun> using run_for_at_least_argument_t =
     typename std::conditional<is_callable<Fun(Chronometer)>::value, Chronometer, int>::type;
 
 struct optimized_away_error : std::exception {
@@ -7301,8 +7286,8 @@ namespace Benchmark {
 struct Benchmark {
   Benchmark(std::string&& name) : name(std::move(name)) {}
 
-  template <class FUN>
-  Benchmark(std::string&& name, FUN&& func) : fun(std::move(func)), name(std::move(name)) {}
+  template <class FUN> Benchmark(std::string&& name, FUN&& func)
+      : fun(std::move(func)), name(std::move(name)) {}
 
   template <typename Clock>
   ExecutionPlan<FloatDuration<Clock>> prepare(const IConfig& cfg,
@@ -7715,7 +7700,7 @@ double standard_deviation(std::vector<double>::iterator first, std::vector<doubl
                                       double diff = b - m;
                                       return a + diff * diff;
                                     }) /
-      (last - first);
+                    (last - first);
   return std::sqrt(variance);
 }
 
@@ -7876,8 +7861,8 @@ bool Approx::equalityComparisonImpl(const double other) const {
   // First try with fixed margin, then compute margin based on epsilon, scale and Approx's value
   // Thanks to Richard Harris for his help refining the scaled margin value
   return marginComparison(m_value, other, m_margin) ||
-      marginComparison(m_value, other,
-                       m_epsilon * (m_scale + std::fabs(std::isinf(m_value) ? 0 : m_value)));
+         marginComparison(m_value, other,
+                          m_epsilon * (m_scale + std::fabs(std::isinf(m_value) ? 0 : m_value)));
 }
 
 void Approx::setMargin(double newMargin) {
@@ -8477,7 +8462,7 @@ class Column {
       assert(at <= line().size());
 
       return at == line().size() || (isWhitespace(line()[at]) && !isWhitespace(line()[at - 1])) ||
-          isBreakableBefore(line()[at]) || isBreakableAfter(line()[at - 1]);
+             isBreakableBefore(line()[at]) || isBreakableAfter(line()[at - 1]);
     }
 
     void calcLength() {
@@ -8560,7 +8545,7 @@ class Column {
 
     auto operator==(iterator const& other) const -> bool {
       return m_pos == other.m_pos && m_stringIndex == other.m_stringIndex &&
-          &m_column == &other.m_column;
+             &m_column == &other.m_column;
     }
     auto operator!=(iterator const& other) const -> bool { return !operator==(other); }
   };
@@ -8786,7 +8771,7 @@ struct Token {
 inline auto isOptPrefix(char c) -> bool {
   return c == '-'
 #ifdef CATCH_PLATFORM_WINDOWS
-      || c == '/'
+         || c == '/'
 #endif
       ;
 }
@@ -8910,8 +8895,7 @@ template <> class ResultValueBase<void> : public ResultBase {
 
 template <typename T = void> class BasicResult : public ResultValueBase<T> {
  public:
-  template <typename U>
-  explicit BasicResult(BasicResult<U> const& other)
+  template <typename U> explicit BasicResult(BasicResult<U> const& other)
       : ResultValueBase<T>(other.type()), m_errorMessage(other.errorMessage()) {
     assert(type() != ResultBase::Ok);
   }
@@ -8975,8 +8959,8 @@ struct HelpColumns {
   std::string right;
 };
 
-template <typename T>
-inline auto convertInto(std::string const& source, T& target) -> ParserResult {
+template <typename T> inline auto convertInto(std::string const& source, T& target)
+    -> ParserResult {
   std::stringstream ss;
   ss << source;
   ss >> target;
@@ -9072,15 +9056,15 @@ template <typename ReturnType> struct LambdaInvoker {
   static_assert(std::is_same<ReturnType, ParserResult>::value,
                 "Lambda must return void or clara::ParserResult");
 
-  template <typename L, typename ArgType>
-  static auto invoke(L const& lambda, ArgType const& arg) -> ParserResult {
+  template <typename L, typename ArgType> static auto invoke(L const& lambda, ArgType const& arg)
+      -> ParserResult {
     return lambda(arg);
   }
 };
 
 template <> struct LambdaInvoker<void> {
-  template <typename L, typename ArgType>
-  static auto invoke(L const& lambda, ArgType const& arg) -> ParserResult {
+  template <typename L, typename ArgType> static auto invoke(L const& lambda, ArgType const& arg)
+      -> ParserResult {
     lambda(arg);
     return ParserResult::ok(ParseResultType::Matched);
   }
@@ -9154,12 +9138,10 @@ template <typename DerivedT> class ParserRefImpl : public ComposableParserImpl<D
   explicit ParserRefImpl(std::shared_ptr<BoundRef> const& ref) : m_ref(ref) {}
 
  public:
-  template <typename T>
-  ParserRefImpl(T& ref, std::string const& hint)
+  template <typename T> ParserRefImpl(T& ref, std::string const& hint)
       : m_ref(std::make_shared<BoundValueRef<T>>(ref)), m_hint(hint) {}
 
-  template <typename LambdaT>
-  ParserRefImpl(LambdaT const& ref, std::string const& hint)
+  template <typename LambdaT> ParserRefImpl(LambdaT const& ref, std::string const& hint)
       : m_ref(std::make_shared<BoundLambda<LambdaT>>(ref)), m_hint(hint) {}
 
   auto operator()(std::string const& description) -> DerivedT& {
@@ -9193,8 +9175,8 @@ class ExeName : public ComposableParserImpl<ExeName> {
   std::shared_ptr<std::string> m_name;
   std::shared_ptr<BoundValueRefBase> m_ref;
 
-  template <typename LambdaT>
-  static auto makeRef(LambdaT const& lambda) -> std::shared_ptr<BoundValueRefBase> {
+  template <typename LambdaT> static auto makeRef(LambdaT const& lambda)
+      -> std::shared_ptr<BoundValueRefBase> {
     return std::make_shared<BoundLambda<LambdaT>>(lambda);
   }
 
@@ -9265,14 +9247,13 @@ class Opt : public ParserRefImpl<Opt> {
   std::vector<std::string> m_optNames;
 
  public:
-  template <typename LambdaT>
-  explicit Opt(LambdaT const& ref)
+  template <typename LambdaT> explicit Opt(LambdaT const& ref)
       : ParserRefImpl(std::make_shared<BoundFlagLambda<LambdaT>>(ref)) {}
 
   explicit Opt(bool& ref) : ParserRefImpl(std::make_shared<BoundFlagRef>(ref)) {}
 
-  template <typename LambdaT>
-  Opt(LambdaT const& ref, std::string const& hint) : ParserRefImpl(ref, hint) {}
+  template <typename LambdaT> Opt(LambdaT const& ref, std::string const& hint)
+      : ParserRefImpl(ref, hint) {}
 
   template <typename T> Opt(T& ref, std::string const& hint) : ParserRefImpl(ref, hint) {}
 
@@ -9436,7 +9417,7 @@ struct Parser : ParserBase {
 
     for (auto const& cols : rows) {
       auto row = TextFlow::Column(cols.left).width(optWidth).indent(2) + TextFlow::Spacer(4) +
-          TextFlow::Column(cols.right).width(consoleWidth - 7 - optWidth);
+                 TextFlow::Column(cols.right).width(consoleWidth - 7 - optWidth);
       os << row << std::endl;
     }
   }
@@ -9507,8 +9488,7 @@ struct Parser : ParserBase {
   }
 };
 
-template <typename DerivedT>
-template <typename T>
+template <typename DerivedT> template <typename T>
 auto ComposableParserImpl<DerivedT>::operator|(T const& other) const -> Parser {
   return Parser() | static_cast<DerivedT const&>(*this) | other;
 }
@@ -9674,7 +9654,8 @@ clara::Parser makeCommandLineParser(ConfigData& config) {
     return ParserResult::ok(ParseResultType::Matched);
   };
 
-  auto cli = ExeName(config.processName) | Help(config.showHelp) |
+  auto cli =
+      ExeName(config.processName) | Help(config.showHelp) |
       Opt(config.listTests)["-l"]["--list-tests"]("list all/matching test cases") |
       Opt(config.listTags)["-t"]["--list-tags"]("list all/matching tags") |
       Opt(config.showSuccessfulTests)["-s"]["--success"]("include successful tests in output") |
@@ -9689,38 +9670,38 @@ clara::Parser makeCommandLineParser(ConfigData& config) {
           "no. failures")["-x"]["--abortx"]("abort after x failures") |
       Opt(setWarning, "warning name")["-w"]["--warn"]("enable warnings") |
       Opt(
-                 [&](bool flag) {
-                   config.showDurations = flag ? ShowDurations::Always : ShowDurations::Never;
-                 },
-                 "yes|no")["-d"]["--durations"]("show test durations") |
+          [&](bool flag) {
+            config.showDurations = flag ? ShowDurations::Always : ShowDurations::Never;
+          },
+          "yes|no")["-d"]["--durations"]("show test durations") |
       Opt(config.minDuration, "seconds")["-D"]["--min-duration"](
-                 "show test durations for tests taking at least the given number of seconds") |
+          "show test durations for tests taking at least the given number of seconds") |
       Opt(loadTestNamesFromFile,
           "filename")["-f"]["--input-file"]("load test names to run from a file") |
       Opt(config.filenamesAsTags)["-#"]["--filenames-as-tags"]("adds a tag for the filename") |
       Opt(config.sectionsToRun, "section name")["-c"]["--section"]("specify section to run") |
       Opt(setVerbosity, "quiet|normal|high")["-v"]["--verbosity"]("set output verbosity") |
       Opt(config.listTestNamesOnly)["--list-test-names-only"](
-                 "list all/matching test cases names only") |
+          "list all/matching test cases names only") |
       Opt(config.listReporters)["--list-reporters"]("list all reporters") |
       Opt(setTestOrder, "decl|lex|rand")["--order"]("test case order (defaults to decl)") |
       Opt(setRngSeed, "'time'|number")["--rng-seed"]("set a specific seed for random numbers") |
       Opt(setColourUsage, "yes|no")["--use-colour"]("should output be colourised") |
       Opt(config.libIdentify)["--libidentify"](
-                 "report name and version according to libidentify standard") |
+          "report name and version according to libidentify standard") |
       Opt(setWaitForKeypress,
           "never|start|exit|both")["--wait-for-keypress"]("waits for a keypress before exiting") |
       Opt(config.benchmarkSamples,
           "samples")["--benchmark-samples"]("number of samples to collect (default: 100)") |
       Opt(config.benchmarkResamples, "resamples")["--benchmark-resamples"](
-                 "number of resamples for the bootstrap (default: 100000)") |
+          "number of resamples for the bootstrap (default: 100000)") |
       Opt(config.benchmarkConfidenceInterval,
           "confidence interval")["--benchmark-confidence-interval"](
-                 "confidence interval for the bootstrap (between 0 and 1, default: 0.95)") |
+          "confidence interval for the bootstrap (between 0 and 1, default: 0.95)") |
       Opt(config.benchmarkNoAnalysis)["--benchmark-no-analysis"](
-                 "perform only measurements; do not perform any analysis") |
+          "perform only measurements; do not perform any analysis") |
       Opt(config.benchmarkWarmupTime, "benchmarkWarmupTime")["--benchmark-warmup-time"](
-                 "amount of time in milliseconds spent on warming up each test (default: 100)") |
+          "amount of time in milliseconds spent on warming up each test (default: 100)") |
       Arg(config.testsOrTags, "test name|pattern|tags")("which test or tests to use");
 
   return cli;
@@ -9742,7 +9723,7 @@ bool SourceLineInfo::operator<(SourceLineInfo const& other) const noexcept {
   // We can assume that the same file will usually have the same pointer.
   // Thus, if the pointers are the same, there is no point in calling the strcmp
   return line < other.line ||
-      (line == other.line && file != other.file && (std::strcmp(file, other.file) < 0));
+         (line == other.line && file != other.file && (std::strcmp(file, other.file) < 0));
 }
 
 std::ostream& operator<<(std::ostream& os, SourceLineInfo const& info) {
@@ -9900,10 +9881,10 @@ class Win32ColourImpl : public IColourImpl {
   Win32ColourImpl() : stdoutHandle(GetStdHandle(STD_OUTPUT_HANDLE)) {
     CONSOLE_SCREEN_BUFFER_INFO csbiInfo;
     GetConsoleScreenBufferInfo(stdoutHandle, &csbiInfo);
-    originalForegroundAttributes = csbiInfo.wAttributes &
-        ~(BACKGROUND_GREEN | BACKGROUND_RED | BACKGROUND_BLUE | BACKGROUND_INTENSITY);
-    originalBackgroundAttributes = csbiInfo.wAttributes &
-        ~(FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+    originalForegroundAttributes = csbiInfo.wAttributes & ~(BACKGROUND_GREEN | BACKGROUND_RED |
+                                                            BACKGROUND_BLUE | BACKGROUND_INTENSITY);
+    originalBackgroundAttributes = csbiInfo.wAttributes & ~(FOREGROUND_GREEN | FOREGROUND_RED |
+                                                            FOREGROUND_BLUE | FOREGROUND_INTENSITY);
   }
 
   void use(Colour::Code _colourCode) override {
@@ -11062,10 +11043,10 @@ std::size_t listReporters() {
 
   for (auto const& factoryKvp : factories) {
     Catch::cout() << Column(factoryKvp.first + ":").indent(2).width(5 + maxNameLen) +
-            Column(factoryKvp.second->getDescription())
-                .initialIndent(0)
-                .indent(2)
-                .width(CATCH_CONFIG_CONSOLE_WIDTH - maxNameLen - 8)
+                         Column(factoryKvp.second->getDescription())
+                             .initialIndent(0)
+                             .indent(2)
+                             .width(CATCH_CONFIG_CONSOLE_WIDTH - maxNameLen - 8)
                   << "\n";
   }
   Catch::cout() << std::endl;
@@ -11253,7 +11234,7 @@ bool WithinAbsMatcher::match(double const& matchee) const {
 
 std::string WithinAbsMatcher::describe() const {
   return "is within " + ::Catch::Detail::stringify(m_margin) + " of " +
-      ::Catch::Detail::stringify(m_target);
+         ::Catch::Detail::stringify(m_target);
 }
 
 WithinUlpsMatcher::WithinUlpsMatcher(double target, uint64_t ulps, FloatingPointKind baseType)
@@ -11449,8 +11430,8 @@ bool RegexMatcher::match(std::string const& matchee) const {
 
 std::string RegexMatcher::describe() const {
   return "matches " + ::Catch::Detail::stringify(m_regex) +
-      ((m_caseSensitivity == CaseSensitive::Choice::Yes) ? " case sensitively"
-                                                         : " case insensitively");
+         ((m_caseSensitivity == CaseSensitive::Choice::Yes) ? " case sensitively"
+                                                            : " case insensitively");
 }
 
 }  // namespace StdString
@@ -13169,8 +13150,8 @@ Catch::IStream::~IStream() = default;
 
 namespace Detail {
 namespace {
-template <typename WriterF, std::size_t bufferSize = 256>
-class StreamBufImpl : public std::streambuf {
+template <typename WriterF, std::size_t bufferSize = 256> class StreamBufImpl
+    : public std::streambuf {
   char data[bufferSize];
   WriterF m_writer;
 
@@ -13491,7 +13472,7 @@ std::string TagAliasRegistry::expandAliases(std::string const& unexpandedTestSpe
     std::size_t pos = expandedTestSpec.find(registryKvp.first);
     if (pos != std::string::npos) {
       expandedTestSpec = expandedTestSpec.substr(0, pos) + registryKvp.second.tag +
-          expandedTestSpec.substr(pos + registryKvp.first.size());
+                         expandedTestSpec.substr(pos + registryKvp.first.size());
     }
   }
   return expandedTestSpec;
@@ -13544,7 +13525,7 @@ TestCaseInfo::SpecialProperties parseSpecialTag(std::string const& tag) {
 }
 bool isReservedTag(std::string const& tag) {
   return parseSpecialTag(tag) == TestCaseInfo::None && tag.size() > 0 &&
-      !std::isalnum(static_cast<unsigned char>(tag[0]));
+         !std::isalnum(static_cast<unsigned char>(tag[0]));
 }
 void enforceNotReservedTag(std::string const& tag, SourceLineInfo const& _lineInfo) {
   CATCH_ENFORCE(
@@ -13758,11 +13739,11 @@ void enforceNoDuplicateTestCases(std::vector<TestCase> const& functions) {
   std::set<TestCase> seenFunctions;
   for (auto const& function : functions) {
     auto prev = seenFunctions.insert(function);
-    CATCH_ENFORCE(prev.second,
-                  "error: TEST_CASE( \""
-                      << function.name << "\" ) already defined.\n"
-                      << "\tFirst seen at " << prev.first->getTestCaseInfo().lineInfo << "\n"
-                      << "\tRedefined at " << function.getTestCaseInfo().lineInfo);
+    CATCH_ENFORCE(prev.second, "error: TEST_CASE( \""
+                                   << function.name << "\" ) already defined.\n"
+                                   << "\tFirst seen at " << prev.first->getTestCaseInfo().lineInfo
+                                   << "\n"
+                                   << "\tRedefined at " << function.getTestCaseInfo().lineInfo);
   }
 }
 
@@ -13884,7 +13865,7 @@ ITrackerPtr TrackerBase::findChild(NameAndLocation const& nameAndLocation) {
   auto it = std::find_if(m_children.begin(), m_children.end(),
                          [&nameAndLocation](ITrackerPtr const& tracker) {
                            return tracker->nameAndLocation().location == nameAndLocation.location &&
-                               tracker->nameAndLocation().name == nameAndLocation.name;
+                                  tracker->nameAndLocation().name == nameAndLocation.name;
                          });
   return (it != m_children.end()) ? *it : nullptr;
 }
@@ -14077,7 +14058,7 @@ TestSpec::TagPattern::TagPattern(std::string const& tag, std::string const& filt
 
 bool TestSpec::TagPattern::matches(TestCaseInfo const& testCase) const {
   return std::find(begin(testCase.lcaseTags), end(testCase.lcaseTags), m_tag) !=
-      end(testCase.lcaseTags);
+         end(testCase.lcaseTags);
 }
 
 TestSpec::ExcludedPattern::ExcludedPattern(PatternPtr const& underlyingPattern)
@@ -15751,8 +15732,8 @@ class TablePrinter {
 
     auto colInfo = tp.m_columnInfos[tp.m_currentColumn];
     auto padding = (strSize + 1 < static_cast<std::size_t>(colInfo.width))
-        ? std::string(colInfo.width - (strSize + 1), ' ')
-        : std::string();
+                       ? std::string(colInfo.width - (strSize + 1), ' ')
+                       : std::string();
     if (colInfo.justification == ColumnInfo::Left)
       tp.m_os << colStr << padding << ' ';
     else

@@ -476,7 +476,7 @@ def getAllocatedMemoryPercent(device):
     mem_use_pct = 0
     if vram_used is None:
         return allocated_memory_vram
-    if vram_used != None and vram_total != None and float(vram_total) != 0:
+    if vram_used is not None and vram_total is not None and float(vram_total) != 0:
         # take floor of result (round down to nearest integer)
         mem_use_pct = (100 * (float(vram_used) / float(vram_total))) // 1
         allocated_memory_vram['value'] = mem_use_pct
@@ -531,7 +531,7 @@ def getProcessName(pid):
     except subprocess.CalledProcessError as e:
         pName = 'UNKNOWN'
 
-    if pName == None:
+    if pName is None:
         pName = 'UNKNOWN'
 
     # Remove the substrings surrounding from process name (b' and \n')
@@ -877,6 +877,9 @@ def printEventList(device, delay, eventList):
         if len(data.message) > 0:
             print2DArray([['\rGPU[%d]:\t' % (data.dv_ind), ctime().split()[3], notification_type_names[data.event.value - 1],
                            data.message.decode('utf8') + '\r']])
+    ret = rocmsmi.rsmi_event_notification_stop(device)
+    if not rsmi_ret_ok(ret, device, 'stop_event_notification'):
+        printErrLog(device, 'Unable to end event notifications.')
 
 def printLog(device, metricName, value=None, extraSpace=False, useItalics=False, xcp=None):
     """ Print out to the SMI log
@@ -919,8 +922,8 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False,
 
         # Handle non UTF-8 locale
         try:
-            print(logstr + '\n', end='')
-        except UnicodeEncodeError:
+            print(logstr.encode('utf-8', 'ignore').decode('utf-8'))
+        except UnicodeError:
             print(logstr.encode('ascii', 'ignore').decode('ascii'))
 
         sys.stdout.flush()
@@ -1140,11 +1143,6 @@ def resetProfile(deviceList):
             printLog(device, 'Successfully reset Power Profile', None)
         else:
             printErrLog(device, 'Unable to reset Power Profile')
-        ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(0))
-        if rsmi_ret_ok(ret, device, 'set_perf_level'):
-            printLog(device, 'Successfully reset Performance Level', None)
-        else:
-            printErrLog(device, 'Unable to reset Performance Level')
     printLogSpacer()
 
 
@@ -1443,7 +1441,7 @@ def setClocks(deviceList, clktype, clk):
             # Validate frequency bitmask
             freq = rsmi_frequencies_t()
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clktype], byref(freq))
-            if rsmi_ret_ok(ret, device, 'get_gpu_clk_freq_' + str(clktype)) == False:
+            if not rsmi_ret_ok(ret, device, 'get_gpu_clk_freq_' + str(clktype)):
                 RETCODE = 1
                 return
             # The freq_bitmask should be less than 2^(freqs.num_supported)
@@ -1463,7 +1461,7 @@ def setClocks(deviceList, clktype, clk):
             # Validate the bandwidth bitmask
             bw = rsmi_pcie_bandwidth_t()
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
-            if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth') == False:
+            if not rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth'):
                 RETCODE = 1
                 return
             # The freq_bitmask should be less than 2^(bw.transfer_rate.num_supported)
@@ -1694,7 +1692,7 @@ def setPowerOverDrive(deviceList, value, autoRespond):
             new_power_cap.value = int(value) * 1000000
 
         ret = rocmsmi.rsmi_dev_power_cap_range_get(device, 0, byref(power_cap_max), byref(power_cap_min))
-        if rsmi_ret_ok(ret, device, 'get_power_cap_range') == False:
+        if not rsmi_ret_ok(ret, device, 'get_power_cap_range'):
             printErrLog(device, 'Unable to parse Power OverDrive range')
             RETCODE = 1
             continue
@@ -2384,7 +2382,7 @@ def getCoarseGrainUtil(device, typeName=None):
     """
     timestamp = c_uint64(0)
 
-    if typeName != None:
+    if typeName is not None:
 
         try:
             i = utilization_counter_name.index(typeName)
@@ -2593,6 +2591,26 @@ def showPcieBw(deviceList):
     max_pkt_sz = c_uint64()
     printLogSpacer(' Measured PCIe Bandwidth ')
     for device in deviceList:
+        # Get BW from GPU metrics from version >= 1.5
+        header = metrics_table_header_t()
+        ret_version = rocmsmi.rsmi_dev_metrics_header_info_get(device, byref(header))
+        if rsmi_ret_ok(ret_version, device, 'get_metrics_header', True):
+            if header.format_revision >= 1 and header.content_revision >= 5:
+                gpu_metrics = rsmi_gpu_metrics_t()
+                ret = rocmsmi.rsmi_dev_gpu_metrics_info_get(device, byref(gpu_metrics))
+                if rsmi_ret_ok(ret, device, "get_gpu_metrics", True):
+                    metric_bw = gpu_metrics.pcie_bandwidth_inst
+                    if metric_bw != ctypes.c_uint64(-1).value and metric_bw > 0:
+                        bandwidth_mbps = metric_bw / 8.0  # Convert megabits to megabytes
+                        bwstr = f"{bandwidth_mbps:.3f}"
+                        printLog(device, "Current PCIe bandwidth (MB/s)", bwstr)
+                        continue
+                    else:
+                        printLog(device, "GPU metrics pcie_bandwidth_inst is invalid", None)
+                else:
+                    printLog(device, "Failed to get GPU metrics info", None)
+
+        # Use legacy API (For GPU metric version < 1.5 or failed)
         ret = rocmsmi.rsmi_dev_pci_throughput_get(device, byref(sent), byref(received), byref(max_pkt_sz))
         if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth'):
             # Use 1024.0 to ensure that the result is a float and not integer division
@@ -3007,7 +3025,7 @@ def showEvents(deviceList, eventTypes):
     :param eventTypes: List of event type names (can be a single-item list)
     """
     printLogSpacer(' Show Events ')
-    printLog(None, 'press \'q\' or \'ctrl + c\' to quit', None)
+    printLog(None, 'press \'q\' or \'ctrl + c\' and then \'Enter\' to quit', None)
     eventTypeList = []
     thread_list = []
     for event in eventTypes:  # Cleaning list from wrong values
@@ -3022,23 +3040,18 @@ def showEvents(deviceList, eventTypes):
         for device in deviceList:
             try:
                 thread = threading.Thread(target=printEventList, args=(device, 1000, eventTypeList))
-                thread.start()
                 thread_list.append(thread)
+                thread.start()
                 time.sleep(0.25)
             except Exception as e:
                 printErrLog(device, 'Unable to start new thread. %s' % (e))
                 return
-    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
-        getch = _Getch()
-        user_input = getch()
+    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c' and then 'Enter'
+        user_input = input()
         # Catch user input for q or Ctrl + c
-        global stop_threads
-        stop_threads = True
         if user_input == 'q' or user_input == '\x03':
-            for device in deviceList:
-                ret = rocmsmi.rsmi_event_notification_stop(device)
-                if not rsmi_ret_ok(ret, device, 'stop_event_notification'):
-                    printErrLog(device, 'Unable to end event notifications.')
+            global stop_threads
+            stop_threads = True
             print('\r')
             break
     for thread in thread_list:
@@ -3316,7 +3329,7 @@ def showWeightTopology(deviceList):
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
                 printTableRow('%-12s', '0')
-            elif (gpu_links_weight[gpu1][gpu2] == None):
+            elif (gpu_links_weight[gpu1][gpu2] is None):
                 printTableRow('%-12s', 'N/A')
             else:
                 printTableRow('%-12s', gpu_links_weight[gpu1][gpu2].value)
@@ -3362,7 +3375,7 @@ def showHopsTopology(deviceList):
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
                 printTableRow('%-12s', '0')
-            elif (gpu_links_hops[gpu1][gpu2] == None):
+            elif (gpu_links_hops[gpu1][gpu2] is None):
                 printTableRow('%-12s', 'N/A')
             else:
                 printTableRow('%-12s', gpu_links_hops[gpu1][gpu2].value)
@@ -4490,7 +4503,7 @@ if __name__ == '__main__':
 
     if not PRINT_JSON:
         print('\n')
-    if not isConciseInfoRequested(args) and args.showhw == False:
+    if not isConciseInfoRequested(args) and not args.showhw:
         printLogSpacer(headerString)
 
     if args.showallinfo:
@@ -4599,7 +4612,7 @@ if __name__ == '__main__':
         showPcieReplayCount(deviceList)
     if args.showserial:
         showSerialNumber(deviceList)
-    if args.showpids != None:
+    if args.showpids is not None:
         showPids(args.showpids)
     if args.showpidgpus or str(args.showpidgpus) == '[]':
         showGpusByPid(args.showpidgpus)
@@ -4743,10 +4756,10 @@ if __name__ == '__main__':
             devCsv = ''
             sysCsv = ''
             # JSON won't have any 'system' data without one of these flags
-            if args.showdriverversion and args.showallinfo == False:
+            if args.showdriverversion and not args.showallinfo:
                 sysCsv = formatCsv(['system'])
                 print('%s' % (sysCsv))
-            elif args.showallinfo is True:
+            elif args.showallinfo:
                 sysCsv = formatCsv(['system'])
                 devCsv = formatCsv(deviceList)
                 print('%s\n%s' % (sysCsv, devCsv))
@@ -4754,7 +4767,7 @@ if __name__ == '__main__':
                 devCsv = formatCsv(deviceList)
                 print(devCsv)
 
-    if not isConciseInfoRequested(args) and args.showhw == False:
+    if not isConciseInfoRequested(args) and not args.showhw:
         printLogSpacer(footerString)
 
     rsmi_ret_ok(rocmsmi.rsmi_shut_down())

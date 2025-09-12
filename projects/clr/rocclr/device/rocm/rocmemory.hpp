@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "platform/memory.hpp"
 #include "utils/debug.hpp"
@@ -153,10 +151,10 @@ class Memory : public device::Memory {
 
   // Get MemorySegment type in terms of host memory allocation flags
   Device::MemorySegment getHostMemorySegment(const unsigned int memFlags) {
-    return (memFlags & CL_MEM_SVM_ATOMICS) == 0
-        ? Device::MemorySegment::kNoAtomics
-        : ((memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0 ? Device::MemorySegment::kUncachedAtomics
-                                                     : Device::MemorySegment::kAtomics);
+    return (memFlags & CL_MEM_SVM_ATOMICS) == 0 ? Device::MemorySegment::kNoAtomics
+                                                : ((memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0
+                                                       ? Device::MemorySegment::kUncachedAtomics
+                                                       : Device::MemorySegment::kAtomics);
   }
 
  private:
@@ -271,4 +269,4 @@ class Image : public roc::Memory {
   std::vector<amd::Image*> view_cache_;  //!< Cache of views for fast access
 };
 }  // namespace amd::roc
-#endif
+

@@ -229,6 +229,24 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
                     hipErrorInvalidValue);
   }
 
+  SECTION("Stream not on the same device") {
+    int numDevices = 0;
+    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      SUCCEED("skipped the testcase as number of devices is less than 2");
+    } else {
+      HIP_CHECK(hipSetDevice(1));
+      hipStream_t s1;
+      HIP_CHECK(hipStreamCreate(&s1));
+      HIP_CHECK(hipSetDevice(0));
+      hipFunction_t f = GetKernel(mg.module(), "Kernel42");
+      void* extra[0] = {};
+      HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, s1, nullptr, extra, nullptr, nullptr, 0u),
+                      hipErrorInvalidResourceHandle);
+      HIP_CHECK(hipStreamDestroy(s1));
+    }
+  }
+
   SECTION("Invalid extra") {
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");
     void* extra[0] = {};

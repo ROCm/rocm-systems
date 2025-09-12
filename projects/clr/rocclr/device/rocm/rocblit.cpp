@@ -310,7 +310,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
       hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
       // Copy memory line by line
-      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Async Copy Rect dst=0x%zx, src=0x%zx, wait_event=0x%zx, "
               "completion_signal=0x%zx",
               dstMem.base, srcMem.base, (wait_events.size() != 0) ? wait_events[0].handle : 0,
@@ -335,7 +335,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
           size_t dstOffset = dstRect.offset(0, y, z);
 
           // Copy memory line by line
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA Async Copy wait_event=0x%zx, completion_signal=0x%zx",
                   (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
           hsa_status_t status = hsa_amd_memory_async_copy(
@@ -509,7 +509,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
   if (!kUseRegularCopyApi && engine != HwQueueEngine::Unknown) {
     copyMask = gpu().getLastUsedSdmaEngine();
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
     copyMask &= (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
     if (copyMask == 0) {
       // Check SDMA engine status
@@ -526,7 +526,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
       // If requested engine is valid and available, use it
       if (recIdMask != 0 && (freeEngineMask & recIdMask) != 0) {
-        copyMask = recIdMask;
+        copyMask = recIdMask - (recIdMask & (recIdMask - 1));
       } else {
         // Otherwise use first available engine
         copyMask = freeEngineMask - (freeEngineMask & (freeEngineMask - 1));
@@ -539,7 +539,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
 
-      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
               "size=%ld, forceSDMA=%d, engineType=%d, wait_event=0x%zx, completion_signal=0x%zx",
               copyEngine, dst, src, size, forceSDMA, engine,
@@ -554,7 +554,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   }
 
   if (engine == HwQueueEngine::Unknown || kUseRegularCopyApi) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
             "HSA Copy dst=0x%zx, src=0x%zx, size=%ld, wait_event=0x%zx, "
             "completion_signal=0x%zx, engineType=%d",
             dst, src, size, (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle,
@@ -656,7 +656,8 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
     if (pinnedMem != nullptr) {
       Memory* pinnedMemory = dev().getRocMemory(pinnedMem);
       address pinBuffer = pinnedMemory->getDeviceMemory();
-      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d", xferSize);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d",
+              xferSize);
       buffState.copySize_ = xferSize;
       buffState.buffer_ = pinBuffer + partial1 + partial2;
       buffState.pinnedMem_ = pinnedMem;
@@ -666,7 +667,8 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
   }
   // If Memory Pinning fails, failback to staging buffer
   xferSize = std::min(xferSize, StagingXferSize);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %d", xferSize);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %d",
+          xferSize);
   buffState.copySize_ = xferSize;
   buffState.buffer_ = gpu().Staging().Acquire(std::min(xferSize, StagingXferSize));
 }
@@ -711,7 +713,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     }
     if (hostToDev) {                          // H2D Path
       if (outBuffer.pinnedMem_ == nullptr) {  // Copy to Staging Buffer
-        ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                 stagingBuffer, hostSrc + copyOffset, copysize);
         memcpy(stagingBuffer, hostSrc + copyOffset, copysize);
       }
@@ -731,7 +733,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
         if (outBuffer.pinnedMem_ == nullptr) {
           // Wait for current signal of previous rocr copy if its not pinned mem
           gpu().Barriers().WaitCurrent();
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
                   hostDst + copyOffset, stagingBuffer, copysize);
           memcpy(hostDst + copyOffset, stagingBuffer, copysize);
         }
@@ -748,9 +750,11 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     firstTx = false;
   }
 
-  // @note: HIP requires a blocking wait on D2H with the pageable system memory
-  if (amd::IS_HIP && !hostToDev) {
+  // @note: HIP requires to unpin all memory after operation, due to an optimization with
+  // direct HSA signal check HIP avoids the command completion wait
+  if (amd::IS_HIP && (gpu().command() != nullptr) && gpu().command()->IsMemoryPinned()) {
     gpu().Barriers().WaitCurrent();
+    gpu().command()->ReleasePinnedMemory();
   }
 
   if (!status) {
@@ -1709,8 +1713,8 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
   } else {
     size_t totalSize = size[0];
     // Do a staging copy
-    bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-        (totalSize <= dev().settings().sdmaCopyThreshold_) ||
+    bool useShaderCopyPath =
+        setup_.disableHwlCopyBuffer_ || (totalSize <= dev().settings().sdmaCopyThreshold_) ||
         (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT);
 
     if (!useShaderCopyPath) {
@@ -1752,7 +1756,7 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
         // Wait for current signal of previous blit copy if its not pinned mem
         if (outBuffer.pinnedMem_ == nullptr) {
           gpu().Barriers().WaitCurrent();
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
                   (void*)(dstAddr + stagedCopyOffset), stagingBuffer, copySize);
           memcpy(dstAddr + stagedCopyOffset, stagingBuffer, copySize);
         }
@@ -1843,8 +1847,8 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
   } else {
     size_t totalSize = size[0];
     // Do a staging copy
-    bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-        (totalSize <= dev().settings().sdmaCopyThreshold_) ||
+    bool useShaderCopyPath =
+        setup_.disableHwlCopyBuffer_ || (totalSize <= dev().settings().sdmaCopyThreshold_) ||
         (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT);
 
     if (!useShaderCopyPath) {
@@ -1873,7 +1877,7 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
         copySize = outBuffer.copySize_;
         address currentDstAddr = dstAddr + stagedCopyOffset;
         if (outBuffer.pinnedMem_ == nullptr) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                   stagingBuffer, (void*)(srcAddr + stagedCopyOffset), copySize);
           memcpy(stagingBuffer, srcAddr + stagedCopyOffset, copySize);
         }
@@ -2014,18 +2018,18 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     for (auto& packed_obj : packed_vector) {
       constexpr uint32_t kFillType = FillBufferAligned;
       uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-          ? HostBlitManager::FillBufferInfo::kExtendedSize
-          : patternSize;
+                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
+                                   : patternSize;
       size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
       size_t koffset = overall_offset;
       overall_offset += packed_obj.fill_size_;
 
       size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0 ? 2 * sizeof(uint64_t)
-          : (kpattern_size & 0x7) == 0                ? sizeof(uint64_t)
-          : (kpattern_size & 0x3) == 0                ? sizeof(uint32_t)
-          : (kpattern_size & 0x1) == 0                ? sizeof(uint16_t)
-                                                      : sizeof(uint8_t);
+      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
+                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
+                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
+                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
+                                                        : sizeof(uint8_t);
       // Program kernels arguments for the fill operation
       cl_mem mem = as_cl<amd::Memory>(memory.owner());
       setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
@@ -2096,10 +2100,10 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     size_t globalWorkSize[3] = {amd::alignUp(fillSizeX, 16), amd::alignUp(fillSizeY, 16), 1};
     size_t localWorkSize[3] = {16, 16, 1};
 
-    uint32_t alignment = (patternSize & 0x7) == 0 ? sizeof(uint64_t)
-        : (patternSize & 0x3) == 0                ? sizeof(uint32_t)
-        : (patternSize & 0x1) == 0                ? sizeof(uint16_t)
-                                                  : sizeof(uint8_t);
+    uint32_t alignment = (patternSize & 0x7) == 0   ? sizeof(uint64_t)
+                         : (patternSize & 0x3) == 0 ? sizeof(uint32_t)
+                         : (patternSize & 0x1) == 0 ? sizeof(uint16_t)
+                                                    : sizeof(uint8_t);
 
     cl_mem mem = as_cl<amd::Memory>(memory.owner());
     if (alignment == sizeof(uint64_t)) {
@@ -2248,15 +2252,29 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
     }
   }
 
-  bool ipcShared = srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+  // Determine if we should use shader copy path based on various conditions
+  bool hwlCopyDisabled = setup_.disableHwlCopyBuffer_;
 
-  bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-      (sizeIn[0] <= dev().settings().sdmaCopyThreshold_) ||
-      (!(p2p || ipcShared) &&
-           (!srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess() &&
-            !(copyMetadata.copyEnginePreference_ ==
-              amd::CopyMetadata::CopyEnginePreference::SDMA)) ||
-       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT));
+  // Check copy engine preferences
+  bool isSdmaPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  bool isBlitPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
+
+  // Check memory access patterns
+  bool isP2pOrIpc = p2p || srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+  bool neitherMemoryIsHostDirectAccess =
+      !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
+
+  // Determine shader copy path conditions
+  bool smallSizeWithNonSdmaPreference =
+      sizeIn[0] <= dev().settings().sdmaCopyThreshold_ && !isSdmaPreference;
+
+  bool nonP2PIpcOrDirectAccess =
+      !isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference;
+
+  const bool useShaderCopyPath = hwlCopyDisabled || smallSizeWithNonSdmaPreference ||
+                                 nonP2PIpcOrDirectAccess || isBlitPreference;
 
   if (!useShaderCopyPath) {
     if (amd::IS_HIP) {
@@ -2307,9 +2325,8 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   constexpr size_t kFillImageThreshold = 256 * 256;
 
   // Use host fill if memory has direct access and image is small
-  if (setup_.disableFillImage_ ||
-      (gpuMem(memory).isHostMemDirectAccess() &&
-       (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
+  if (setup_.disableFillImage_ || (gpuMem(memory).isHostMemDirectAccess() &&
+                                   (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     result = HostBlitManager::fillImage(memory, pattern, origin, size, entire);
@@ -2691,8 +2708,8 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
 
   amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
 
-  device::Kernel* devKernel = const_cast<device::Kernel*>(
-    kernels_[Scheduler]->getDeviceKernel(dev()));
+  device::Kernel* devKernel =
+      const_cast<device::Kernel*>(kernels_[Scheduler]->getDeviceKernel(dev()));
 
   Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
 

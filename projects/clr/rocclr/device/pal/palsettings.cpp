@@ -140,7 +140,7 @@ Settings::Settings() {
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
                       const Pal::GpuMemoryHeapProperties* heaps, const Pal::WorkStationCaps& wscaps,
-                      bool enableXNACK, bool reportAsOCL12Device) {
+                      const amd::Isa& isa, bool reportAsOCL12Device) {
   uint32_t osVer = 0x0;
 
   // Disable thread trace by default for all devices
@@ -151,8 +151,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     apuSystem_ = true;
   }
 
-  enableXNACK_ = enableXNACK;
-  hsailExplicitXnack_ = enableXNACK;
+  enableXNACK_ = (isa.xnack() == amd::Isa::Feature::Enabled);
+  hsailExplicitXnack_ = enableXNACK_;
   bool useWavefront64 = false;
 
   std::string appName = {};
@@ -341,9 +341,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #endif
   }
 
-  if (apuSystem_ &&
-      ((heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize) <
-       (150 * Mi))) {
+  if (apuSystem_ && ((heaps[Pal::GpuHeapLocal].logicalSize +
+                      heaps[Pal::GpuHeapInvisible].logicalSize) < (150 * Mi))) {
     remoteAlloc_ = true;
   }
 

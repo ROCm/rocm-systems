@@ -142,6 +142,8 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_compare_host_device", "", float, double) {
                       << " - gpu_result: " << result[i]);
     CHECK(cpu_result[i] == result[i]);
   }
+
+  HIP_CHECK(hipFree(d_numbers));
 }
 
 __FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2* val) {
@@ -234,6 +236,8 @@ TEST_CASE("Unit_fp8x2_ocp_compare_host_device") {
   for (size_t i = 0; i < result.size(); i++) {
     CHECK(cpu_result[i] == result[i]);
   }
+
+  HIP_CHECK(hipFree(d_numbers));
 }
 
 TEST_CASE("Unit_fp8x2_ocp_split_compare") {
@@ -290,6 +294,8 @@ TEST_CASE("Unit_fp8x2_ocp_split_compare") {
                    << " y: " << result[i].y);
     CHECK(cpu_result[i] == result[i]);
   }
+
+  HIP_CHECK(hipFree(d_numbers));
 }
 
 __FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
@@ -388,6 +394,8 @@ TEST_CASE("Unit_fp8x4_ocp_split_compare") {
                    << " w: " << result[i].w);
     CHECK(cpu_result[i] == result[i]);
   }
+
+  HIP_CHECK(hipFree(d_numbers));
 }
 
 __FP8_DEVICE__ bool e4m3_bool_ocp_device(float val) {
@@ -629,8 +637,8 @@ template <typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float* cvt1, f
 
   __hip_fp8_e4m3 tmp1;
   tmp1.__x = std::is_same<T, float>::value
-      ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3)
-      : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3);
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3);
   ;
   *cvt2 = tmp1;
 #else
@@ -647,8 +655,8 @@ template <typename T> __FP8_DEVICE__ void e5m2_ocp_fp8_cvt(T val, float* cvt1, f
 
   __hip_fp8_e5m2 tmp1;
   tmp1.__x = std::is_same<T, float>::value
-      ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2)
-      : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2);
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2);
   ;
   *cvt2 = tmp1;
 #else

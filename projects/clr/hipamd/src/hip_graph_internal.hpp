@@ -49,7 +49,7 @@ class GraphKernelNode;
 typedef GraphNode* Node;
 hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                             hip::GraphNode* const* pDependencies, size_t numDependencies,
-                            bool capture);
+                            bool capture = true, int devId = 0);
 
 class UserObject : public amd::ReferenceCountedObject {
   typedef void (*UserCallbackDestructor)(void* data);
@@ -366,9 +366,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   virtual void EnqueueCommands(hip::Stream* stream) {
     // If the node is disabled it becomes empty node. To maintain ordering just enqueue marker.
     // Node can be enabled/disabled only for kernel, memcpy and memset nodes.
-    if (!isEnabled_ &&
-        (type_ == hipGraphNodeTypeKernel || type_ == hipGraphNodeTypeMemcpy ||
-         type_ == hipGraphNodeTypeMemset)) {
+    if (!isEnabled_ && (type_ == hipGraphNodeTypeKernel || type_ == hipGraphNodeTypeMemcpy ||
+                        type_ == hipGraphNodeTypeMemset)) {
       amd::Command::EventWaitList waitList;
       if (!commands_.empty()) {
         waitList = commands_[0]->eventWaitList();
@@ -479,6 +478,53 @@ class GraphNode : public hipGraphNodeDOTAttribute {
                 //!< when explicitly added)
 };
 
+class GraphEventWaitNode : public GraphNode {
+  hipEvent_t event_;
+
+ public:
+  GraphEventWaitNode(hipEvent_t event)
+      : GraphNode(hipGraphNodeTypeWaitEvent, "solid", "rectangle", "EVENT_WAIT"), event_(event) {}
+
+  ~GraphEventWaitNode() {}
+
+  GraphEventWaitNode(const GraphEventWaitNode& rhs) : GraphNode(rhs) { event_ = rhs.event_; }
+
+  GraphNode* clone() const override { return new GraphEventWaitNode(*this); }
+
+  hipError_t CreateCommand(hip::Stream* stream) override {
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
+    hip::Event* e = reinterpret_cast<hip::Event*>(event_);
+    commands_.reserve(1);
+    amd::Command* command;
+    status = e->streamWaitCommand(command, stream);
+    commands_.emplace_back(command);
+    return status;
+  }
+
+  void EnqueueCommands(hip::Stream* stream) override {
+    if (!commands_.empty()) {
+      hip::Event* e = reinterpret_cast<hip::Event*>(event_);
+      commands_[0]->enqueue();
+      commands_[0]->release();
+    }
+  }
+
+  void GetParams(hipEvent_t* event) const { *event = event_; }
+
+  hipError_t SetParams(hipEvent_t event) {
+    event_ = event;
+    return hipSuccess;
+  }
+
+  hipError_t SetParams(GraphNode* node) override {
+    const GraphEventWaitNode* eventWaitNode = static_cast<GraphEventWaitNode const*>(node);
+    return SetParams(eventWaitNode->event_);
+  }
+};
+
 class Graph {
  public:
   //!< Contains mem alloc dptrs whose corresponding free node is not added to the graph.
@@ -533,6 +579,16 @@ class Graph {
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
 
   std::unordered_set<GraphNode*> GetManualNodesDuringCapture() { return capturedNodes_; }
+
+  GraphNode* AddExternalEventWaitNode(hip::GraphNode* pDependencies, size_t numDependencies,
+    hipEvent_t event) {
+    GraphNode* node = new GraphEventWaitNode(event);
+    for (size_t i = 0; i < numDependencies; i++) {
+      pDependencies[i].AddEdgeDep(node);
+    }
+    AddNode(node);
+    return node;
+  }
 
   void RemoveManualNodesDuringCapture() {
     capturedNodes_.erase(capturedNodes_.begin(), capturedNodes_.end());
@@ -602,7 +658,7 @@ class Graph {
   void ScheduleNodes();
 
   //! Update streams for the graph execution
-  void UpdateStreams(
+  hipError_t UpdateStreams(
       hip::Stream* launch_stream,                       //!< Launch stream from the application
       const std::vector<hip::Stream*>& parallel_stream  //!< The list of parallel streams
   );
@@ -736,6 +792,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
  public:
   static std::unordered_set<GraphExec*> graphExecSet_;
   static amd::Monitor graphExecSetLock_;
+  static amd::Monitor graphExecStreamCreateLock_;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
     amd::ScopedLock lock(graphExecSetLock_);
@@ -885,6 +942,9 @@ class GraphKernelNode : public GraphNode {
   ihipExtKernelEvents kernelEvents_;   //!< Events for Ext launch kernel
   bool hasHiddenHeap_;                 //!< Kernel has hidden heap(device side allocation)
   int coopKernel_;                     //!< Launch cooperative kernel
+  int globalWorkSizeX_remainder_;
+  int globalWorkSizeY_remainder_;
+  int globalWorkSizeZ_remainder_;
 
  public:
   bool HasHiddenHeap() const { return hasHiddenHeap_; }
@@ -943,17 +1003,19 @@ class GraphKernelNode : public GraphNode {
     char buffer[4096];
     if (flag == hipGraphDebugDotFlagsVerbose) {
       sprintf(buffer,
-              "{\n%s\n| {ID | %d | %s\\<\\<\\<(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>}\n| {{node "
+              "{\n%s\n| {ID | %d | %s\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>}\n| {{node "
               "handle | func handle} | {%p | %p}}\n| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} | {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
               label_, GetID(), function->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z, kernelParams_.blockDim.x,
-              kernelParams_.blockDim.y, kernelParams_.blockDim.z, kernelParams_.sharedMemBytes,
-              this, kernelParams_.func, kernelAttr_.accessPolicyWindow.base_ptr,
-              kernelAttr_.accessPolicyWindow.num_bytes, kernelAttr_.accessPolicyWindow.hitRatio,
-              kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
-              kernelAttr_.cooperative, kernelAttr_.priority);
+              kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+              globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+              kernelParams_.sharedMemBytes, this, kernelParams_.func,
+              kernelAttr_.accessPolicyWindow.base_ptr, kernelAttr_.accessPolicyWindow.num_bytes,
+              kernelAttr_.accessPolicyWindow.hitRatio, kernelAttr_.accessPolicyWindow.hitProp,
+              kernelAttr_.accessPolicyWindow.missProp, kernelAttr_.cooperative,
+              kernelAttr_.priority);
       label = buffer;
     } else if (flag == hipGraphDebugDotFlagsKernelNodeAttributes) {
       sprintf(buffer,
@@ -966,11 +1028,14 @@ class GraphKernelNode : public GraphNode {
               kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
               kernelAttr_.cooperative, kernelAttr_.priority);
       label = buffer;
-    } else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
-      sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>", GetID(),
-              function->name().c_str(), kernelParams_.gridDim.x, kernelParams_.gridDim.y,
-              kernelParams_.gridDim.z, kernelParams_.blockDim.x, kernelParams_.blockDim.y,
-              kernelParams_.blockDim.z, kernelParams_.sharedMemBytes);
+    }
+    else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
+      sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
+              GetID(), function->name().c_str(), kernelParams_.gridDim.x,
+              kernelParams_.gridDim.y, kernelParams_.gridDim.z,
+              kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+              globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+              kernelParams_.sharedMemBytes);
       label = buffer;
     } else {
       label = std::to_string(GetID()) + "\n" + function->name() + "\n";
@@ -1073,7 +1138,10 @@ class GraphKernelNode : public GraphNode {
   }
 
   GraphKernelNode(const hipKernelNodeParams* pNodeParams, const ihipExtKernelEvents* pEvents,
-                  int coopKernel = 0)
+                  int coopKernel = 0,
+                  int globalWorkSizeX_remainder = 0,
+                  int globalWorkSizeY_remainder = 0,
+                  int globalWorkSizeZ_remainder = 0)
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
     if (pEvents != nullptr) {
@@ -1086,6 +1154,9 @@ class GraphKernelNode : public GraphNode {
     kernelAttrInUse_ = 0;
     hasHiddenHeap_ = false;
     coopKernel_ = coopKernel;
+    globalWorkSizeX_remainder_ = globalWorkSizeX_remainder;
+    globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
+    globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
   }
 
   ~GraphKernelNode() { freeParams(); }
@@ -1116,6 +1187,9 @@ class GraphKernelNode : public GraphNode {
     kernelParams_ = rhs.kernelParams_;
     kernelEvents_ = rhs.kernelEvents_;
     coopKernel_ = rhs.coopKernel_;
+    globalWorkSizeX_remainder_ = rhs.globalWorkSizeX_remainder_;
+    globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
+    globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
@@ -1163,7 +1237,8 @@ class GraphKernelNode : public GraphNode {
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
                                        kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                       kernelParams_.sharedMemBytes);
+                                       kernelParams_.sharedMemBytes, globalWorkSizeX_remainder_,
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_);
 
     if (!launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
@@ -1301,16 +1376,19 @@ class GraphKernelNode : public GraphNode {
   }
 
   hipError_t SetParams(GraphNode* node) override {
+    dev_id_ = ihipGetDevice();
     const GraphKernelNode* kernelNode = static_cast<GraphKernelNode const*>(node);
     return SetParams(&kernelNode->kernelParams_);
   }
 
-  static hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams, hipFunction_t func,
-                                         int devId) {
+  hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
+                                  hipFunction_t func, int devId) {
+
     amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                        pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                       pNodeParams->sharedMemBytes);
+                                       pNodeParams->sharedMemBytes, globalWorkSizeX_remainder_,
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);
@@ -1506,6 +1584,32 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   hipMemcpyKind kind_;
 
  public:
+  // When device memory is on dev1 and graph node is added from different device update the device
+  // id accordingly so that node can be executed on dev1.
+  void UpdateDevId() {
+    size_t sOffset = 0;
+    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    size_t dOffset = 0;
+    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+    hip::MemcpyType memType = ihipGetMemcpyType(src_, dst_, kind_);
+    switch (memType) {
+      case hipCopyBuffer:
+        // D2H/H2D source/dst is pinned memory
+        // Override the device id when node is created
+        if (!((srcMemory->GetDeviceById() != dstMemory->GetDeviceById()) &&
+              srcMemory->getContext().devices().size() == 1 &&
+              dstMemory->getContext().devices().size() == 1)) {
+          if (srcMemory->getContext().devices().size() == 1) {
+            dev_id_ = srcMemory->GetDeviceById()->index();
+          } else {
+            dev_id_ = dstMemory->GetDeviceById()->index();
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
   GraphMemcpyNode1D(void* dst, const void* src, size_t count, hipMemcpyKind kind,
                     hipGraphNodeType type = hipGraphNodeTypeMemcpy)
       : GraphMemcpyNode(nullptr), dst_(dst), src_(src), count_(count), kind_(kind) {
@@ -1515,6 +1619,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     copyParams_.extent.height = 1;
     copyParams_.extent.depth = 1;
     copyParams_.kind = kind;
+    UpdateDevId();
   }
 
   ~GraphMemcpyNode1D() {}
@@ -1524,6 +1629,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     src_ = rhs.src_;
     count_ = rhs.count_;
     kind_ = rhs.kind_;
+    UpdateDevId();
   }
 
   GraphNode* clone() const override { return new GraphMemcpyNode1D(*this); }
@@ -1626,6 +1732,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     src_ = src;
     count_ = count;
     kind_ = kind;
+    UpdateDevId();
     return hipSuccess;
   }
 
@@ -1677,7 +1784,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       label = buffer;
     } else {
       label = std::to_string(GetID()) + "\n" + label_ + "\n(" + memcpyDirection + "," +
-          std::to_string(count_) + ")";
+              std::to_string(count_) + ")";
     }
     return label;
   }
@@ -1948,7 +2055,7 @@ class GraphMemsetNode : public GraphNode {
         sizeBytes = memsetParams_.width * memsetParams_.height * depth_ * memsetParams_.elementSize;
       }
       label = std::to_string(GetID()) + "\n" + label_ + "\n(" +
-          std::to_string(memsetParams_.value) + "," + std::to_string(sizeBytes) + ")";
+              std::to_string(memsetParams_.value) + "," + std::to_string(sizeBytes) + ")";
     }
     return label;
   }
@@ -2117,53 +2224,6 @@ class GraphEventRecordNode : public GraphNode {
   }
 };
 
-class GraphEventWaitNode : public GraphNode {
-  hipEvent_t event_;
-
- public:
-  GraphEventWaitNode(hipEvent_t event)
-      : GraphNode(hipGraphNodeTypeWaitEvent, "solid", "rectangle", "EVENT_WAIT"), event_(event) {}
-
-  ~GraphEventWaitNode() {}
-
-  GraphEventWaitNode(const GraphEventWaitNode& rhs) : GraphNode(rhs) { event_ = rhs.event_; }
-
-  GraphNode* clone() const override { return new GraphEventWaitNode(*this); }
-
-  hipError_t CreateCommand(hip::Stream* stream) override {
-    hipError_t status = GraphNode::CreateCommand(stream);
-    if (status != hipSuccess) {
-      return status;
-    }
-    hip::Event* e = reinterpret_cast<hip::Event*>(event_);
-    commands_.reserve(1);
-    amd::Command* command;
-    status = e->streamWaitCommand(command, stream);
-    commands_.emplace_back(command);
-    return status;
-  }
-
-  void EnqueueCommands(hip::Stream* stream) override {
-    if (!commands_.empty()) {
-      hip::Event* e = reinterpret_cast<hip::Event*>(event_);
-      commands_[0]->enqueue();
-      commands_[0]->release();
-    }
-  }
-
-  void GetParams(hipEvent_t* event) const { *event = event_; }
-
-  hipError_t SetParams(hipEvent_t event) {
-    event_ = event;
-    return hipSuccess;
-  }
-
-  hipError_t SetParams(GraphNode* node) override {
-    const GraphEventWaitNode* eventWaitNode = static_cast<GraphEventWaitNode const*>(node);
-    return SetParams(eventWaitNode->event_);
-  }
-};
-
 class GraphHostNode : public GraphNode {
   hipHostNodeParams NodeParams_;
 
@@ -2212,6 +2272,7 @@ class GraphHostNode : public GraphNode {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed during block command creation");
       }
       block_command->enqueue();
+      block_command->notifyCmdQueue();
       block_command->release();
       commands_[0]->release();
     }
@@ -2307,7 +2368,7 @@ class GraphMemAllocNode final : public GraphNode {
                                      amd::Device::VmmAccess::kReadWrite);
       va_->retain();
       graph_->IncrementMemAllocNodeCount();  // Increment count of unreleased mem alloc nodes
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
               vaddr_sub_obj->getSvmPtr(),
               reinterpret_cast<char*>(vaddr_sub_obj->getSvmPtr()) + aligned_size, memory());
     }
@@ -2370,7 +2431,7 @@ class GraphMemAllocNode final : public GraphNode {
           // be executed again
           amd::MemObjMap::AddMemObj(node_params_.dptr, va_);
         }
-        ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemAlloc create: %p", node_params_.dptr);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc create: %p", node_params_.dptr);
       }
     }
     return error;
@@ -2385,7 +2446,7 @@ class GraphMemAllocNode final : public GraphNode {
         va_ = amd::MemObjMap::FindVirtualMemObj(node_params_.dptr);
         amd::MemObjMap::AddMemObj(node_params_.dptr, va_);
       }
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemAlloc reserve VA: %p", node_params_.dptr);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc reserve VA: %p", node_params_.dptr);
     }
     return node_params_.dptr;
   }
@@ -2450,7 +2511,7 @@ class GraphMemFreeNode : public GraphNode {
       }
       amd::MemObjMap::AddMemObj(ptr(), vaddr_mem_obj);
       graph_->DecrementMemAllocNodeCount();  // Decrement count of unreleased memalloc nodes
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph MemFree execute: %p, %p", ptr(),
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemFree execute: %p, %p", ptr(),
               vaddr_sub_obj);
     }
 
@@ -2480,7 +2541,7 @@ class GraphMemFreeNode : public GraphNode {
             graph, stream->DeviceId(), *stream, amd::Command::EventWaitList{}, device_ptr_,
             amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularity_), nullptr);
         commands_.push_back(cmd);
-        ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Graph FreeMem create: %p", device_ptr_);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph FreeMem create: %p", device_ptr_);
       }
     }
     return error;

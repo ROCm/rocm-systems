@@ -30,9 +30,9 @@ __device__ static void* dev_ptr[num_threads][GRIDSIZE];
  * This kernel allocates and deallocates in every thread
  * of every block.
  */
-template <typename T>
-static __global__ void kerTestDynamicAllocInAllThread(T* outputBuf, int test_type, T value,
-                                                      size_t perThreadSize) {
+template <typename T> static __global__ void kerTestDynamicAllocInAllThread(T* outputBuf,
+                                                                            int test_type, T value,
+                                                                            size_t perThreadSize) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   size_t size = 0;
@@ -835,6 +835,7 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   }
   HIP_CHECK(hipStreamDestroy(streamForGraph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(outputVec_d));
   free(outputVec_h);
   return bPassed;

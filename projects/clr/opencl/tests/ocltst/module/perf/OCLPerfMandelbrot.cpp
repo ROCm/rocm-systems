@@ -749,10 +749,9 @@ void OCLPerfMandelbrot::run(void) {
   // printf(" totalIter = %lld\n", totalIters);
   if (isAMD && (type_ == CL_DEVICE_TYPE_GPU)) {
     CHECK_RESULT((totalIters != expectedIters[_openTest]) &&
-                     (totalIters !=
-                      expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
-                                         ? _openTest + FMA_EXPECTEDVALUES_INDEX
-                                         : _openTest)]),
+                     (totalIters != expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
+                                                       ? _openTest + FMA_EXPECTEDVALUES_INDEX
+                                                       : _openTest)]),
                  "Incorrect iteration count detected!");
   } else {
     CHECK_RESULT(totalIters != expectedItersNV[_openTest], "Incorrect iteration count detected!");
@@ -869,11 +868,9 @@ void OCLPerfAsyncMandelbrot::run(void) {
   // printf(" totalIter = %lld\n", totalIters);
   if (isAMD && (type_ == CL_DEVICE_TYPE_GPU)) {
     CHECK_RESULT((totalIters != 2 * expectedIters[_openTest]) &&
-                     (totalIters !=
-                      2 *
-                          expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
-                                             ? _openTest + FMA_EXPECTEDVALUES_INDEX
-                                             : _openTest)]),
+                     (totalIters != 2 * expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
+                                                           ? _openTest + FMA_EXPECTEDVALUES_INDEX
+                                                           : _openTest)]),
                  "Incorrect iteration count detected!");
   } else {
     CHECK_RESULT(totalIters != 2 * expectedItersNV[_openTest],

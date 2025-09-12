@@ -471,7 +471,7 @@ inline void Os::ThreadAffinityMask::clear(uint cpu) {
 
 inline bool Os::ThreadAffinityMask::isSet(uint cpu) const {
   return (KAFFINITY)0 !=
-      (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
+         (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
 }
 
 inline bool Os::ThreadAffinityMask::isEmpty() const {

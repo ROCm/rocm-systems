@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
@@ -191,7 +191,7 @@ rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
                                "Compiler specific language extensions" OFF
 )
 rocprofiler_systems_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH
-                               "Enable rpath to linked libraries" ON
+                               "Enable rpath to linked libraries" OFF
 )
 set(CMAKE_INSTALL_MESSAGE "LAZY" CACHE STRING "Installation message")
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
@@ -385,8 +385,8 @@ endif()
 # ------------------------------------------------------------------------------#
 
 configure_file(
-    ${PROJECT_SOURCE_DIR}/LICENSE
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    ${PROJECT_SOURCE_DIR}/LICENSE.md
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     COPYONLY
 )
 
@@ -430,7 +430,8 @@ install(
 )
 
 install(
-    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    FILES
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}
     COMPONENT setup
 )
