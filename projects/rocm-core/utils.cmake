@@ -229,7 +229,7 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
       find_program ( DEB_GZIP_EXEC gzip )
       if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
         execute_process(
-          COMMAND ${DEB_GZIP_EXEC} -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+          COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
           WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
           RESULT_VARIABLE result
           OUTPUT_VARIABLE output
