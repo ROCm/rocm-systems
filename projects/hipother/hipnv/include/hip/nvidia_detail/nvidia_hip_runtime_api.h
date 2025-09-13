@@ -372,6 +372,10 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipEventRecordDefault cudaEventRecordDefault
 #define hipEventRecordExternal cudaEventRecordExternal
 
+//! Flags that can be used with hipStreamWaitEvent.
+#define hipEventWaitDefault cudaEventWaitDefault
+#define hipEventWaitExternal cudaEventWaitExternal
+
 #define hipHostMallocDefault cudaHostAllocDefault
 #define hipHostMallocPortable cudaHostAllocPortable
 #define hipHostMallocMapped cudaHostAllocMapped
