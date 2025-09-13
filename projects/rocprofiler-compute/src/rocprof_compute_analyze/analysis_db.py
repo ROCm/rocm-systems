@@ -249,7 +249,7 @@ class db_analysis(OmniAnalyze_Base):
         return roofline_ceilings_per_workload
 
     def calc_pc_sampling_data(self) -> dict[str, pd.DataFrame]:
-        pc_sampling_data_per_workload:dict[str, pd.DataFrame] = {}
+        pc_sampling_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             if not (Path(workload_path) / "ps_file_results.json").exists():
