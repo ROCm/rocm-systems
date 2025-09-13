@@ -147,17 +147,17 @@ constexpr rocprofiler_agent_t default_agent =
 RocAttachDispatchTable**
 get_attach_table()
 {
-    static auto table = common::static_object<RocAttachDispatchTable*>::construct();
+    static auto* table = common::static_object<RocAttachDispatchTable*>::construct();
     return table;
 }
 
 void
 queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, void*)
 {
-    auto qc                    = CHECK_NOTNULL(get_queue_controller());
-    bool registration_consumed = false;
+    auto* qc                    = CHECK_NOTNULL(get_queue_controller());
+    bool  registration_consumed = false;
 
-    auto set_write_interceptor = [&queue, &qc](write_interceptor_t wi, void* data) {
+    auto set_write_interceptor = [&queue](write_interceptor_t wi, void* data) {
         CHECK_NOTNULL(*(get_attach_table()))
             ->rocprofiler_attach_set_write_interceptor(queue, wi, data);
     };

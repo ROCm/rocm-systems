@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "include/attach.h"
+#include "attach.h"
 #include "code_object_registration.hpp"
 #include "queue_registration.hpp"
 #include "table.hpp"

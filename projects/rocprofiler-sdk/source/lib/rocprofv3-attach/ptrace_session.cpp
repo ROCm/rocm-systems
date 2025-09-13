@@ -145,14 +145,12 @@ namespace rocprofiler
 namespace attach
 {
 PTraceSession::PTraceSession(int _pid)
-: pid(_pid)
-, attached(false)
-, detaching_ptrace_session(false)
+: m_pid{_pid}
 {}
 
 PTraceSession::~PTraceSession()
 {
-    if(attached)
+    if(m_attached)
     {
         detach();
     }
@@ -161,24 +159,24 @@ PTraceSession::~PTraceSession()
 bool
 PTraceSession::attach()
 {
-    PTRACE_CALL(PTRACE_SEIZE, pid, NULL, NULL);
-    ROCP_INFO << "Successfully attached to pid " << pid;
-    attached = true;
+    PTRACE_CALL(PTRACE_SEIZE, m_pid, NULL, NULL);
+    ROCP_INFO << "Successfully attached to pid " << m_pid;
+    m_attached = true;
     return true;
 }
 
 bool
 PTraceSession::detach()
 {
-    attached = false;
-    PTRACE_CALL(PTRACE_DETACH, pid, NULL, NULL);
-    ROCP_INFO << "Detached from pid " << pid;
+    m_attached = false;
+    PTRACE_CALL(PTRACE_DETACH, m_pid, NULL, NULL);
+    ROCP_INFO << "Detached from pid " << m_pid;
     return true;
 }
 
 // pre-cond: process must be stopped
 bool
-PTraceSession::write(size_t addr, const std::vector<uint8_t>& data, size_t size)
+PTraceSession::write(size_t addr, const std::vector<uint8_t>& data, size_t size) const
 {
     constexpr size_t word_size = sizeof(void*);
     size_t           word_iter = 0;
@@ -187,18 +185,18 @@ PTraceSession::write(size_t addr, const std::vector<uint8_t>& data, size_t size)
         const size_t offset = (word_iter * word_size);
         uint64_t     word;
         std::memcpy(&word, data.data() + offset, word_size);
-        PTRACE_CALL(PTRACE_POKEDATA, pid, addr + offset, word);
+        PTRACE_CALL(PTRACE_POKEDATA, m_pid, addr + offset, word);
     }
 
     // If not divisible, get the last word to do a partial write correctly.
     size_t remainder = size % word_size;
-    if(remainder)
+    if(remainder != 0u)
     {
         const size_t offset    = (word_iter * word_size);
         uint64_t     last_word = 0;
-        PTRACE_PEEK(pid, addr + offset, last_word);
+        PTRACE_PEEK(m_pid, addr + offset, last_word);
         std::memcpy(&last_word, data.data() + offset, remainder);
-        PTRACE_CALL(PTRACE_POKEDATA, pid, addr + offset, last_word);
+        PTRACE_CALL(PTRACE_POKEDATA, m_pid, addr + offset, last_word);
     }
     ROCP_TRACE << "ptrace wrote " << size << " bytes at " << addr;
     return true;
@@ -206,7 +204,7 @@ PTraceSession::write(size_t addr, const std::vector<uint8_t>& data, size_t size)
 
 // pre-cond: process must be stopped
 bool
-PTraceSession::read(size_t addr, std::vector<uint8_t>& data, size_t size)
+PTraceSession::read(size_t addr, std::vector<uint8_t>& data, size_t size) const
 {
     data.clear();
     data.resize(size);
@@ -216,15 +214,15 @@ PTraceSession::read(size_t addr, std::vector<uint8_t>& data, size_t size)
     {
         const size_t offset = (word_iter * word_size);
         uint64_t     word   = 0;
-        PTRACE_PEEK(pid, addr + offset, word);
+        PTRACE_PEEK(m_pid, addr + offset, word);
         std::memcpy(data.data() + offset, &word, word_size);
     }
     size_t remainder = size % word_size;
-    if(remainder)
+    if(remainder != 0u)
     {
         const size_t offset    = (word_iter * word_size);
         uint64_t     last_word = 0;
-        PTRACE_PEEK(pid, addr + offset, last_word);
+        PTRACE_PEEK(m_pid, addr + offset, last_word);
         std::memcpy(data.data() + offset, &last_word, remainder);
     }
     ROCP_TRACE << "ptrace read " << size << " bytes at " << addr;
@@ -236,7 +234,7 @@ bool
 PTraceSession::swap(size_t                      addr,
                     const std::vector<uint8_t>& in_data,
                     std::vector<uint8_t>&       out_data,
-                    size_t                      size)
+                    size_t                      size) const
 {
     if(!read(addr, out_data, size))
     {
@@ -246,9 +244,9 @@ PTraceSession::swap(size_t                      addr,
 }
 
 bool
-PTraceSession::simple_mmap(void*& addr, size_t length)
+PTraceSession::simple_mmap(void*& addr, size_t length) const
 {
-    if(!attached)
+    if(!m_attached)
     {
         ROCP_ERROR << "simple_mmap called while not attached";
         return false;
@@ -263,11 +261,11 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     // mmap(NULL, length, prot, flags, -1, 0);
     // Get entry address for safe injection of op codes
     size_t entry_addr{0};
-    get_auxv_entry(pid, entry_addr);
+    get_auxv_entry(m_pid, entry_addr);
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
     // Set register file for call
     struct user_regs_struct newregs = oldregs;
 
@@ -283,7 +281,7 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     newregs.rsp -= (newregs.rsp % 16);
 
     // Set syscall registers
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
 
     // x64 assembly to perform a syscall and breakpoint when done
     // 0f 05  syscall
@@ -306,14 +304,14 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
 
     // Wait for int3 breakpoint to be hit
     int status;
-    if(waitpid(pid, &status, WUNTRACED) == -1)
+    if(waitpid(m_pid, &status, WUNTRACED) == -1)
     {
         return false;
     }
 
     // Get registers to see mmap's return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
     if(!write(entry_addr, old_code, 3))
@@ -322,21 +320,21 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     }
 
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
     // Restart execution
     if(!cont())
     {
         return false;
     }
 
-    addr = reinterpret_cast<void*>(returnregs.rax);
+    addr = reinterpret_cast<void*>(returnregs.rax);  // NOLINT(performance-no-int-to-ptr)
     return true;
 }
 
 bool
-PTraceSession::simple_munmap(void*& addr, size_t length)
+PTraceSession::simple_munmap(void*& addr, size_t length) const
 {
-    if(!attached)
+    if(!m_attached)
     {
         ROCP_ERROR << "simple_munmap called while not attached";
         return false;
@@ -352,11 +350,11 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     // mumap(NULL, length, prot, flags, -1, 0);
     // Get entry address for safe injection of op codes
     size_t entry_addr{0};
-    get_auxv_entry(pid, entry_addr);
+    get_auxv_entry(m_pid, entry_addr);
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
     // Set register file for call
     struct user_regs_struct newregs = oldregs;
 
@@ -367,7 +365,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     newregs.rsp = oldregs.rsp - 128;  // move sp by 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);
     // Set syscall registers
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
 
     // x64 assembly to perform a syscall and breakpoint when done
     // 0f 05  syscall
@@ -390,14 +388,14 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
 
     // Wait for int3 breakpoint to be hit
     int status;
-    if(waitpid(pid, &status, WUNTRACED) == -1)
+    if(waitpid(m_pid, &status, WUNTRACED) == -1)
     {
         return false;
     }
 
     // Get registers to see munmap's return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
     if(!write(entry_addr, old_code, 3))
@@ -405,7 +403,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
         return false;
     }
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
     // Restart execution
     if(!cont())
     {
@@ -430,7 +428,7 @@ PTraceSession::call_function(const std::string& library,
                              const std::string& symbol,
                              void*              first_param)
 {
-    if(!attached)
+    if(!m_attached)
     {
         ROCP_ERROR << "call_function called while not attached";
         return false;
@@ -450,11 +448,11 @@ PTraceSession::call_function(const std::string& library,
 
     // Get entry address for safe injection of op codes
     size_t entry_addr{0};
-    get_auxv_entry(pid, entry_addr);
+    get_auxv_entry(m_pid, entry_addr);
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
 
     // Construct registers to call a function with 1 parameter
     // symbol(first_param)
@@ -477,7 +475,7 @@ PTraceSession::call_function(const std::string& library,
         return false;
     }
     // Set syscall registers
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
 
     ROCP_TRACE << "Attempting to execute " << library << "::" << symbol << "(" << first_param
                << ")";
@@ -488,14 +486,14 @@ PTraceSession::call_function(const std::string& library,
     }
 
     // Wait for int3 to be hit
-    if(waitpid(pid, 0, WSTOPPED) == -1)
+    if(waitpid(m_pid, nullptr, WSTOPPED) == -1)
     {
         return false;
     }
 
     // Get registers to see return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
     if(!write(entry_addr, old_code, 3))
@@ -503,7 +501,7 @@ PTraceSession::call_function(const std::string& library,
         return false;
     }
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
     // Restart execution
     if(!cont())
     {
@@ -521,7 +519,7 @@ PTraceSession::call_function(const std::string& library,
                              void*              first_param,
                              void*              second_param)
 {
-    if(!attached)
+    if(!m_attached)
     {
         ROCP_ERROR << "call_function called while not attached";
         return false;
@@ -533,7 +531,7 @@ PTraceSession::call_function(const std::string& library,
         return false;
     }
 
-    void* target_addr;
+    void* target_addr = nullptr;
     if(!find_symbol(target_addr, library, symbol))
     {
         return false;
@@ -541,11 +539,11 @@ PTraceSession::call_function(const std::string& library,
 
     // Get entry address for safe injection of op codes
     size_t entry_addr{0};
-    get_auxv_entry(pid, entry_addr);
+    get_auxv_entry(m_pid, entry_addr);
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
 
     // Construct registers to call a function with 2 parameters
     // symbol(first_param, second_param)
@@ -569,7 +567,7 @@ PTraceSession::call_function(const std::string& library,
         return false;
     }
     // Set syscall registers
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
 
     ROCP_TRACE << "Attempting to execute " << library << "::" << symbol << "(" << first_param
                << ", " << second_param << ")";
@@ -580,14 +578,14 @@ PTraceSession::call_function(const std::string& library,
     }
 
     // Wait for int3 to be hit
-    if(waitpid(pid, 0, WSTOPPED) == -1)
+    if(waitpid(m_pid, nullptr, WSTOPPED) == -1)
     {
         return false;
     }
 
     // Get registers to see return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
     if(!write(entry_addr, old_code, 3))
@@ -595,7 +593,7 @@ PTraceSession::call_function(const std::string& library,
         return false;
     }
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
     // Restart execution
     if(!cont())
     {
@@ -603,12 +601,6 @@ PTraceSession::call_function(const std::string& library,
     }
 
     return true;
-}
-
-int
-PTraceSession::get_pid()
-{
-    return pid;
 }
 
 bool
@@ -650,6 +642,7 @@ PTraceSession::find_library(void*& addr, int inpid, const std::string& library)
         return false;
     }
 
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     addr = reinterpret_cast<void*>(std::stoull(line, nullptr, 16));
     //  target_library_addrs[searchname.str()] = addr;
     return true;
@@ -658,16 +651,16 @@ PTraceSession::find_library(void*& addr, int inpid, const std::string& library)
 bool
 PTraceSession::find_symbol(void*& addr, const std::string& library, const std::string& symbol)
 {
-    std::stringstream searchname;
+    auto searchname = std::stringstream{};
     searchname << library << "::" << symbol;
-    if(target_symbol_addrs.find(searchname.str()) != target_symbol_addrs.end())
+    if(auto itr = m_target_symbol_addrs.find(searchname.str()); itr != m_target_symbol_addrs.end())
     {
-        ROCP_TRACE << "found symbol for " << searchname.str() << " at "
-                   << target_symbol_addrs[searchname.str()];
-        return target_symbol_addrs[searchname.str()];
+        ROCP_TRACE << "found symbol for " << searchname.str() << " at " << itr->second;
+        return itr->second != nullptr;
     }
-    void* libraryaddr;
-    void* symboladdr;
+
+    void* libraryaddr = nullptr;
+    void* symboladdr  = nullptr;
 
     // Load the library in our process to determine the offset of the requested symbol from the
     // start address of the library
@@ -702,80 +695,81 @@ PTraceSession::find_symbol(void*& addr, const std::string& library, const std::s
 
     // Find the start address of the library in the target process
     void* targetlibraryaddr;
-    if(!find_library(targetlibraryaddr, pid, library))
+    if(!find_library(targetlibraryaddr, m_pid, library))
     {
         ROCP_ERROR << "couldn't determine where " << library << " was loaded for target";
         return false;
     }
 
     // Calculate address of symbol in the target process using the offset
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     addr = reinterpret_cast<void*>(reinterpret_cast<size_t>(targetlibraryaddr) + offset);
-    target_symbol_addrs[searchname.str()] = addr;
+    m_target_symbol_addrs[searchname.str()] = addr;
     ROCP_TRACE << "found symbol for " << searchname.str() << " at " << addr;
     return true;
 }
 
 bool
-PTraceSession::stop()
+PTraceSession::stop() const
 {
-    if(!attached)
+    if(!m_attached)
     {
         ROCP_ERROR << "stop called while not attached";
         return false;
     }
 
     // Stop the process
-    PTRACE_CALL(PTRACE_INTERRUPT, pid, NULL, NULL);
+    PTRACE_CALL(PTRACE_INTERRUPT, m_pid, NULL, NULL);
 
     // Wait for the stop
-    if(waitpid(pid, 0, WSTOPPED) == -1)
+    if(waitpid(m_pid, nullptr, WSTOPPED) == -1)
     {
         return false;
     }
-    ROCP_TRACE << "ptrace stopped pid " << pid;
+    ROCP_TRACE << "ptrace stopped pid " << m_pid;
     return true;
 }
 
 bool
-PTraceSession::cont()
+PTraceSession::cont() const
 {
-    if(!attached)
+    if(!m_attached)
     {
         ROCP_ERROR << "cont called while not attached";
         return false;
     }
 
-    PTRACE_CALL(PTRACE_CONT, pid, NULL, NULL);
-    ROCP_TRACE << "ptrace resumed pid " << pid;
+    PTRACE_CALL(PTRACE_CONT, m_pid, NULL, NULL);
+    ROCP_TRACE << "ptrace resumed pid " << m_pid;
     return true;
 }
 
 bool
-PTraceSession::handle_signals()
+PTraceSession::handle_signals() const
 {
-    while(!detaching_ptrace_session.load())
+    while(!m_detaching_ptrace_session.load())
     {
         int status{0};
-        if(waitpid(pid, &status, WNOHANG) == -1)
+        if(waitpid(m_pid, &status, WNOHANG) == -1)
         {
-            ROCP_ERROR << "waitpid failed in handle_signal for pid " << pid;
+            ROCP_ERROR << "waitpid failed in handle_signal for pid " << m_pid;
             return false;
         }
         if(status != 0 && WIFEXITED(status))
         {
-            ROCP_ERROR << "process " << pid << " exited, status=" << WEXITSTATUS(status);
+            ROCP_ERROR << "process " << m_pid << " exited, status=" << WEXITSTATUS(status);
             return false;
         }
         else if(status != 0 && WIFSIGNALED(status))
         {
-            ROCP_ERROR << "process " << pid << " killed by signal " << WTERMSIG(status);
+            ROCP_ERROR << "process " << m_pid << " killed by signal " << WTERMSIG(status);
             return false;
         }
         else if(status != 0 && WIFSTOPPED(status))
         {
             auto sig = WSTOPSIG(status);
-            ROCP_TRACE << "process " << pid << "stopped by signal " << sig;
-            PTRACE_CALL(PTRACE_CONT, pid, NULL, sig);
+            ROCP_TRACE << "process " << m_pid << "stopped by signal " << sig;
+            PTRACE_CALL(PTRACE_CONT, m_pid, NULL, sig);
         }
         std::this_thread::yield();
     }
@@ -785,7 +779,7 @@ PTraceSession::handle_signals()
 void
 PTraceSession::detach_ptrace_session()
 {
-    detaching_ptrace_session.store(true);
+    m_detaching_ptrace_session.store(true);
 }
 
 }  // namespace attach

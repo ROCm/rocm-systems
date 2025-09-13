@@ -25,7 +25,7 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 
-#include "lib/rocprofiler-sdk-attach/include/table.h"
+#include "lib/rocprofiler-sdk-attach/table.h"
 
 #include <hsa/hsa_api_trace.h>
 

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "include/queue_registration.h"
+#include "queue_registration.h"
 #include "queue_registration.hpp"
 #include "table.hpp"
 
@@ -75,7 +75,7 @@ write_interceptor(const void*                             packets,
                   hsa_amd_queue_intercept_packet_writer_t writer)
 {
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a valid pointer";
-    auto entry = static_cast<const queue_entry_t*>(data);
+    const auto* entry = static_cast<const queue_entry_t*>(data);
 
     if(entry->user_write_interceptor_func)
     {
@@ -147,7 +147,7 @@ create_queue(hsa_agent_t        agent,
 
     ROCP_INFO << "created attach queue for HSA agent handle " << agent.handle;
 
-    auto attach_table = rocprofiler::attach::get_dispatch_table();
+    auto* attach_table = rocprofiler::attach::get_dispatch_table();
     if(attach_table->rocprofiler_attach_notify_new_queue)
     {
         attach_table->rocprofiler_attach_notify_new_queue(new_queue, agent, nullptr);

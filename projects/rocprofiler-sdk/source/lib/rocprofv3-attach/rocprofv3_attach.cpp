@@ -26,6 +26,8 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
+#include <rocprofiler-sdk/defines.h>
+
 #include <atomic>
 #include <thread>
 
@@ -55,8 +57,6 @@ initialize_logging()
     common::init_logging("ROCPROF", logging_cfg);
     FLAGS_colorlogtostderr = true;
 }
-
-ROCPROFILER_EXTERN_C_INIT
 
 namespace
 {
@@ -127,7 +127,7 @@ build_environment_buffer()
 
         // Add variable value
         var++;
-        while(*var)
+        while(*var != 0)
         {
             environment_buffer.emplace_back(*var++);
         }
@@ -141,6 +141,8 @@ build_environment_buffer()
     return environment_buffer;
 }
 }  // anonymous namespace
+
+ROCPROFILER_EXTERN_C_INIT
 
 void
 handle_ptrace_operations(uint32_t pid)

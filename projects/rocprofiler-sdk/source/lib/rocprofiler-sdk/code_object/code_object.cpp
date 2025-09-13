@@ -1145,7 +1145,7 @@ shutdown(hsa_executable_t executable)
 RocAttachDispatchTable**
 get_attach_table()
 {
-    static auto table = common::static_object<RocAttachDispatchTable*>::construct();
+    static auto* table = common::static_object<RocAttachDispatchTable*>::construct();
     return table;
 }
 
