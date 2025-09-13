@@ -415,7 +415,7 @@ class RocProfCompute:
 
         console_warning(
             "Database update mode is deprecated and will "
-            "be removed in a future release "
+            "be removed in ROCm 7.2 "
             "and no fixes will be made for this mode."
         )
 
