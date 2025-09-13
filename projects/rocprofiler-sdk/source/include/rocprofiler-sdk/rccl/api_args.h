@@ -329,6 +329,28 @@ typedef union rocprofiler_rccl_api_args_t
         hipStream_t      stream;
         const void*      acc;
     } ncclAllReduceWithBias;
+    struct
+    {
+        ncclComm_t comm;
+        int* excludeRanksList;
+        int excludeRanksCount;
+        ncclComm_t* newcomm;
+        ncclConfig_t* config;
+        int shrinkFlags;
+    } ncclCommShrink;
+    struct
+    {
+        ncclComm_t comm;
+        void* buff;
+        size_t size;
+        ncclWindow_t* win;
+        int winFlags;
+    } ncclCommWindowRegister;
+    struct
+    {
+        ncclComm_t comm;
+        ncclWindow_t win;
+    } ncclCommWindowDeregister;
 #endif
 } rocprofiler_rccl_api_args_t;
 
