@@ -450,8 +450,8 @@ class db_analysis(OmniAnalyze_Base):
     def calc_metrics_data(
             self
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
-        metrics_info_data_per_workload:dict[str, pd.DataFrame] = {}
-        values_data_per_workload:dict[str, pd.DataFrame] = {}
+        metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
+        values_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
