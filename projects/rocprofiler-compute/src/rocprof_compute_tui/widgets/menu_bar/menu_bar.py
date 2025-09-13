@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
 from typing import Any, Optional
 
 from textual import on
