@@ -516,7 +516,7 @@ class db_analysis(OmniAnalyze_Base):
         return metrics_info_data_per_workload, values_data_per_workload
 
     def calc_dispatch_data(self) -> dict[str, pd.DataFrame]:
-        dispatch_data_per_workload:dict[str, pd.DataFrame]= {}
+        dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             dispatch_df = pd.DataFrame([
