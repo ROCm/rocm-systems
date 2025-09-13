@@ -31,7 +31,7 @@ OUTPUT_DIR=$3
 LOG_LEVEL=$4
 
 # Set environment variables required for attachment
-export ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED=1
+export ROCP_TOOL_ATTACH=1
 
 # Clean up any existing output
 rm -rf ${OUTPUT_DIR}/attachment-output
