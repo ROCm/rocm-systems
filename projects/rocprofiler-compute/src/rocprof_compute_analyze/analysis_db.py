@@ -249,7 +249,7 @@ class db_analysis(OmniAnalyze_Base):
         return roofline_ceilings_per_workload
 
     def calc_pc_sampling_data(self) -> dict[str, pd.DataFrame]:
-        pc_sampling_data_per_workload:dict[str, pd.DataFrame] = {}
+        pc_sampling_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             if not (Path(workload_path) / "ps_file_results.json").exists():
@@ -291,7 +291,7 @@ class db_analysis(OmniAnalyze_Base):
             ])
 
             def custom_aggregator(
-                    column_name: str
+                column_name: str,
             ) -> Callable[[pd.Series], Union[int, dict[str, int], None]]:
                 if column_name == "count_issued":
 
@@ -359,9 +359,9 @@ class db_analysis(OmniAnalyze_Base):
         name: str,
         value: str,
         pmc_df: pd.DataFrame,
-        sys_info: dict[str, Any], #noqa ANN401
+        sys_info: dict[str, Any],  # noqa ANN401
         parse: bool = False,
-    ) -> Any: #noqa ANN401
+    ) -> Any:  # noqa ANN401
         if parse:
             value = re.sub(
                 r"\$([0-9A-Za-z_]+)",
@@ -448,10 +448,10 @@ class db_analysis(OmniAnalyze_Base):
         return values_data_per_workload
 
     def calc_metrics_data(
-            self
+        self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
-        metrics_info_data_per_workload:dict[str, pd.DataFrame] = {}
-        values_data_per_workload:dict[str, pd.DataFrame] = {}
+        metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
+        values_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
@@ -516,7 +516,7 @@ class db_analysis(OmniAnalyze_Base):
         return metrics_info_data_per_workload, values_data_per_workload
 
     def calc_dispatch_data(self) -> dict[str, pd.DataFrame]:
-        dispatch_data_per_workload:dict[str, pd.DataFrame]= {}
+        dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             dispatch_df = pd.DataFrame([
