@@ -402,5 +402,5 @@ Example for file plugin output:
 
 ### Removed
 
-- rocprofv2 doesn't support gfx12, Use rocprofv3 tool.
+- `rocprofv2` doesn't support gfx12. For gfx12, use `rocprofv3` tool.
 
