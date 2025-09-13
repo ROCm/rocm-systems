@@ -670,12 +670,14 @@ rocprofiler_register_library_api_table(
     // rocprofiler library is dlopened and we have the functor to pass the API data
     auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
 
-#if defined ROCP_REG_ALWAYS_SUPPORT_ATTACH && ROCP_REG_ALWAYS_SUPPORT_ATTACH == 1
-    auto _attachment_enabled = true;
+#if defined(ROCP_REG_DEFAULT_ATTACHMENT) && ROCP_REG_DEFAULT_ATTACHMENT != 0
+    constexpr auto default_attachment_enabled = true;
 #else
-    auto _attachment_enabled =
-        common::get_env<bool>("ROCPROFILER_REGISTER_ATTACHMENT_ENABLED", false);
+    constexpr auto default_attachment_enabled = false;
 #endif
+
+    auto _attachment_enabled =
+        common::get_env("ROCP_TOOL_ATTACH", default_attachment_enabled);
 
     rocp_import* _import_match = nullptr;
     for(auto& itr : import_info)

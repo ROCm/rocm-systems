@@ -39,7 +39,7 @@ if [ "$OUTPUT_FORMAT" != "csv" ] && [ "$OUTPUT_FORMAT" != "json" ]; then
 fi
 
 # Set environment variables required for attachment
-export ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED=1
+export ROCP_TOOL_ATTACH=1
 
 # Set output directory based on format
 if [ "$OUTPUT_FORMAT" = "csv" ]; then
@@ -169,7 +169,7 @@ fi
 
 echo "=== PID COMPARISON SUMMARY ==="
 echo "Target process PID: $APP_PID (constant)"
-echo "Script PID: $$ (constant)"  
+echo "Script PID: $$ (constant)"
 echo "Script PPID: $PPID (constant)"
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
 echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"

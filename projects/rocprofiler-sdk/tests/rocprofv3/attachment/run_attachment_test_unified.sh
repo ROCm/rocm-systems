@@ -39,7 +39,7 @@ if [ "$OUTPUT_FORMAT" != "csv" ] && [ "$OUTPUT_FORMAT" != "json" ]; then
 fi
 
 # Set environment variables required for attachment
-export ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED=1
+export ROCP_TOOL_ATTACH=1
 
 # Set output directory based on format
 if [ "$OUTPUT_FORMAT" = "csv" ]; then
