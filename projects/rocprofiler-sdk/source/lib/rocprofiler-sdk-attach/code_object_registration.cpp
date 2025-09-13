@@ -20,9 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "include/code_object_registration.h"
+#include "code_object_registration.h"
 #include "code_object_registration.hpp"
 #include "table.hpp"
+
+#include <hsa/hsa.h>
 
 #include "lib/common/static_object.hpp"
 
@@ -56,16 +58,15 @@ executable_freeze(hsa_executable_t executable, const char* options)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
     auto  status       = registration->hsa_executable_freeze_fn(executable, options);
-    if(status)
-    {
-        return status;
-    }
+
+    if(status != HSA_STATUS_SUCCESS) return status;
+
     ROCP_TRACE << "adding code_object " << executable.handle;
     {
         std::lock_guard lg(registration->code_objects_mutex);
         registration->code_objects.emplace_back(executable);
     }
-    auto attach_table = rocprofiler::attach::get_dispatch_table();
+    auto* attach_table = rocprofiler::attach::get_dispatch_table();
     if(attach_table->rocprofiler_attach_notify_new_code_object)
     {
         attach_table->rocprofiler_attach_notify_new_code_object(executable, nullptr);
@@ -89,12 +90,8 @@ executable_destroy(hsa_executable_t executable)
         }
         registration->code_objects.erase(itr);
     }
-    auto status = registration->hsa_executable_destroy_fn(executable);
-    if(status)
-    {
-        return status;
-    }
-    return HSA_STATUS_SUCCESS;
+
+    return registration->hsa_executable_destroy_fn(executable);
 }
 
 int

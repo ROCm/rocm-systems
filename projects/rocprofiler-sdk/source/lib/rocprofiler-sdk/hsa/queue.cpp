@@ -600,11 +600,12 @@ Queue::Queue(const AgentCache&  agent,
     *queue = _intercept_queue;
 }
 
-Queue::Queue(const AgentCache&       agent,
-             CoreApiTable            core_api,
-             AmdExtTable             ext_api,
-             hsa_queue_t*            queue,
-             set_write_interceptor_t set_write_interceptor)
+Queue::Queue(
+    const AgentCache&       agent,
+    CoreApiTable            core_api,
+    AmdExtTable             ext_api,
+    hsa_queue_t*            queue,
+    set_write_interceptor_t set_write_interceptor)  // NOLINT(performance-unnecessary-value-param)
 : _core_api(core_api)
 , _ext_api(ext_api)
 , _agent(agent)

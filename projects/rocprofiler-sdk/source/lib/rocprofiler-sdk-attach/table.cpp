@@ -51,7 +51,7 @@ get_dispatch_registration_table()
 void
 dispatch_table_init()
 {
-    auto table = get_dispatch_table();
+    auto* table = get_dispatch_table();
 
     table->size                                     = sizeof(RocAttachDispatchTable);
     table->rocprofiler_attach_get_version           = &rocprofiler_attach_get_version;

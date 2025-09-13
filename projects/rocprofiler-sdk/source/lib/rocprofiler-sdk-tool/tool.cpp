@@ -1934,7 +1934,7 @@ attach_init(void* tool_data)
 }
 
 void
-attach_start(void* tool_data)
+attach_start(void* /*tool_data*/)
 {
     ROCP_INFO << "attach_start: Starting contexts based on configuration";
 

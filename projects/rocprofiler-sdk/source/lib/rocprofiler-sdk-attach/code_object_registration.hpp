@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk-attach/code_object_registration.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <hsa/hsa.h>
