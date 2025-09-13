@@ -43,7 +43,6 @@ def main(
         raise RuntimeError("rocprofv3_attach called with no PID specified")
 
     # Load the shared library into ctypes
-    MAX_STR = 256
     c_lib = ctypes.CDLL(attach_library)
 
     c_lib.attach.argtypes = [ctypes.c_uint]
