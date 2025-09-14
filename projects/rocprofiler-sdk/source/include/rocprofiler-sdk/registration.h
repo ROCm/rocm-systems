@@ -81,20 +81,6 @@ typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t final
 typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
 
 /**
- * @brief Prototype for the reattach function where a tool can reinitialize after being detached.
- * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
- * ::rocprofiler_tool_configure_result_experimental_t.
- */
-typedef void (*rocprofiler_tool_reattach_t)(void* tool_data);
-
-/**
- * @brief Prototype for the detach function where a tool can temporarily suspend operations.
- * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
- * ::rocprofiler_tool_configure_result_experimental_t.
- */
-typedef void (*rocprofiler_tool_detach_t)(void* tool_data);
-
-/**
  * @brief Data structure containing a initialization, finalization, and data.
  *
  * After rocprofiler has retrieved all instances of ::rocprofiler_tool_configure_result_t from the
@@ -114,28 +100,6 @@ typedef struct rocprofiler_tool_configure_result_t
     rocprofiler_tool_finalize_t   finalize;    ///< cleanup
     void*                         tool_data;   ///< data to provide to init and fini callbacks
 } rocprofiler_tool_configure_result_t;
-
-/**
- * @brief (EXPERIMENTAL) Extended data structure containing initialization, finalization,
- * attach/detach, and data.
- *
- * This is an experimental extension of ::rocprofiler_tool_configure_result_t that adds support for
- * runtime attachment and detachment of tools. The `tool_reattach` and `tool_detach` function
- * pointers allow tools to handle dynamic attachment scenarios where they may need to suspend and
- * resume profiling operations.
- *
- * The `size` field is used for ABI reasons and should be set to
- * `sizeof(rocprofiler_tool_configure_result_experimental_t)`
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_tool_configure_result_experimental_t
-{
-    size_t                        size;  ///< size of this struct (in case of future extensions)
-    rocprofiler_tool_initialize_t initialize;     ///< context creation
-    rocprofiler_tool_finalize_t   finalize;       ///< cleanup
-    void*                         tool_data;      ///< data to provide to init and fini callbacks
-    rocprofiler_tool_reattach_t   tool_reattach;  ///< reattachment after detach
-    rocprofiler_tool_detach_t     tool_detach;    ///< temporary suspension
-} rocprofiler_tool_configure_result_experimental_t;
 
 /**
  * @brief Query whether rocprofiler has already scanned the binary for all the instances of @ref

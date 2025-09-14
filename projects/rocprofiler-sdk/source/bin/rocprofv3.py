@@ -1096,8 +1096,9 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
-    update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
-    update_env("LD_PRELOAD", ":".join(append_preload), append=True)
+    if not args.pid:
+        update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
+        update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
     update_env(
         "ROCP_TOOL_LIBRARIES",

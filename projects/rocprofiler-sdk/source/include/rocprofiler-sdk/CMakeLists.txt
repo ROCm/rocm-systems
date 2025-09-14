@@ -14,7 +14,6 @@ set(ROCPROFILER_HEADER_FILES
     rocprofiler.h
     # secondary headers
     agent.h
-    attach.h
     buffer.h
     buffer_tracing.h
     callback_tracing.h

@@ -42,12 +42,15 @@ def main(
     if pid is None:
         raise RuntimeError("rocprofv3_attach called with no PID specified")
 
+    print(f"Attaching to PID {pid} using library {attach_library}")
+
     # Load the shared library into ctypes
     c_lib = ctypes.CDLL(attach_library)
 
     c_lib.attach.argtypes = [ctypes.c_uint]
     c_lib.attach(int(pid))
 
+    print(f"Attaching to PID {pid} using library {attach_library} :: success")
     if duration is None:
         sys.stdout.write("Press Enter to detach...")
         sys.stdout.flush()  # Force the prompt to appear immediately
