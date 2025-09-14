@@ -167,7 +167,9 @@ handle_ptrace_operations(uint32_t pid)
     }
 
     // Build and write tool library path to target process
-    const char* tool_lib_path = "librocprofiler-sdk-tool.so";
+    auto tool_lib_path_env =
+        rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY", "librocprofiler-sdk-tool.so");
+    const char* tool_lib_path = tool_lib_path_env.c_str();
     ROCP_TRACE << "Tool library path: " << tool_lib_path;
 
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;

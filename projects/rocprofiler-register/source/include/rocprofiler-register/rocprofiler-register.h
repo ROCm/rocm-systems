@@ -62,6 +62,9 @@ typedef struct
 /// @var ROCP_REG_EXCESS_API_INSTANCES
 /// @brief The same API has been registered too many times
 ///
+/// @var ROCP_REG_INVALID_ARGUMENT
+/// @brief Rocprofiler-register API function was provided an invalid argument
+///
 typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
 {
     ROCP_REG_SUCCESS = 0,
@@ -72,6 +75,7 @@ typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
     ROCP_REG_INVALID_API_ADDRESS,
     ROCP_REG_ROCPROFILER_ERROR,
     ROCP_REG_EXCESS_API_INSTANCES,
+    ROCP_REG_INVALID_ARGUMENT,
     ROCP_REG_ERROR_CODE_END,
 } rocprofiler_register_error_code_t;
 
@@ -157,8 +161,11 @@ rocprofiler_register_iterate_registration_info(
 /// @param[in] tool_lib_path Path to the tool library to load (can be NULL)
 /// @return ::rocprofiler_register_error_code_t
 rocprofiler_register_error_code_t
-rocprofiler_register_attach(const char* environment_buffer,
-                            const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
+rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path)
+    ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(2)) ROCPROFILER_REGISTER_PUBLIC_API;
+
+rocprofiler_register_error_code_t
+rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
 
 #ifdef __cplusplus
 }

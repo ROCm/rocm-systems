@@ -20,14 +20,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <rocprofiler-sdk/attach.h>
+#include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 
-void
-rocprofiler_detach()
+ROCPROFILER_EXTERN_C_INIT
+
+rocprofiler_status_t
+rocprofiler_attach(void) ROCPROFILER_API;
+
+rocprofiler_status_t
+rocprofiler_detach(void) ROCPROFILER_API;
+
+rocprofiler_status_t
+rocprofiler_attach(void)
 {
-    rocprofiler::registration::call_client_detach();
+    rocprofiler::registration::attach();
+    return ROCPROFILER_STATUS_SUCCESS;
 }
+
+rocprofiler_status_t
+rocprofiler_detach(void)
+{
+    rocprofiler::registration::detach();
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+ROCPROFILER_EXTERN_C_FINI

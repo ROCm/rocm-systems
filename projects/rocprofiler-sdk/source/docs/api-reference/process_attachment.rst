@@ -370,7 +370,7 @@ When using reattachment, set this additional environment variable:
 .. code-block:: cpp
 
    // Indicates that the tool was loaded via attachment (not LD_PRELOAD)
-   setenv("ROCP_REGISTERED_TOOL_ATTACH", "1", 1);
+   setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", 1);
 
 This helps the registration system differentiate between initial attachment and reattachment cycles.
 
