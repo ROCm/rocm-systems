@@ -36,23 +36,14 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(attachment_test_app.cpp PROPERTIES LANGUAGE HIP)
+find_package(Threads REQUIRED)
+find_package(rocprofiler-sdk-roctx REQUIRED)
+
+set_source_files_properties(attachment_test.cpp PROPERTIES LANGUAGE HIP)
 add_executable(attachment-test)
-target_sources(attachment-test PRIVATE attachment_test_app.cpp)
+target_sources(attachment-test PRIVATE attachment_test.cpp)
 target_compile_options(attachment-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
                                                -Werror)
 
-find_package(Threads REQUIRED)
-target_link_libraries(attachment-test PRIVATE Threads::Threads)
-
-# Don't link against rocprofiler libraries for attachment testing These should be
-# dynamically loaded during attachment, not linked find_package(rocprofiler-sdk REQUIRED)
-# target_link_libraries(attachment-test PRIVATE rocprofiler-sdk::rocprofiler-sdk)
-
-# Don't link against roctx - it will be loaded if needed
-# find_package(rocprofiler-sdk-roctx REQUIRED) target_link_libraries(attachment-test
-# PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
-
-# Don't link against rocprofiler-register - it should be loaded via LD_PRELOAD
-# find_package(rocprofiler-register REQUIRED) target_link_libraries(attachment-test
-# PRIVATE rocprofiler-register::rocprofiler-register)
+target_link_libraries(
+    attachment-test PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
