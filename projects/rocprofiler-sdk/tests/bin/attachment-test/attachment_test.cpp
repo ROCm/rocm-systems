@@ -21,9 +21,7 @@
 // THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
-// Don't include rocprofiler headers - they should be loaded dynamically during attachment
-// #include <rocprofiler-sdk-roctx/roctx.h>
-// #include <rocprofiler-register/rocprofiler-register.h>
+#include <rocprofiler-sdk-roctx/roctx.h>
 #include <unistd.h>
 #include <chrono>
 #include <iostream>
@@ -85,32 +83,28 @@ main(int /*argc*/, char** /*argv*/)
         h_data[i] = static_cast<float>(i);
     }
 
-    // Wait longer before starting kernels (to allow attachment to fully complete)
-    std::cout << "Waiting 5 seconds before starting kernel execution..." << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-
     // Run kernels in a loop for a while
     std::cout << "Starting kernel execution loop..." << std::endl;
-    const int num_iterations = 20;
+    const int num_iterations = 30;
 
     for(int iter = 0; iter < num_iterations; ++iter)
     {
         // Add ROCTX markers for better profiling
         std::string range_name = "Iteration_" + std::to_string(iter + 1);
-        // roctxRangePush(range_name.c_str()); // Removed - ROCTx not linked
+        roctxRangePush(range_name.c_str());  // Removed - ROCTx not linked
 
         // Copy data to device
-        // roctxMark("Start_H2D_Copy");
+        roctxMark("Start_H2D_Copy");
         err = hipMemcpy(d_data, h_data, bytes, hipMemcpyHostToDevice);
         if(err != hipSuccess)
         {
             std::cerr << "Failed to copy data to device" << std::endl;
-            // roctxRangePop(); // Removed - ROCTx not linked
+            roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
 
         // Launch kernel
-        // roctxMark("Launch_Kernel");
+        roctxMark("Launch_Kernel");
         int threads_per_block = 256;
         int blocks_per_grid   = (size + threads_per_block - 1) / threads_per_block;
 
@@ -118,26 +112,26 @@ main(int /*argc*/, char** /*argv*/)
             simple_kernel, dim3(blocks_per_grid), dim3(threads_per_block), 0, 0, d_data, size);
 
         // Copy data back
-        // roctxMark("Start_D2H_Copy");
+        roctxMark("Start_D2H_Copy");
         err = hipMemcpy(h_data, d_data, bytes, hipMemcpyDeviceToHost);
         if(err != hipSuccess)
         {
             std::cerr << "Failed to copy data from device" << std::endl;
-            // roctxRangePop(); // Removed - ROCTx not linked
+            roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
 
         // Wait for completion
-        // roctxMark("Device_Synchronize");
+        roctxMark("Device_Synchronize");
         err = hipDeviceSynchronize();
         if(err != hipSuccess)
         {
             std::cerr << "Failed to synchronize device" << std::endl;
-            // roctxRangePop(); // Removed - ROCTx not linked
+            roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
 
-        // roctxRangePop(); // Removed - ROCTx not linked
+        roctxRangePop();  // Removed - ROCTx not linked
 
         std::cout << "Iteration " << (iter + 1) << "/" << num_iterations << " completed"
                   << std::endl;
