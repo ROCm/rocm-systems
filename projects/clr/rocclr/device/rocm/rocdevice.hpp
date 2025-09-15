@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -32,16 +32,12 @@
 #include "thread/monitor.hpp"
 #include "utils/versions.hpp"
 
+#include "device/rocm/rocrctx.hpp"
 #include "device/rocm/rocsettings.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
-
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
-#include "hsa/hsa_ven_amd_loader.h"
 
 #include <atomic>
 #include <iostream>
@@ -304,12 +300,6 @@ class NullDevice : public amd::Device {
   }
 #endif
 #endif
-
- protected:
-  //! Initialize compiler instance and handle
-  static bool initCompiler(bool isOffline);
-  //! destroy compiler instance and handle
-  static bool destroyCompiler();
 
  private:
   static constexpr bool offlineDevice_ = true;

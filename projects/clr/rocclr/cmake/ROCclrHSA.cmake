@@ -1,4 +1,4 @@
-# Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,15 +18,54 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-find_package(hsa-runtime64 1.11 REQUIRED CONFIG
-  PATHS
-    /opt/rocm/
-    ${ROCM_INSTALL_PATH}
-  PATH_SUFFIXES
-    cmake/hsa-runtime64
-    lib/cmake/hsa-runtime64
-    lib64/cmake/hsa-runtime64)
-target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64)
+if(UNIX)
+  find_package(hsa-runtime64 1.11 REQUIRED CONFIG
+    PATHS
+      /opt/rocm/
+      ${ROCM_INSTALL_PATH}
+    PATH_SUFFIXES
+      cmake/hsa-runtime64
+      lib/cmake/hsa-runtime64
+      lib64/cmake/hsa-runtime64)
+else()
+  find_package(hsa-runtime64 CONFIG
+    PATHS
+      /opt/rocm/
+      ${ROCM_INSTALL_PATH}
+      ${CMAKE_CURRENT_BINARY_DIR}
+      ${CMAKE_INSTALL_PREFIX}
+      ${CMAKE_INSTALL_PREFIX}/..
+    PATH_SUFFIXES
+      rocr/lib/cmake/hsa-runtime64
+      rocr/runtime/hsa-runtime
+      cmake/hsa-runtime64
+      lib/cmake/hsa-runtime64
+      lib64/cmake/hsa-runtime64)
+endif()
+
+if (ROCR_DLL_LOAD)
+  find_path(AMD_HSA_INCLUDE_DIR hsa.h
+    HINTS
+      /opt/rocm
+      ${ROCM_INSTALL_PATH}
+      ${CMAKE_CURRENT_BINARY_DIR}
+    PATHS
+      ${CMAKE_CURRENT_BINARY_DIR}/..
+      ${CMAKE_CURRENT_BINARY_DIR}/../..
+      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
+    PATH_SUFFIXES
+      include
+      include/hsa
+      inc)
+  message("Roc CLR: " ${ROCCLR_SRC_DIR} "; HSA headers:" ${AMD_HSA_INCLUDE_DIR})
+  target_compile_definitions(rocclr PUBLIC ROCR_DYN_DLL)
+  target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR})
+else()
+  target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64)
+endif()
+
+#target_include_directories(rocclr PRIVATE ${AMD_HSA_INCLUDE_DIR}/..)
 
 find_package(NUMA)
 if(NUMA_FOUND)
@@ -39,6 +78,7 @@ find_package(OpenGL REQUIRED)
 
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocappprofile.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocrctx.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblit.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/roccounters.cpp
