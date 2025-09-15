@@ -1159,16 +1159,13 @@ def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
         "path": None,
     }
 
+    # Create distro ID list based off of ID (a string, containing a single distro)
+    # and ID_LIKE (a string, listing at least one distro, separated by a single space)
+    # from the system /etc/os-release file
     os_release = Path("/etc/os-release").read_text()
-    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release)
-    id = specs.search(r'^ID="?(.*?)"?$', os_release)
-    if id is not None:
-        # create distro ID list based off of ID and (if present) ID_LIKE
-        if id_list is not None:
-            id_list = id_list.split()
-            id_list.append(id)
-        else:
-            id_list = [id]
+    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release) or ""
+    id = specs.search(r'^ID="?(.*?)"?$', os_release) or ""
+    id_list = id_list.split() + [id]
 
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
