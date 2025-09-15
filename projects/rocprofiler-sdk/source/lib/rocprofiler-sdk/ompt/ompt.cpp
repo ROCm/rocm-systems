@@ -172,9 +172,9 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     auto* pprior = INTERNAL(prior_task_data);
     auto* pnext  = INTERNAL(next_task_data);
     assert(pprior != nullptr);
-    auto* state_prior  = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
     if(state_prior == nullptr)
-        ROCP_FATAL << "state_prior == nullptr prior_task_status" << prior_task_status  << ".";
+        ROCP_FATAL << "state_prior == nullptr prior_task_status" << prior_task_status << ".";
 
     auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
     auto* prior_corrid = context::get_latest_correlation_id();
