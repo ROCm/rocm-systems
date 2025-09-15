@@ -62,6 +62,9 @@ typedef enum {
     AQL_ERROR_NO_MEMORY = -8,           /**< Memory allocation failed */
     AQL_ERROR_INVALID_STATE = -9,       /**< Invalid operation state */
     AQL_ERROR_NOT_FOUND = -10,          /**< Resource not found */
+    AQL_ERROR_INVALID_REGISTER = -11,   /**< Invalid register address */
+    AQL_ERROR_INVALID_BLOCK = -12,      /**< Invalid counter block */
+    AQL_ERROR_INVALID_INSTANCE = -13,   /**< Invalid block instance */
 } aql_result_t;
 
 /**
@@ -131,7 +134,8 @@ typedef enum {
     AQL_BLOCK_UMC,                      /**< Unified Memory Controller */
     AQL_BLOCK_IOMMU_V2,                 /**< IOMMU Version 2 */
 
-    AQL_BLOCK_COUNT                     /**< Total number of block types */
+    AQL_BLOCK_COUNT,                    /**< Total number of block types */
+    AQL_BLOCK_UNKNOWN = 0xFFFFFFFF      /**< Unknown/invalid block type */
 } aql_block_id_t;
 
 /**

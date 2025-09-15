@@ -33,12 +33,16 @@ KBUILD_CFLAGS += -I$(PWD)/$(INC_DIR)
 LIB_SOURCES = $(SRC_DIR)/aql_cmd_buffer.c \
               $(SRC_DIR)/aql_packet.c \
               $(SRC_DIR)/aql_arch_detect.c \
-              $(SRC_DIR)/aql_gfx12_ops.c
+              $(SRC_DIR)/aql_gfx9_ops.c \
+              $(SRC_DIR)/aql_gfx12_ops.c \
+              $(SRC_DIR)/aql_pmc_interface.c
 
 LIB_HEADERS = $(INC_DIR)/aql_types.h \
               $(INC_DIR)/aql_arch_ops.h \
               $(INC_DIR)/aql_cmd_buffer.h \
-              $(INC_DIR)/aql_gfx12_defs.h
+              $(INC_DIR)/aql_gfx9_defs.h \
+              $(INC_DIR)/aql_gfx12_defs.h \
+              $(INC_DIR)/aql_pmc_interface.h
 
 EXAMPLE_SOURCES = $(EXAMPLES_DIR)/simple_example.c
 

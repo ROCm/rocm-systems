@@ -21,11 +21,11 @@
  * Forward declarations for architecture operations tables
  * These are implemented in separate files (aql_gfx12_ops.c, etc.)
  */
+extern const aql_arch_ops_t aql_gfx9_ops;
 extern const aql_arch_ops_t aql_gfx12_ops;
 
 /* TODO: Add other architectures as they are implemented */
 /*
-extern const aql_arch_ops_t aql_gfx9_ops;
 extern const aql_arch_ops_t aql_gfx10_ops;
 extern const aql_arch_ops_t aql_gfx11_ops;
 */
@@ -48,6 +48,18 @@ static const aql_arch_pattern_t architecture_patterns[] = {
     { "gfx1201",    &aql_gfx12_ops },
     { "rdna3",      &aql_gfx12_ops },
 
+    /* GFX9 (Vega) patterns */
+    { "gfx90",      &aql_gfx9_ops },
+    { "gfx94",      &aql_gfx9_ops },
+    { "gfx900",     &aql_gfx9_ops },
+    { "gfx902",     &aql_gfx9_ops },
+    { "gfx906",     &aql_gfx9_ops },
+    { "gfx908",     &aql_gfx9_ops },
+    { "gfx90a",     &aql_gfx9_ops },
+    { "gfx940",     &aql_gfx9_ops },
+    { "gfx942",     &aql_gfx9_ops },
+    { "vega",       &aql_gfx9_ops },
+
     /* TODO: Add other architecture patterns */
     /*
     // GFX11 (RDNA2) patterns
@@ -63,10 +75,6 @@ static const aql_arch_pattern_t architecture_patterns[] = {
     { "gfx1010",    &aql_gfx10_ops },
     { "gfx1030",    &aql_gfx10_ops },
     { "rdna1",      &aql_gfx10_ops },
-
-    // GFX9 (Vega) patterns
-    { "gfx90",      &aql_gfx9_ops },
-    { "gfx94",      &aql_gfx9_ops },
     { "gfx900",     &aql_gfx9_ops },
     { "gfx902",     &aql_gfx9_ops },
     { "gfx906",     &aql_gfx9_ops },
@@ -85,12 +93,12 @@ static const aql_arch_pattern_t architecture_patterns[] = {
  * Architecture Operations Table Registry
  */
 static const aql_arch_ops_t* supported_architectures[] = {
+    &aql_gfx9_ops,
     &aql_gfx12_ops,
     /* TODO: Add other architectures */
     /*
-    &aql_gfx11_ops,
     &aql_gfx10_ops,
-    &aql_gfx9_ops,
+    &aql_gfx11_ops,
     */
     NULL
 };

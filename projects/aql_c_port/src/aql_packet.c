@@ -20,6 +20,11 @@
 #define AQL_PRINT(fmt, ...) printf("aql: " fmt, ##__VA_ARGS__)
 #endif
 
+/* Forward declaration for debug function */
+#ifdef AQL_DEBUG_TRACE
+static void aql_debug_print_packet(const aql_pm4_ib_packet_t* aql_packet);
+#endif
+
 /* AQL packet format constants */
 #define AQL_PM4_IB_FORMAT                   1
 #define AQL_PM4_IB_DW_COUNT_REMAIN         10

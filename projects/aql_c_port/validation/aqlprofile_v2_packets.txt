@@ -1,0 +1,52 @@
+# AQLProfile V2 Real Implementation Packet Dump
+# Architecture: gfx942
+# Counters: 16
+
+## Counter: CPC_CPC_STAT_BUSY
+Block: CPC, Event: 25
+
+## Counter: CPC_CPC_STAT_IDLE
+Block: CPC, Event: 26
+
+## Counter: CPC_CPC_STAT_STALL
+Block: CPC, Event: 27
+
+## Counter: GRBM_COUNT
+Block: GRBM, Event: 0
+
+## Counter: GRBM_CPC_BUSY
+Block: GRBM, Event: 30
+
+## Counter: GRBM_CPF_BUSY
+Block: GRBM, Event: 31
+
+## Counter: SQ_WAVES
+Block: SQ, Event: 4
+
+## Counter: SQC_DCACHE_ATOMIC
+Block: SQ, Event: 298
+
+## Counter: SQC_DCACHE_HITS
+Block: SQ, Event: 291
+
+## Counter: SQC_DCACHE_BUSY_CYCLES
+Block: SQ, Event: 289
+
+## Counter: TCC_ATOMIC
+Block: TCC, Event: 14
+
+## Counter: TCC_ALL_TC_OP_WB_WRITEBACK
+Block: TCC, Event: 73
+
+## Counter: TCC_ALL_TC_OP_INV_EVICT
+Block: TCC, Event: 80
+
+## Counter: TCP_GATE_EN1
+Block: TCP, Event: 0
+
+## Counter: TCP_GATE_EN2
+Block: TCP, Event: 1
+
+## Counter: TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES
+Block: TCP, Event: 12
+

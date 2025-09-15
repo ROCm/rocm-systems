@@ -11,6 +11,7 @@
 #define AQL_GFX12_DEFS_H
 
 #include <stdint.h>
+#include "aql_types.h"
 
 /*
  * Register Space Definitions (from soc24_enum.h)
@@ -134,6 +135,38 @@
 #define AQL_GFX12_HAS_WGP_SUPPORT                 true   /* Workgroup Processor support */
 
 /*
+ * GFX12 Real Hardware Performance Counter Select Registers
+ * These are actual hardware register addresses extracted from GFX12 register definitions
+ * Source: /linux/registers/gc/gc_12_0_0_offset.h
+ */
+#define AQL_GFX12_PERF_SEL_BASE_CB                   0x3C01  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_CPC                  0x3809  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_CPF                  0x3807  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_CPG                  0x3802  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_DB                   0x3C40  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_GDS                  0x3A80  /* Placeholder - not found in GFX12 */
+#define AQL_GFX12_PERF_SEL_BASE_GRBM                 0x3840  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_GRBMSE               0x8040  /* Placeholder - not found in GFX12 */
+#define AQL_GFX12_PERF_SEL_BASE_PA_SC                0x3940  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_PA_SU                0x3900  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_SPI                  0x2400  /* Placeholder - not found in GFX12 */
+#define AQL_GFX12_PERF_SEL_BASE_SQ                   0x39C0  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_SX                   0x2100  /* Placeholder - not found in GFX12 */
+#define AQL_GFX12_PERF_SEL_BASE_TA                   0x3AC0  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_TCP                  0x3B40  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_TD                   0x3B00  /* Real hardware address */
+#define AQL_GFX12_PERF_SEL_BASE_TCA                  0x3400  /* Placeholder - not found in GFX12 */
+#define AQL_GFX12_PERF_SEL_BASE_GL2C                 0x3B80  /* Real hardware address (replaces TCC) */
+
+/*
+ * GFX12 Performance Counter Register Offsets
+ */
+#define AQL_GFX12_PERF_COUNTER_SELECT_OFFSET         0x00
+#define AQL_GFX12_PERF_COUNTER_SELECT1_OFFSET        0x01
+#define AQL_GFX12_PERF_COUNTER_LO_OFFSET             0x02
+#define AQL_GFX12_PERF_COUNTER_HI_OFFSET             0x03
+
+/*
  * GFX12 Counter Block Information
  * These definitions map to the unified block IDs in aql_types.h
  */
@@ -176,6 +209,38 @@
 
 /* Number of supported counter blocks */
 #define AQL_GFX12_NUM_SUPPORTED_BLOCKS            31
+
+/*
+ * GFX12 Counter Block Register Information
+ */
+typedef struct {
+    aql_block_id_t block_id;
+    uint32_t perf_sel_base;
+    uint32_t counter_count;
+    const char* block_name;
+} aql_gfx12_counter_block_info_t;
+
+static const aql_gfx12_counter_block_info_t aql_gfx12_counter_blocks[] = {
+    { AQL_BLOCK_CB,     AQL_GFX12_PERF_SEL_BASE_CB,     4, "CB" },     /* Real: 0x3C01 */
+    { AQL_BLOCK_CPC,    AQL_GFX12_PERF_SEL_BASE_CPC,    2, "CPC" },    /* Real: 0x3809 */
+    { AQL_BLOCK_CPF,    AQL_GFX12_PERF_SEL_BASE_CPF,    2, "CPF" },    /* Real: 0x3807 */
+    { AQL_BLOCK_CPG,    AQL_GFX12_PERF_SEL_BASE_CPG,    2, "CPG" },    /* Real: 0x3802 */
+    { AQL_BLOCK_DB,     AQL_GFX12_PERF_SEL_BASE_DB,     4, "DB" },     /* Real: 0x3C40 */
+    { AQL_BLOCK_GDS,    AQL_GFX12_PERF_SEL_BASE_GDS,    4, "GDS" },    /* Placeholder */
+    { AQL_BLOCK_GRBM,   AQL_GFX12_PERF_SEL_BASE_GRBM,   2, "GRBM" },   /* Real: 0x3840 */
+    { AQL_BLOCK_GRBM_SE, AQL_GFX12_PERF_SEL_BASE_GRBMSE, 4, "GRBMSE" }, /* Placeholder */
+    { AQL_BLOCK_PA_SC,  AQL_GFX12_PERF_SEL_BASE_PA_SC,  8, "PA_SC" },  /* Real: 0x3940 */
+    { AQL_BLOCK_PA_SU,  AQL_GFX12_PERF_SEL_BASE_PA_SU,  4, "PA_SU" },  /* Real: 0x3900 */
+    { AQL_BLOCK_SPI,    AQL_GFX12_PERF_SEL_BASE_SPI,    6, "SPI" },    /* Placeholder */
+    { AQL_BLOCK_SQ,     AQL_GFX12_PERF_SEL_BASE_SQ,     16, "SQ" },    /* Real: 0x39C0 */
+    { AQL_BLOCK_SX,     AQL_GFX12_PERF_SEL_BASE_SX,     4, "SX" },     /* Placeholder */
+    { AQL_BLOCK_TA,     AQL_GFX12_PERF_SEL_BASE_TA,     2, "TA" },     /* Real: 0x3AC0 */
+    { AQL_BLOCK_TCP,    AQL_GFX12_PERF_SEL_BASE_TCP,    4, "TCP" },    /* Real: 0x3B40 */
+    { AQL_BLOCK_TD,     AQL_GFX12_PERF_SEL_BASE_TD,     2, "TD" },     /* Real: 0x3B00 */
+    { AQL_BLOCK_TCA,    AQL_GFX12_PERF_SEL_BASE_TCA,    4, "TCA" },    /* Placeholder */
+    { AQL_BLOCK_GL2C,   AQL_GFX12_PERF_SEL_BASE_GL2C,   4, "GL2C" },   /* Real: 0x3B80 (replaces TCC) */
+    { AQL_BLOCK_UNKNOWN, 0, 0, NULL } /* Terminator */
+};
 
 /*
  * GRBM Index Construction for GFX12

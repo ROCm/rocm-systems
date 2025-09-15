@@ -75,6 +75,9 @@ static void print_hex_data(const char* label, const void* data, size_t size) {
 /* Test architecture detection */
 static void test_architecture_detection(void) {
     const char* test_gpus[] = {
+        "gfx942",
+        "gfx906",
+        "vega",
         "gfx1201",
         "gfx1200",
         "rdna3",
@@ -277,6 +280,65 @@ static void test_counter_validation(void) {
     printf("\n");
 }
 
+/* Test GFX9-specific features */
+static void test_gfx9_features(void) {
+    const aql_arch_ops_t* ops;
+    uint32_t cmd_buffer_data[256];
+    aql_cmd_buffer_t cmd_buf;
+    aql_result_t result;
+
+    printf("=== GFX9 Specific Features Test ===\n");
+
+    /* Get GFX9 operations */
+    ops = aql_detect_architecture("gfx942");
+    if (!ops) {
+        printf("GFX9 not supported, skipping GFX9-specific tests\n\n");
+        return;
+    }
+
+    printf("Using architecture: %s\n", ops->arch_name);
+
+    /* Initialize command buffer */
+    result = aql_cmd_buffer_init(&cmd_buf, cmd_buffer_data, 256);
+    assert(result == AQL_SUCCESS);
+
+    /* Test GFX9-specific capabilities */
+    printf("GFX9 Capabilities:\n");
+    printf("  PRED_EXEC support: %s\n", ops->has_pred_exec ? "YES" : "NO");
+    printf("  UCONFIG space: %s\n", ops->has_uconfig_space ? "YES" : "NO");
+    printf("  SMN addressing: %s\n", ops->has_smn_addressing ? "YES" : "NO");
+
+    /* Generate GFX9-specific commands */
+    printf("Generating GFX9-specific commands...\n");
+
+    /* 1. Test PRED_EXEC packet (unique to GFX9) */
+    if (ops->has_pred_exec) {
+        result = ops->build_pred_exec(&cmd_buf, 0xFF, 1000);
+        assert(result == AQL_SUCCESS);
+        printf("  PRED_EXEC: generated %zu dwords\n", aql_cmd_buffer_used(&cmd_buf));
+    }
+
+    /* 2. Test UCONFIG register write (GFX9 specific) */
+    if (ops->has_uconfig_space) {
+        result = ops->build_write_uconfig_reg(&cmd_buf, 0xC004, 0xDEADBEEF);
+        assert(result == AQL_SUCCESS);
+        printf("  WRITE_UCONFIG_REG: buffer now %zu dwords\n", aql_cmd_buffer_used(&cmd_buf));
+    }
+
+    /* 3. Test 7-dword cache flush (GFX9 vs 8-dword GFX12) */
+    size_t dwords_before = aql_cmd_buffer_used(&cmd_buf);
+    result = ops->build_cache_flush(&cmd_buf, 0x10000000, 4096);
+    assert(result == AQL_SUCCESS);
+    size_t cache_flush_size = aql_cmd_buffer_used(&cmd_buf) - dwords_before;
+    printf("  CACHE_FLUSH (GFX9): %zu dwords (should be 7)\n", cache_flush_size);
+
+    /* Print generated commands */
+    print_hex_data("GFX9-specific commands", aql_cmd_buffer_data(&cmd_buf),
+                   aql_cmd_buffer_size_bytes(&cmd_buf));
+
+    printf("\n");
+}
+
 /* Main example program */
 int main(int argc, char* argv[]) {
     (void)argc; /* Suppress unused parameter warning */
@@ -290,6 +352,7 @@ int main(int argc, char* argv[]) {
     test_pm4_generation();
     test_aql_packet_generation();
     test_counter_validation();
+    test_gfx9_features();
 
     /* Print supported architectures */
     printf("=== Supported Architectures ===\n");

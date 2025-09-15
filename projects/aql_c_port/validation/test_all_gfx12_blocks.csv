@@ -1,0 +1,53 @@
+# Comprehensive GFX12 counter test covering all blocks
+# Format: counter_name,block,event
+# CB Block - Color Buffer
+CB_DB_CB_LQUAD_READS,CB,0
+CB_DB_CB_LQUAD_WRITES,CB,1
+CB_CB_CACHE_HITS,CB,2
+CB_CB_CACHE_MISSES,CB,3
+# CPC Block - Command Processor Controller
+CPC_CPC_STAT_BUSY,CPC,25
+CPC_CPC_STAT_IDLE,CPC,26
+# CPF Block - Command Processor Fetcher
+CPF_CPF_STAT_BUSY,CPF,25
+CPF_CPF_STAT_IDLE,CPF,26
+# CPG Block - Command Processor Graphics
+CPG_CPG_STAT_BUSY,CPG,25
+CPG_CPG_STAT_IDLE,CPG,26
+# DB Block - Depth Buffer
+DB_DB_QUAD_QUADS,DB,0
+DB_DB_QUAD_PIXELS,DB,1
+DB_HIZ_TILE_CULLED,DB,2
+DB_HIZ_ZMASK_STALL,DB,3
+# GDS Block - Global Data Share (if available in GFX12)
+GDS_GDS_ATOM_CMP_EXCH,GDS,0
+GDS_GDS_ATOM_FCMP_EXCH,GDS,1
+# GRBM Block - Graphics Register Bus Manager
+GRBM_COUNT,GRBM,0
+GRBM_CPC_BUSY,GRBM,30
+# PA_SC Block - Primitive Assembly - Scan Converter
+PA_SC_CLIPRECT_IN,PA_SC,0
+PA_SC_CLIPRECT_OUT,PA_SC,1
+PA_SC_CLIP_CULL_IN,PA_SC,2
+PA_SC_CLIP_CULL_OUT,PA_SC,3
+# PA_SU Block - Primitive Assembly - Setup Unit
+PA_SU_CLPRIM,PA_SU,0
+PA_SU_CLVERT,PA_SU,1
+# SQ Block - Sequencer
+SQ_WAVES,SQ,4
+SQC_DCACHE_ATOMIC,SQ,298
+SQC_DCACHE_HITS,SQ,291
+SQC_DCACHE_BUSY_CYCLES,SQ,289
+# TA Block - Texture Addresser
+TA_TA_BUSY,TA,0
+TA_TA_TC_STALL,TA,1
+# TCP Block - Texture Cache per Pipe
+TCP_GATE_EN1,TCP,0
+TCP_GATE_EN2,TCP,1
+TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,TCP,12
+# TD Block - Texture Data
+TD_TD_BUSY,TD,0
+TD_TC_TD_STALL,TD,1
+# GL2C Block - GL2 Cache Controller (replaces TCC in GFX12)
+GL2C_ATOMIC,GL2C,14
+GL2C_ALL_TC_OP_WB_WRITEBACK,GL2C,73
