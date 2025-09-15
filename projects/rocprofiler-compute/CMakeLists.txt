@@ -158,6 +158,10 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
 
+# Setup sdk tool
+enable_language("CXX" "HIP")
+add_subdirectory(src/rocprofiler_sdk_tool)
+
 # Setup testing collateral
 
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
@@ -550,6 +554,11 @@ install(
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT main)
 
+install(
+    FILES ${PROJECT_BINARY_DIR}/src/rocprofiler_sdk_tool/librocprofiler-sdk-tool-for-compute.so
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+    COMPONENT main)
+    
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)

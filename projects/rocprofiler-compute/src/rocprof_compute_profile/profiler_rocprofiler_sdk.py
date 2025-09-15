@@ -54,17 +54,18 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         app_cmd = shlex.split(args.remaining)
 
         rocm_libdir = Path(args.rocprofiler_sdk_library_path).parent
-        rocprofiler_sdk_tool_path = str(
-            rocm_libdir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
-        )
+        # rocprofiler_sdk_tool_path = str(
+        #     rocm_libdir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
+        # )
+        rocprofiler_sdk_tool_api_path = "/home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/install/lib/rocprofiler-compute/librocprofiler-sdk-tool-for-compute.so"
         ld_preload = [
-            rocprofiler_sdk_tool_path,
-            args.rocprofiler_sdk_library_path,
+            rocprofiler_sdk_tool_api_path,
+            # args.rocprofiler_sdk_library_path,
         ]
         options = {
             "ROCPROFILER_LIBRARY_CTOR": "1",
             "LD_PRELOAD": ":".join(ld_preload),
-            "ROCP_TOOL_LIBRARIES": rocprofiler_sdk_tool_path,
+            "ROCP_TOOL_LIBRARIES": rocprofiler_sdk_tool_api_path,
             "LD_LIBRARY_PATH": rocm_libdir,
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
