@@ -548,18 +548,13 @@ class OmniSoC_Base:
             )
             sys.path.append(
                 str(
-                    Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-                    / "bin"
+                    Path(self.get_args().rocprofiler_sdk_library_path).parent
+                    / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                    / "site-packages"
                 )
             )
-            from rocprofv3_avail_module import avail
+            from rocprofv3 import avail
 
-            avail.loadLibrary.libname = str(
-                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-                / "lib"
-                / "rocprofiler-sdk"
-                / "librocprofv3-list-avail.so"
-            )
             counters = avail.get_counters()
             rocprof_counters = {
                 counter.name
