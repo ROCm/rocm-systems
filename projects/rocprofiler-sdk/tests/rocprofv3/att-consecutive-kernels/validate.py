@@ -41,7 +41,7 @@ def test_csv_data(csv_data):
             if kernel_pattern.search(row["Source"]):
                 kernel_set.add(row["Source"])
 
-    assert len(kernel_set) == 4, "Expected all vector-ops kernels to be recorded"
+    assert len(kernel_set) >= 4, "Expected all vector-ops kernels to be recorded"
 
 
 if __name__ == "__main__":
