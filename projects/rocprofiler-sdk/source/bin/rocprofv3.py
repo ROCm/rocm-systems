@@ -60,6 +60,12 @@ class dotdict(dict):
                     [dotdict(i) if isinstance(i, (dict)) else i for i in v],
                 )
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+
 
 def patch_message(msg, *args):
     msg = textwrap.dedent(msg)
@@ -72,14 +78,14 @@ def patch_message(msg, *args):
 
 def fatal_error(msg, *args, exit_code=1):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Fatal error: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
 
 
 def warning(msg, *args):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Warning: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
 
 
@@ -951,18 +957,27 @@ def patch_args(data):
     return data
 
 
-def get_args(cmd_args, inp_args):
+def get_args(cmd_args, inp_args, filter=[]):
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
-                f"{name} is of type {type(var).__name__}, expected {type(type_id).__name__}"
+                f"{name} is of type {type(var).__name__}, expected {type_id.__name__}"
             )
 
-    ensure_type("cmd_args", cmd_args, argparse.Namespace)
-    ensure_type("inp_args", inp_args, dotdict)
+    if isinstance(cmd_args, argparse.Namespace):
+        ensure_type("cmd_args", cmd_args, argparse.Namespace)
+        ensure_type("inp_args", inp_args, dotdict)
 
-    cmd_keys = list(cmd_args.__dict__.keys())
-    inp_keys = list(inp_args.keys())
+        cmd_keys = list(cmd_args.__dict__.keys())
+        inp_keys = list(inp_args.keys())
+
+    else:
+        ensure_type("cmd_args", cmd_args, dotdict)
+        ensure_type("inp_args", inp_args, dotdict)
+
+        cmd_keys = list(cmd_args.keys())
+        inp_keys = list(inp_args.keys())
+
     data = {}
 
     def get_attr(key):
@@ -978,9 +993,30 @@ def get_args(cmd_args, inp_args):
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            raise RuntimeError(
-                f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
-            )
+            should_raise = True
+            if filter:
+                is_filtered = False
+                for fitr in filter:
+                    import re
+
+                    if re.match(fitr, itr):
+                        is_filtered = True
+                        break
+
+                if not is_filtered:
+                    warning(
+                        f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
+                    )
+                    should_raise = False
+
+            # should raise error if not in filter list
+            if should_raise:
+                raise RuntimeError(
+                    f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+                )
+            else:
+                # has preference towards command line args
+                data[itr] = get_attr(itr)
         else:
             data[itr] = get_attr(itr)
 
@@ -1697,6 +1733,39 @@ def main(argv=None):
 
     if len(inp_args) == 1:
         args = get_args(cmd_args, inp_args[0])
+
+        if args.pid:
+            import pickle
+
+            if args.collection_period:
+                fatal_error("--collection-period is not compatible with attach mode")
+
+            fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
+            if os.path.exists(fname):
+                # load the configuration from the previous attachment
+                with open(fname, "rb") as ifs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Loading attach configuration from {fname}...")
+                    prev_args = pickle.load(ifs)
+
+                args = get_args(
+                    args,
+                    dotdict(prev_args),
+                    filter=[
+                        ".*_trace",
+                        "^pc_sampling_.*$",
+                        "^att_.*$",
+                        "^(pmc|pmc_groups|output_config|extra_counters)$",
+                        "^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    ],
+                )
+
+            # write the configuration for future attachments
+            with open(fname, "wb") as ofs:
+                if args.log_level in ("config", "info", "trace"):
+                    print(f"Saving attach configuration to {fname}...")
+                pickle.dump(args, ofs)
+
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1

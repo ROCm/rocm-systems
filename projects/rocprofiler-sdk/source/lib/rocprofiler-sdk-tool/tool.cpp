@@ -116,6 +116,7 @@ __gcov_dump(void);
 
 namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
+namespace fs     = ::rocprofiler::common::filesystem;
 
 extern "C" {
 void
@@ -1775,8 +1776,19 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    // save the existing config for comparison
+    auto original_config = tool::get_config();
+
     // reset config for attach (i.e. re-parse environment variables)
-    rocprofiler::tool::get_config() = rocprofiler::tool::config{};
+    tool::get_config() = tool::config{};
+
+    // ensure the config has not changed which services were requested.
+    // NOTE: this is a temporary restriction
+    ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
+        << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
+           "support changing the set of enabled tracing services between initial load and attach. "
+           "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
+           "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
     pid_t target_pid = getppid();  // The target process we're attaching to
     pid_t tool_pid   = getpid();   // The rocprofv3 tool process
@@ -2851,6 +2863,14 @@ tool_fini(void* /*tool_data*/)
             itr();
         delete destructors;
         destructors = nullptr;
+    }
+
+    // remove the attach arguments file if it exists
+    if(auto attach_args_fname = fmt::format("/tmp/rocprofv3_attach_{}.pkl", getpid());
+       fs::exists(attach_args_fname))
+    {
+        ROCP_INFO << "removing attach arguments file: " << attach_args_fname;
+        fs::remove(attach_args_fname);
     }
 
 #if defined(CODECOV) && CODECOV > 0
