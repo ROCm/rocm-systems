@@ -211,12 +211,15 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         COMPONENT rocpd)
 endfunction()
 
-function(rocprofiler_rocprofv3_python)
+function(rocprofiler_rocprofv3_python _VERSION)
+    message(
+        STATUS "Building rocprofiler-sdk rocprofv3 python bindings for python ${_VERSION}")
+    rocprofiler_find_python3(${_VERSION} QUIET)
     set(rocprofv3_PYTHON_INSTALL_DIRECTORY
         ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3)
     set(rocprofv3_PYTHON_OUTPUT_DIRECTORY
         ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY})
-    set(rocprofv3_PYTHON_SOURCES ${ARGN})
+    set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
     if(NOT rocprofv3_PYTHON_SOURCES)
         message(
             FATAL_ERROR "rocprofiler_rocprofv3_python requires specifying source files")

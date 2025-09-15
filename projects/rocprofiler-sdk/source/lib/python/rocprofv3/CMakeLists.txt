@@ -21,6 +21,8 @@
 # SOFTWARE.
 
 set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
-rocprofiler_rocprofv3_python(${rocprofv3_PYTHON_SOURCES})
+foreach(_PYTHON_VERSION ${ROCPROFILER_PYTHON_VERSIONS})
+    rocprofiler_rocprofv3_python(${_PYTHON_VERSION})
+endforeach()
 
 rocprofiler_reset_python3_cache()
