@@ -212,8 +212,6 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
 endfunction()
 
 function(rocprofiler_rocprofv3_python)
-    message(
-        STATUS "Building rocprofiler-sdk rocprofv3 python bindings for python3")
     set(rocprofv3_PYTHON_INSTALL_DIRECTORY
         ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3)
     set(rocprofv3_PYTHON_OUTPUT_DIRECTORY
