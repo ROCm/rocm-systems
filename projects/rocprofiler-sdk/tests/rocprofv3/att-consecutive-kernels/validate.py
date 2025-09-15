@@ -21,7 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
+import re
 import sys
 import pytest
 
@@ -29,8 +29,19 @@ import pytest
 def test_csv_data(csv_data):
     assert len(csv_data) > 0, "Expected at least one stats csv file"
 
+    kernel_pattern = re.compile("kernel")
+    MIN_EXPECTED_LINES = 5
+    kernel_set = set()
     for stats_csv_data in csv_data:
-        assert len(stats_csv_data) > 0, "Expected stats csv file to be non-empty"
+        assert (
+            len(stats_csv_data) >= MIN_EXPECTED_LINES
+        ), "Expected stats csv file to be non-empty"
+
+        for row in stats_csv_data:
+            if kernel_pattern.search(row["Source"]):
+                kernel_set.add(row["Source"])
+
+    assert len(kernel_set) == 4, "Expected all vector-ops kernels to be recorded"
 
 
 if __name__ == "__main__":
