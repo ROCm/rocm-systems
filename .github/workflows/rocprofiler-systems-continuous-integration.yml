@@ -44,7 +44,8 @@ jobs:
         system:
           - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
           - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
-    runs-on: ${{ matrix.system.runner }}
+    # TODO: Replace with ${{ matrix.system.runner }} when ready
+    runs-on: ubuntu-latest
     container:
       # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.system.arch }}-ubuntu-${{ matrix.system.os-release }}
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-${{ matrix.system.os-release }}
