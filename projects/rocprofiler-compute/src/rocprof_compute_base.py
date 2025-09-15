@@ -215,9 +215,9 @@ class RocProfCompute:
 
     def handle_profile_args(self) -> None:
         # Handle list operations first - these are independent and exit immediately
-        if getattr(self.__args, 'list_sets', False):
+        if getattr(self.__args, "list_sets", False):
             return
-        if getattr(self.__args, 'list_available_metrics', False):
+        if getattr(self.__args, "list_available_metrics", False):
             return
 
         # Add --name to workload path if --path is not given
@@ -234,7 +234,9 @@ class RocProfCompute:
                 self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
             else:
                 self.__args.path = str(Path(self.__args.path) / self.__args.name)
-                console_warning(f"No gpu model found, using default path: {self.__args.path}")
+                console_warning(
+                    f"No gpu model found, using default path: {self.__args.path}"
+                )
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
@@ -466,13 +468,18 @@ class RocProfCompute:
             base_path = path_list[0] if isinstance(path_list, list) else path_list
 
             # Determine sysinfo path
-            if analyzer.get_args().nodes is None and not analyzer.get_args().spatial_multiplexing:
+            if (
+                analyzer.get_args().nodes is None
+                and not analyzer.get_args().spatial_multiplexing
+            ):
                 sysinfo_path = base_path
             else:
                 sysinfo_path = file_io.find_1st_sub_dir(base_path)
 
             sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
-            sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
+            sys_info_dict = {
+                key: value[0] for key, value in sys_info.to_dict("list").items()
+            }
             self.load_soc_specs(sys_info_dict)
 
         analyzer.set_soc(self.__soc)
