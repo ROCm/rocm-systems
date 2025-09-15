@@ -59,8 +59,9 @@ template <typename T, unsigned int n> __attribute__((always_inline)) __HOST_DEVI
     typename HIP_vector_base<T, n>::Native_vec_*
     get_native_pointer(HIP_vector_base<T, n>& base_vec) {
   static_assert(sizeof(base_vec) == sizeof(typename HIP_vector_base<T, n>::Native_vec_));
-  static_assert(__hip_internal::alignment_of<HIP_vector_base<T, n>>::value ==
-                __hip_internal::alignment_of<typename HIP_vector_base<T, n>::Native_vec_>::value);
+  static_assert(
+      (__hip_internal::alignment_of<HIP_vector_base<T, n>>::value %
+       __hip_internal::alignment_of<typename HIP_vector_base<T, n>::Native_vec_>::value) == 0);
   return reinterpret_cast<typename HIP_vector_base<T, n>::Native_vec_*>(&base_vec);
 };
 
@@ -68,8 +69,9 @@ template <typename T, unsigned int n>
 __attribute__((always_inline)) __HOST_DEVICE__ const typename HIP_vector_base<T, n>::Native_vec_*
 get_native_pointer(const HIP_vector_base<T, n>& base_vec) {
   static_assert(sizeof(base_vec) == sizeof(typename HIP_vector_base<T, n>::Native_vec_));
-  static_assert(__hip_internal::alignment_of<HIP_vector_base<T, n>>::value ==
-                __hip_internal::alignment_of<typename HIP_vector_base<T, n>::Native_vec_>::value);
+  static_assert(
+      (__hip_internal::alignment_of<HIP_vector_base<T, n>>::value %
+       __hip_internal::alignment_of<typename HIP_vector_base<T, n>::Native_vec_>::value) == 0);
   return reinterpret_cast<const typename HIP_vector_base<T, n>::Native_vec_*>(&base_vec);
 };
 }  // Namespace hip_impl.
