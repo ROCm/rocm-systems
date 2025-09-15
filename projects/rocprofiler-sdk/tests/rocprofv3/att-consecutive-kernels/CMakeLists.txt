@@ -66,7 +66,7 @@ add_test(
     NAME rocprofv3-test-att-consecutive-kernels-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${ATT_LIB} --att
-        --att-consecutive-kernels 20 -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --
+        --att-consecutive-kernels 8 -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --
         $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(

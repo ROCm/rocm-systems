@@ -1431,7 +1431,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 {
     using capture_ids_set_t = common::Synchronized<std::unordered_set<rocprofiler_dispatch_id_t>>;
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE) return;
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) return;
 
     assert(record.payload != nullptr);
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
@@ -1487,7 +1487,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
         return;
     }
 
-    assert(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT);
+    assert(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE);
 
     if(!isprofiling) return;
 
