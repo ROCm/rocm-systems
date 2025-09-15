@@ -241,6 +241,20 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
+    NAME test_profile_path
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m path --junitxml=tests/test_profile_path.xml
+            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_roofline
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m roofline
+        --junitxml=tests/test_profile_roofline.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
     NAME test_profile_section
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m section
@@ -265,9 +279,15 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 set_tests_properties(
-    test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join
-    test_profile_sort test_profile_misc PROPERTIES LABELS "profile" RESOURCE_GROUPS
-                                                   gpus:1)
+    test_profile_kernel_execution
+    test_profile_dispatch
+    test_profile_mem
+    test_profile_join
+    test_profile_sort
+    test_profile_misc
+    test_profile_path
+    test_profile_roofline
+    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1)
 
 # ---------------------------
 # analysis command tests
@@ -367,6 +387,8 @@ if(${ENABLE_COVERAGE})
         test_profile_join
         test_profile_sort
         test_profile_misc
+        test_profile_path
+        test_profile_roofline
         test_profile_section
         test_profile_sets_func
         test_analyze_commands
@@ -484,10 +506,10 @@ add_custom_target(
     license
     COMMAND
         ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}/src
-        --license ${PROJECT_SOURCE_DIR}/LICENSE --extension '.py'
+        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
     COMMAND
         ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
-        --license ${PROJECT_SOURCE_DIR}/LICENSE --file
+        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
     )
 
@@ -524,7 +546,7 @@ add_custom_target(
     COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR})
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT main)
 
