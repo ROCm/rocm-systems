@@ -56,7 +56,7 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' == 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
             MODE=Nightly
           else
             MODE=Continuous
@@ -68,10 +68,10 @@ jobs:
         id: therock
         working-directory: projects/rocprofiler-systems
         run: |
-          if [ ${{ matrix.os-release }} == '24.04' ]; then
-            apt install python3.12-venv
+          if [ ${{ matrix.os-release }} = '24.04' ]; then
+            apt install -y python3.12-venv
           else
-            apt install python3.10-venv
+            apt install -y python3.10-venv
           fi
           python3 -m venv ${{ env.PYTHON_VENV_NAME }}
           source ${{ env.PYTHON_VENV_ACTIVATE }}
