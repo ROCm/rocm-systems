@@ -42,10 +42,10 @@ from utils.logger import console_error, demarcate
 
 class tui_analysis(OmniAnalyze_Base):
     def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, str], path: Path
+        self, args: argparse.Namespace, supported_archs: dict[str, str], path: str
     ) -> None:
         super().__init__(args, supported_archs)
-        self.path = str(path)
+        self.path = path
         self.args = self.get_args()
         self.raw_dfs: dict[str, dict] = {}
 
@@ -114,7 +114,7 @@ class tui_analysis(OmniAnalyze_Base):
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         # Load system info and configure
-        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
+        sys_info = file_io.load_sys_info(f"{self.path}/sysinfo.csv")
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(
