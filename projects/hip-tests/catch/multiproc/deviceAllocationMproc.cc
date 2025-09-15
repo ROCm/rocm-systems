@@ -43,7 +43,6 @@ static __global__ void kerTestDeviceMalloc(size_t size) {
   if (myId == 0) {
     dev_common_ptr = reinterpret_cast<char*>(malloc(size));
     if (dev_common_ptr == nullptr) {
-      printf("Device Allocation Failed! \n");
       return;
     }
   }
@@ -57,7 +56,6 @@ static __global__ void kerTestDeviceWrite() {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (dev_common_ptr == nullptr) {
-    printf("Device Allocation Failed! \n");
     return;
   }
   *(dev_common_ptr + myId) = SCHAR_MAX;
@@ -95,7 +93,6 @@ static __global__ void kerTestDeviceNew(size_t size) {
   if (myId == 0) {
     dev_common_ptr = new char[size];
     if (dev_common_ptr == nullptr) {
-      printf("Device Allocation Failed! \n");
       return;
     }
   }

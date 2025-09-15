@@ -1582,7 +1582,9 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   if (mem_segment == Device::MemorySegment::kKernArg &&
       (gpu_.dev().settings().kernel_arg_impl_ != KernelArgImpl::HostKernelArgs) &&
       gpu_.dev().info().largeBar_) {
-    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_));
+    amd::Device::AllocationFlags flags = {};
+    flags.executable_ = true;
+    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags));
     if (pool_base_ != nullptr) {
       // @note Workaround first access penalty.
       // KFD may update CPU page tables on the first CPU access
@@ -2946,7 +2948,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     constexpr bool kParent = false;
     amd::Memory* vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
