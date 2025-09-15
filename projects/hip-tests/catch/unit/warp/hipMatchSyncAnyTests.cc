@@ -67,6 +67,9 @@ template <typename T> static void runTestMatchAny_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 template <typename T> __global__ void matchAny_2(T* Input, unsigned long long* Output) {
@@ -124,6 +127,9 @@ template <typename T> static void runTestMatchAny_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void matchAny_3(int* Input, int* Output) {
@@ -172,6 +178,9 @@ static void runTestMatchAny_3() {
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 /**
