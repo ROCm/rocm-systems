@@ -24,7 +24,6 @@
 ##############################################################################
 
 import argparse
-import os
 import textwrap
 import time
 from abc import abstractmethod
@@ -164,7 +163,7 @@ class Roofline:
 
         base_path = Path(base_dir)
 
-        if base_path.name == "workloads" and base_path.parent == Path(os.getcwd()):
+        if base_path.name == "workloads" and base_path.parent == Path.cwd():
             app_name = getattr(self.__args, "name", "default_app_name")
             gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
 
