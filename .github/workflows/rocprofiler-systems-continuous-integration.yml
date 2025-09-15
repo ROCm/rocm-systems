@@ -36,15 +36,16 @@ env:
 
 jobs:
   ubuntu:
-    name: Ubuntu ${{ matrix.os-release }} • ${{ matrix.arch }} • Continuous Integration
+    name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }} • Continuous Integration
     strategy:
       matrix:
-        - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
-        - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
-    runs-on: ${{ matrix.runner }}
+        system:
+          - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
+          - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
+    runs-on: ${{ matrix.system.runner }}
     container:
-      # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.arch }}-ubuntu-${{ matrix.os-release }}
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-${{ matrix.os-release }}
+      # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.system.arch }}-ubuntu-${{ matrix.system.os-release }}
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-${{ matrix.system.os-release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,16 +73,16 @@ jobs:
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.arch }}')], &LastModified)[-1].Key")
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.system.arch }}')], &LastModified)[-1].Key")
           KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No ${{ matrix.arch }} tarball found"; exit 1; }
-          aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.arch }}.tar.gz --no-sign-request; \
-          mv rocm-${{ matrix.arch }}.tar.gz $${{ env.ROCM_PATH }}-${{ matrix.arch }}.tar.gz;
-          echo "✅ Latest TheRock Tarball Release for ${{ matrix.arch }} Downloaded!"
+          test -n "$KEY" || { echo "No ${{ matrix.system.arch }} tarball found"; exit 1; }
+          aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.system.arch }}.tar.gz --no-sign-request; \
+          mv rocm-${{ matrix.system.arch }}.tar.gz $${{ env.ROCM_PATH }}-${{ matrix.system.arch }}.tar.gz;
+          echo "✅ Latest TheRock Tarball Release for ${{ matrix.system.arch }} Downloaded!"
       
       - name: Install Latest Nightly ROCm
         run: |
-          tar -xf ${{ env.ROCM_PATH }}-${{ matrix.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
@@ -92,7 +93,7 @@ jobs:
         run: |
           python3 ./scripts/run-ci.py \
             -B build \
-            --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os }}-${{ matrix.system.gpu }} \
+            --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
             --build-jobs 2 \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
