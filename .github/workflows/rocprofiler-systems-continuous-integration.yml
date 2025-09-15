@@ -1,0 +1,100 @@
+name: rocprofiler-systems Continuous Integration
+run-name: rocprofiler-systems-ci
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+
+jobs:
+  ubuntu:
+    name: Ubuntu ${{ matrix.os-release }} • ${{ matrix.arch }} • Continuous Integration
+    strategy:
+      matrix:
+        - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
+        - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
+    runs-on: ${{ matrix.runner }}
+    container:
+      # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.arch }}-ubuntu-${{ matrix.os-release }}
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-${{ matrix.os-release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems/
+
+      - name: Setup Environment
+        id: setup_env
+        run: |
+          if [ ${{ github.event_name }} == 'schedule' ]; then
+            MODE=Nightly
+          else
+            MODE=Continuous
+          fi
+          echo "mode=${MODE}" >> $GITHUB_OUTPUT
+
+      # TODO: Remove this step once the gfx Dockers are available
+      - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
+        id: therock
+        run: |
+          sudo apt-get install -y python3-pip
+          python3 -m pip install -U pip
+          python3 -m pip install -U awscli
+          export PATH=~/.local/bin:$PATH
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.arch }}')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No ${{ matrix.arch }} tarball found"; exit 1; }
+          aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.arch }}.tar.gz --no-sign-request; \
+          mv rocm-${{ matrix.arch }}.tar.gz $${{ env.ROCM_PATH }}-${{ matrix.arch }}.tar.gz;
+          echo "✅ Latest TheRock Tarball Release for ${{ matrix.arch }} Downloaded!"
+      
+      - name: Install Latest Nightly ROCm
+        run: |
+          tar -xf ${{ env.ROCM_PATH }}-${{ matrix.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          echo "✅ ROCm Installation Complete!"
+
+      - name: Configure, Build, and Test
+        timeout-minutes: 30
+        working-directory: projects/rocprofiler-systems
+        run: |
+          python3 ./scripts/run-ci.py \
+            -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os }}-${{ matrix.system.gpu }} \
+            --build-jobs 2 \
+            --site ${{ matrix.system.runner }} \
+            --mode ${{ steps.setup_env.outputs.mode }} \
+            -- \
+            -DCMAKE_PREFIX_PATH={{ env.ROCM_PATH }}
