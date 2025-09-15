@@ -44,8 +44,7 @@ jobs:
         system:
           - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
           - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
-    # TODO: Replace with ${{ matrix.system.runner }} when ready
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.system.runner }}
     container:
       # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.system.arch }}-ubuntu-${{ matrix.system.os-release }}
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-${{ matrix.system.os-release }}
@@ -106,6 +105,8 @@ jobs:
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory ${PWD}
           python3 ./scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
@@ -113,4 +114,6 @@ jobs:
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
-            -DCMAKE_PREFIX_PATH={{ env.ROCM_PATH }}
+            -DCMAKE_PREFIX_PATH={{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DHIP_PLATFORM=amd
