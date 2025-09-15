@@ -68,6 +68,11 @@ jobs:
         id: therock
         working-directory: projects/rocprofiler-systems
         run: |
+          if [ ${{ matrix.os-release }} == '24.04' ]; then
+            apt install python3.12-venv
+          else
+            apt install python3.10-venv
+          fi
           python3 -m venv ${{ env.PYTHON_VENV_NAME }}
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           python3 -m pip install -U pip
