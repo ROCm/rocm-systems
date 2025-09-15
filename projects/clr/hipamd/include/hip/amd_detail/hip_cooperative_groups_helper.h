@@ -243,10 +243,19 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_signal(-1);
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait() {
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_wait(-1);
+#else
   __builtin_amdgcn_s_barrier();
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 }
 }  // namespace workgroup
