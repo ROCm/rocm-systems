@@ -547,7 +547,7 @@ queue_controller_fini()
 }
 
 void
-queue_controller_set_attach_table(RocAttachDispatchTable* attach_table)
+queue_controller_init(RocAttachDispatchTable* attach_table)
 {
     // We need to save the attach table for later, when the queue controller receives the HSA table
     // and is initialized. We must get the attach table before HSA for correct behavior. This is

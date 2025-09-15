@@ -68,7 +68,7 @@ void
 finalize();
 
 void
-code_object_set_attach_table(RocAttachDispatchTable* table);
+initialize(RocAttachDispatchTable* table);
 
 }  // namespace code_object
 }  // namespace rocprofiler
