@@ -70,6 +70,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems
         run: |
+          set -e
           if [ ${{ matrix.system.os-release }} = '24.04' ]; then
             apt install -y python3.12-venv
           else
@@ -93,6 +94,7 @@ jobs:
       
       - name: Install Latest Nightly ROCm
         run: |
+          set -e
           mkdir ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           tar -xf /opt/${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
@@ -103,6 +105,7 @@ jobs:
         timeout-minutes: 30
         working-directory: projects/rocprofiler-systems
         run: |
+          set -e
           python3 ./scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
