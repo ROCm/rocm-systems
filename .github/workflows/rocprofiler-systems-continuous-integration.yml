@@ -33,6 +33,8 @@ env:
   ROCPROFSYS_CI: ON
   ROCM_PATH: "/opt/rocm"
   ROCM_VERSION: "7.0.0"
+  PYTHON_VENV_NAME: "rocprofiler-systems"
+  PYTHON_VENV_ACTIVATE: "rocprofiler-systems/bin/activate"
 
 jobs:
   ubuntu:
@@ -64,8 +66,10 @@ jobs:
       # TODO: Remove this step once the gfx Dockers are available
       - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
         id: therock
+        working-directory: projects/rocprofiler-systems
         run: |
-          apt-get install -y python3-pip
+          python3 -m venv ${{ env.PYTHON_VENV_NAME }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           python3 -m pip install -U pip
           python3 -m pip install -U awscli
           export PATH=~/.local/bin:$PATH
