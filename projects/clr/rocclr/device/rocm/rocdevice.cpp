@@ -2007,13 +2007,14 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 
 // ================================================================================================
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const AgentInfo* agentInfo) const {
+                        const void* agentInfo) const {
   void* ptr = nullptr;
   uint32_t memFlags = 0;
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
+  hsa_amd_memory_pool_t pool =
+      getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
   hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, memFlags, &ptr);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Allocate hsa host memory %p, size 0x%zx,"
