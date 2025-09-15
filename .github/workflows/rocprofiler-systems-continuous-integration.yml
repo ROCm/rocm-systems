@@ -69,7 +69,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems
         run: |
-          if [ ${{ matrix.os-release }} = '24.04' ]; then
+          if [ ${{ matrix.system.os-release }} = '24.04' ]; then
             apt install -y python3.12-venv
           else
             apt install -y python3.10-venv
