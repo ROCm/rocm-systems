@@ -40,8 +40,8 @@ jobs:
     strategy:
       matrix:
         system:
-          - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
-          - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi325-1gpu-ossci-rocm'}
+          - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
+          - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
     runs-on: ${{ matrix.system.runner }}
     container:
       # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.system.arch }}-ubuntu-${{ matrix.system.os-release }}
