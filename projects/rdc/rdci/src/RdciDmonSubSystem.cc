@@ -26,7 +26,6 @@ THE SOFTWARE.
 #include <signal.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <ctime>
@@ -35,14 +34,12 @@ THE SOFTWARE.
 #include <queue>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "common/rdc_fields_supported.h"
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
-#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -68,7 +65,11 @@ std::string entity_to_string(uint32_t entity_index) {
   rdc_entity_info_t info = rdc_get_info_from_entity_index(entity_index);
 
   if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
-    return "g" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
+    if (info.device_type == RDC_DEVICE_TYPE_CPU) {
+      return "c" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
+    } else {
+      return "g" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
+    }
   }
   return std::to_string(info.device_index);
 }
@@ -166,16 +167,15 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
       throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify the fields or field group id");
     } else {
       std::vector<std::string> vec_ids = split_string(field_ids, ',');
-      for (uint32_t i = 0; i < vec_ids.size(); i++) {
-        if (!IsNumber(vec_ids[i])) {
+      for (const auto& vec_id : vec_ids) {
+        if (!IsNumber(vec_id)) {
           rdc_field_t field_id = RDC_FI_INVALID;
-          if (!amd::rdc::get_field_id_from_name(vec_ids[i], &field_id)) {
-            throw RdcException(RDC_ST_BAD_PARAMETER,
-                               "The field name " + vec_ids[i] + " is not valid");
+          if (!amd::rdc::get_field_id_from_name(vec_id, &field_id)) {
+            throw RdcException(RDC_ST_BAD_PARAMETER, "The field name " + vec_id + " is not valid");
           }
           field_ids_.push_back(field_id);
         } else {
-          field_ids_.push_back(static_cast<rdc_field_t>(std::stoi(vec_ids[i])));
+          field_ids_.push_back(static_cast<rdc_field_t>(std::stoi(vec_id)));
         }
       }
     }
@@ -204,7 +204,7 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
   }
 
   // Store gpu indexes to parse later
-  raw_gpu_indexes_ = gpu_indexes;
+  raw_device_indexes_ = gpu_indexes;
 }
 
 void RdciDmonSubSystem::show_help() const {
@@ -254,12 +254,12 @@ void RdciDmonSubSystem::show_help() const {
 }
 
 void RdciDmonSubSystem::create_temp_group() {
-  if (gpu_indexes_.size() == 0) {
+  if (device_indexes_.size() == 0) {
     return;
   }
 
   const std::string group_name("rdci-dmon-group");
-  rdc_gpu_group_t group_id;
+  rdc_gpu_group_t group_id = 0;
   rdc_status_t result =
       rdc_group_gpu_create(rdc_handle_, RDC_GROUP_EMPTY, group_name.c_str(), &group_id);
   if (result != RDC_ST_OK) {
@@ -267,17 +267,10 @@ void RdciDmonSubSystem::create_temp_group() {
   }
   need_cleanup_ = true;
 
-  for (uint32_t i = 0; i < gpu_indexes_.size(); i++) {
-    result = rdc_group_gpu_add(rdc_handle_, group_id, gpu_indexes_[i]);
+  for (unsigned int device_index : device_indexes_) {
+    result = rdc_group_gpu_add(rdc_handle_, group_id, device_index);
     if (result != RDC_ST_OK) {
-      rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_indexes_[i]);
-      std::string info_str;
-      if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
-        info_str =
-            "g" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
-      } else {
-        info_str = std::to_string(info.device_index);
-      }
+      std::string info_str = entity_to_string(device_index);
       throw RdcException(result, "Fail to add " + info_str + " to the dmon group.");
     }
   }
@@ -290,7 +283,7 @@ void RdciDmonSubSystem::create_temp_field_group() {
   }
 
   const std::string field_group_name("rdci-dmon-field-group");
-  rdc_field_grp_t group_id;
+  rdc_field_grp_t group_id = 0;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
   for (uint32_t i = 0; i < field_ids_.size(); i++) {
     field_ids[i] = field_ids_[i];
@@ -306,7 +299,7 @@ void RdciDmonSubSystem::create_temp_field_group() {
   options_.insert({OPTIONS_FIELD_GROUP_ID, group_id});
 }
 
-void RdciDmonSubSystem::resolve_gpu_indexes() {
+void RdciDmonSubSystem::resolve_device_indexes() {
   uint32_t device_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;
   rdc_status_t res = rdc_device_get_all(rdc_handle_, device_list, &count);
@@ -314,66 +307,105 @@ void RdciDmonSubSystem::resolve_gpu_indexes() {
     throw RdcException(res, "Failed to get all devices");
   }
 
-  // If neither group or gpu_index was specified, default to all
-  if (raw_gpu_indexes_.empty()) {
-    gpu_indexes_.assign(device_list, device_list + count);
+  // If neither group or device_index was specified, default to all
+  if (raw_device_indexes_.empty()) {
+    device_indexes_.assign(device_list, device_list + count);
     return;
   }
 
-  std::vector<std::string> vec_ids = split_string(raw_gpu_indexes_, ',');
-  for (uint32_t i = 0; i < vec_ids.size(); i++) {
-    if (rdc_is_partition_string(vec_ids[i].c_str())) {
-      uint32_t logicalPhysicalGpu;
-      uint32_t partition;
-      if (!rdc_parse_partition_string(vec_ids[i].c_str(), &logicalPhysicalGpu, &partition)) {
-        throw RdcException(RDC_ST_BAD_PARAMETER, "Invalid partition format: " + vec_ids[i]);
+  std::vector<std::string> vec_ids = split_string(raw_device_indexes_, ',');
+  for (const auto& vec_id : vec_ids) {
+    if (rdc_is_partition_string(vec_id.c_str())) {
+      uint32_t logicalPhysicalDevice = 0;
+      uint32_t partition = 0;
+      if (!rdc_parse_partition_string(vec_id.c_str(), &logicalPhysicalDevice, &partition)) {
+        throw RdcException(RDC_ST_BAD_PARAMETER, "Invalid partition format: " + vec_id);
       }
 
-      if (logicalPhysicalGpu >= count) {
-        throw RdcException(RDC_ST_BAD_PARAMETER,
-                           "GPU " + std::to_string(logicalPhysicalGpu) + " is out of range");
+      // Detect device type from partition string prefix
+      bool is_cpu_device = (vec_id[0] == 'c');
+      std::string device_type_str = is_cpu_device ? "CPU" : "GPU";
+
+      if (logicalPhysicalDevice >= count) {
+        throw RdcException(
+            RDC_ST_BAD_PARAMETER,
+            device_type_str + " " + std::to_string(logicalPhysicalDevice) + " is out of range");
       }
 
-      uint32_t physicalGpu = device_list[logicalPhysicalGpu];
+      uint32_t physicalDevice = device_list[logicalPhysicalDevice];
 
-      uint16_t num_partitions = 0;
-      rdc_status_t st = rdc_get_num_partition(rdc_handle_, physicalGpu, &num_partitions);
-      if (st != RDC_ST_OK) {
-        throw RdcException(st,
-                           "Failed to get partition info for GPU " + std::to_string(physicalGpu));
-      }
-
-      if (num_partitions == UINT16_MAX || num_partitions <= 1) {
+      if (is_cpu_device) {
+        // CPU-specific validation: CPUs don't have GPU-style partitioning
         if (partition != 0) {
-          throw RdcException(RDC_ST_BAD_PARAMETER, "GPU " + std::to_string(physicalGpu) +
-                                                       " is not partitioned, so partition " +
-                                                       std::to_string(partition) + " is invalid");
+          throw RdcException(RDC_ST_BAD_PARAMETER,
+                             "CPU " + std::to_string(physicalDevice) +
+                                 " does not support partitioning, partition " +
+                                 std::to_string(partition) + " is invalid");
         }
       } else {
-        if (partition >= num_partitions) {
-          throw RdcException(RDC_ST_BAD_PARAMETER,
-                             "GPU " + std::to_string(physicalGpu) + " supports only " +
-                                 std::to_string(num_partitions) + " partitions, partition " +
-                                 std::to_string(partition) + " is invalid");
+        // GPU-specific validation: Check GPU partitioning
+        uint16_t num_partitions = 0;
+        rdc_status_t st = rdc_get_num_partition(rdc_handle_, physicalDevice, &num_partitions);
+        if (st != RDC_ST_OK) {
+          throw RdcException(
+              st, "Failed to get partition info for GPU " + std::to_string(physicalDevice));
+        }
+
+        if (num_partitions == UINT16_MAX || num_partitions <= 1) {
+          if (partition != 0) {
+            throw RdcException(RDC_ST_BAD_PARAMETER, "GPU " + std::to_string(physicalDevice) +
+                                                         " is not partitioned, so partition " +
+                                                         std::to_string(partition) + " is invalid");
+          }
+        } else {
+          if (partition >= num_partitions) {
+            throw RdcException(RDC_ST_BAD_PARAMETER,
+                               "GPU " + std::to_string(physicalDevice) + " supports only " +
+                                   std::to_string(num_partitions) + " partitions, partition " +
+                                   std::to_string(partition) + " is invalid");
+          }
         }
       }
 
       rdc_entity_info_t phys_info;
-      phys_info.device_index = physicalGpu;
+      phys_info.device_index = physicalDevice;
       phys_info.instance_index = partition;
       phys_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
-      phys_info.device_type = RDC_DEVICE_TYPE_GPU;
+      phys_info.device_type = is_cpu_device ? RDC_DEVICE_TYPE_CPU : RDC_DEVICE_TYPE_GPU;
       uint32_t phys_entity_index = rdc_get_entity_index_from_info(phys_info);
-      gpu_indexes_.push_back(phys_entity_index);
-    } else if (IsNumber(vec_ids[i])) {
-      uint32_t logicalIndex = std::stoi(vec_ids[i]);
+      device_indexes_.push_back(phys_entity_index);
+    } else if (IsNumber(vec_id)) {
+      uint32_t logicalIndex = std::stoi(vec_id);
       if (logicalIndex >= count) {
         throw RdcException(RDC_ST_BAD_PARAMETER,
-                           "GPU " + std::to_string(logicalIndex) + " is out of range");
+                           "Device " + std::to_string(logicalIndex) + " is out of range");
       }
-      gpu_indexes_.push_back(std::stoi(vec_ids[i]));
+      device_indexes_.push_back(std::stoi(vec_id));
+    } else if (vec_id.length() >= 2 && vec_id[0] == 'c') {
+      // Handle CPU device IDs like "c0", "c1", etc. (without partition)
+      std::string cpu_id = vec_id.substr(1);
+      if (!IsNumber(cpu_id)) {
+        throw RdcException(RDC_ST_BAD_PARAMETER, "Invalid CPU device ID: " + vec_id);
+      }
+
+      uint32_t logicalIndex = std::stoi(cpu_id);
+      if (logicalIndex >= count) {
+        throw RdcException(RDC_ST_BAD_PARAMETER,
+                           "CPU " + std::to_string(logicalIndex) + " is out of range");
+      }
+
+      uint32_t physicalDevice = device_list[logicalIndex];
+
+      // Create CPU entity with partition 0 (CPUs don't have partitions)
+      rdc_entity_info_t cpu_info;
+      cpu_info.device_index = physicalDevice;
+      cpu_info.instance_index = 0;  // Always 0 for CPUs
+      cpu_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+      cpu_info.device_type = RDC_DEVICE_TYPE_CPU;
+      uint32_t cpu_entity_index = rdc_get_entity_index_from_info(cpu_info);
+      device_indexes_.push_back(cpu_entity_index);
     } else {
-      throw RdcException(RDC_ST_BAD_PARAMETER, "The GPU index " + vec_ids[i] +
+      throw RdcException(RDC_ST_BAD_PARAMETER, "The device index " + vec_id +
                                                    " needs to be a number or a valid partition");
     }
   }
@@ -383,9 +415,9 @@ void RdciDmonSubSystem::show_field_usage() const {
   std::cout << "Supported fields Ids:" << std::endl;
 
   amd::rdc::fld_id2name_map_t& field_id_to_descript = amd::rdc::get_field_id_description_from_id();
-  for (auto i = field_id_to_descript.begin(); i != field_id_to_descript.end(); i++) {
-    if (i->second.do_display || dmon_ops_ == DMON_LIST_ALL_FIELDS) {
-      std::cout << i->first << " " << i->second.enum_name << " : " << i->second.description << "."
+  for (const auto& i : field_id_to_descript) {
+    if (i.second.do_display || dmon_ops_ == DMON_LIST_ALL_FIELDS) {
+      std::cout << i.first << " " << i.second.enum_name << " : " << i.second.description << "."
                 << std::endl;
     }
   }
@@ -428,10 +460,10 @@ typedef std::priority_queue<notif_dev_value, std::vector<notif_dev_value>, Compa
 static void collect_new_notifs(rdc_handle_t h, const rdc_group_info_t& group_info,
                                const std::vector<rdc_field_t>& notif_fields,
                                std::vector<uint64_t>* notif_ts, field_pq_t* notif_pq) {
-  rdc_status_t ret;
+  rdc_status_t ret = RDC_ST_UNKNOWN_ERROR;
   notif_dev_value value;
   std::string error_msg;
-  uint64_t next_ts;
+  uint64_t next_ts = 0;
 
   assert(notif_ts != nullptr);
 
@@ -461,7 +493,7 @@ static void collect_new_notifs(rdc_handle_t h, const rdc_group_info_t& group_inf
 
 // ts is milliseconds
 static std::string ts_string(const time_t ts) {
-  struct tm* timeinfo;
+  struct tm* timeinfo = nullptr;
   time_t tmp_ts = ts / 1000;
   std::string ret;
 
@@ -504,11 +536,11 @@ void RdciDmonSubSystem::process() {
     return;
   }
 
-  rdc_status_t result;
+  rdc_status_t result = RDC_ST_UNKNOWN_ERROR;
   rdc_group_info_t group_info;
   rdc_field_group_info_t field_info;
 
-  resolve_gpu_indexes();
+  resolve_device_indexes();
 
   // Create a temporary group/field if pass as GPU indexes or field ids
   create_temp_group();
@@ -549,9 +581,9 @@ void RdciDmonSubSystem::process() {
   // keep extra 1 minute data
   double max_keep_age = options_[OPTIONS_DELAY] / 1000.0 + 60;
   const int max_keep_samples = 10;  // keep only 10 samples
-  result =
-      rdc_field_watch(rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID],
-                      options_[OPTIONS_DELAY] * 1000, max_keep_age, max_keep_samples);
+  result = rdc_field_watch(
+      rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID],
+      static_cast<uint64_t>(options_[OPTIONS_DELAY]) * 1000, max_keep_age, max_keep_samples);
   need_cleanup_ = true;
 
   std::stringstream ss;
@@ -570,8 +602,8 @@ void RdciDmonSubSystem::process() {
     ss << std::left << std::setw(25) << "TIMESTAMP";
     ss << "  ";
   }
-  for (uint32_t findex = 0; findex < reg_fields.size(); findex++) {
-    ss << std::left << std::setw(20) << field_id_string(reg_fields[findex]);
+  for (auto& reg_field : reg_fields) {
+    ss << std::left << std::setw(20) << field_id_string(reg_field);
   }
   ss << std::endl;
 
@@ -644,7 +676,7 @@ void RdciDmonSubSystem::clean_up() {
     rdc_field_unwatch(rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID]);
   }
 
-  if (gpu_indexes_.size() != 0) {
+  if (device_indexes_.size() != 0) {
     auto group = options_.find(OPTIONS_GROUP_ID);
     if (group != options_.end()) {
       rdc_group_gpu_destroy(rdc_handle_, group->second);
