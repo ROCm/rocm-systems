@@ -216,7 +216,7 @@ function(rocprofiler_rocprofv3_python _VERSION)
         STATUS "Building rocprofiler-sdk rocprofv3 python bindings for python ${_VERSION}")
     rocprofiler_find_python3(${_VERSION} QUIET)
     set(rocprofv3_PYTHON_INSTALL_DIRECTORY
-        ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3)
+        ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/rocprofv3)
     set(rocprofv3_PYTHON_OUTPUT_DIRECTORY
         ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY})
     set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)

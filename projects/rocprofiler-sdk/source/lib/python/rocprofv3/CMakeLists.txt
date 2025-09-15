@@ -20,7 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
 foreach(_PYTHON_VERSION ${ROCPROFILER_PYTHON_VERSIONS})
     rocprofiler_rocprofv3_python(${_PYTHON_VERSION})
 endforeach()
