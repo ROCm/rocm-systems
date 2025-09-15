@@ -66,6 +66,7 @@ jobs:
       # TODO: Remove this step once the gfx Dockers are available
       - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
         id: therock
+        shell: bash
         working-directory: projects/rocprofiler-systems
         run: |
           if [ ${{ matrix.os-release }} = '24.04' ]; then
