@@ -332,4 +332,37 @@ static inline bool aql_is_uconfig_reg(const aql_arch_ops_t* ops, uint32_t addr) 
            (addr <= ops->register_spaces.uconfig_space_end);
 }
 
+/*
+ * Additional utility structures and functions
+ */
+
+/**
+ * @brief Architecture capabilities structure for querying
+ */
+typedef struct {
+    bool has_pred_exec;                 /**< Supports PRED_EXEC packets */
+    bool has_uconfig_space;             /**< Has UCONFIG register space */
+    bool has_dual_sdma;                 /**< Has dual SDMA engines */
+    bool has_gl_cache_hierarchy;        /**< Has GL1/GL2 cache blocks */
+    bool has_smn_addressing;            /**< Supports SMN addressing */
+} aql_arch_capabilities_t;
+
+/**
+ * @brief Get architecture capabilities
+ * @param gfx_name GPU architecture name
+ * @param capabilities Output structure for capabilities
+ * @return AQL_SUCCESS if architecture is supported
+ */
+aql_result_t aql_get_arch_capabilities(const char* gfx_name,
+                                      aql_arch_capabilities_t* capabilities);
+
+/**
+ * @brief Get register space information for architecture
+ * @param gfx_name GPU architecture name
+ * @param register_spaces Output structure for register spaces
+ * @return AQL_SUCCESS if architecture is supported
+ */
+aql_result_t aql_get_register_spaces(const char* gfx_name,
+                                    aql_register_spaces_t* register_spaces);
+
 #endif /* AQL_ARCH_OPS_H */
