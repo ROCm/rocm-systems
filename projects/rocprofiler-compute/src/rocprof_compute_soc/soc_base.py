@@ -518,8 +518,7 @@ class OmniSoC_Base:
             sys.path.append(
                 str(
                     Path(self.get_args().rocprofiler_sdk_library_path).parent
-                    / f"python{sys.version_info.major}.{sys.version_info.minor}"
-                    / "site-packages"
+                    / "python3/site-packages"
                 )
             )
             from rocprofv3 import avail
