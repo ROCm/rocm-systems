@@ -87,7 +87,7 @@ jobs:
           KEY=${KEY//\"/}
           test -n "$KEY" || { echo "No ${{ matrix.system.arch }} tarball found"; exit 1; }
           aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.system.arch }}.tar.gz --no-sign-request
-          mv rocm-${{ matrix.system.arch }}.tar.gz $${{ env.ROCM_PATH }}-${{ matrix.system.arch }}.tar.gz
+          mv rocm-${{ matrix.system.arch }}.tar.gz ${{ env.ROCM_PATH }}-${{ matrix.system.arch }}.tar.gz
           echo "✅ Latest TheRock Tarball Release for ${{ matrix.system.arch }} Downloaded!"
       
       - name: Install Latest Nightly ROCm
