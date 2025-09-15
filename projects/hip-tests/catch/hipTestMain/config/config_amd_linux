@@ -564,7 +564,6 @@
         "Unit_Device___hiloint2double_Positive",
         "Unit_Device___hiloint2double_Negative_RTC",
         "SWDEV-447384, SWDEV-447932: These tests fail in gfx1100, gfx1101 & gfx1102",
-        "Unit_hipFreeAsync_Negative_Parameters",
         "SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024",
         "Unit_hipDestroySurfaceObject_Negative_Parameters",
         "Unit_Device___float2half_rd_Accuracy_Limited_Positive",
