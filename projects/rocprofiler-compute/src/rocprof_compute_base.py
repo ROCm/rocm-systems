@@ -59,7 +59,7 @@ from utils.utils import (
 
 class RocProfCompute:
     def __init__(self) -> None:
-        self.__args: argparse.Namespace
+        self.__args: Optional[argparse.Namespace] = None
         self.__profiler_mode = None
         self.__analyze_mode = None
         self.__soc: dict[str, OmniSoC_Base] = {}
