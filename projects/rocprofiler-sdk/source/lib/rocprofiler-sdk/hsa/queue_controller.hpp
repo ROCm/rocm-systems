@@ -138,7 +138,7 @@ void
 queue_controller_sync();
 
 void
-queue_controller_set_attach_table(RocAttachDispatchTable* table);
+queue_controller_init(RocAttachDispatchTable* table);
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);

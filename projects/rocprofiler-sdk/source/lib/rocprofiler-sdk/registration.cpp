@@ -173,6 +173,19 @@ get_status()
     return _v;
 }
 
+struct attach_status
+{
+    bool has_attach_table = false;
+    bool is_attached      = false;
+};
+
+auto*
+get_attach_status()
+{
+    static auto*& _v = common::static_object<attach_status>::construct(false);
+    return _v;
+}
+
 auto&
 get_invoked_configures()
 {
@@ -541,16 +554,19 @@ invoke_client_configures()
         {
             itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
 
-            auto* _attach_result =
-                itr->configure_attach_func(ROCPROFILER_VERSION,
-                                           ROCPROFILER_VERSION_STRING,
-                                           itr->internal_client_id.handle - get_client_offset(),
-                                           &itr->mutable_client_id);
-
-            if(_attach_result)
+            if(itr->configure_attach_func)
             {
-                itr->configure_attach_result =
-                    new rocprofiler_tool_configure_attach_result_t{*_attach_result};
+                auto* _attach_result =
+                    itr->configure_attach_func(ROCPROFILER_VERSION,
+                                               ROCPROFILER_VERSION_STRING,
+                                               itr->internal_client_id.handle - get_client_offset(),
+                                               &itr->mutable_client_id);
+
+                if(_attach_result)
+                {
+                    itr->configure_attach_result =
+                        new rocprofiler_tool_configure_attach_result_t{*_attach_result};
+                }
             }
         }
         else
@@ -1213,8 +1229,10 @@ rocprofiler_set_api_table(const char* name,
 
         // unlike other APIs, we do not offer tracing for our own attach library
         // forward the table to the relevant code sections, then move on
-        rocprofiler::hsa::queue_controller_set_attach_table(rocattach_api);
-        rocprofiler::code_object::code_object_set_attach_table(rocattach_api);
+        rocprofiler::hsa::queue_controller_init(rocattach_api);
+        rocprofiler::code_object::initialize(rocattach_api);
+
+        rocprofiler::registration::get_attach_status()->has_attach_table = true;
     }
     else
     {

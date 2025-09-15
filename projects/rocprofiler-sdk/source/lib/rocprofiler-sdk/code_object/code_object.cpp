@@ -1256,7 +1256,7 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
 }
 
 void
-code_object_set_attach_table(RocAttachDispatchTable* attach_table)
+initialize(RocAttachDispatchTable* attach_table)
 {
     // We need to save the attach table for later, when the code object module receives the HSA
     // table and is initialized. We must get the attach table before HSA for correct behavior. This

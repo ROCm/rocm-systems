@@ -3300,38 +3300,13 @@ rocprofiler_configure(uint32_t                 version,
 }
 
 rocprofiler_tool_configure_attach_result_t*
-rocprofiler_configure_attach(uint32_t                 version,
-                             const char*              runtime_version,
-                             uint32_t                 priority,
-                             rocprofiler_client_id_t* id)
+rocprofiler_configure_attach(uint32_t /*version*/,
+                             const char* /*runtime_version*/,
+                             uint32_t /*priority*/,
+                             rocprofiler_client_id_t* /*id*/)
 {
-    initialize_logging();
-
-    // set the client name
-    id->name = "rocprofv3";
-
-    // store client info
-    client_identifier = id;
-
-    // note that rocprofv3 is not the primary tool
-    ROCP_WARNING_IF(priority > 0) << id->name << " has a priority of " << priority
-                                  << " (not primary tool)";
-
-    // compute major/minor/patch version info
-    uint32_t major = version / 10000;
-    uint32_t minor = (version % 10000) / 100;
-    uint32_t patch = version % 100;
-
-    // ensure these pointers are not leaked
-    add_destructor(tool_metadata);
-    add_destructor(execution_profile);
-
-    tool::get_tmp_file_name_callback() = [](domain_type type) -> std::string {
-        return compose_tmp_file_name(tool::get_config(), type);
-    };
-
-    ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
-              << " (" << runtime_version << ")";
+    // This function is called right after rocprofiler_configure with the same parameters.
+    // The data returned is only used when attaching to a running process.
 
     // create configure data using experimental struct with attach/detach support
     static auto cfg = rocprofiler_tool_configure_attach_result_t{
