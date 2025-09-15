@@ -1,3 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include <rocprofiler-systems/categories.h>
 #include <rocprofiler-systems/types.h>

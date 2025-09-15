@@ -39,7 +39,7 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
-    build_in_vars,
+    BUILD_IN_VARS,
     to_avg,
     to_concat,
     to_int,
@@ -409,14 +409,14 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info[f"{key}_empirical_peak"] = value
 
             # Calculate PER_XCD variables first
-            for key, value in build_in_vars.items():
+            for key, value in BUILD_IN_VARS.items():
                 if "PER_XCD" in key:
                     sys_info[key] = db_analysis.evaluate(
                         key, value, pmc_df, sys_info, parse=True
                     )
 
             # variable dependent on PER_XCD variables
-            for key, value in build_in_vars.items():
+            for key, value in BUILD_IN_VARS.items():
                 if "PER_XCD" not in key:
                     sys_info[key] = db_analysis.evaluate(
                         key, value, pmc_df, sys_info, parse=True
