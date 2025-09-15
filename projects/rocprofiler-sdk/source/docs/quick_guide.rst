@@ -74,8 +74,6 @@ Granular Tracing Options
    # Memory operations tracing
    rocprofv3 --memory-copy-trace --output-format csv -- ./your_app
 
-   # Marker/ROCTx tracing
-   rocprofv3 --marker-trace --output-format csv -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Basic tracing section)
 
@@ -84,14 +82,14 @@ Performance Counter Collection
 
 .. code-block:: bash
 
-   # Collect specific counters
-   rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU --output-format csv -- ./your_app
-
    # List available counters
    rocprofv3-avail list --pmc
 
    # Check if counters can be collected together
    rocprofv3-avail pmc-check SQ_WAVES SQ_INSTS_VALU
+
+   # Collect specific counters
+   rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU --output-format csv -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Counter collection section)
 
@@ -103,11 +101,11 @@ PC Sampling (Beta)
 
 .. code-block:: bash
 
-   # Enable PC sampling
-   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-interval 1000 --output-format csv -- ./your_app
-
    # Check PC sampling support
    rocprofv3-avail list --pc-sampling
+
+   # Enable PC sampling
+   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-interval 1000 --output-format csv -- ./your_app
 
 **Documentation:** :ref:`using-pc-sampling`
 
@@ -124,8 +122,31 @@ Thread Trace
 Output Formats and Post-processing
 ===================================
 
-Output Format Options
----------------------
+rocprofv3 supports multiple output formats for different analysis needs. The default format is ``rocpd``, which stores data in a structured SQLite3 database.
+
+Working with rocpd Database Format
+-----------------------------------
+
+.. code-block:: bash
+
+   # Generate rocpd database (default format)
+   rocprofv3 --runtime-trace -- ./your_app
+   # Creates: hostname/pid_results.db
+
+   # Explicitly specify rocpd format
+   rocprofv3 --runtime-trace --output-format rocpd -- ./your_app
+
+   # Query the database directly with SQL
+   sqlite3 hostname/12345_results.db "SELECT * FROM rocprofiler_domain_info;"
+
+   # Convert rocpd to other formats using Python API
+   python3 -c "
+   import rocpd
+   rocpd.rocpd_to_csv('hostname/12345_results.db', 'output.csv')
+   rocpd.rocpd_to_json('hostname/12345_results.db', 'output.json')
+   "
+Converting to Other Formats
+----------------------------
 
 .. code-block:: bash
 
