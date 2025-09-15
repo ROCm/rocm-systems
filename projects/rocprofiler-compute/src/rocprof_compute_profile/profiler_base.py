@@ -199,7 +199,7 @@ class RocProfCompute_Base:
             else:
                 console_error(
                     "join_prof",
-                    f"{args.join_type} is an unrecognized option for --join-type"
+                    f"{args.join_type} is an unrecognized option for --join-type",
                 )
 
             if df is None:
@@ -249,7 +249,7 @@ class RocProfCompute_Base:
             if not test_df_column_equality(current_df):
                 console_warning(
                     "join_prof",
-                    f"Detected differing {key} values while joining pmc_perf.csv"
+                    f"Detected differing {key} values while joining pmc_perf.csv",
                 )
             else:
                 console_debug("join_prof", f"Successfully joined {key} in pmc_perf.csv")
