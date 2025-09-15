@@ -36,7 +36,7 @@ env:
 
 jobs:
   ubuntu:
-    name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }} • Continuous Integration
+    name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
     strategy:
       matrix:
         system:
@@ -54,7 +54,7 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ ${{ github.event_name }} == 'schedule' ]; then
+          if [ '${{ github.event_name }}' == 'schedule' ]; then
             MODE=Nightly
           else
             MODE=Continuous
@@ -65,7 +65,7 @@ jobs:
       - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
         id: therock
         run: |
-          sudo apt-get install -y python3-pip
+          apt-get install -y python3-pip
           python3 -m pip install -U pip
           python3 -m pip install -U awscli
           export PATH=~/.local/bin:$PATH
@@ -76,8 +76,8 @@ jobs:
                 --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.system.arch }}')], &LastModified)[-1].Key")
           KEY=${KEY//\"/}
           test -n "$KEY" || { echo "No ${{ matrix.system.arch }} tarball found"; exit 1; }
-          aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.system.arch }}.tar.gz --no-sign-request; \
-          mv rocm-${{ matrix.system.arch }}.tar.gz $${{ env.ROCM_PATH }}-${{ matrix.system.arch }}.tar.gz;
+          aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.system.arch }}.tar.gz --no-sign-request
+          mv rocm-${{ matrix.system.arch }}.tar.gz $${{ env.ROCM_PATH }}-${{ matrix.system.arch }}.tar.gz
           echo "✅ Latest TheRock Tarball Release for ${{ matrix.system.arch }} Downloaded!"
       
       - name: Install Latest Nightly ROCm
