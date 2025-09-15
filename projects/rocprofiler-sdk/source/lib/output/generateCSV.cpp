@@ -694,10 +694,7 @@ generate_csv(const output_config&                                               
                 row_ss,
                 kind_name,
                 op_name,
-                record.agent_id.handle != 0
-                    ? tool_metadata.get_agent_index(record.agent_id, cfg.agent_index_value)
-                          .as_string()
-                    : "UNK",  // Some agents may be unkown due to rocprofiler attachment feature
+                tool_metadata.get_agent_index(record.agent_id, cfg.agent_index_value).as_string(),
                 record.queue_id.handle,
                 record.thread_id,
                 record.flags,
