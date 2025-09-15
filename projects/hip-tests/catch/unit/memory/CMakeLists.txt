@@ -87,6 +87,7 @@ set(TEST_SRC
     hipMemsetD32Async.cc
     hipMemsetD8Async.cc
     hipMemcpy2DArrayToArray.cc
+    hipMemcpyBatchAsync.cc
     )
 
 if(UNIX)
