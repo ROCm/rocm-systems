@@ -27,6 +27,7 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
   navi3_EXCLUDE_TESTS_REGEX: ""
   vega20_EXCLUDE_TESTS_REGEX: ""
   mi200_EXCLUDE_TESTS_REGEX: ""
@@ -79,8 +80,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-${{ matrix.system.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        tar -xf /opt/rocm-${{ matrix.system.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
         ln -s -f /usr/bin/git /usr/local/bin/git
 
@@ -163,8 +164,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-${{ matrix.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        tar -xf /opt/rocm-${{ matrix.gfx }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
 
