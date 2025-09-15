@@ -1,12 +1,38 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 """
 Panel Widget Modules
 -------------------
 Contains the panel widgets used in the main layout.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from textual import on
+from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Label, RadioButton, RadioSet
 
@@ -53,13 +79,14 @@ class KernelView(Container):
     }
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None) -> None:
         super().__init__(id="kernel-view")
-        self.kernel_to_df_dict = {}
-        self.top_kernel_to_df_list = []
-        self.current_selection = None
+        self.kernel_to_df_dict: dict[str, dict[str, Any]] = {}
+        self.top_kernel_to_df_list: list[dict[str, Any]] = []
+        self.current_selection: Optional[str] = None
+        self.status_label: Optional[Label] = None
 
-        self.config_path = config_path or (
+        self.config_path = config_path or str(
             rocprof_compute_home
             / "rocprof_compute_tui"
             / "utils"
@@ -68,7 +95,7 @@ class KernelView(Container):
             else None
         )
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         """
         Compose the split panel layout with two scrollable containers.
         """
@@ -85,7 +112,11 @@ class KernelView(Container):
             # empty on init
             pass
 
-    def update_results(self, kernel_to_df_dict, top_kernel_to_df_list) -> None:
+    def update_results(
+        self,
+        kernel_to_df_dict: dict[str, dict[str, Any]],
+        top_kernel_to_df_list: list[dict[str, Any]],
+    ) -> None:
         self.kernel_to_df_dict = kernel_to_df_dict
         self.top_kernel_to_df_list = top_kernel_to_df_list
 
@@ -126,7 +157,7 @@ class KernelView(Container):
             self.status_label.update(message)
             self.status_label.set_classes(log_level)
 
-    def new_perf_metric(self):
+    def new_perf_metric(self) -> None:
         new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
         for new_metric in new_metrics:
             for i, kernel in enumerate(self.top_kernel_to_df_list):
@@ -146,7 +177,7 @@ class KernelView(Container):
             self.current_selection = kernel_data["Kernel_Name"]
             self.update_bottom_content()
 
-    def update_bottom_content(self):
+    def update_bottom_content(self) -> None:
         bottom_container = self.query_one("#bottom-container", VerticalScroll)
         bottom_container.remove_children()
 

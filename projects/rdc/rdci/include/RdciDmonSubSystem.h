@@ -43,8 +43,8 @@ class RdciDmonSubSystem : public RdciSubSystem {
   void show_field_usage() const;
   void clean_up();
 
-  // Need to resolve gpu indexes after process is called
-  void resolve_gpu_indexes();
+  // Need to resolve device indexes after process is called
+  void resolve_device_indexes();
 
   void create_temp_group();
   void create_temp_field_group();
@@ -67,8 +67,8 @@ class RdciDmonSubSystem : public RdciSubSystem {
 
   std::map<OPTIONS, uint32_t> options_;
   std::vector<rdc_field_t> field_ids_;
-  std::string raw_gpu_indexes_;
-  std::vector<uint32_t> gpu_indexes_;
+  std::string raw_device_indexes_;
+  std::vector<uint32_t> device_indexes_;
   bool need_cleanup_;
   uint64_t latest_time_stamp_;
   bool show_timpstamps_;

@@ -39,7 +39,7 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
-    build_in_vars,
+    BUILD_IN_VARS,
     to_avg,
     to_concat,
     to_int,
@@ -403,20 +403,20 @@ class db_analysis(OmniAnalyze_Base):
         for workload_path in self._runs.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
-            for key, value in self._roofline_ceilings_per_workload[
-                workload_path
-            ].items():
+            for key, value in self._roofline_ceilings_per_workload.get(
+                workload_path, {}
+            ).items():
                 sys_info[f"{key}_empirical_peak"] = value
 
             # Calculate PER_XCD variables first
-            for key, value in build_in_vars.items():
+            for key, value in BUILD_IN_VARS.items():
                 if "PER_XCD" in key:
                     sys_info[key] = db_analysis.evaluate(
                         key, value, pmc_df, sys_info, parse=True
                     )
 
             # variable dependent on PER_XCD variables
-            for key, value in build_in_vars.items():
+            for key, value in BUILD_IN_VARS.items():
                 if "PER_XCD" not in key:
                     sys_info[key] = db_analysis.evaluate(
                         key, value, pmc_df, sys_info, parse=True
@@ -571,10 +571,12 @@ class db_analysis(OmniAnalyze_Base):
                 zip(roofline_data_df["Metric"], roofline_data_df["Value"])
             )
             roofline_data_expressions = {
-                "total_flops": roofline_data_expressions["Performance (GFLOPs)"],
-                "l1_cache_data": roofline_data_expressions["AI L1"],
-                "l2_cache_data": roofline_data_expressions["AI L2"],
-                "hbm_cache_data": roofline_data_expressions["AI HBM"],
+                "total_flops": roofline_data_expressions.get(
+                    "Performance (GFLOPs)", ""
+                ),
+                "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
+                "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
+                "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
             }
 
             roofline_df = pd.DataFrame([

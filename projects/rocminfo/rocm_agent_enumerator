@@ -142,7 +142,7 @@ def readFromROCMINFO(search_arch_name = False):
       t1 = time.time()
       # quit after retrying rocminfo for a minute.
       if t1 - t0 > 60.0:
-        print("Timeout querying rocminfo.  Are you compiling with more than 254 threads?")
+        print("Timeout querying rocminfo.  Are you compiling with more than 254 threads?", file=sys.stderr)
         break
       # run rocminfo
       rocminfo_output = subprocess.Popen(rocminfo_executable, stdout=subprocess.PIPE).communicate()[0].decode("utf-8").split('\n')
