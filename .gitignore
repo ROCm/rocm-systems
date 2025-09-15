@@ -1,0 +1,35 @@
+# Build artifacts
+build/
+*.o
+*.o.d
+*.a
+*.so
+*.dylib
+
+# Validation build artifacts
+projects/aql_c_port/validation/build/
+
+# Kernel module build artifacts
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test outputs
+*.log
+*_results.txt
