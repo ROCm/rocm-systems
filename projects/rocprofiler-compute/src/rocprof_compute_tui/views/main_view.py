@@ -133,7 +133,7 @@ class MainView(Horizontal):
 
             # 1. Create and TUI analyzer
             analyzer = tui_analysis(
-                self.app.args, self.app.supported_archs, self.selected_path
+                self.app.args, self.app.supported_archs, str(self.selected_path)
             )
             analyzer.sanitize()
 
@@ -142,7 +142,7 @@ class MainView(Horizontal):
             if not sysinfo_path.exists():
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
 
-            sys_info = file_io.load_sys_info(sysinfo_path).iloc[0].to_dict()
+            sys_info = file_io.load_sys_info(str(sysinfo_path)).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
             analyzer.set_soc(self.app.soc)
 
