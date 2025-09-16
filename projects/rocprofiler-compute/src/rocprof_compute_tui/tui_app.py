@@ -116,7 +116,7 @@ class RocprofTUIApp(App):
 
     def on_recent_selected(self, selected_dir: Optional[str]) -> None:
         if selected_dir:
-            self.main_view.selected_path = selected_dir
+            self.main_view.selected_path = Path(selected_dir)
             self.main_view.run_analysis()
 
     @on(Button.Pressed, "#menu-open-workload")
