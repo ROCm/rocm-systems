@@ -135,5 +135,5 @@ jobs:
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
-            -DCMAKE_PREFIX_PATH={{ env.ROCM_PATH }} \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
