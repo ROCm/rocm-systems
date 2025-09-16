@@ -36,6 +36,10 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
+#if HT_LINUX
+#include <sys/resource.h>
+#endif
+
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()
 #else
@@ -634,3 +638,29 @@ class BlockingContext {
     }                                                                                              \
     HIP_CHECK(hipStreamDestroy(stream));                                                           \
   }
+
+// Manage core dumps in specific tests which require it disabled (e.g., hipGetLastErrorOnAbort.cc)
+#if HT_LINUX
+#define DISABLE_CORE_DUMPS()                                                                       \
+  struct rlimit core_limit;                                                                        \
+  bool rlimit_saved = false;                                                                       \
+  if (getrlimit(RLIMIT_CORE, &core_limit) == 0) {                                                  \
+    if (core_limit.rlim_cur != 0) {                                                                \
+      struct rlimit new_limit;                                                                     \
+      new_limit.rlim_cur = 0;                                                                      \
+      new_limit.rlim_max = core_limit.rlim_max;                                                    \
+      if (setrlimit(RLIMIT_CORE, &new_limit) == 0) {                                               \
+        rlimit_saved = true;                                                                       \
+      }                                                                                            \
+    }                                                                                              \
+  }
+
+#define RESTORE_CORE_DUMPS()                                                                       \
+  if (rlimit_saved) {                                                                              \
+    setrlimit(RLIMIT_CORE, &core_limit);                                                           \
+    rlimit_saved = false;                                                                          \
+  }
+#else
+#define DISABLE_CORE_DUMPS()
+#define RESTORE_CORE_DUMPS()
+#endif

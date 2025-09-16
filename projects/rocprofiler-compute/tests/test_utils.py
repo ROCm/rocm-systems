@@ -157,7 +157,7 @@ def check_csv_files(output_dir, num_devices, num_kernels):
             file_dict[file] = pd.read_csv(output_dir + "/" + file)
             if "roofline" in file:
                 assert len(file_dict[file].index) >= num_devices
-            elif not "sysinfo" in file:
+            elif "sysinfo" not in file and "ps_file" not in file:
                 assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
