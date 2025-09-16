@@ -44,6 +44,7 @@
 #define ROCCLR_MEM_INTERPROCESS (1u << 26)
 #define ROCCLR_MEM_PHYMEM (1u << 25)
 #define ROCCLR_MEM_HSA_CONTIGUOUS (1u << 24)
+#define ROCCLR_MEM_IO_MEMORY (1u << 23)
 
 namespace amd::device {
 class Memory;
