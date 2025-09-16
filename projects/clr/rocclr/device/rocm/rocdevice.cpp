@@ -2014,6 +2014,7 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
+
   hsa_amd_memory_pool_t pool =
       getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
   hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, memFlags, &ptr);
@@ -2080,10 +2081,13 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
-  uint flags = (memSegment == amd::Device::MemorySegment::kIoMemory) ? 
-                HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0;
+  uint32_t memFlags = 0;
+  if (mem_seg == kIoMemory) {
+    memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_status_t status = hsa_amd_memory_lock_to_pool(
-      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, flags, &deviceMemory);
+      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",
