@@ -22,7 +22,9 @@
 
 #pragma once
 
+#include "core/agent.hpp"
 #include "core/rocpd/data_storage/database.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -112,6 +114,7 @@ public:
     data_processor& operator=(const data_processor&) = delete;
 
     size_t insert_string(const char* str);
+    void   insert_string_bulk(const std::vector<std::string>& strings);
 
     void insert_node_info(size_t node_id, size_t hash, const char* machine_id,
                           const char* system_name, const char* hostname,
@@ -127,6 +130,9 @@ public:
                         uint64_t uuid, const char* name, const char* model_name,
                         const char* vendor_name, const char* product_name,
                         const char* user_name, const char* extdata = "{}");
+
+    void insert_agent_bulk(const std::vector<std::shared_ptr<agent>>& agents,
+                           size_t node_id, size_t ppid);
 
     void insert_track(const char* track_name, size_t node_id, size_t process_id,
                       std::optional<size_t> thread_id, const char* extdata = "{}");
@@ -147,6 +153,10 @@ public:
                                 const char* value_type, const char* block,
                                 const char* expression, uint32_t is_constant,
                                 uint32_t is_derived, const char* extdata = "{}");
+
+    void insert_pmc_description_bulk(
+        size_t node_id, size_t process_id,
+        const std::vector<trace_cache::info::pmc>& pmc_info_list);
 
     void insert_sample(const char* track, uint64_t timestamp, size_t event_id,
                        const char* extdata = "{}");
@@ -226,9 +236,11 @@ private:
     std::shared_ptr<data_storage::database>         _database;
     std::unordered_map<std::string, track_name_map> _tracks;
     std::unordered_map<pmc_identifier, size_t, pmc_identifier_hash, pmc_identifier_equal>
-                                            _pmc_descriptor_map;
-    std::unordered_map<size_t, size_t>      _thread_id_map;
-    std::unordered_map<std::string, size_t> _string_map;
+                                                   _pmc_descriptor_map;
+    std::vector<std::pair<pmc_identifier, size_t>> _pmc_insertion_order;
+    std::unordered_map<size_t, size_t>             _thread_id_map;
+    std::unordered_map<std::string, size_t>        _string_map;
+    std::vector<std::pair<std::string, size_t>>    _string_insertion_order;
 
     insert_event_stmt                 _insert_event_statement;
     insert_pmc_event_stmt             _insert_pmc_event_statement;

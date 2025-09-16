@@ -558,7 +558,7 @@ metadata_registry::add_stream(const uint64_t& stream_handle)
 }
 
 void
-metadata_registry::add_string(const std::string_view& string_value)
+metadata_registry::add_string(const std::string& string_value)
 {
     m_strings.wlock([&string_value](auto& _data) {
         if(_data.count(string_value) > 0)
@@ -641,10 +641,10 @@ metadata_registry::get_stream_list() const
     return result;
 }
 
-std::vector<std::string_view>
+std::vector<std::string>
 metadata_registry::get_string_list() const
 {
-    std::vector<std::string_view> result;
+    std::vector<std::string> result;
     m_strings.rlock(assign_set_to_vector(result));
     return result;
 }

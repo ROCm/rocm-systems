@@ -183,7 +183,7 @@ struct metadata_registry
     void add_track(const info::track& track_info);
     void add_queue(const uint64_t& queue_handle);
     void add_stream(const uint64_t& stream_handle);
-    void add_string(const std::string_view& string_value);
+    void add_string(const std::string& string_value);
 
     info::process               get_process_info() const;
     std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
@@ -194,7 +194,7 @@ struct metadata_registry
     std::vector<info::track>    get_track_info_list() const;
     std::vector<uint64_t>       get_queue_list() const;
     std::vector<uint64_t>       get_stream_list() const;
-    std::vector<std::string_view> get_string_list() const;
+    std::vector<std::string> get_string_list() const;
 
     bool        save_to_file(const std::string& filepath) const;
     bool        load_from_file(const std::string& filepath);
@@ -234,7 +234,7 @@ private:
 
     common::synchronized<std::set<uint64_t>>                   m_streams;
     common::synchronized<std::set<uint64_t>>                   m_queues;
-    common::synchronized<std::unordered_set<std::string_view>> m_strings;
+    common::synchronized<std::unordered_set<std::string>> m_strings;
     std::vector<std::shared_ptr<agent>> m_agents;  // Temp Workaround
 #if ROCPROFSYS_USE_ROCM > 0
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,

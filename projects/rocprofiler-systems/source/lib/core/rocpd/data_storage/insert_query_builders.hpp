@@ -50,13 +50,18 @@ struct query_value_builder
     query_value_builder& set_values(Values&&... values)
     {
         auto i = sizeof...(values);
-        _ss << "( ";
+        _ss << "(";
         ((process_value(values) << (i-- > 1 ? ", " : " ")), ...);
-        _ss << ")";
+        _ss << "),";
         return *this;
     }
 
-    std::string get_query_string() { return _ss.str(); }
+    std::string get_query_string() 
+    { 
+        auto query_str = _ss.str();
+        if (query_str.back() == ',') query_str.pop_back();
+        return query_str; 
+    }
 
 private:
     template <typename T>

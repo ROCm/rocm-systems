@@ -56,7 +56,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #    else
     return code_object.rocp_agent.handle;
@@ -166,7 +166,7 @@ rocpd_post_processing::get_memory_copy_callback() const
     };
 }
 
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
+#if (ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
 postprocessing_callback
 rocpd_post_processing::get_memory_allocate_callback() const
 {
@@ -683,7 +683,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
     parser.register_type_callback(entry_type::kernel_dispatch,
                                   get_kernel_dispatch_callback());
     parser.register_type_callback(entry_type::memory_copy, get_memory_copy_callback());
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     parser.register_type_callback(entry_type::memory_alloc,
                                   get_memory_allocate_callback());
 #    endif
@@ -720,25 +720,22 @@ rocpd_post_processing::post_process_metadata()
     data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid, 0,
                                         0, 0, 0, process_info.command.c_str(), "{}");
 
-    const auto& agents  = agent_mngr.get_agents();
-    int         counter = 0;
-    for(const auto& rocpd_agent : agents)
-    {
-        auto _base_id = data_processor->insert_agent(
-            n_info.id, process_info.pid,
-            ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"), counter++,
-            rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
-            rocpd_agent->device_id, rocpd_agent->name.c_str(),
-            rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
-            rocpd_agent->product_name.c_str(), "");
-        rocpd_agent->base_id = _base_id;
-    }
+    const auto& agents = agent_mngr.get_agents();
+    // int         counter = 0;
+    // for(const auto& rocpd_agent : agents)
+    // {
+    //     auto _base_id = data_processor->insert_agent(
+    //         n_info.id, process_info.pid,
+    //         ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"), counter++,
+    //         rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
+    //         rocpd_agent->device_id, rocpd_agent->name.c_str(),
+    //         rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
+    //         rocpd_agent->product_name.c_str(), "");
+    //     rocpd_agent->base_id = _base_id;
+    // }
+    data_processor->insert_agent_bulk(agents, n_info.id, process_info.pid);
 
     auto _string_list = m_metadata.get_string_list();
-    for(auto& _string : _string_list)
-    {
-        data_processor->insert_string(std::string(_string).c_str());
-    }
 
     auto _thread_info_list = m_metadata.get_thread_info_list();
     for(auto& t_info : _thread_info_list)
@@ -790,7 +787,8 @@ rocpd_post_processing::post_process_metadata()
             kernel_symbol.private_segment_size, kernel_symbol.sgpr_count,
             kernel_symbol.arch_vgpr_count, kernel_symbol.accum_vgpr_count);
 
-        data_processor->insert_string(kernel_name.c_str());
+        // data_processor->insert_string(kernel_name.c_str());
+        _string_list.emplace_back(kernel_name);
     }
 
     auto _queue_list = m_metadata.get_queue_list();
@@ -816,7 +814,8 @@ rocpd_post_processing::post_process_metadata()
     {
         for(const auto& item : buffer_info.items())
         {
-            data_processor->insert_string(*item.second);
+            // data_processor->insert_string(*item.second);
+            _string_list.emplace_back(*item.second);
         }
     }
 
@@ -825,25 +824,33 @@ rocpd_post_processing::post_process_metadata()
     {
         for(const auto& item : cb_info.items())
         {
-            data_processor->insert_string(*item.second);
+            // data_processor->insert_string(*item.second);
+            _string_list.emplace_back(*item.second);
         }
     }
 
-    auto pmc_info_list = m_metadata.get_pmc_info_list();
-    for(const auto& pmc_info : pmc_info_list)
-    {
-        const auto agent_primary_key =
-            agent_mngr.get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
-                .base_id;
+    data_processor->insert_string_bulk(_string_list);
 
-        data_processor->insert_pmc_description(
-            n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
-            pmc_info.event_code, pmc_info.instance_id, pmc_info.name.c_str(),
-            pmc_info.symbol.c_str(), pmc_info.description.c_str(),
-            pmc_info.long_description.c_str(), pmc_info.component.c_str(),
-            pmc_info.units.c_str(), pmc_info.value_type.c_str(), pmc_info.block.c_str(),
-            pmc_info.expression.c_str(), pmc_info.is_constant, pmc_info.is_derived);
-    }
+    auto pmc_info_list = m_metadata.get_pmc_info_list();
+    // for(const auto& pmc_info : pmc_info_list)
+    // {
+    //     const auto agent_primary_key =
+    //         agent_mngr.get_agent_by_type_index(pmc_info.agent_type_index,
+    //         pmc_info.type)
+    //             .base_id;
+
+    //     data_processor->insert_pmc_description(
+    //         n_info.id, process_info.pid, agent_primary_key,
+    //         pmc_info.target_arch.c_str(), pmc_info.event_code,
+    //         pmc_info.instance_id, pmc_info.name.c_str(), pmc_info.symbol.c_str(),
+    //         pmc_info.description.c_str(), pmc_info.long_description.c_str(),
+    //         pmc_info.component.c_str(), pmc_info.units.c_str(),
+    //         pmc_info.value_type.c_str(), pmc_info.block.c_str(),
+    //         pmc_info.expression.c_str(), pmc_info.is_constant,
+    //         pmc_info.is_derived);
+    // }
+    data_processor->insert_pmc_description_bulk(n_info.id, process_info.pid,
+                                                pmc_info_list);
 #endif
 }
 

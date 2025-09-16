@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "data_processor.hpp"
+#include "core/agent_manager.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
 #include "debug.hpp"
@@ -78,7 +79,55 @@ data_processor::insert_string(const char* str)
 
     const auto string_id = _database->get_last_insert_id();
     _string_map.emplace(str, string_id);
+    _string_insertion_order.emplace_back(str, string_id);
     return string_id;
+}
+
+void
+data_processor::insert_string_bulk(const std::vector<std::string>& strings)
+{
+    if(strings.empty()) return;
+
+    std::vector<std::string> new_strings;
+    auto                     start_id =
+        (_string_insertion_order.empty()) ? 1 : _string_insertion_order.back().second + 1;
+
+    for(const auto& str : strings)
+    {
+        auto it = _string_map.find(str);
+        if(it == _string_map.end())
+        {
+            new_strings.emplace_back(str);
+            _string_map.emplace(str, start_id++);
+            _string_insertion_order.emplace_back(str, start_id);
+        }
+    }
+
+    if(new_strings.empty()) return;
+
+    const size_t CHUNK_SIZE = 1000;
+    for(size_t i = 0; i < new_strings.size(); i += CHUNK_SIZE)
+    {
+        auto chunk_end = std::min(i + CHUNK_SIZE, new_strings.size());
+
+        data_storage::queries::table_insert_query query;
+        auto&                                     value_builder =
+            query.set_table_name("rocpd_string_" + _upid).set_columns("guid", "string");
+
+        for(size_t j = i; j < chunk_end; ++j)
+        {
+            value_builder.set_values(_upid, new_strings[j]);
+        }
+
+        try
+        {
+            _database->execute_query(value_builder.get_query_string());
+        } catch(const std::exception& e)
+        {
+            ROCPROFSYS_DEBUG("Chunk insert failed at index {}: {}", i, e.what());
+            throw;
+        }
+    }
 }
 
 void
@@ -133,6 +182,33 @@ data_processor::insert_agent(size_t node_id, size_t pid, const char* agent_type,
             .get_query_string());
 
     return _database->get_last_insert_id();
+}
+
+void
+data_processor::insert_agent_bulk(const std::vector<std::shared_ptr<agent>>& agents,
+                                  size_t node_id, size_t ppid)
+{
+    if(agents.empty()) return;
+
+    data_storage::queries::table_insert_query query;
+
+    auto& value_builder =
+        query.set_table_name("rocpd_info_agent_" + _upid)
+            .set_columns("guid", "nid", "pid", "type", "absolute_index", "logical_index",
+                         "type_index", "uuid", "name", "model_name", "vendor_name",
+                         "product_name", "user_name", "extdata");
+    int idx = 1;
+    for(const auto& agent : agents)
+    {
+        value_builder.set_values(
+            _upid, node_id, ppid, ((agent->type == agent_type::GPU) ? "GPU" : "CPU"), idx,
+            agent->logical_node_id, agent->logical_node_type_id, agent->device_id,
+            agent->name.c_str(), agent->model_name.c_str(), agent->vendor_name.c_str(),
+            agent->product_name.c_str(), "", "");
+        agent->base_id = idx++;
+    }
+
+    _database->execute_query(value_builder.get_query_string());
 }
 
 void
@@ -193,6 +269,85 @@ data_processor::insert_pmc_description(
     auto pmc_id = _database->get_last_insert_id();
     _pmc_descriptor_map.emplace(
         std::pair<pmc_identifier, size_t>{ { agent_id, name }, pmc_id });
+    _pmc_insertion_order.emplace_back(
+        std::pair<pmc_identifier, size_t>{ { agent_id, name }, pmc_id });
+}
+
+void
+data_processor::insert_pmc_description_bulk(
+    size_t node_id, size_t process_id,
+    const std::vector<trace_cache::info::pmc>& pmc_info_list)
+{
+    if(pmc_info_list.empty()) return;
+
+    std::vector<trace_cache::info::pmc> new_pmcs;
+    auto                                start_id =
+        (_pmc_insertion_order.empty()) ? 1 : _pmc_insertion_order.back().second + 1;
+
+    for(const auto& pmc_info : pmc_info_list)
+    {
+        const auto agent_primary_key =
+            agent_manager::get_instance()
+                .get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
+                .base_id;
+
+        pmc_identifier pmc_id = { agent_primary_key, pmc_info.name };
+        auto           it     = _pmc_descriptor_map.find(pmc_id);
+
+        if(it == _pmc_descriptor_map.end())
+        {
+            new_pmcs.emplace_back(pmc_info);
+            _pmc_descriptor_map.emplace(pmc_id, start_id);
+            _pmc_insertion_order.emplace_back(pmc_id, start_id);
+            start_id++;
+        }
+    }
+
+    if(new_pmcs.empty()) return;
+
+    const size_t CHUNK_SIZE = 1000;
+    for(size_t i = 0; i < new_pmcs.size(); i += CHUNK_SIZE)
+    {
+        auto chunk_end = std::min(i + CHUNK_SIZE, new_pmcs.size());
+
+        data_storage::queries::table_insert_query query_builder;
+        auto&                                     value_builder =
+            query_builder.set_table_name("rocpd_info_pmc_" + _upid)
+                .set_columns("guid", "nid", "pid", "agent_id", "target_arch",
+                             "event_code", "instance_id", "name", "symbol", "description",
+                             "long_description", "component", "units", "value_type",
+                             "block", "expression", "is_constant", "is_derived",
+                             "extdata");
+
+        for(size_t j = i; j < chunk_end; ++j)
+        {
+            const auto& pmc_info = new_pmcs[j];
+            const auto  agent_primary_key =
+                agent_manager::get_instance()
+                    .get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+
+            value_builder.set_values(
+                _upid, node_id, process_id, agent_primary_key,
+                pmc_info.target_arch.c_str(), pmc_info.event_code, pmc_info.instance_id,
+                pmc_info.name.c_str(), pmc_info.symbol.c_str(),
+                pmc_info.description.c_str(), pmc_info.long_description.c_str(),
+                pmc_info.component.c_str(), pmc_info.units.c_str(),
+                pmc_info.value_type.c_str(), pmc_info.block.c_str(),
+                pmc_info.expression.c_str(), pmc_info.is_constant, pmc_info.is_derived,
+                "{}");
+        }
+
+        try
+        {
+            _database->execute_query(value_builder.get_query_string());
+        } catch(const std::exception& e)
+        {
+            ROCPROFSYS_DEBUG("PMC description bulk insert failed at chunk {}: {}", i,
+                             e.what());
+            throw;
+        }
+    }
 }
 
 void
