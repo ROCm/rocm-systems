@@ -27,7 +27,6 @@
 #include "table.hpp"
 
 #include "lib/common/logging.hpp"
-#include "rocprofiler-sdk/version.h"
 
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-register/rocprofiler-register.h>
