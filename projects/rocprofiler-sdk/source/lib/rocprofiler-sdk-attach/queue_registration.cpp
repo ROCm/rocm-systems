@@ -67,7 +67,7 @@ get_queue_registration()
 std::string_view
 get_hsa_status_string(hsa_status_t _status)
 {
-    auto registration = CHECK_NOTNULL(get_queue_registration());
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
 
     const char* _status_msg = nullptr;
     return (CHECK_NOTNULL(registration->hsa_status_string_fn)(_status, &_status_msg) ==
