@@ -70,11 +70,25 @@ struct file_buffer
     file_buffer& operator=(const file_buffer&) = delete;
     file_buffer& operator=(file_buffer&&) noexcept = default;
 
+    void reset();
+
     domain_type       domain = {};
     uint64_t          nbytes = 0;
     ring_buffer_t<Tp> buffer = {};
     tmp_file          file;
 };
+
+template <typename Tp>
+void
+file_buffer<Tp>::reset()
+{
+    auto _lk = std::lock_guard<std::mutex>{file.file_mutex};
+    file.close();
+    file.remove();  // Delete old file
+    file.file_pos.clear();
+    nbytes = 0;
+    buffer.clear();
+}
 
 template <typename Tp>
 struct file_buffer<ring_buffer_t<Tp>>
@@ -85,18 +99,9 @@ struct file_buffer<ring_buffer_t<Tp>>
 
 template <typename Tp>
 file_buffer<Tp>*&
-get_tmp_file_buffer(domain_type type, bool recreate = false)
+get_tmp_file_buffer(domain_type type)
 {
-    static file_buffer<Tp>* val = nullptr;
-    if(!val)
-    {
-        val = new file_buffer<Tp>{type};
-    }
-    else if(recreate)
-    {
-        delete val;
-        val = new file_buffer<Tp>{type};
-    }
+    static file_buffer<Tp>* val = new file_buffer<Tp>{type};
     return val;
 }
 
@@ -207,25 +212,6 @@ flush_tmp_buffer(domain_type type)
 {
     auto* filebuf = get_tmp_file_buffer<Tp>(type);
     if(filebuf && !filebuf->buffer.is_empty()) offload_buffer<Tp>(type);
-}
-
-template <typename Tp>
-void
-reset_tmp_file_buffer(domain_type type)
-{
-    auto*& static_ptr = get_tmp_file_buffer<Tp>(type);
-
-    if(static_ptr)
-    {
-        auto _lk = std::lock_guard<std::mutex>{static_ptr->file.file_mutex};
-        static_ptr->file.close();
-        static_ptr->file.remove();  // Delete old file
-
-        delete static_ptr;
-        static_ptr = nullptr;
-    }
-
-    static_ptr = new file_buffer<Tp>{type};
 }
 
 template <typename Tp>
