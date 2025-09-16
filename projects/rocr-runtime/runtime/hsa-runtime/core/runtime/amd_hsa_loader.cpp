@@ -317,26 +317,7 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
   code_object_size = _code_object_size;
   is_mmap = true;
 #else
-  //@todo the code below is useless. It's unclear if we need this interface at all
- #if 0
-  if (__lseek__(_code_object_file_descriptor, 0, SEEK_SET) == (off_t)-1) {
-    return HSA_STATUS_ERROR_INVALID_FILE;
-  }
-
-  std::unique_ptr<unsigned char> memory(new unsigned char[_code_object_size]);
-  if (!memory) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-
-  if (__read__(_code_object_file_descriptor, mmap_memory,
-                _code_object_size) != _code_object_size) {
-    return HSA_STATUS_ERROR_INVALID_FILE;
-  }
-  mmap_memory = memory.release();
-  mmap_size = _code_object_size;
-  code_object_memory = memory;
-  code_object_size = _code_object_size;
-#endif
+  //@todo May need an implementation in Windows
 #endif  // !defined(_WIN32) && !defined(_WIN64)
 
   uri = GetUriFromFile(_code_object_file_descriptor, _code_object_offset,

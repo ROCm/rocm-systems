@@ -979,15 +979,5 @@ uint64_t BlitKernel::PendingBytes() {
   return 0;
 }
 
-bool BlitKernel::IsKernelCodeAddr(const void* addr) const {
-  for (const auto& kern : kernels_) {
-    const KernelCode& kernel = static_cast<const KernelCode>(kern.second);
-    if (kernel.code_buf_ == addr)
-      return true;
-  }
-
-  return false;
-}
-
 }  // namespace amd
 }  // namespace rocr

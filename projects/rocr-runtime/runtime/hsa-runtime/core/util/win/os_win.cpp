@@ -316,25 +316,6 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
   *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 4) = regs[3];
   *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 8) = regs[2];
   // @todo fill the rest of CPU info
-#if 0
-  uint32_t eax, ebx, ecx, edx, max_eax = 0;
-  memset(cpuinfo, 0, sizeof(*cpuinfo));
-
-  /* Make sure current CPU supports at least EAX 4 */
-  if (!__get_cpuid_max(0x80000004, NULL)) return false;
-
-  // Manufacturer ID is a twelve-character ASCII string stored in order EBX, EDX, ECX.
-  if (!__get_cpuid(0, &max_eax, (uint32_t*)&cpuinfo->ManufacturerID[0],
-                   (uint32_t*)&cpuinfo->ManufacturerID[8], (uint32_t*)&cpuinfo->ManufacturerID[4])) {
-    return false;
-  }
-
-  if (!strcmp(cpuinfo->ManufacturerID, "AuthenticAMD")) {
-    if (__get_cpuid(0x80000001, &eax, &ebx, &ecx, &edx)) {
-      cpuinfo->mwaitx = !!((ecx >> 29) & 0x1);
-    }
-  }
-#endif
   return true;
 }
 

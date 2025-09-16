@@ -116,7 +116,6 @@ class BlitKernel : public core::Blit {
   virtual bool GangLeader() const override { return false; }
 
   const uint16_t kInvalidPacketHeader = HSA_PACKET_TYPE_INVALID;
-  bool IsKernelCodeAddr(const void* addr) const;
 
  private:
   union KernelArgs {

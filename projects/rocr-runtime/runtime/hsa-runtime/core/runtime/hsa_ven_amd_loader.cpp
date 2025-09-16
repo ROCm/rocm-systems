@@ -75,15 +75,6 @@ hsa_status_t hsa_ven_amd_loader_query_host_address(
     if (nullptr == host_address) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
-#if defined(_WIN32)
-    for (auto agent: Runtime::runtime_singleton_->gpu_agents()) {
-      // Note:This logic is necessary to avoid a deadlock in the loader with the pm4 emulation path
-      if (reinterpret_cast<AMD::GpuAgent*>(agent)->IsBlitKernelCodeAddr(device_address)) {
-        *host_address = device_address;
-        return HSA_STATUS_SUCCESS;
-      }
-    }
-#endif
 
     uintptr_t udaddr = reinterpret_cast<uintptr_t>(device_address);
     uintptr_t uhaddr = Runtime::runtime_singleton_->loader()->FindHostAddress(udaddr);

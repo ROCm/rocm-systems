@@ -429,20 +429,6 @@ void GpuAgent::ReleaseShader(void* code_buf, size_t code_buf_size) const {
   system_deallocator()(code_buf);
 }
 
-bool GpuAgent::IsBlitKernelCodeAddr(const void* addr) const {
-  for (auto& blit : blits_) {
-    if (!blit.empty()) {
-      if (!blit->isSDMA()) {
-        const BlitKernel* kernl = static_cast<const BlitKernel*>((*blit).get());
-        if (kernl->IsKernelCodeAddr(addr))
-          return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 void GpuAgent::InitRegionList() {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
 
