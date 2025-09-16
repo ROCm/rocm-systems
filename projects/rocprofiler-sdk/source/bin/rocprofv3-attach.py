@@ -48,8 +48,14 @@ def main(
     # Load the shared library into ctypes
     c_lib = ctypes.CDLL(attach_library)
 
+    c_lib.attach.restype = ctypes.c_int
     c_lib.attach.argtypes = [ctypes.c_uint]
-    c_lib.attach(int(pid))
+    attach_status = c_lib.attach(int(pid))
+
+    if attach_status != 0:
+        raise RuntimeError(
+            f"Calling attach in {attach_library} returned non-zero status {attach_status}"
+        )
 
     print(f"Attaching to PID {pid} using library {attach_library} :: success")
 
