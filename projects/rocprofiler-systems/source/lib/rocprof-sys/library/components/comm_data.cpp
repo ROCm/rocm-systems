@@ -135,7 +135,7 @@ template <typename Track>
 void
 cache_comm_data_events(const uint32_t device_id, int bytes)
 {
-    auto& agents = agent_manager::get_instance();
+    auto& agents = get_agent_manager_instance();
     auto  agent  = agents.get_agent_by_type_index(device_id, agent_type::CPU);
 
     static std::mutex _mutex{};
@@ -159,7 +159,8 @@ cache_comm_data_events(const uint32_t device_id, int bytes)
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::pmc_event_with_sample, track_name.c_str(), timestamp_ns,
         event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
-        call_stack.c_str(), line_info.c_str(), agent_handle, track_name.c_str(), value);
+        call_stack.c_str(), line_info.c_str(), agent_handle, track_name.c_str(),
+        static_cast<double>(value));
 }
 
 }  // namespace

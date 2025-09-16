@@ -244,7 +244,7 @@ config()
     // the agents seems to be assigned per device basis not per core.
     // TODO: `get_enabled_cpus()` should be fixed in the future to align with GPU
     // implementation.
-    auto cpu_agents = agent_manager::get_instance().get_agents_by_type(agent_type::CPU);
+    auto cpu_agents = get_agent_manager_instance().get_agents_by_type(agent_type::CPU);
     for(auto& agent : cpu_agents)
     {
         metadata_initialize_cpu_freq_pmc(agent->device_id);

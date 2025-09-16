@@ -31,7 +31,6 @@
 #include "core/defines.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/json.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
@@ -45,6 +44,8 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
+
+#include <nlohmann/json.hpp>
 
 #include <cstdlib>
 #include <sstream>
@@ -177,11 +178,11 @@ void
 cache_kokkos_event(const char* name, const char* event_type, const char* target,
                    uint64_t timestamp_ns)
 {
-    auto event_metadata = rocpd::json::create();
+    nlohmann::json event_metadata;
 
-    event_metadata->set("name", name);
-    event_metadata->set("event_type", event_type);
-    event_metadata->set("target", target);
+    event_metadata["name"]       = name;
+    event_metadata["event_type"] = event_type;
+    event_metadata["target"]     = target;
 
     const size_t stack_id        = 0;
     const size_t parent_stack_id = 0;
@@ -192,7 +193,7 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::entry_type::in_time_sample,
         rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
-        event_metadata->to_string().c_str(), stack_id, parent_stack_id, correlation_id,
+        event_metadata.dump().c_str(), stack_id, parent_stack_id, correlation_id,
         call_stack, line_info);
 }
 
