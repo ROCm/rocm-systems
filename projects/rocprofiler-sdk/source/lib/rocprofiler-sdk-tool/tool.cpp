@@ -2309,10 +2309,16 @@ api_timestamps_callback(rocprofiler_intercept_table_t table_id,
     });
 }
 
+enum class cleanup_mode
+{
+    destroy,
+    reset,
+};
+
 using stats_data_t       = tool::stats_data_t;
 using stats_entry_t      = tool::stats_entry_t;
 using domain_stats_vec_t = tool::domain_stats_vec_t;
-using cleanup_vec_t      = std::vector<std::function<void()>>;
+using cleanup_vec_t      = std::vector<std::function<void(cleanup_mode)>>;
 
 struct output_data
 {
@@ -2411,7 +2417,26 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
                 domain_stats_vec_t&                 contributions_v,
                 cleanup_vec_t&                      cleanups_v)
 {
-    cleanups_v.emplace_back([&output_v]() { output_v.destroy(); });
+    cleanups_v.emplace_back([&output_v](cleanup_mode _mode) {
+        switch(_mode)
+        {
+            case cleanup_mode::destroy:
+            {
+                ROCP_INFO << fmt::format("destroying buffer for {}",
+                                         get_domain_column_name(DomainT));
+                output_v.destroy();
+                return;
+            }
+            case cleanup_mode::reset:
+            {
+                ROCP_INFO << fmt::format("resetting buffer for {}",
+                                         get_domain_column_name(DomainT));
+                output_v.reset();
+                return;
+            }
+        }
+        ROCP_CI_LOG(WARNING) << fmt::format("invalid cleanup mode {}", static_cast<int>(_mode));
+    });
 
     if(!output_v) return;
 
@@ -2447,8 +2472,10 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 }
 
 void
-generate_output()
+generate_output(cleanup_mode _cleanup_mode)
 {
+    auto _output_gen_timer = common::simple_timer{"[rocprofv3] output generation"};
+
     auto kernel_dispatch_output =
         rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
 
@@ -2486,10 +2513,10 @@ generate_output()
     auto contributions = domain_stats_vec_t{};
     auto cleanups      = cleanup_vec_t{};
 
-    auto run_cleanup = [&cleanups]() {
+    auto run_cleanup = [&cleanups, _cleanup_mode]() {
         for(const auto& itr : cleanups)
         {
-            if(itr) itr();
+            if(itr) itr(_cleanup_mode);
         }
         cleanups.clear();
     };
@@ -2688,31 +2715,7 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    generate_output();
-
-    // Reset all temp file buffers after generating output for clean reattachment
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_kernel_dispatch_ext_record_t>(
-        domain_type::KERNEL_DISPATCH);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_hsa_api_record_t>(domain_type::HSA);
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_hip_api_ext_record_t>(domain_type::HIP);
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_copy_ext_record_t>(
-        domain_type::MEMORY_COPY);
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_allocation_ext_record_t>(
-        domain_type::MEMORY_ALLOCATION);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_marker_api_record_t>(
-        domain_type::MARKER);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rccl_api_record_t>(domain_type::RCCL);
-    tool::reset_tmp_file_buffer<tool::tool_counter_record_t>(domain_type::COUNTER_COLLECTION);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_scratch_memory_record_t>(
-        domain_type::SCRATCH_MEMORY);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocdecode_api_record_t>(
-        domain_type::ROCDECODE);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocjpeg_api_record_t>(
-        domain_type::ROCJPEG);
-    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_host_trap_record_t>(
-        domain_type::PC_SAMPLING_HOST_TRAP);
-    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_stochastic_record_t>(
-        domain_type::PC_SAMPLING_STOCHASTIC);
+    generate_output(cleanup_mode::reset);
 }
 
 void
@@ -2734,7 +2737,7 @@ tool_fini(void* /*tool_data*/)
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
-    generate_output();
+    generate_output(cleanup_mode::destroy);
 
     if(destructors)
     {
