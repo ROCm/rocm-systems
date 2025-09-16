@@ -912,8 +912,7 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     // Log error and abort.
     if (!is_attachment_library_registered())
     {
-        LOG(ERROR) << "rocprofiler-register attach was invoked, but the "
-                      "rocprofiler-attach library was never loaded.";
+        LOG(ERROR) << "rocprofiler-register attach was invoked, but the rocprofiler-attach library was never loaded. Start the app with environment variable ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option ROCP_REG_DEFAULT_ATTACHMENT=ON";
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
     
@@ -983,8 +982,7 @@ rocprofiler_register_detach()
 
     if (!is_attachment_library_registered())
     {
-        LOG(ERROR) << "rocprofiler-register detach was invoked, but the "
-                      "rocprofiler-attach library was never loaded.";
+        LOG(ERROR) << "rocprofiler-register detach was invoked, but the rocprofiler-attach library was never loaded. Start the app with environment variable ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option ROCP_REG_DEFAULT_ATTACHMENT=ON";
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 
