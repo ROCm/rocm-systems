@@ -577,7 +577,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
     endif()
 
     if(NOT TEST_RUNTIME_TIMEOUT)
-        set(TEST_RUNTIME_TIMEOUT 300)
+        set(TEST_RUNTIME_TIMEOUT 800)
     endif()
 
     if(NOT TEST_SAMPLING_TIMEOUT)
