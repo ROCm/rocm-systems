@@ -76,7 +76,6 @@ jobs:
       # TODO: Remove this step once amdgpu logic has been added to gfx Dockers
       - name: Install amdgpu (remove once added to gfx Dockers)
         shell: bash
-        working-directory: tmp
         run: |
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_7.0.70000-1_all.deb
           apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
