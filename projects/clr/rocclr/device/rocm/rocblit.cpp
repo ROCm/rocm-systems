@@ -539,6 +539,13 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
 
+      // Check if engine type is SdmaInter and adjust agents accordingly
+      // ROCr copy api would always choose SDMA engine of the srcAgent if its a GPU
+      if (engine == HwQueueEngine::SdmaInter) {
+        srcAgent = dev().getBackendDevice();
+        forceSDMA = true;
+      }
+
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
               "size=%ld, forceSDMA=%d, engineType=%d, wait_event=0x%zx, completion_signal=0x%zx",
