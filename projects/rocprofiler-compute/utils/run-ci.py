@@ -49,7 +49,7 @@ def detect_repo_structure():
             return True, monorepo_root, project_root
 
     if (cwd / "CMakeLists.txt").exists():
-        with open(cwd / "CMakeLists.txt", "r") as f:
+        with open(cwd / "CMakeLists.txt") as f:
             content = f.read()
             if (
                 "project(rocprofiler-compute" in content
