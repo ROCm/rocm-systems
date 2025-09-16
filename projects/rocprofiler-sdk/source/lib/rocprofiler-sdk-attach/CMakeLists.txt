@@ -2,6 +2,8 @@
 # rocprofiler-sdk attach Library
 #
 
+find_package(rocprofiler-register REQUIRED)
+
 add_library(rocprofiler-sdk-attach-shared-library SHARED)
 add_library(rocprofiler-sdk::rocprofiler-sdk-attach-shared-library ALIAS
             rocprofiler-sdk-attach-shared-library)
@@ -23,7 +25,8 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
-            rocprofiler-sdk::rocprofiler-sdk-common-library)
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-register::rocprofiler-register-headers)
 
 set_target_properties(
     rocprofiler-sdk-attach-shared-library

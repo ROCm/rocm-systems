@@ -22,33 +22,48 @@
 
 #include "attach.h"
 #include "code_object_registration.hpp"
+#include "lib/common/defines.hpp"
 #include "queue_registration.hpp"
 #include "table.hpp"
 
 #include "lib/common/logging.hpp"
 #include "rocprofiler-sdk/version.h"
 
-void
-init_logging()
-{
-    rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
-}
+#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-register/rocprofiler-register.h>
 
-// ensure that logging is always initialized when library is loaded
-bool init_logging_at_load = (init_logging(), true);
+#define ROCPROFILER_ATTACH_VERSION_MAJOR ROCPROFILER_VERSION_MAJOR
+#define ROCPROFILER_ATTACH_VERSION_MINOR ROCPROFILER_VERSION_MINOR
+#define ROCPROFILER_ATTACH_VERSION_PATCH ROCPROFILER_VERSION_PATCH
+#define ROCPROFILER_ATTACH_VERSION                                                                 \
+    ROCPROFILER_COMPUTE_VERSION(ROCPROFILER_ATTACH_VERSION_MAJOR,                                  \
+                                ROCPROFILER_ATTACH_VERSION_MINOR,                                  \
+                                ROCPROFILER_ATTACH_VERSION_PATCH)
 
-using rocprofiler_register_functor_t = void (*)(uint64_t, void*, uint64_t);
+using rocprofiler_register_library_api_table_func_t =
+    decltype(::rocprofiler_register_library_api_table)*;
 
 ROCPROFILER_EXTERN_C_INIT
 
 int
-rocprofiler_attach_set_api_table(const char* name,
-                                 uint64_t    lib_version,
-                                 uint64_t    lib_instance,
-                                 void**      tables,
-                                 uint64_t    num_tables,
-                                 void*       register_functor)
+rocprofiler_attach_set_api_table(const char*                                   name,
+                                 uint64_t                                      lib_version,
+                                 uint64_t                                      lib_instance,
+                                 void**                                        tables,
+                                 uint64_t                                      num_tables,
+                                 rocprofiler_register_library_api_table_func_t register_functor)
+    ROCPROFILER_PUBLIC_API;
+
+int
+rocprofiler_attach_set_api_table(const char*                                   name,
+                                 uint64_t                                      lib_version,
+                                 uint64_t                                      lib_instance,
+                                 void**                                        tables,
+                                 uint64_t                                      num_tables,
+                                 rocprofiler_register_library_api_table_func_t register_functor)
 {
+    rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
+
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
     (void) lib_version;   // unused
     (void) lib_instance;  // unused
@@ -68,10 +83,14 @@ rocprofiler_attach_set_api_table(const char* name,
 
     if(register_functor)
     {
-        auto callable = reinterpret_cast<rocprofiler_register_functor_t>(register_functor);
-        callable(rocprofiler_attach_get_version(),
-                 (void*) (rocprofiler::attach::get_dispatch_registration_table()),
-                 1);
+        auto library_id = rocprofiler_register_library_indentifier_t{};
+        auto attach_tables = std::array<void*, 1>{rocprofiler::attach::get_dispatch_table()};
+        register_functor("rocattach",
+                         nullptr,
+                         ROCPROFILER_ATTACH_VERSION,
+                         attach_tables.data(),
+                         attach_tables.size(),
+                         &library_id);
     }
 
     // Initialize all registration services in attach

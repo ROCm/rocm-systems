@@ -44,8 +44,13 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
-extern "C"
+namespace
 {
+using rocprofiler_register_library_api_table_func_t =
+    decltype(::rocprofiler_register_library_api_table)*;
+}
+
+extern "C" {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
 #pragma weak rocprofiler_attach
@@ -99,7 +104,7 @@ rocprofiler_attach_set_api_table(const char*,
                                  uint64_t,
                                  void**,
                                  uint64_t,
-                                 void (*)(uint64_t, void**, uint64_t));
+                                 rocprofiler_register_library_api_table_func_t);
 
 extern uint32_t
 rocprofiler_register_import_hip(void);
@@ -134,9 +139,9 @@ using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api
 using rocprofiler_attach_func_t          = decltype(::rocprofiler_attach)*;
 using rocprofiler_detach_func_t          = decltype(::rocprofiler_detach)*;
 using rocp_set_api_table_data_t          = std::tuple<void*,
-                                                      rocprofiler_set_api_table_t,
-                                                      rocprofiler_attach_func_t,
-                                                      rocprofiler_detach_func_t>;
+                                             rocprofiler_set_api_table_t,
+                                             rocprofiler_attach_func_t,
+                                             rocprofiler_detach_func_t>;
 
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
@@ -296,8 +301,7 @@ struct rocp_import
 };
 
 template <size_t... Idx>
-auto
-rocp_reg_get_imports(std::index_sequence<Idx...>)
+auto rocp_reg_get_imports(std::index_sequence<Idx...>)
 {
     auto _data        = std::vector<rocp_import>{};
     auto _import_scan = [&_data](auto _info) {
@@ -376,7 +380,7 @@ rocp_reg_scan_for_tools()
 }
 
 void*
-rocp_load_lib(std::string_view _rocp_reg_lib)
+get_library_handle(std::string_view _rocp_reg_lib)
 {
     void* rocprofiler_lib_handle = nullptr;
 
@@ -481,7 +485,7 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
 
     if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
 
-    rocprofiler_lib_handle = rocp_load_lib(_rocp_reg_lib);
+    rocprofiler_lib_handle = get_library_handle(_rocp_reg_lib);
 
     *(void**) (&rocprofiler_lib_config_fn) =
         dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
@@ -538,9 +542,9 @@ struct scoped_count
 
     ~scoped_count() { --global_count; }
 
-    scoped_count(const scoped_count&)                = delete;
-    scoped_count(scoped_count&&) noexcept            = delete;
-    scoped_count& operator=(const scoped_count&)     = delete;
+    scoped_count(const scoped_count&)     = delete;
+    scoped_count(scoped_count&&) noexcept = delete;
+    scoped_count& operator=(const scoped_count&) = delete;
     scoped_count& operator=(scoped_count&&) noexcept = delete;
 
     uint32_t value = 0;
@@ -653,10 +657,53 @@ is_attachment_library_registered()
     }
     return false;
 }
+
+constexpr auto offset_factor = 64 / std::max<size_t>(ROCP_REG_LAST, 8);
+
+rocprofiler_register_error_code_t
+register_functor(const char*                                 common_name,
+                 rocprofiler_register_import_func_t          import_func,
+                 uint32_t                                    lib_version,
+                 void**                                      api_tables,
+                 uint64_t                                    api_table_length,
+                 rocprofiler_register_library_indentifier_t* register_id)
+{
+    rocp_import* _import_match = nullptr;
+    for(auto& itr : import_info)
+    {
+        if(itr.common_name == common_name)
+        {
+            _import_match = &itr;
+            break;
+        }
+    }
+
+    // not a supported library name
+    if(!_import_match || _import_match->library_idx == ROCP_REG_LAST)
+        return ROCP_REG_UNSUPPORTED_API;
+
+    if(instance_counters.at(_import_match->library_idx) >= offset_factor)
+        return ROCP_REG_EXCESS_API_INSTANCES;
+
+    auto  _instance_val = instance_counters.at(_import_match->library_idx)++;
+    auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
+    _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
+
+    auto* reginfo = rocp_add_registered_library_api_table(
+        common_name, import_func, lib_version, api_tables, api_table_length, _instance_val);
+
+    LOG_IF(WARNING, !reginfo) << fmt::format(
+        "rocprofiler-register failed to create registration info for "
+        "{} version {} (instance {})",
+        common_name,
+        lib_version,
+        _instance_val);
+
+    return ROCP_REG_SUCCESS;
+};
 }  // namespace
 
-extern "C"
-{
+extern "C" {
 rocprofiler_register_error_code_t
 rocprofiler_register_library_api_table(
     const char*                                 common_name,
@@ -741,7 +788,6 @@ rocprofiler_register_library_api_table(
         if(!_valid_addr) return ROCP_REG_INVALID_API_ADDRESS;
     }
 
-    constexpr auto offset_factor = 64 / std::max<size_t>(ROCP_REG_LAST, 8);
     // if ROCP_REG_LAST > 8, then we can no longer encode 8 instances per lib
     // because we ran out of bits (i.e. max of 8 * 8 = 64)
     static_assert((offset_factor * ROCP_REG_LAST) <= sizeof(uint64_t) * 8,
@@ -760,7 +806,7 @@ rocprofiler_register_library_api_table(
     if(!_activate_rocprofiler && _attachment_enabled &&
        _import_match->library_idx == ROCP_REG_HSA)
     {
-        void* attachlibrary = rocp_load_lib(rocprofiler_attach_lib_name);
+        void* attachlibrary = get_library_handle(rocprofiler_attach_lib_name);
         if(!attachlibrary)
         {
             LOG(ERROR)
@@ -785,18 +831,13 @@ rocprofiler_register_library_api_table(
         // Pass a functor to the attach library that it can use to pass back its own API
         // table to us. This approach simplifies the interface and avoids having to modify
         // the deadlock protection of this function.
-        auto register_functor =
-            [](uint64_t lib_version, void** api_tables, uint64_t api_table_length) {
-                rocp_add_registered_library_api_table(
-                    "rocattach", nullptr, lib_version, api_tables, api_table_length, 0);
-            };
 
         auto _ret = rocprofiler_attach_set_api_table_fn(common_name,
                                                         lib_version,
                                                         _instance_val,
                                                         api_tables,
                                                         api_table_length,
-                                                        register_functor);
+                                                        &register_functor);
         if(_ret != 0)
         {
             LOG(ERROR) << "Proxy queues for attachment are enabled, but attach library "
@@ -902,6 +943,9 @@ rocprofiler_register_invoke_all_registrations()
 rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer,
                             const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
+
+rocprofiler_register_error_code_t
+rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
 
 //
 //  This function can be invoked by ptrace
