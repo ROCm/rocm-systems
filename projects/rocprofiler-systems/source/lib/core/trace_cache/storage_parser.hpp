@@ -52,7 +52,7 @@ public:
 
 private:
     friend class cache_manager;
-    storage_parser(pid_t _pid);
+    storage_parser(std::string _filename);
     template <typename T>
     static void process_arg(const uint8_t*& data_pos, T& arg)
     {
@@ -83,8 +83,8 @@ private:
     }
 
 private:
-    pid_t m_pid;
-    void  invoke_callbacks(entry_type type, const storage_parsed_type_base& parsed);
+    std::string m_filename;
+    void        invoke_callbacks(entry_type type, const storage_parsed_type_base& parsed);
     std::map<entry_type, std::vector<postprocessing_callback>> m_callbacks;
 };
 

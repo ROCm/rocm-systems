@@ -179,7 +179,7 @@ struct pmc_event_with_sample : in_time_sample
 {
     size_t      agent_handle;
     std::string pmc_info_name;
-    size_t      value;
+    double      value;
 };
 
 struct amd_smi_sample : storage_parsed_type_base
@@ -219,6 +219,43 @@ struct cpu_freq_sample : storage_parsed_type_base
     std::vector<uint8_t> freqs;
 };
 
+struct backtrace_region_sample : storage_parsed_type_base
+{
+    backtrace_region_sample() = default;
+    backtrace_region_sample(uint32_t _type, uint64_t _thread_id, std::string _track_name,
+                            std::string _name, uint64_t _start_timestamp,
+                            uint64_t _end_timestamp, std::string _category,
+                            std::string _call_stack, std::string _line_info,
+                            std::string _extdata)
+    : type(_type)
+    , thread_id(_thread_id)
+    , track_name(std::move(_track_name))
+    , name(std::move(_name))
+    , start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , category(std::move(_category))
+    , call_stack(std::move(_call_stack))
+    , line_info(std::move(_line_info))
+    , extdata(std::move(_extdata))
+    {}
+
+    // Identification fields
+    uint32_t    type;
+    uint64_t    thread_id;
+    std::string track_name;
+    std::string name;
+
+    // Timing fields
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    // Additional fields
+    std::string category;
+    std::string call_stack;
+    std::string line_info;
+    std::string extdata;
+};
+
 enum class entry_type : uint32_t
 {
     in_time_sample        = 0x0000,
@@ -229,9 +266,10 @@ enum class entry_type : uint32_t
 #if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
     memory_alloc = 0x0005,
 #endif
-    amd_smi_sample   = 0x0006,
-    cpu_freq_sample  = 0x0007,
-    fragmented_space = 0xFFFF
+    amd_smi_sample          = 0x0006,
+    cpu_freq_sample         = 0x0007,
+    backtrace_region_sample = 0x0008,
+    fragmented_space        = 0xFFFF
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

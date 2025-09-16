@@ -29,7 +29,6 @@
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
 #include "core/rocpd/data_processor.hpp"
-#include "core/rocpd/json.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
@@ -44,6 +43,7 @@
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
 
+#include <nlohmann/json_fwd.hpp>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
@@ -72,6 +72,8 @@
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
+
+#include <nlohmann/json.hpp>
 
 #include <array>
 #include <chrono>
@@ -168,21 +170,21 @@ get_category_track_name(uint64_t tid)
 std::string
 generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
 {
-    auto call_stack = ::rocpd::json::create();
+    nlohmann::json call_stack;
 
-    call_stack->set("name", std::string(demangle(stack_entry.name)));
-    call_stack->set("pc", as_hex(stack_entry.address));
-    call_stack->set("file", std::string(stack_entry.location));
+    call_stack["name"] = std::string(demangle(stack_entry.name));
+    call_stack["pc"]   = as_hex(stack_entry.address);
+    call_stack["file"] = std::string(stack_entry.location);
 
-    return call_stack->to_string();
+    return call_stack.dump();
 }
 
 std::string
 generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
 {
-    auto line_info = ::rocpd::json::create();
-    line_info->set("line_address", as_hex(line_info_entry.line_address));
-    line_info->set("name", std::string(demangle(line_info_entry.name)));
+    nlohmann::json line_info;
+    line_info["line_address"] = as_hex(line_info_entry.line_address);
+    line_info["name"]         = std::string(demangle(line_info_entry.name));
 
     if(line_info_entry.lineinfo && !line_info_entry.lineinfo.lines.empty())
     {
@@ -190,43 +192,37 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
         std::reverse(_lines.begin(), _lines.end());
         for(const auto& line : _lines)
         {
-            auto inlined = ::rocpd::json::create();
-            inlined->set("name", std::string(demangle(line.name)));
-            inlined->set("location", std::string(line.location));
-            inlined->set("line", std::to_string(line.line));
-            line_info->set("inlined", inlined);
+            nlohmann::json inlined;
+            inlined["name"]      = std::string(demangle(line.name));
+            inlined["location"]  = std::string(line.location);
+            inlined["line"]      = std::to_string(line.line);
+            line_info["inlined"] = inlined;
         }
     }
 
-    return line_info->to_string();
+    return line_info.dump();
 }
 
 std::string
 generate_hw_counter_json(int64_t _tid, const backtrace_metrics& metrics)
 {
-    auto extdata = ::rocpd::json::create();
+    nlohmann::json extdata;
 
     if(!metrics.get_hw_counters().empty())
     {
         auto _labels      = backtrace_metrics::get_hw_counter_labels(_tid);
         auto _hw_cnt_vals = metrics.get_hw_counters();
 
-        auto hw_counters = ::rocpd::json::create();
+        nlohmann::json hw_counters;
         for(size_t i = 0; i < _labels.size(); ++i)
         {
-            hw_counters->set(_labels.at(i), _hw_cnt_vals.at(i));
+            hw_counters[_labels.at(i)] = _hw_cnt_vals.at(i);
         }
 
-        extdata->set("hw_counters", hw_counters);
+        extdata["hw_counters"] = hw_counters;
     }
 
-    return extdata->to_string();
-}
-
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
+    return extdata.dump();
 }
 
 template <typename Category>
@@ -296,16 +292,18 @@ rocpd_insert_region(size_t thread_id, size_t start_time, size_t end_time, size_t
                     const char* track, const char* call_stack = "{}",
                     const char* line_info = "{}", const char* extdata = "{}")
 {
-    auto& data_processor     = get_data_processor();
-    auto& n_info             = node_info::get_instance();
-    auto  string_primary_key = data_processor.insert_string(trait::name<Category>::value);
+    // auto& data_processor     = get_data_processor();
+    // auto& n_info             = node_info::get_instance();
+    // auto  string_primary_key =
+    // data_processor.insert_string(trait::name<Category>::value);
 
-    auto event_id = data_processor.insert_event(string_primary_key, 0, 0, 0, call_stack,
-                                                line_info, extdata);
+    // auto event_id = data_processor.insert_event(string_primary_key, 0, 0, 0,
+    // call_stack,
+    //                                             line_info, extdata);
 
-    data_processor.insert_region(n_info.id, getpid(), thread_id, start_time, end_time,
-                                 name_id, event_id);
-    data_processor.insert_sample(track, start_time, event_id);
+    // data_processor.insert_region(n_info.id, getpid(), thread_id, start_time, end_time,
+    //                              name_id, event_id);
+    // data_processor.insert_sample(track, start_time, event_id);
 }
 
 auto&
@@ -1707,59 +1705,61 @@ void
 rocpd_post_process_overflow_data(
     int64_t _tid, const std::vector<overflow_sampling_data>& _overflow_data)
 {
-    auto& data_processor = get_data_processor();
+    // auto& data_processor = get_data_processor();
 
-    const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
-    if(!_thread_info) return;
+    // const auto& _thread_info = thread_info::get(_tid, SequentTID);
+    // ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
+    // if(!_thread_info) return;
 
-    auto _overflow_event =
-        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
+    // auto _overflow_event =
+    //     get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
 
-    if(!_overflow_event.empty() && !_overflow_data.empty())
-    {
-        auto _beg_ns = std::max(_overflow_data.front().m_beg, _thread_info->get_start());
-        auto _end_ns = std::min(_overflow_data.back().m_end, _thread_info->get_stop());
+    // if(!_overflow_event.empty() && !_overflow_data.empty())
+    // {
+    //     auto _beg_ns = std::max(_overflow_data.front().m_beg,
+    //     _thread_info->get_start()); auto _end_ns =
+    //     std::min(_overflow_data.back().m_end, _thread_info->get_stop());
 
-        const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
-        const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
-        if(_overflow_pos != std::string::npos)
-            _overflow_event =
-                _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
+    //     const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
+    //     const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
+    //     if(_overflow_pos != std::string::npos)
+    //         _overflow_event =
+    //             _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
 
-        const auto* _main_name =
-            static_strings.emplace(join(" ", _overflow_event, "samples [rocprof-sys]"))
-                .first->c_str();
-        auto main_name_id = data_processor.insert_string(_main_name);
+    //     const auto* _main_name =
+    //         static_strings.emplace(join(" ", _overflow_event, "samples [rocprof-sys]"))
+    //             .first->c_str();
+    //     auto main_name_id = data_processor.insert_string(_main_name);
 
-        size_t thread_id = _thread_info->index_data->system_value;
+    //     size_t thread_id = _thread_info->index_data->system_value;
 
-        auto thread_primary_key = data_processor.map_thread_id_to_primary_key(thread_id);
-        const auto _track_name =
-            get_track_name<category::overflow_sampling>(*_thread_info);
+    //     auto thread_primary_key =
+    //     data_processor.map_thread_id_to_primary_key(thread_id); const auto _track_name
+    //     =
+    //         get_track_name<category::overflow_sampling>(*_thread_info);
 
-        rocpd_insert_region<category::overflow_sampling>(
-            thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
+    //     rocpd_insert_region<category::overflow_sampling>(
+    //         thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
 
-        for(const auto& itr : _overflow_data)
-        {
-            auto _beg = itr.m_beg;
-            auto _end = itr.m_end;
+    //     for(const auto& itr : _overflow_data)
+    //     {
+    //         auto _beg = itr.m_beg;
+    //         auto _end = itr.m_end;
 
-            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
+    //         if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
-            for(const auto& iitr : itr.m_stack)
-            {
-                const auto* _name =
-                    static_strings.emplace(demangle(iitr.name)).first->c_str();
-                auto name_id = data_processor.insert_string(_name);
-                rocpd_insert_region<category::overflow_sampling>(
-                    thread_primary_key, _beg, _end, name_id, _track_name.c_str(),
-                    generate_call_stack_json(iitr).c_str(),
-                    generate_line_info_json(iitr).c_str());
-            }
-        }
-    }
+    //         for(const auto& iitr : itr.m_stack)
+    //         {
+    //             const auto* _name =
+    //                 static_strings.emplace(demangle(iitr.name)).first->c_str();
+    //             auto name_id = data_processor.insert_string(_name);
+    //             rocpd_insert_region<category::overflow_sampling>(
+    //                 thread_primary_key, _beg, _end, name_id, _track_name.c_str(),
+    //                 generate_call_stack_json(iitr).c_str(),
+    //                 generate_line_info_json(iitr).c_str());
+    //         }
+    //     }
+    // }
 }
 
 void
@@ -1782,7 +1782,6 @@ rocpd_post_process_backtrace_metrics(
         backtrace_metrics::init_rocpd(_tid, _valid_metrics);  // move to setup
         for(const auto& itr : _timer_data)
             itr.m_metrics.post_process_rocpd(_tid, 0.5 * (itr.m_beg + itr.m_end));
-        backtrace_metrics::fini_rocpd(_tid, _valid_metrics);
     }
 #endif
 }
@@ -1793,93 +1792,99 @@ rocpd_post_process_timer_data(
     [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    auto& data_processor = get_data_processor();
+    // auto& data_processor = get_data_processor();
 
-    const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
-    if(!_thread_info) return;
+    // const auto& _thread_info = thread_info::get(_tid, SequentTID);
+    // ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
+    // if(!_thread_info) return;
 
-    if(!_timer_data.empty())
-    {
-        rocpd_post_process_backtrace_metrics(_tid, _timer_data);
+    // if(!_timer_data.empty())
+    // {
+    //     rocpd_post_process_backtrace_metrics(_tid, _timer_data);
 
-        auto _beg_ns = std::max(_timer_data.front().m_beg, _thread_info->get_start());
-        auto _end_ns = std::min(_timer_data.back().m_end, _thread_info->get_stop());
+    //     auto _beg_ns = std::max(_timer_data.front().m_beg, _thread_info->get_start());
+    //     auto _end_ns = std::min(_timer_data.back().m_end, _thread_info->get_stop());
 
-        const auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
+    //     const auto _track_name =
+    //     get_track_name<category::timer_sampling>(*_thread_info);
 
-        auto thread_primary_key = data_processor.map_thread_id_to_primary_key(
-            _thread_info->index_data->system_value);
+    //     auto thread_primary_key = data_processor.map_thread_id_to_primary_key(
+    //         _thread_info->index_data->system_value);
 
-        const auto main_name_id = data_processor.insert_string("samples [rocprof-sys]");
-        rocpd_insert_region<category::timer_sampling>(
-            thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
+    //     const auto main_name_id = data_processor.insert_string("samples
+    //     [rocprof-sys]"); rocpd_insert_region<category::timer_sampling>(
+    //         thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
 
-        auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
-        for(const auto& itr : _timer_data)
-        {
-            size_t   _ncount = 0;
-            uint64_t _beg    = itr.m_beg;
-            uint64_t _end    = itr.m_end;
-            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
+    //     auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
+    //     for(const auto& itr : _timer_data)
+    //     {
+    //         size_t   _ncount = 0;
+    //         uint64_t _beg    = itr.m_beg;
+    //         uint64_t _end    = itr.m_end;
+    //         if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
-            for(const auto& iitr : itr.m_stack)
-            {
-                auto _ncur = _ncount++;
-                // the begin/end + HW counters will be same for entire call-stack so only
-                // annotate the top and the bottom functions to keep the data consumption
-                // low
-                bool _include_common = (_ncur == 0 || _ncur + 1 == itr.m_stack.size());
+    //         for(const auto& iitr : itr.m_stack)
+    //         {
+    //             auto _ncur = _ncount++;
+    //             // the begin/end + HW counters will be same for entire call-stack so
+    //             only
+    //             // annotate the top and the bottom functions to keep the data
+    //             consumption
+    //             // low
+    //             bool _include_common = (_ncur == 0 || _ncur + 1 == itr.m_stack.size());
 
-                // Only annotate HW counters when first or last and HW counters are not
-                // empty
-                bool _include_hw =
-                    _include_common && !itr.m_metrics.get_hw_counters().empty();
+    //             // Only annotate HW counters when first or last and HW counters are not
+    //             // empty
+    //             bool _include_hw =
+    //                 _include_common && !itr.m_metrics.get_hw_counters().empty();
 
-                std::string hw_counter_json = "{}";
-                if(_include_hw)
-                {
-                    // current values when read
-                    hw_counter_json = generate_hw_counter_json(_tid, itr.m_metrics);
-                }
+    //             std::string hw_counter_json = "{}";
+    //             if(_include_hw)
+    //             {
+    //                 // current values when read
+    //                 hw_counter_json = generate_hw_counter_json(_tid, itr.m_metrics);
+    //             }
 
-                if(get_sampling_include_inlines() && iitr.lineinfo)
-                {
-                    auto _lines = iitr.lineinfo.lines;
-                    std::reverse(_lines.begin(), _lines.end());
-                    size_t _n = 0;
-                    for(const auto& line : _lines)
-                    {
-                        const auto* _name =
-                            static_strings.emplace(demangle(line.name)).first->c_str();
-                        auto inlined_name_id = data_processor.insert_string(_name);
+    //             if(get_sampling_include_inlines() && iitr.lineinfo)
+    //             {
+    //                 auto _lines = iitr.lineinfo.lines;
+    //                 std::reverse(_lines.begin(), _lines.end());
+    //                 size_t _n = 0;
+    //                 for(const auto& line : _lines)
+    //                 {
+    //                     const auto* _name =
+    //                         static_strings.emplace(demangle(line.name)).first->c_str();
+    //                     auto inlined_name_id = data_processor.insert_string(_name);
 
-                        auto inlined_call_stack = ::rocpd::json::create();
-                        inlined_call_stack->set("name", std::string(demangle(line.name)));
-                        inlined_call_stack->set("location", std::string(line.location));
-                        inlined_call_stack->set("line", std::to_string(line.line));
-                        inlined_call_stack->set("inlined", "true");
+    //                     nlohmann::json inlined_call_stack;
+    //                     inlined_call_stack["name"]     =
+    //                     std::string(demangle(line.name));
+    //                     inlined_call_stack["location"] = std::string(line.location);
+    //                     inlined_call_stack["line"]     = std::to_string(line.line);
+    //                     inlined_call_stack["inlined"]  = "true";
 
-                        rocpd_insert_region<category::timer_sampling>(
-                            thread_primary_key, _beg, _end, inlined_name_id,
-                            _track_name.c_str(), inlined_call_stack->to_string().c_str(),
-                            "{}",
-                            // Only include HW counters for first inlined function
-                            (_n == 0) ? hw_counter_json.c_str() : "{}");
-                    }
-                }
-                else
-                {
-                    const auto* _name = static_strings.emplace(iitr.name).first->c_str();
-                    const auto  name_id = data_processor.insert_string(_name);
-                    rocpd_insert_region<category::timer_sampling>(
-                        thread_primary_key, _beg, _end, name_id, _track_name.c_str(),
-                        generate_call_stack_json(iitr).c_str(),
-                        generate_line_info_json(iitr).c_str(), hw_counter_json.c_str());
-                }
-            }
-        }
-    }
+    //                     rocpd_insert_region<category::timer_sampling>(
+    //                         thread_primary_key, _beg, _end, inlined_name_id,
+    //                         _track_name.c_str(), inlined_call_stack.dump().c_str(),
+    //                         "{}",
+    //                         // Only include HW counters for first inlined function
+    //                         (_n == 0) ? hw_counter_json.c_str() : "{}");
+    //                 }
+    //             }
+    //             else
+    //             {
+    //                 const auto* _name =
+    //                 static_strings.emplace(iitr.name).first->c_str(); const auto
+    //                 name_id = data_processor.insert_string(_name);
+    //                 rocpd_insert_region<category::timer_sampling>(
+    //                     thread_primary_key, _beg, _end, name_id, _track_name.c_str(),
+    //                     generate_call_stack_json(iitr).c_str(),
+    //                     generate_line_info_json(iitr).c_str(),
+    //                     hw_counter_json.c_str());
+    //             }
+    //         }
+    //     }
+    // }
 #endif
 }
 

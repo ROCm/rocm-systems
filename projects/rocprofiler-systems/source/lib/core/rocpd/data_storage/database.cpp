@@ -28,6 +28,7 @@
 #include <config.hpp>
 #include <fstream>
 #include <regex>
+#include <string>
 #include <timemory/environment/types.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <unistd.h>
@@ -50,17 +51,10 @@ namespace rocpd
 {
 namespace data_storage
 {
-database&
-database::get_instance()
+database::database(const std::string& _tag)
 {
-    static database _instance;
-    return _instance;
-}
-
-database::database()
-{
-    auto db_name     = std::string_view{ "rocpd.db" };
-    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name);
+    auto db_name     = std::string{ "rocpd" };
+    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name, _tag);
     create_directory_for_database_file(abs_db_path);
     ROCPROFSYS_VERBOSE(0, "Database: %s\r\n", abs_db_path.c_str());
 
