@@ -1355,14 +1355,6 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
                                  amd::AccumulateCommand* vcmd = nullptr) = 0;
 
-  enum SystemScopeFlags {
-    ScopeNone = 0,
-    ScopeAcquire = 1 << 0,
-    ScopeRelease = 1 << 1,
-    ScopeAcquireRelease = ScopeAcquire | ScopeRelease
-  };
-  virtual void addSystemScope(SystemScopeFlags flags = SystemScopeFlags::ScopeAcquireRelease) = 0;
-
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 

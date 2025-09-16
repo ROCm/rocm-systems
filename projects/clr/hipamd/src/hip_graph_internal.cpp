@@ -471,26 +471,10 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
   if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
     accumulate = new amd::AccumulateCommand(*hip_stream, {}, nullptr);
   }
-  bool addedSystemScopeAcquire = false;
-  amd::Device* device = hip_stream->GetDevice()->devices()[0];
-  auto& isa = device->isa();
-  bool isGfx12 = (isa.versionMajor() == 12 && isa.versionMinor() == 0 &&
-                  (isa.versionStepping() == 0 || isa.versionStepping() == 1));
   for (int i = 0; i < topoOrder_.size(); i++) {
     if (topoOrder_[i]->GraphCaptureEnabled()) {
       if (topoOrder_[i]->GetEnabled()) {
         std::vector<uint8_t*>& gpuPackets = topoOrder_[i]->GetAqlPackets();
-        // System scope acquire on gfx12 is to ensure that the kernel sees updates
-        // when hostMalloc'ed memory changes on the host. This is only needed for the
-        // first kernel in the graph.
-        if (isGfx12 &&
-            (topoOrder_[i]->GetType() == hipGraphNodeTypeKernel ||
-             topoOrder_[i]->GetType() == hipGraphNodeTypeMemcpy) &&
-            !addedSystemScopeAcquire) {
-          hip_stream->vdev()->addSystemScope(
-              amd::device::VirtualDevice::SystemScopeFlags::ScopeAcquire);
-          addedSystemScopeAcquire = true;
-        }
         for (auto& packet : gpuPackets) {
           hip_stream->vdev()->dispatchAqlPacket(packet, topoOrder_[i]->GetKernelName(), accumulate);
         }

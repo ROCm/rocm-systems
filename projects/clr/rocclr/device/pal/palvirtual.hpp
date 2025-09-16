@@ -361,8 +361,6 @@ class VirtualGPU : public device::VirtualDevice {
     return false;
   }
 
-  void addSystemScope(SystemScopeFlags scope = VirtualGPU::SystemScopeFlags::ScopeAcquireRelease) {}
-
   void resetFenceDirty() {}
 
   //! Returns GPU device object associated with this kernel
