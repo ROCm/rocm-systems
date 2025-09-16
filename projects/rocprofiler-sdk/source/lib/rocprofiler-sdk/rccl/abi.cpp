@@ -57,7 +57,7 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommInitRankConfig_fn, 19)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommFinalize_fn, 20)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommDestroy_fn, 21)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommAbort_fn, 22)
-#if RCCL_API_TRACE_VERSION_PATCH == 0
+#if RCCL_API_TRACE_VERSION_PATCH == 0 || RCCL_API_TRACE_VERSION_PATCH == 1
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommSplit_fn, 23)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclGetErrorString_fn, 24)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclGetLastError_fn, 25)
@@ -72,7 +72,9 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, mscclRunAlgo_fn, 33)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, mscclUnloadAlgo_fn, 34)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommRegister_fn, 35)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommDeregister_fn, 36)
-#elif RCCL_API_TRACE_VERSION_PATCH >= 1
+#elif RCCL_API_TRACE_VERSION_PATCH == 1
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAllReduceWithBias_fn, 37)
+#elif RCCL_API_TRACE_VERSION_PATCH == 2
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommShrink_fn, 23)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommSplit_fn, 24)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclGetErrorString_fn, 25)
@@ -94,8 +96,10 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAllReduceWithBias_fn, 40)
 #endif
 
 #if RCCL_API_TRACE_VERSION_PATCH == 0
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 40)
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 37)
 #elif RCCL_API_TRACE_VERSION_PATCH == 1
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 38)
+#elif RCCL_API_TRACE_VERSION_PATCH == 2
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 41)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 0)

@@ -88,9 +88,6 @@ RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_nc
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommFinalize, ncclCommFinalize, ncclCommFinalize_fn, comm)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommDestroy, ncclCommDestroy, ncclCommDestroy_fn, comm)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommAbort, ncclCommAbort, ncclCommAbort_fn, comm)
-#if RCCL_API_TRACE_VERSION_PATCH >= 1
-RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommShrink, ncclCommShrink, ncclCommShrink_fn, comm, excludeRanksList, excludeRanksCount, newcomm, config, shrinkFlags)
-#endif
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommSplit, ncclCommSplit, ncclCommSplit_fn, comm, color, key, newcomm, config)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclGetErrorString, ncclGetErrorString, ncclGetErrorString_fn, code)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclGetLastError, ncclGetLastError, ncclGetLastError_fn, comm)
@@ -106,9 +103,12 @@ RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ms
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommRegister, ncclCommRegister, ncclCommRegister_fn, comm, buff, size, handle)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommDeregister, ncclCommDeregister, ncclCommDeregister_fn, comm, handle)
 #if RCCL_API_TRACE_VERSION_PATCH >= 1
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclAllReduceWithBias, ncclAllReduceWithBias, ncclAllReduceWithBias_fn, sendbuff, recvbuff, count, datatype, op, comm, stream, acc)
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 2
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommShrink, ncclCommShrink, ncclCommShrink_fn, comm, excludeRanksList, excludeRanksCount, newcomm, config, shrinkFlags)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommWindowRegister, ncclCommWindowRegister, ncclCommWindowRegister_fn, comm, buff, size, win, winFlags)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommWindowDeregister, ncclCommWindowDeregister, ncclCommWindowDeregister_fn, comm, win)
-RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclAllReduceWithBias, ncclAllReduceWithBias, ncclAllReduceWithBias_fn, sendbuff, recvbuff, count, datatype, op, comm, stream, acc)
 #endif
 
 #else

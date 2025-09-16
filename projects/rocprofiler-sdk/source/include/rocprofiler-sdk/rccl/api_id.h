@@ -54,7 +54,7 @@ typedef enum rocprofiler_rccl_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RCCL_API_ID_ncclCommFinalize,
     ROCPROFILER_RCCL_API_ID_ncclCommDestroy,
     ROCPROFILER_RCCL_API_ID_ncclCommAbort,
-#if RCCL_API_TRACE_VERSION_PATCH >= 1
+#if RCCL_API_TRACE_VERSION_PATCH >= 2
     ROCPROFILER_RCCL_API_ID_ncclCommShrink,
 #endif
     ROCPROFILER_RCCL_API_ID_ncclCommSplit,
@@ -71,10 +71,12 @@ typedef enum rocprofiler_rccl_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RCCL_API_ID_mscclUnloadAlgo,
     ROCPROFILER_RCCL_API_ID_ncclCommRegister,
     ROCPROFILER_RCCL_API_ID_ncclCommDeregister,
-#if RCCL_API_TRACE_VERSION_PATCH >= 1
+#if RCCL_API_TRACE_VERSION_PATCH >= 2
     ROCPROFILER_RCCL_API_ID_ncclCommWindowRegister,
     ROCPROFILER_RCCL_API_ID_ncclCommWindowDeregister,
-    ROCPROFILER_RCCL_API_ID_ncclAllReduceWithBias,    
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 1
+    ROCPROFILER_RCCL_API_ID_ncclAllReduceWithBias,
 #endif
     ROCPROFILER_RCCL_API_ID_LAST,
 } rocprofiler_rccl_api_id_t;
