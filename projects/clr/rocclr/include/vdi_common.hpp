@@ -101,7 +101,7 @@ struct PlatformIDS {
 };
 class PlatformID {
  public:
-  static PlatformIDS Platform;
+  static inline PlatformIDS Platform = {amd::ICDDispatchedObject::icdVendorDispatch_};
 };
 #define AMD_PLATFORM (reinterpret_cast<cl_platform_id>(&amd::PlatformID::Platform))
 

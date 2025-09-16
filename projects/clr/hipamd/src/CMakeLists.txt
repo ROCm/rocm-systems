@@ -96,7 +96,6 @@ if(NOT WIN32)
 endif()
 
 target_sources(amdhip64 PRIVATE
-  fixme.cpp
   hip_activity.cpp
   hip_code_object.cpp
   hip_context.cpp
