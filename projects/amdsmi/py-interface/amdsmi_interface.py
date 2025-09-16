@@ -2144,7 +2144,7 @@ def amdsmi_get_gpu_pm_metrics_info(
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_pm_metrics_info(
-            processor_handle, POINTER(pm_metrics), ctypes.byref(num_mets)
+            processor_handle, pm_metrics, ctypes.byref(num_mets)
         )
     )
 
@@ -2173,7 +2173,7 @@ def amdsmi_get_gpu_reg_table_info(
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_reg_table_info(
-            processor_handle, reg_type, POINTER(reg_metrics), ctypes.byref(num_regs)
+            processor_handle, reg_type, reg_metrics, ctypes.byref(num_regs)
         )
     )
 

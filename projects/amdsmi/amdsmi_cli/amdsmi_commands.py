@@ -203,7 +203,7 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
-            
+
         # Perform one-time group check. If it fails, record that fact
         # but do NOT abort—just mark that UUID should be "N/A" later.
         _group_check_done = False
@@ -293,7 +293,7 @@ class AMDSMICommands():
             self.logger.store_output(args.gpu, 'hsa_id', enumeration_info['hsa_id'])
             self.logger.store_output(args.gpu, 'hip_id', enumeration_info['hip_id'])
             self.logger.store_output(args.gpu, 'hip_uuid', enumeration_info['hip_uuid'])
-            
+
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -446,12 +446,12 @@ class AMDSMICommands():
         # amd-smi static default arguments:
         # Exclude args that are not applicable to the current platform,
         # but allow output if argument is passed.
-        # 
-        # Note: Partition is a special case, it is no longer an amd-smi static 
+        #
+        # Note: Partition is a special case, it is no longer an amd-smi static
         # default argument.
         # Reason: Reading current_compute_partition may momentarily wake the
         #         GPU up. This is due to reading XCD registers, which is expected
-        #         behavior. Changing partitions is not a trivial operation, 
+        #         behavior. Changing partitions is not a trivial operation,
         #         current_compute_partition SYSFS controls this action.
         if args.partition:
             current_platform_args += ["partition"]
@@ -2344,7 +2344,7 @@ class AMDSMICommands():
                     try:
                         base_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(args.gpu, type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
                         if base_board_temp_holder != "N/A":
-                            
+
                             base_board_temp_dict[f'{type_name}'] = self.helpers.unit_format(self.logger,
                                                                                      base_board_temp_holder,
                                                                                      '\N{DEGREE SIGN}C')
@@ -4290,7 +4290,7 @@ class AMDSMICommands():
                     boost_limit = int(boost_limit.split()[0])
                 else:
                     boost_limit = int(boost_limit)
-                
+
                 if boost_limit < args.core_boost_limit[0][0]:
                     static_dict["set_core_boost_limit"]["Response"] = f"Max allowed boostlimit is {boost_limit} MHz"
                 elif boost_limit > args.core_boost_limit[0][0]:
@@ -5193,7 +5193,7 @@ class AMDSMICommands():
         if self.helpers.is_amd_hsmp_initialized() and cpu_args_enabled:
             if args.cpu == None:
                 args.cpu = self.cpu_handles
-        
+
         if self.helpers.is_amd_hsmp_initialized() and core_args_enabled:
             if args.core == None:
                 args.core = self.core_handles
@@ -5484,7 +5484,7 @@ class AMDSMICommands():
 
         #######################
         # BM commands - END   #
-        #######################    
+        #######################
 
         if args.clean_local_data:
             try:
@@ -5815,7 +5815,7 @@ class AMDSMICommands():
             # Get Current Power Cap
             try:
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                monitor_values['max_power'] = power_cap_info['power_cap']  # Get current power cap (`power_cap`) socket is set to 
+                monitor_values['max_power'] = power_cap_info['power_cap']  # Get current power cap (`power_cap`) socket is set to
                                                                            # `max_power_cap`, is the maximum value it can be set to
                 monitor_values['max_power'] = self.helpers.convert_SI_unit(monitor_values['max_power'], AMDSMIHelpers.SI_Unit.MICRO)
 
@@ -6429,15 +6429,9 @@ class AMDSMICommands():
         # Populate the possible gpus and their bdfs
         xgmi_values = []
         for gpu in args.gpu:
-            partition_id = -1
-            try:
-                kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(gpu)
-                partition_id = kfd_info['current_partition_id']
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get kfd info for gpu %s | %s", gpu, e.get_error_info())
-
-            if partition_id != 0:
-                logging.debug(f"Skipping xgmi command due to non zero partition {gpu} - {partition_id}")
+            primary_partition = self.helpers.is_primary_partition(gpu)
+            if not primary_partition:
+                logging.debug(f"Skipping xgmi command due to non zero partition {gpu}")
                 continue
 
             logging.debug("check1 device_handle: %s", gpu)
@@ -6497,14 +6491,8 @@ class AMDSMICommands():
 
                 # Populate link metrics
                 for dest_gpu in args.gpu:
-                    partition_id = -1
-                    try:
-                        kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(dest_gpu)
-                        partition_id = kfd_info['current_partition_id']
-                    except amdsmi_exception.AmdSmiLibraryException as e:
-                        logging.debug("Failed to get kfd info for gpu %s | %s", dest_gpu, e.get_error_info())
-
-                    if partition_id != 0:
+                    primary_partition = self.helpers.is_primary_partition(dest_gpu)
+                    if not primary_partition:
                         continue
 
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
@@ -7077,6 +7065,36 @@ class AMDSMICommands():
             args.gpu = [args.gpu]
 
         args.cursor = [0] * len(args.gpu)
+
+        # Using all the devices given in args.gpu
+        # Populate a list of all the primary partition GPU ids (GPU 0, GPU 1, etc)
+        partition_warning_flag = True
+        primary_partition_gpu_ids = set() # set of all primary partition GPU ids from arg.gpu
+        for device_handle in args.gpu:
+            # First get the partition
+            partition_id = self.helpers.get_partition_id(device_handle)
+            # If there is a single primary partition within args.gpu then we don't need to print the warning
+            if partition_id == 0:
+                partition_warning_flag = False
+                break
+            # Then attempt to get the primary GPU id for that partition
+            primary_partition_gpu_id = self.helpers.get_primary_partition_gpu_id(device_handle)
+            # Add to the set if it's a non-primary partition and we found a valid primary GPU id
+            if partition_id != 0 and primary_partition_gpu_id is not None:
+                primary_partition_gpu_ids.add(primary_partition_gpu_id)
+
+        if partition_warning_flag:
+            # Create a list of the primary partitions
+            primary_partitions_str = " ".join(f"GPU{gpu_id}" for gpu_id in primary_partition_gpu_ids)
+
+            print("WARNING: CPER files are only available on primary partitions")
+            if len(primary_partition_gpu_ids) > 1:
+                print(f"Try with primary partitions {primary_partitions_str}",end="")
+            else:
+                print(f"Try with primary partition {primary_partitions_str}",end="")
+
+            print()
+
         while True:
             for idx, device_handle in enumerate(args.gpu):
                 self.helpers.ras_cper(args, device_handle, self.logger, idx)
@@ -7274,7 +7292,7 @@ class AMDSMICommands():
                             proc_info_dict['cu_occupancy'] = {"current_cu": "N/A", "total_num_cu": total_num_cu}
                     except (ValueError, TypeError):
                         proc_info_dict['cu_occupancy'] = {"current_cu": "N/A", "total_num_cu": total_num_cu}
-                    
+
                     all_process_list.append(proc_info_dict)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
