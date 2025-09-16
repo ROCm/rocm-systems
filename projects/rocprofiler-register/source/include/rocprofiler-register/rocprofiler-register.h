@@ -65,6 +65,10 @@ typedef struct
 /// @var ROCP_REG_INVALID_ARGUMENT
 /// @brief Rocprofiler-register API function was provided an invalid argument
 ///
+/// @var ROCP_REG_ATTACHMENT_NOT_AVAILABLE
+/// @brief Rocprofiler-register attach or detach was invoked, but the attachment
+/// library was not loaded at app startup.
+///
 typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
 {
     ROCP_REG_SUCCESS = 0,
@@ -156,17 +160,6 @@ rocprofiler_register_iterate_registration_info(
     rocprofiler_register_registration_info_cb_t callback,
     void*                                       data)
     ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(1)) ROCPROFILER_REGISTER_PUBLIC_API;
-
-/// @brief Function for attaching to a process and loading tool library
-/// @param[in] environment_buffer Environment variables to set
-/// @param[in] tool_lib_path Path to the tool library to load (can be NULL)
-/// @return ::rocprofiler_register_error_code_t
-rocprofiler_register_error_code_t
-rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path)
-    ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(2)) ROCPROFILER_REGISTER_PUBLIC_API;
-
-rocprofiler_register_error_code_t
-rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
 
 #ifdef __cplusplus
 }
