@@ -147,7 +147,10 @@ class RocProfCompute_Base:
             for file in result_files:
                 Path(file).unlink()
                 console_debug(f"Deleted file: {file}")
-            return
+            return None
+
+        # Collect files to process - normalize to Path objects
+        files: list[Path] = []
 
         # Set default output directory if not specified
         if isinstance(args.path, str):
@@ -168,7 +171,7 @@ class RocProfCompute_Base:
                     f for f in files if not f.name.endswith("_marker_api_trace.csv")
                 ]
         elif isinstance(args.path, list):
-            files = args.path
+            files = [Path(path) for path in args.path]
         else:
             console_error(f"Invalid workload directory. Cannot resolve {args.path}")
 
@@ -176,6 +179,11 @@ class RocProfCompute_Base:
         df = None
         for i, file in enumerate(files):
             current_df = pd.read_csv(file)
+
+            if current_df.empty:
+                console_warning("join_prof", f"Empty dataframe from {file}")
+                continue
+
             if args.join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
                 current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
@@ -190,7 +198,8 @@ class RocProfCompute_Base:
                 )
             else:
                 console_error(
-                    f"{args.join_type} is an unrecognized option for --join-type"
+                    "join_prof",
+                    f"{args.join_type} is an unrecognized option for --join-type",
                 )
 
             if df is None:
@@ -202,7 +211,8 @@ class RocProfCompute_Base:
                 )
 
         if df is None or df.empty:
-            return
+            console_warning("join_prof", "No data available after processing all files")
+            return None
 
         # TODO: check for any mismatch in joins
         duplicate_cols = {
@@ -238,10 +248,11 @@ class RocProfCompute_Base:
             current_df = df[cols]
             if not test_df_column_equality(current_df):
                 console_warning(
-                    f"Detected differing {key} values while joining pmc_perf.csv"
+                    "join_prof",
+                    f"Detected differing {key} values while joining pmc_perf.csv",
                 )
             else:
-                console_debug(f"Successfully joined {key} in pmc_perf.csv")
+                console_debug("join_prof", f"Successfully joined {key} in pmc_perf.csv")
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
@@ -321,7 +332,8 @@ class RocProfCompute_Base:
             df["End_Timestamp"] = mean_end
 
         # finally, join the drop key
-        df = df.drop(columns=["key"])
+        if "key" in df.columns:
+            df = df.drop(columns=["key"])
 
         # save to file and delete old file(s)
         # skip if we're being called outside of rocprof-compute
@@ -330,8 +342,8 @@ class RocProfCompute_Base:
             if not args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
-                    if "SQ_" not in file or "SQC_" not in file:
-                        Path(file).unlink()
+                    if "SQ_" not in file.name or "SQC_" not in file.name:
+                        file.unlink()
             return None
         else:
             return df

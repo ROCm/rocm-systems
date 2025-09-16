@@ -88,7 +88,7 @@ class tui_analysis(OmniAnalyze_Base):
 
         # 1. load top kernel
         parser.load_non_mertrics_table(
-            workload=self._runs[self.path], dir=self.path, args=self.args
+            workload=self._runs[self.path], dir_path=self.path, args=self.args
         )
 
         # 2. Generate kernel-specific dataframes
