@@ -44,7 +44,8 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
-extern "C" {
+extern "C"
+{
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
 #pragma weak rocprofiler_attach
@@ -133,9 +134,9 @@ using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api
 using rocprofiler_attach_func_t          = decltype(::rocprofiler_attach)*;
 using rocprofiler_detach_func_t          = decltype(::rocprofiler_detach)*;
 using rocp_set_api_table_data_t          = std::tuple<void*,
-                                             rocprofiler_set_api_table_t,
-                                             rocprofiler_attach_func_t,
-                                             rocprofiler_detach_func_t>;
+                                                      rocprofiler_set_api_table_t,
+                                                      rocprofiler_attach_func_t,
+                                                      rocprofiler_detach_func_t>;
 
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
@@ -254,9 +255,9 @@ ROCP_REG_DEFINE_ERROR_MESSAGE(
 ROCP_REG_DEFINE_ERROR_MESSAGE(
     ROCP_REG_INVALID_ARGUMENT,
     "rocprofiler-register API function was provided an invalid argument")
-ROCP_REG_DEFINE_ERROR_MESSAGE(
-    ROCP_REG_ATTACHMENT_NOT_AVAILABLE,
-    "rocprofiler-register attach was invoked, but the attachment library was never loaded.")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_ATTACHMENT_NOT_AVAILABLE,
+                              "rocprofiler-register attach was invoked, but the "
+                              "attachment library was never loaded.")
 
 auto
 get_this_library_path()
@@ -295,7 +296,8 @@ struct rocp_import
 };
 
 template <size_t... Idx>
-auto rocp_reg_get_imports(std::index_sequence<Idx...>)
+auto
+rocp_reg_get_imports(std::index_sequence<Idx...>)
 {
     auto _data        = std::vector<rocp_import>{};
     auto _import_scan = [&_data](auto _info) {
@@ -536,9 +538,9 @@ struct scoped_count
 
     ~scoped_count() { --global_count; }
 
-    scoped_count(const scoped_count&)     = delete;
-    scoped_count(scoped_count&&) noexcept = delete;
-    scoped_count& operator=(const scoped_count&) = delete;
+    scoped_count(const scoped_count&)                = delete;
+    scoped_count(scoped_count&&) noexcept            = delete;
+    scoped_count& operator=(const scoped_count&)     = delete;
     scoped_count& operator=(scoped_count&&) noexcept = delete;
 
     uint32_t value = 0;
@@ -596,7 +598,7 @@ rocp_invoke_registrations(bool invoke_all)
             if(_activate_rocprofiler)
             {
                 existing_scanned_data = _scan_result;
-                auto _ret = _scan_result.set_api_table_fn(itr->common_name,
+                auto _ret             = _scan_result.set_api_table_fn(itr->common_name,
                                                           itr->lib_version,
                                                           itr->instance_value,
                                                           itr->api_tables.data(),
@@ -642,10 +644,10 @@ bool
 is_attachment_library_registered()
 {
     bool _attachment_library_registered = false;
-    for (const auto& itr : registered)
+    for(const auto& itr : registered)
     {
-        if (std::string_view{itr->common_name} == 
-            supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
+        if(std::string_view{ itr->common_name } ==
+           supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
         {
             _attachment_library_registered = true;
             break;
@@ -655,7 +657,8 @@ is_attachment_library_registered()
 }
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_register_error_code_t
 rocprofiler_register_library_api_table(
     const char*                                 common_name,
@@ -910,12 +913,16 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     // If the attachment library has not been loaded when attach is called, tracing
     // that relies on proxy queues will fail (e.g. kernel tracing).
     // Log error and abort.
-    if (!is_attachment_library_registered())
+    if(!is_attachment_library_registered())
     {
-        LOG(ERROR) << "rocprofiler-register attach was invoked, but the rocprofiler-attach library was never loaded. Start the app with environment variable ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option ROCP_REG_DEFAULT_ATTACHMENT=ON";
+        LOG(ERROR)
+            << "rocprofiler-register attach was invoked, but the rocprofiler-attach "
+               "library was never loaded. Start the app with environment variable "
+               "ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option "
+               "ROCP_REG_DEFAULT_ATTACHMENT=ON";
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
-    
+
     static auto prev_tool_lib_path = std::string{};
 
     // tool_lib_path is declared with non-null attribute
@@ -980,9 +987,13 @@ rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
 
-    if (!is_attachment_library_registered())
+    if(!is_attachment_library_registered())
     {
-        LOG(ERROR) << "rocprofiler-register detach was invoked, but the rocprofiler-attach library was never loaded. Start the app with environment variable ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option ROCP_REG_DEFAULT_ATTACHMENT=ON";
+        LOG(ERROR)
+            << "rocprofiler-register detach was invoked, but the rocprofiler-attach "
+               "library was never loaded. Start the app with environment variable "
+               "ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option "
+               "ROCP_REG_DEFAULT_ATTACHMENT=ON";
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 
