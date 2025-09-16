@@ -643,17 +643,15 @@ load_environment_buffer(const char* environment_buffer)
 bool
 is_attachment_library_registered()
 {
-    bool _attachment_library_registered = false;
     for(const auto& itr : registered)
     {
         if(std::string_view{ itr->common_name } ==
            supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
         {
-            _attachment_library_registered = true;
-            break;
+            return true;
         }
     }
-    return _attachment_library_registered;
+    return false;
 }
 }  // namespace
 
