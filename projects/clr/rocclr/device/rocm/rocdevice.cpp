@@ -1998,6 +1998,10 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
+  if (mem_seg == kIoMemory) {
+    memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+  
   hsa_amd_memory_pool_t pool =
       getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
   hsa_status_t stat = Hsa::memory_pool_allocate(pool, size, memFlags, &ptr);
