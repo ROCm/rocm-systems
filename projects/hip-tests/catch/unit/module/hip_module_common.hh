@@ -34,6 +34,8 @@ class ModuleGuard {
 
   static ModuleGuard LoadModule(const char* fname);
 
+  static ModuleGuard InitModule(const char* fname);
+
   static ModuleGuard LoadModuleDataFile(const char* fname);
 
   static ModuleGuard LoadModuleDataRTC(const char* code);
