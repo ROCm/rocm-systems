@@ -2422,15 +2422,15 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
         {
             case cleanup_mode::destroy:
             {
-                ROCP_INFO << fmt::format("destroying buffer for {}",
-                                         get_domain_column_name(DomainT));
+                // ROCP_INFO << fmt::format("destroying buffer for {}",
+                //                          get_domain_column_name(DomainT));
                 output_v.destroy();
                 return;
             }
             case cleanup_mode::reset:
             {
-                ROCP_INFO << fmt::format("resetting buffer for {}",
-                                         get_domain_column_name(DomainT));
+                // ROCP_INFO << fmt::format("resetting buffer for {}",
+                //                          get_domain_column_name(DomainT));
                 output_v.reset();
                 return;
             }
