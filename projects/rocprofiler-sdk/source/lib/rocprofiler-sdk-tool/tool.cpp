@@ -2447,190 +2447,8 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 }
 
 void
-tool_detach(void* /*tool_data*/)
+generate_output()
 {
-    auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
-
-    // Flush all buffers (same as tool_fini)
-    flush();
-
-    // Set process end timestamp for this detachment cycle
-    if(tool_metadata->process_end_ns == 0)
-        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
-
-    // Generate output for all services (similar to tool_fini but without destroying state)
-    auto kernel_dispatch_output =
-        rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
-    auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
-                                                  tool::get_config().hsa_amd_ext_api_trace ||
-                                                  tool::get_config().hsa_image_ext_api_trace ||
-                                                  tool::get_config().hsa_finalizer_ext_api_trace};
-    auto hip_output = tool::hip_buffered_output_t{tool::get_config().hip_runtime_api_trace ||
-                                                  tool::get_config().hip_compiler_api_trace};
-    auto memory_copy_output =
-        tool::memory_copy_buffered_output_ext_t{tool::get_config().memory_copy_trace};
-
-    auto memory_allocation_output =
-        tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
-
-    auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
-
-    auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
-
-    auto counters_output =
-        tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
-
-    auto scratch_memory_output =
-        tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
-
-    auto rocdecode_output =
-        tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
-
-    auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
-
-    auto pc_sampling_host_trap_output =
-        tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
-
-    auto pc_sampling_stochastic_output =
-        tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
-
-    auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
-    auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
-    std::sort(agents_output.begin(), agents_output.end(), node_id_sort);
-
-    auto outdata       = output_data{};
-    auto contributions = domain_stats_vec_t{};
-    auto cleanups      = cleanup_vec_t{};
-
-    auto run_cleanup = [&cleanups]() {
-        for(const auto& itr : cleanups)
-        {
-            if(itr) itr();
-        }
-        cleanups.clear();
-    };
-
-    // Generate configuration output if requested
-    if(tool::get_config().output_config_file)
-    {
-        generate_config_output(tool::get_config(), *tool_metadata);
-    }
-    {
-        auto _dtor = common::scope_destructor{run_cleanup};
-
-        // Generate output for all services
-        generate_output(kernel_dispatch_output, outdata, contributions, cleanups);
-
-        generate_output(hsa_output, outdata, contributions, cleanups);
-        generate_output(hip_output, outdata, contributions, cleanups);
-        generate_output(memory_copy_output, outdata, contributions, cleanups);
-        generate_output(memory_allocation_output, outdata, contributions, cleanups);
-        generate_output(marker_output, outdata, contributions, cleanups);
-        generate_output(rccl_output, outdata, contributions, cleanups);
-        generate_output(counters_output, outdata, contributions, cleanups);
-        generate_output(scratch_memory_output, outdata, contributions, cleanups);
-        generate_output(rocdecode_output, outdata, contributions, cleanups);
-        generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
-        generate_output(rocjpeg_output, outdata, contributions, cleanups);
-        generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
-        if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
-        {
-            outdata.num_output += 1;
-        }
-
-        ROCP_INFO << fmt::format("tool_detach: Generated output from {} services ({} kB)",
-                                 outdata.num_output,
-                                 (outdata.num_bytes / 1024));
-
-        // when benchmarking, we do not generate output
-        if(tool::get_config().benchmark_mode != tool::config::benchmark::none) return;
-
-        // Generate output files (same logic as tool_fini)
-        if(tool::get_config().csv_output && outdata.num_output > 0 &&
-           outdata.num_bytes >= tool::get_config().minimum_output_bytes)
-        {
-            tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
-        }
-
-        if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
-           outdata.num_bytes >= tool::get_config().minimum_output_bytes)
-        {
-            tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
-        }
-
-        if(tool::get_config().json_output && outdata.num_output > 0 &&
-           outdata.num_bytes >= tool::get_config().minimum_output_bytes)
-        {
-            auto json_ar = tool::open_json(tool::get_config());
-
-            json_ar.start_process();
-            tool::write_json(json_ar, tool::get_config(), *tool_metadata, getpid());
-            tool::write_json(json_ar,
-                             tool::get_config(),
-                             *tool_metadata,
-                             contributions,
-                             hip_output.get_generator(),
-                             hsa_output.get_generator(),
-                             kernel_dispatch_output.get_generator(),
-                             memory_copy_output.get_generator(),
-                             counters_output.get_generator(),
-                             marker_output.get_generator(),
-                             scratch_memory_output.get_generator(),
-                             rccl_output.get_generator(),
-                             memory_allocation_output.get_generator(),
-                             rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator(),
-                             pc_sampling_host_trap_output.get_generator(),
-                             pc_sampling_stochastic_output.get_generator());
-            json_ar.finish_process();
-
-            tool::close_json(json_ar);
-        }
-    }
-    // Reset all temp file buffers after generating output for clean reattachment
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_kernel_dispatch_ext_record_t>(
-        domain_type::KERNEL_DISPATCH);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_hsa_api_record_t>(domain_type::HSA);
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_hip_api_ext_record_t>(domain_type::HIP);
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_copy_ext_record_t>(
-        domain_type::MEMORY_COPY);
-    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_allocation_ext_record_t>(
-        domain_type::MEMORY_ALLOCATION);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_marker_api_record_t>(
-        domain_type::MARKER);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rccl_api_record_t>(domain_type::RCCL);
-    tool::reset_tmp_file_buffer<tool::tool_counter_record_t>(domain_type::COUNTER_COLLECTION);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_scratch_memory_record_t>(
-        domain_type::SCRATCH_MEMORY);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocdecode_api_record_t>(
-        domain_type::ROCDECODE);
-    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocjpeg_api_record_t>(
-        domain_type::ROCJPEG);
-    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_host_trap_record_t>(
-        domain_type::PC_SAMPLING_HOST_TRAP);
-    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_stochastic_record_t>(
-        domain_type::PC_SAMPLING_STOCHASTIC);
-}
-
-void
-tool_fini(void* /*tool_data*/)
-{
-    static bool _first = true;
-    if(!_first) return;
-    _first = false;
-
-    client_identifier = nullptr;
-    client_finalizer  = nullptr;
-
-    auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
-
-    if(tool_metadata->process_end_ns == 0)
-        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
-
-    flush();
-    rocprofiler_stop_context(get_client_ctx());
-    flush();
-
     auto kernel_dispatch_output =
         rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
 
@@ -2856,6 +2674,67 @@ tool_fini(void* /*tool_data*/)
     }
 
     run_cleanup();
+}
+
+void
+tool_detach(void* /*tool_data*/)
+{
+    auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
+
+    // Flush all buffers (same as tool_fini)
+    flush();
+
+    // Set process end timestamp for this detachment cycle
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    generate_output();
+
+    // Reset all temp file buffers after generating output for clean reattachment
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_kernel_dispatch_ext_record_t>(
+        domain_type::KERNEL_DISPATCH);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_hsa_api_record_t>(domain_type::HSA);
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_hip_api_ext_record_t>(domain_type::HIP);
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_copy_ext_record_t>(
+        domain_type::MEMORY_COPY);
+    tool::reset_tmp_file_buffer<tool::tool_buffer_tracing_memory_allocation_ext_record_t>(
+        domain_type::MEMORY_ALLOCATION);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_marker_api_record_t>(
+        domain_type::MARKER);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rccl_api_record_t>(domain_type::RCCL);
+    tool::reset_tmp_file_buffer<tool::tool_counter_record_t>(domain_type::COUNTER_COLLECTION);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_scratch_memory_record_t>(
+        domain_type::SCRATCH_MEMORY);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocdecode_api_record_t>(
+        domain_type::ROCDECODE);
+    tool::reset_tmp_file_buffer<rocprofiler_buffer_tracing_rocjpeg_api_record_t>(
+        domain_type::ROCJPEG);
+    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_host_trap_record_t>(
+        domain_type::PC_SAMPLING_HOST_TRAP);
+    tool::reset_tmp_file_buffer<tool::rocprofiler_tool_pc_sampling_stochastic_record_t>(
+        domain_type::PC_SAMPLING_STOCHASTIC);
+}
+
+void
+tool_fini(void* /*tool_data*/)
+{
+    static bool _first = true;
+    if(!_first) return;
+    _first = false;
+
+    client_identifier = nullptr;
+    client_finalizer  = nullptr;
+
+    auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
+
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    flush();
+    rocprofiler_stop_context(get_client_ctx());
+    flush();
+
+    generate_output();
 
     if(destructors)
     {
