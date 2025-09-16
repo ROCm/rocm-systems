@@ -102,12 +102,8 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
   HIP_CHECK(hipEventDestroy(start_event2));
   HIP_CHECK(hipEventDestroy(end_event2));
 
-#if HT_WIN == 1
-  float ratio = 1.0f;
-#else
-  float ratio = kernel == kernel_wc64 ? 0.01 : 0.5;
-#endif
 
+  float ratio = kernel == kernel_wc64 ? 0.01 : 0.5;
   return verify_time_execution(ratio, time1, time2, expected_time1, expected_time2);
 }
 
