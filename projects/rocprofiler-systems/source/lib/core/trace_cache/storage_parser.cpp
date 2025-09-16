@@ -34,8 +34,8 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-storage_parser::storage_parser(pid_t _pid)
-: m_pid(_pid)
+storage_parser::storage_parser(std::string _filename)
+: m_filename(std::move(_filename))
 {}
 
 void
@@ -49,19 +49,14 @@ storage_parser::register_type_callback(
 void
 storage_parser::consume_storage()
 {
-    ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s", filename.c_str());
-    if(m_pid != getpid())
-    {
-        ROCPROFSYS_DEBUG(
-            "Storage parser is not created in same process as shutting down..");
-        return;
-    }
+    ROCPROFSYS_VERBOSE(0, "Consuming buffered storage with filename: %s\n",
+                       m_filename.c_str());
 
-    std::ifstream ifs(filename, std::ios::binary);
+    std::ifstream ifs(m_filename, std::ios::binary);
     if(!ifs)
     {
         std::stringstream ss;
-        ss << "Error opening file for reading: " << filename << "\n";
+        ss << "Error opening file for reading: " << m_filename << "\n";
         throw std::runtime_error(ss.str());
     }
 
@@ -90,10 +85,10 @@ storage_parser::consume_storage()
 
         if(ifs.bad())
         {
-            ROCPROFSYS_WARNING(
-                1,
-                "Bad read while consuming buffered storage. Filename: %s. Bytes read: %d",
-                filename.c_str(), static_cast<int>(ifs.tellg()));
+            ROCPROFSYS_WARNING(1,
+                               "Bad read while consuming buffered storage. Filename: %s. "
+                               "Bytes read: %d\n",
+                               m_filename.c_str(), static_cast<int>(ifs.tellg()));
             continue;
         }
 
@@ -225,14 +220,28 @@ storage_parser::consume_storage()
                 invoke_callbacks(header.type, _cpu_freq_sample);
                 break;
             }
+            case entry_type::backtrace_region_sample:
+            {
+                backtrace_region_sample _backtrace_region_sample;
+                parse_data(
+                    sample.data(), _backtrace_region_sample.type,
+                    _backtrace_region_sample.thread_id,
+                    _backtrace_region_sample.track_name, _backtrace_region_sample.name,
+                    _backtrace_region_sample.start_timestamp,
+                    _backtrace_region_sample.end_timestamp,
+                    _backtrace_region_sample.category,
+                    _backtrace_region_sample.call_stack,
+                    _backtrace_region_sample.line_info, _backtrace_region_sample.extdata);
+                invoke_callbacks(header.type, _backtrace_region_sample);
+            }
             default: break;
         }
     }
 
     ifs.close();
-    ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system",
-                     filename.c_str());
-    std::remove(filename.c_str());
+    ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system\n",
+                     m_filename.c_str());
+    std::remove(m_filename.c_str());
 }
 
 void
@@ -241,7 +250,7 @@ storage_parser::invoke_callbacks(entry_type type, const storage_parsed_type_base
     auto _callback_list = m_callbacks.find(type);
     if(_callback_list == m_callbacks.end())
     {
-        ROCPROFSYS_VERBOSE(1, "Callback not found for cache postprocessing");
+        ROCPROFSYS_VERBOSE(1, "Callback not found for cache postprocessing\n");
         return;
     }
 

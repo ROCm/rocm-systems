@@ -759,6 +759,25 @@ rocprofsys_finalize_hidden(void)
     }
     else if(_is_child)
     {
+        // TODO: Child and parent process finalize methods start to look a like,
+        // brainstorm new approach
+        sampling::block_samples();
+        tim::signals::block_signals(get_sampling_signals(),
+                                    tim::signals::sigmask_scope::process);
+        set_state(State::Finalized);
+
+        push_enable_sampling_on_child_threads(false);
+        set_sampling_on_all_future_threads(false);
+
+        if(get_use_sampling())
+        {
+            ROCPROFSYS_VERBOSE_F(1, "Shutting down sampling for child process...\n");
+            sampling::shutdown();
+            ROCPROFSYS_VERBOSE_F(
+                1, "Post-processing the sampling backtraces for child process...\n");
+            sampling::post_process();
+        }
+
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
         if(get_use_rocm())
@@ -767,17 +786,13 @@ rocprofsys_finalize_hidden(void)
             rocprofiler_sdk::shutdown();
         }
 #endif
-        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
-        _manager.shutdown();
-        _manager.post_process();
+        auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        const auto _agents  = get_agent_manager_instance().get_agents();
+        const auto _filepath =
+            std::string{ "/tmp/metadata_" + std::to_string(get_root_process_id()) + "_" +
+                         std::to_string(getpid()) + ".json" };
+        _manager.get_metadata_registry().save_to_file(_filepath, _agents);
 
-#if ROCPROFSYS_USE_ROCM > 0
-        if(get_use_rocpd())
-        {
-            rocpd::data_processor::get_instance().flush();
-        }
-#endif
-        set_state(State::Finalized);
         std::quick_exit(EXIT_SUCCESS);
         return;
     }
@@ -870,12 +885,6 @@ rocprofsys_finalize_hidden(void)
         rocprofiler_sdk::shutdown();
     }
 #endif
-
-    {
-        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
-        _manager.shutdown();
-        _manager.post_process();
-    }
 
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
@@ -1013,6 +1022,12 @@ rocprofsys_finalize_hidden(void)
                                            _perfetto_output_error);
     }
 
+    {
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process_bulk();
+    }
+
     if(_timemory_manager && _timemory_manager != nullptr)
     {
         _timemory_manager->add_metadata([](auto& ar) {
@@ -1067,12 +1082,6 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
-#if ROCPROFSYS_USE_ROCM > 0
-    if(get_use_rocpd())
-    {
-        rocpd::data_processor::get_instance().flush();
-    }
-#endif
 }
 
 //======================================================================================//

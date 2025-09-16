@@ -22,8 +22,10 @@
 
 #pragma once
 
+#include "core/rocpd/data_storage/database.hpp"
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -102,7 +104,12 @@ private:
     };
 
 public:
-    static data_processor& get_instance();
+    explicit data_processor(std::shared_ptr<data_storage::database> db);
+
+    data_processor() = delete;
+
+    data_processor(const data_processor&)            = delete;
+    data_processor& operator=(const data_processor&) = delete;
 
     size_t insert_string(const char* str);
 
@@ -203,10 +210,6 @@ public:
     void flush();
 
 private:
-    data_processor();
-    data_processor(data_processor&)                  = delete;
-    data_processor& operator=(const data_processor&) = delete;
-
     void initialize_pmc_event_stmt();
     void initialize_event_stmt();
     void initialize_sample_stmt();
@@ -220,6 +223,7 @@ private:
     void initialize_memory_alloc_stmt();
 
 private:
+    std::shared_ptr<data_storage::database>         _database;
     std::unordered_map<std::string, track_name_map> _tracks;
     std::unordered_map<pmc_identifier, size_t, pmc_identifier_hash, pmc_identifier_equal>
                                             _pmc_descriptor_map;
