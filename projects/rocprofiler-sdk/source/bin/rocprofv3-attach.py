@@ -24,6 +24,7 @@
 
 import ctypes
 import os
+import signal
 import sys
 import time
 
@@ -51,6 +52,14 @@ def main(
     c_lib.attach(int(pid))
 
     print(f"Attaching to PID {pid} using library {attach_library} :: success")
+
+    def signal_handler(sig, frame):
+        print("\nCaught signal SIGINT, detaching")
+        c_lib.detach()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
     if duration is None:
         sys.stdout.write("Press Enter to detach...")
         sys.stdout.flush()  # Force the prompt to appear immediately
