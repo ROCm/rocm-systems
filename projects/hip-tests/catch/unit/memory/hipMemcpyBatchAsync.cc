@@ -34,7 +34,7 @@
  * - Test case to verify the 1D batch memory copy.
  * 1. Create Array of device pointers(Src, Dst).
  * 2. Set the MemcpyBatch params. As of now no support for memcpy Attributes.
- * 3. Perform batch memcpy operation.
+ * 3. Perform batch memcpy operation from deviceptr to deviceptr.
  * 4. Validate data on host.
  * Test source
  * ------------------------
@@ -44,7 +44,7 @@
  *  - HIP_VERSION >= 7.1
  */
 #if HT_AMD
-TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
+TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_BasicFunctional") {
   const size_t count = 2;
   size_t numAttrs = 0;
   const size_t size = 4096 * sizeof(char);
