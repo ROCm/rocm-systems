@@ -506,7 +506,7 @@ int GetKernelSourceParam(const char* paramName) {
   std::string::size_type paramValLoc = paramDefLoc + paramDef.str().size();
   std::string::size_type paramEndLoc =
       kBlitKernelSource().find('\n', paramDefLoc);
-  assert(paramDefLoc != std::string::npos);
+  assert(paramEndLoc != std::string::npos);
 
   std::string paramVal(&kBlitKernelSource()[paramValLoc],
                        &kBlitKernelSource()[paramEndLoc]);
