@@ -254,6 +254,9 @@ ROCP_REG_DEFINE_ERROR_MESSAGE(
 ROCP_REG_DEFINE_ERROR_MESSAGE(
     ROCP_REG_INVALID_ARGUMENT,
     "rocprofiler-register API function was provided an invalid argument")
+ROCP_REG_DEFINE_ERROR_MESSAGE(
+    ROCP_REG_ATTACHMENT_NOT_AVAILABLE,
+    "rocprofiler-register attach was invoked, but the attachment library was never loaded.")
 
 auto
 get_this_library_path()
@@ -634,6 +637,22 @@ load_environment_buffer(const char* environment_buffer)
         setenv(name, value, 1);
     }
 }
+
+bool
+is_attachment_library_registered()
+{
+    bool _attachment_library_registered = false;
+    for (const auto& itr : registered)
+    {
+        if (std::string_view{itr->common_name} == 
+            supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
+        {
+            _attachment_library_registered = true;
+            break;
+        }
+    }
+    return _attachment_library_registered;
+}
 }  // namespace
 
 extern "C" {
@@ -888,6 +907,16 @@ rocprofiler_register_attach(const char* environment_buffer,
 rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path)
 {
+    // If the attachment library has not been loaded when attach is called, tracing
+    // that relies on proxy queues will fail (e.g. kernel tracing).
+    // Log error and abort.
+    if (!is_attachment_library_registered())
+    {
+        LOG(ERROR) << "rocprofiler-register attach was invoked, but the "
+                      "rocprofiler-attach library was never loaded.";
+        return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
+    }
+    
     static auto prev_tool_lib_path = std::string{};
 
     // tool_lib_path is declared with non-null attribute
@@ -951,6 +980,13 @@ rocprofiler_register_error_code_t
 rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
+
+    if (!is_attachment_library_registered())
+    {
+        LOG(ERROR) << "rocprofiler-register detach was invoked, but the "
+                      "rocprofiler-attach library was never loaded.";
+        return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
+    }
 
     if(existing_scanned_data.detach_fn)
     {

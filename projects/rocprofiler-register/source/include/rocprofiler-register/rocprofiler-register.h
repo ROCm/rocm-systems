@@ -76,6 +76,7 @@ typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
     ROCP_REG_ROCPROFILER_ERROR,
     ROCP_REG_EXCESS_API_INSTANCES,
     ROCP_REG_INVALID_ARGUMENT,
+    ROCP_REG_ATTACHMENT_NOT_AVAILABLE,
     ROCP_REG_ERROR_CODE_END,
 } rocprofiler_register_error_code_t;
 
