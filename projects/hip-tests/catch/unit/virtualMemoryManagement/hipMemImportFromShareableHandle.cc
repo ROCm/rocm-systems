@@ -84,6 +84,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
             reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
             hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(imported_handle));
   CTX_DESTROY();
 }
 
