@@ -22,8 +22,8 @@
 # THE SOFTWARE.
 
 ##############################################################################
-from typing import Any, Optional
 from pathlib import Path
+from typing import Any, Optional
 
 from textual import on
 from textual.app import ComposeResult
