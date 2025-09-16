@@ -245,6 +245,7 @@ queue_registration_init(HsaApiTable* table)
         *table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn;
     registration->hsa_amd_queue_intercept_register_fn =
         *table->amd_ext_->hsa_amd_queue_intercept_register_fn;
+    registration->hsa_status_string_fn = *table->core_->hsa_status_string_fn;
 }
 
 }  // namespace attach

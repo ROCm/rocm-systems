@@ -28,8 +28,8 @@
 
 #include "lib/common/logging.hpp"
 
-#include <rocprofiler-sdk/version.h>
 #include <rocprofiler-register/rocprofiler-register.h>
+#include <rocprofiler-sdk/version.h>
 
 #define ROCPROFILER_ATTACH_VERSION_MAJOR ROCPROFILER_VERSION_MAJOR
 #define ROCPROFILER_ATTACH_VERSION_MINOR ROCPROFILER_VERSION_MINOR
@@ -82,7 +82,7 @@ rocprofiler_attach_set_api_table(const char*                                   n
 
     if(register_functor)
     {
-        auto library_id = rocprofiler_register_library_indentifier_t{};
+        auto library_id    = rocprofiler_register_library_indentifier_t{};
         auto attach_tables = std::array<void*, 1>{rocprofiler::attach::get_dispatch_table()};
         register_functor("rocattach",
                          nullptr,
