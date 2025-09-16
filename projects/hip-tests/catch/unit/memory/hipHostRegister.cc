@@ -174,8 +174,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
  *    - HIP_VERSION >= 5.6
  */
 TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, float, double) {
-  auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
-                        hipHostRegisterIoMemory);
+  auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -925,10 +924,10 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
   memory to be tested */
   FlagType flags = GENERATE(
       FlagType{hipHostRegisterDefault, true}, FlagType{hipHostRegisterPortable, true},
-      FlagType{hipHostRegisterIoMemory, true},
       FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
+      FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif

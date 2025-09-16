@@ -1303,7 +1303,6 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
       memFlags |= ROCCLR_MEM_IO_MEMORY;
     }
 
-
     amd::Memory* mem =
         new (*hip::host_context) amd::Buffer(*hip::host_context, memFlags, sizeBytes);
 
