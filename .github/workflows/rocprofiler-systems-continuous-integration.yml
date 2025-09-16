@@ -136,4 +136,5 @@ jobs:
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DGPU_TARGETS=${{ matrix.system.arch }}
