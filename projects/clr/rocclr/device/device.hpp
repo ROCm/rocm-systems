@@ -1648,7 +1648,8 @@ class Device : public RuntimeObject {
     kNoAtomics = 0,
     kAtomics = 1,
     kKernArg = 2,
-    kUncachedAtomics = 4
+    kUncachedAtomics = 4,
+    kIoMemory = 8
   } MemorySegment;
 
   typedef enum CacheState {

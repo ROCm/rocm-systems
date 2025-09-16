@@ -1291,12 +1291,18 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
     return hipErrorInvalidValue;
   } else {
     unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
-    if (flags & (hipExtHostRegisterUncached | hipHostRegisterIoMemory)) {
+    if (flags & hipExtHostRegisterUncached) {
       if (IS_WINDOWS) {
         return hipErrorInvalidValue;
       }
       memFlags |= ROCCLR_MEM_HSA_UNCACHED;
+    } else if (flags & hipHostRegisterIoMemory) {
+      if (IS_WINDOWS) {
+        return hipErrorInvalidValue;
+      }
+      memFlags |= ROCCLR_MEM_IO_MEMORY;
     }
+
 
     amd::Memory* mem =
         new (*hip::host_context) amd::Buffer(*hip::host_context, memFlags, sizeBytes);
