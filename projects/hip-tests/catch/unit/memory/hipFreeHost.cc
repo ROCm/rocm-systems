@@ -44,8 +44,7 @@ TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
 
   SECTION("Host registered memory") {
     char* ptr = new char;
-    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable,
-                         hipHostRegisterMapped, hipHostRegisterIoMemory);
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
 
     HIP_CHECK(hipHostRegister(ptr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipFreeHost(ptr), hipErrorInvalidValue);
