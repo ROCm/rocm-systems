@@ -46,7 +46,7 @@ Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
 
 // Mock classes to simulate Pm4Factory and related functionality
 class MockPm4Factory : public Pm4Factory {
-public:
+ public:
   MockPm4Factory() : Pm4Factory(BlockInfoMap(nullptr, 0)) {}
   MOCK_METHOD(const GpuBlockInfo*, GetBlockInfo, (const hsa_ven_amd_aqlprofile_event_t*), (const));
   MOCK_METHOD(bool, IsGFX9, (), (const));
@@ -105,7 +105,7 @@ hsa_status_t DefaultTracedataCallback(hsa_ven_amd_aqlprofile_info_type_t info_ty
 
 // Test fixture for CountersVec tests
 class CountersVecTest : public Test {
-protected:
+ protected:
   void SetUp() override {
     pm4_factory = new NiceMock<MockPm4Factory>();
     ON_CALL(*pm4_factory, IsGFX9()).WillByDefault(Return(true));
@@ -119,7 +119,7 @@ protected:
 };
 
 pm4_builder::counters_vector CountersVecTest::CountersVec(const profile_t* profile,
-                                                       const Pm4Factory* pm4_factory) {
+                                                          const Pm4Factory* pm4_factory) {
   pm4_builder::counters_vector vec;
   std::map<block_des_t, uint32_t, lt_block_des> index_map;
   for (const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
@@ -178,7 +178,7 @@ TEST_F(CountersVecTest, RegularEvents) {
 
 // Test fixture for the DefaultTracedataCallback function
 class DefaultTracedataCallbackTest : public Test {
-protected:
+ protected:
   hsa_ven_amd_aqlprofile_info_data_t CreateInfoData(uint32_t sample_id) {
     hsa_ven_amd_aqlprofile_info_data_t data{};
     data.sample_id = sample_id;
@@ -247,27 +247,18 @@ TEST_F(DefaultTracedataCallbackTest, NonTraceInfoType) {
 }
 
 TEST(aqlprofile, version) {
-  auto correct_version = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>(
-      AQLPROFILE_VERSION_MAJOR, AQLPROFILE_VERSION_MINOR, AQLPROFILE_VERSION_PATCH,
-      AQLPROFILE_VERSION_NPI);
-  auto query_version = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>(0, 0, 0, 0);
-  auto query_version_copy = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>(0, 0, 0, 0);
+  auto correct_version = aqlprofile_version_t{.major = AQLPROFILE_VERSION_MAJOR,
+                                              .minor = AQLPROFILE_VERSION_MINOR,
+                                              .patch = AQLPROFILE_VERSION_PATCH};
 
-  auto ret0 = aqlprofile_get_version(&std::get<0>(query_version), nullptr, nullptr, nullptr);
-  auto ret1 = aqlprofile_get_version(nullptr, &std::get<1>(query_version), nullptr, nullptr);
-  auto ret2 = aqlprofile_get_version(nullptr, nullptr, &std::get<2>(query_version), nullptr);
-  auto ret3 = aqlprofile_get_version(nullptr, nullptr, nullptr, &std::get<3>(query_version));
+  auto query_version = aqlprofile_version_t{};
 
-  EXPECT_EQ(ret0, HSA_STATUS_SUCCESS);
-  EXPECT_EQ(ret1, HSA_STATUS_SUCCESS);
-  EXPECT_EQ(ret2, HSA_STATUS_SUCCESS);
-  EXPECT_EQ(ret3, HSA_STATUS_SUCCESS);
-  EXPECT_EQ(query_version, correct_version);
+  auto ret = aqlprofile_get_version(&query_version);
 
-  auto reta =
-      aqlprofile_get_version(&std::get<0>(query_version_copy), &std::get<1>(query_version_copy),
-                             &std::get<2>(query_version_copy), &std::get<3>(query_version_copy));
-  EXPECT_EQ(reta, HSA_STATUS_SUCCESS);
-  EXPECT_EQ(query_version_copy, correct_version);
-  EXPECT_EQ(query_version_copy, query_version);
+  EXPECT_EQ(ret, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(query_version.major, correct_version.major);
+  EXPECT_EQ(query_version.minor, correct_version.minor);
+  EXPECT_EQ(query_version.patch, correct_version.patch);
+
+  EXPECT_EQ(aqlprofile_get_version(nullptr), HSA_STATUS_ERROR_INVALID_ARGUMENT);
 }

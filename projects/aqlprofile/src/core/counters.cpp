@@ -256,13 +256,15 @@ hsa_status_t _internal_aqlprofile_pmc_create_packets(
 
 extern "C" {
 
-PUBLIC_API hsa_status_t aqlprofile_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch,
-                                               uint32_t* npi) {
-  if (major) *major = AQLPROFILE_VERSION_MAJOR;
-  if (minor) *minor = AQLPROFILE_VERSION_MINOR;
-  if (patch) *patch = AQLPROFILE_VERSION_PATCH;
-  if (npi) *npi = 0;
-  return HSA_STATUS_SUCCESS;
+PUBLIC_API hsa_status_t aqlprofile_get_version(aqlprofile_version_t* info) {
+  if (info != nullptr) {
+    *info = {.major = AQLPROFILE_VERSION_MAJOR,
+             .minor = AQLPROFILE_VERSION_MINOR,
+             .patch = AQLPROFILE_VERSION_PATCH};
+    return HSA_STATUS_SUCCESS;
+  } else {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 }
 
 PUBLIC_API hsa_status_t aqlprofile_pmc_create_packets(
