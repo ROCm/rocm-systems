@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -66,6 +68,8 @@ public:
     bool cont() const;
     bool handle_signals() const;
     void detach_ptrace_session();
+
+    std::atomic<rocprofiler_status_t> m_setup_status = ROCPROFILER_STATUS_SUCCESS;
 
 private:
     static bool find_library(void*& addr, int inpid, const std::string& library);

@@ -37,7 +37,6 @@
 #include <type_traits>
 
 #define AT_ENTRY 9 /* Entry point of program */
-#define PATH_MAX 255
 
 // ptrace memory operations use "word length" which is dependent on system architecture.
 static_assert(sizeof(void*) == 8);

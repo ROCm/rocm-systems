@@ -43,10 +43,10 @@ std::atomic<bool>                                   finished_setup(false);
 }  // namespace
 
 ROCPROFILER_EXTERN_C_INIT
-void
+int
 attach(uint32_t pid) ROCPROFILER_EXPORT;
 
-void
+int
 detach() ROCPROFILER_EXPORT;
 ROCPROFILER_EXTERN_C_FINI
 
@@ -154,6 +154,8 @@ handle_ptrace_operations(uint32_t pid)
     if(!ptrace_session->attach())
     {
         ROCP_ERROR << "Attachment failed to pid " << pid;
+        ptrace_session->m_setup_status.store(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+        finished_setup.store(true);
         return;
     }
     ROCP_TRACE << "Attachment success to pid " << pid;
@@ -163,6 +165,8 @@ handle_ptrace_operations(uint32_t pid)
     void* environment_buffer_addr = nullptr;
     if(!write_data_to_target("environment buffer", environment_buffer, environment_buffer_addr))
     {
+        ptrace_session->m_setup_status.store(ROCPROFILER_STATUS_ERROR);
+        finished_setup.store(true);
         return;
     }
 
@@ -178,6 +182,8 @@ handle_ptrace_operations(uint32_t pid)
     void* tool_lib_path_addr = nullptr;
     if(!write_data_to_target("tool library path", tool_lib_buffer, tool_lib_path_addr))
     {
+        ptrace_session->m_setup_status.store(ROCPROFILER_STATUS_ERROR);
+        finished_setup.store(true);
         return;
     }
 
@@ -188,6 +194,8 @@ handle_ptrace_operations(uint32_t pid)
                                       tool_lib_path_addr))
     {
         ROCP_ERROR << "Failed to call attach function in target process " << pid;
+        ptrace_session->m_setup_status.store(ROCPROFILER_STATUS_ERROR);
+        finished_setup.store(true);
         return;
     }
 
@@ -204,7 +212,7 @@ handle_ptrace_operations(uint32_t pid)
     if(!ptrace_session->handle_signals())
     {
         ROCP_ERROR << "Signal handling loop terminated unexepectedly for pid " << pid;
-        return;
+        // don't return, try to detach anyways
     }
     // Detach rocprofiler
     ROCP_TRACE << "Detaching rocprofiler from pid " << pid;
@@ -218,7 +226,7 @@ handle_ptrace_operations(uint32_t pid)
     ptrace_session.reset();
 }
 
-void
+int
 attach(uint32_t pid)
 {
     initialize_logging();
@@ -226,14 +234,25 @@ attach(uint32_t pid)
     // Wait for ptrace thread to finish setting up
     while(!finished_setup.load())
         std::this_thread::yield();
+
+    auto status = ptrace_session->m_setup_status.load();
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << "ptrace session failed with error code " << ptrace_session->m_setup_status;
+        ptrace_thread.join();
+        finished_setup.store(false);
+        return status;
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
-void
+int
 detach()
 {
     ptrace_session->detach_ptrace_session();
     ptrace_thread.join();
     finished_setup.store(false);
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 ROCPROFILER_EXTERN_C_FINI
