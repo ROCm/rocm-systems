@@ -53,6 +53,7 @@ struct queue_registration_t
         hsa_amd_profiling_set_profiler_enabled_fn = nullptr;
     decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn) hsa_amd_queue_intercept_register_fn =
         nullptr;
+    decltype(CoreApiTable::hsa_status_string_fn) hsa_status_string_fn = nullptr;
 };
 
 queue_registration_t*
@@ -62,6 +63,28 @@ get_queue_registration()
         rocprofiler::common::static_object<queue_registration_t>::construct();
     return registration;
 }
+
+std::string_view
+get_hsa_status_string(hsa_status_t _status)
+{
+    auto registration = CHECK_NOTNULL(get_queue_registration());
+
+    const char* _status_msg = nullptr;
+    return (CHECK_NOTNULL(registration->hsa_status_string_fn)(_status, &_status_msg) ==
+                HSA_STATUS_SUCCESS &&
+            _status_msg)
+               ? std::string_view{_status_msg}
+               : std::string_view{"(unknown HSA error)"};
+}
+
+#define ROCP_ATTACH_HSA_TABLE_CALL(SEVERITY, EXPR)                                                 \
+    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
+    ROCP_##SEVERITY##_IF(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) !=                   \
+                         HSA_STATUS_SUCCESS)                                                       \
+        << #EXPR << " returned non-zero status code "                                              \
+        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__)                                    \
+        << " :: " << get_hsa_status_string(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))   \
+        << " "
 
 // This is the attach library's WriteInterceptor that is provided to HSA.
 // Since the interceptor function cannot be changed later, this shim is provided immediately upon
@@ -103,23 +126,25 @@ create_queue(hsa_agent_t        agent,
 
     // Create new queue in HSA
     hsa_queue_t* new_queue = nullptr;
-    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn)
+    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn ||
+                  !registration->hsa_amd_profiling_set_profiler_enabled_fn ||
+                  !registration->hsa_amd_queue_intercept_register_fn ||
+                  !registration->hsa_status_string_fn)
         << "Queue registration was not initialized before create queue was called!";
-    ROCP_HSA_TABLE_CALL(FATAL,
-                        registration->hsa_amd_queue_intercept_create_fn(agent,
-                                                                        size,
-                                                                        type,
-                                                                        callback,
-                                                                        data,
-                                                                        private_segment_size,
-                                                                        group_segment_size,
-                                                                        &new_queue))
+
+    ROCP_ATTACH_HSA_TABLE_CALL(FATAL,
+                               registration->hsa_amd_queue_intercept_create_fn(agent,
+                                                                               size,
+                                                                               type,
+                                                                               callback,
+                                                                               data,
+                                                                               private_segment_size,
+                                                                               group_segment_size,
+                                                                               &new_queue))
         << "Could not create intercept queue";
 
-    ROCP_FATAL_IF(!registration->hsa_amd_profiling_set_profiler_enabled_fn)
-        << "Queue registration was not initialized before create queue was called!";
-    ROCP_HSA_TABLE_CALL(FATAL,
-                        registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
+    ROCP_ATTACH_HSA_TABLE_CALL(
+        FATAL, registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
         << "Could not setup intercept profiler";
 
     // Create and insert our queue's data entry now, as we need to provide a reference to it for the
@@ -136,11 +161,9 @@ create_queue(hsa_agent_t        agent,
     auto* write_interceptor_data = &(registration->queues.at(new_queue));
 
     // Pass queue_entry_t* as user data, used to directly call the user's write interceptor
-    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_register_fn)
-        << "Queue registration was not initialized before create queue was called!";
-    ROCP_HSA_TABLE_CALL(FATAL,
-                        registration->hsa_amd_queue_intercept_register_fn(
-                            new_queue, write_interceptor, write_interceptor_data))
+    ROCP_ATTACH_HSA_TABLE_CALL(FATAL,
+                               registration->hsa_amd_queue_intercept_register_fn(
+                                   new_queue, write_interceptor, write_interceptor_data))
         << "Could not register interceptor";
 
     *queue = new_queue;
