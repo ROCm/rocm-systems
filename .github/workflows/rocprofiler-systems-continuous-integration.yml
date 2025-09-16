@@ -35,6 +35,7 @@ env:
   ROCM_VERSION: "7.0.0"
   PYTHON_VENV_NAME: "rocprofiler-systems"
   PYTHON_VENV_ACTIVATE: "rocprofiler-systems/bin/activate"
+  BUILD_DYNIST: "ON"
 
   # TODO: Remove once Docker gfx images have these
   HIP_PLATFORM: "amd"
@@ -143,4 +144,9 @@ jobs:
             -- \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DROCPROFSYS_BUILD_DYNINST=${{ env.BUILD_DYNIST }} \
+            -DROCPROFSYS_BUILD_BOOST=${{ env.BUILD_DYNIST }} \
+            -DROCPROFSYS_BUILD_TBB=${{ env.BUILD_DYNIST }} \
+            -DROCPROFSYS_BUILD_ELFUTILS=${{ env.BUILD_DYNIST }} \
+            -DROCPROFSYS_BUILD_LIBIBERTY=${{ env.BUILD_DYNIST }} \
