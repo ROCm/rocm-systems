@@ -298,7 +298,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
 /**
  * Test Description
  * ------------------------
- *    - Checks that vectors can be used with structured bindigns
+ *    - Checks that vectors can be used with structured bindings
  *    - Tests from the host side
  * Test source
  * ------------------------
@@ -328,7 +328,7 @@ __global__ void generate_my_kernel() { static_assert(func()); }
 /**
  * Test Description
  * ------------------------
- *    - Checks that vectors can be used with structured bindigns
+ *    - Checks that vectors can work with constexpr
  *    - Tests from the host and device side
  * Test source
  * ------------------------
@@ -340,6 +340,191 @@ __global__ void generate_my_kernel() { static_assert(func()); }
 TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
+}
+
+struct padded_struct {
+    int2 data1;
+    float3 data2;
+};
+
+__host__ __device__ void check_alignment() {
+  // char/uchar
+  static_assert(std::alignment_of_v<char1> == 1);
+  static_assert(std::alignment_of_v<char2> == 2);
+  static_assert(std::alignment_of_v<char3> == 1);
+  static_assert(std::alignment_of_v<char4> == 4);
+  static_assert(std::alignment_of_v<uchar1> == 1);
+  static_assert(std::alignment_of_v<uchar2> == 2);
+  static_assert(std::alignment_of_v<uchar3> == 1);
+  static_assert(std::alignment_of_v<uchar4> == 4);
+
+  // short/ushort
+  static_assert(std::alignment_of_v<short1> == 2);
+  static_assert(std::alignment_of_v<short2> == 4);
+  static_assert(std::alignment_of_v<short3> == 2);
+  static_assert(std::alignment_of_v<short4> == 8);
+  static_assert(std::alignment_of_v<ushort1> == 2);
+  static_assert(std::alignment_of_v<ushort2> == 4);
+  static_assert(std::alignment_of_v<ushort3> == 2);
+  static_assert(std::alignment_of_v<ushort4> == 8);
+
+  // int/uint
+  static_assert(std::alignment_of_v<int1> == 4);
+  static_assert(std::alignment_of_v<int2> == 8);
+  static_assert(std::alignment_of_v<int3> == 4);
+  static_assert(std::alignment_of_v<int4> == 16);
+  static_assert(std::alignment_of_v<uint1> == 4);
+  static_assert(std::alignment_of_v<uint2> == 8);
+  static_assert(std::alignment_of_v<uint3> == 4);
+  static_assert(std::alignment_of_v<uint4> == 16);
+
+  // long/ulong
+  constexpr size_t long_size = sizeof(long);  // needed to handle MSVC long defintion
+  static_assert(std::alignment_of_v<long1> == long_size);
+  static_assert(std::alignment_of_v<long2> == 2 * long_size);
+  static_assert(std::alignment_of_v<long3> == long_size);
+  static_assert(std::alignment_of_v<long4> == 4 * long_size);
+  static_assert(std::alignment_of_v<ulong1> == long_size);
+  static_assert(std::alignment_of_v<ulong2> == 2 * long_size);
+  static_assert(std::alignment_of_v<ulong3> == long_size);
+  static_assert(std::alignment_of_v<ulong4> == 4 * long_size);
+
+  // longlong/ulonglong
+  static_assert(std::alignment_of_v<longlong1> == 8);
+  static_assert(std::alignment_of_v<longlong2> == 16);
+  static_assert(std::alignment_of_v<longlong3> == 8);
+  static_assert(std::alignment_of_v<longlong4> == 32);
+  static_assert(std::alignment_of_v<ulonglong1> == 8);
+  static_assert(std::alignment_of_v<ulonglong2> == 16);
+  static_assert(std::alignment_of_v<ulonglong3> == 8);
+  static_assert(std::alignment_of_v<ulonglong4> == 32);
+
+  // float
+  static_assert(std::alignment_of_v<float1> == 4);
+  static_assert(std::alignment_of_v<float2> == 8);
+  static_assert(std::alignment_of_v<float3> == 4);
+  static_assert(std::alignment_of_v<float4> == 16);
+
+  // double
+  static_assert(std::alignment_of_v<double1> == 8);
+  static_assert(std::alignment_of_v<double2> == 16);
+  static_assert(std::alignment_of_v<double3> == 8);
+  static_assert(std::alignment_of_v<double4> == 32);
+
+  // padded struct
+  static_assert(std::alignment_of_v<padded_struct> == 8);
+}
+
+__global__ void check_alignment_device() { check_alignment(); }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Compile-time test checking vector type alignement
+ *    - Tests from the host and device side
+ * Test source
+ * ------------------------
+ *    - unit/vector_types/vector_types.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_Vector_alignment_check", "") {
+  check_alignment_device<<<1, 1>>>();
+  check_alignment();
+}
+
+__host__ __device__ void check_size() {
+  // char/uchar
+  constexpr size_t char_size = sizeof(char);
+  static_assert(sizeof(char1) == 1 * char_size);
+  static_assert(sizeof(char2) == 2 * char_size);
+  static_assert(sizeof(char3) == 3 * char_size);
+  static_assert(sizeof(char4) == 4 * char_size);
+  static_assert(sizeof(uchar1) == 1 * char_size);
+  static_assert(sizeof(uchar2) == 2 * char_size);
+  static_assert(sizeof(uchar3) == 3 * char_size);
+  static_assert(sizeof(uchar4) == 4 * char_size);
+
+  // short/ushort
+  constexpr size_t short_size = sizeof(short);
+  static_assert(sizeof(short1) == 1 * short_size);
+  static_assert(sizeof(short2) == 2 * short_size);
+  static_assert(sizeof(short3) == 3 * short_size);
+  static_assert(sizeof(short4) == 4 * short_size);
+  static_assert(sizeof(ushort1) == 1 * short_size);
+  static_assert(sizeof(ushort2) == 2 * short_size);
+  static_assert(sizeof(ushort3) == 3 * short_size);
+  static_assert(sizeof(ushort4) == 4 * short_size);
+
+  // int/uint
+  constexpr size_t int_size = sizeof(int);
+  static_assert(sizeof(int1) == 1 * int_size);
+  static_assert(sizeof(int2) == 2 * int_size);
+  static_assert(sizeof(int3) == 3 * int_size);
+  static_assert(sizeof(int4) == 4 * int_size);
+  static_assert(sizeof(uint1) == 1 * int_size);
+  static_assert(sizeof(uint2) == 2 * int_size);
+  static_assert(sizeof(uint3) == 3 * int_size);
+  static_assert(sizeof(uint4) == 4 * int_size);
+
+  // long/ulong
+  constexpr size_t long_size = sizeof(long);
+  static_assert(sizeof(long1) == 1 * long_size);
+  static_assert(sizeof(long2) == 2 * long_size);
+  static_assert(sizeof(long3) == 3 * long_size);
+  static_assert(sizeof(long4) == 4 * long_size);
+  static_assert(sizeof(ulong1) == 1 * long_size);
+  static_assert(sizeof(ulong2) == 2 * long_size);
+  static_assert(sizeof(ulong3) == 3 * long_size);
+  static_assert(sizeof(ulong4) == 4 * long_size);
+
+  // longlong/ulonglong
+  constexpr size_t longlong_size = sizeof(long long);
+  static_assert(sizeof(longlong1) == 1 * longlong_size);
+  static_assert(sizeof(longlong2) == 2 * longlong_size);
+  static_assert(sizeof(longlong3) == 3 * longlong_size);
+  static_assert(sizeof(longlong4) == 4 * longlong_size);
+  static_assert(sizeof(ulonglong1) == 1 * longlong_size);
+  static_assert(sizeof(ulonglong2) == 2 * longlong_size);
+  static_assert(sizeof(ulonglong3) == 3 * longlong_size);
+  static_assert(sizeof(ulonglong4) == 4 * longlong_size);
+
+  // float
+  constexpr size_t float_size = sizeof(float);
+  static_assert(sizeof(float1) == 1 * float_size);
+  static_assert(sizeof(float2) == 2 * float_size);
+  static_assert(sizeof(float3) == 3 * float_size);
+  static_assert(sizeof(float4) == 4 * float_size);
+
+  // double
+  constexpr size_t double_size = sizeof(double);
+  static_assert(sizeof(double1) == 1 * double_size);
+  static_assert(sizeof(double2) == 2 * double_size);
+  static_assert(sizeof(double3) == 3 * double_size);
+  static_assert(sizeof(double4) == 4 * double_size);
+
+  // padded struct
+  static_assert(sizeof(padded_struct) == 24);
+}
+
+__global__ void check_size_device() { check_size(); }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Compile-time test checking vector type size
+ *    - Tests from the host and device side
+ * Test source
+ * ------------------------
+ *    - unit/vector_types/vector_types.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_Vector_size_check", "") {
+  check_size_device<<<1, 1>>>();
+  check_size();
 }
 #endif  // HT_AMD
 
