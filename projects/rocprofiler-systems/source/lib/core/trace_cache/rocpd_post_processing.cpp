@@ -311,7 +311,7 @@ rocpd_post_processing::get_ompt_callback() const
         auto name_primary_key      = data_processor.insert_string(_name.c_str());
 
         auto category_primary_key = 
-            data_processor.insert_string(trait::name<category::ompt>::value);
+            data_processor.insert_string(trait::name<category::rocm_ompt_api>::value);
 
         size_t stack_id        = _ors.correlation_id_internal;
         size_t parent_stack_id = _ors.correlation_id_ancestor;
