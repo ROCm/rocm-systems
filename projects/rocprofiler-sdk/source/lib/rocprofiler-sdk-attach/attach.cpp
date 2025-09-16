@@ -25,8 +25,8 @@
 #include "queue_registration.hpp"
 #include "table.hpp"
 
-#include "rocprofiler-sdk/version.h"
 #include "lib/common/logging.hpp"
+#include "rocprofiler-sdk/version.h"
 
 void
 init_logging()
