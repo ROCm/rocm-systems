@@ -1,0 +1,35 @@
+GFX1201 SQ Block Summary
+============================
+Generated: Tue Sep 16 21:50:08 UTC 2025
+Block Type: SQ
+
+Counters Tested:
+- SQ:0:789
+- SQ:0:790
+- SQ:0:791
+- SQ:1:789
+- SQ:2:789
+
+Block Characteristics:
+- Architecture: RDNA3 (GFX12)
+- Register Base: 0x8219
+- Instance Support: Multi-instance capable
+- Event Range: Variable per counter
+
+Comparison Focus:
+- Register programming sequences
+- Instance handling
+- Event ID encoding
+- Memory buffer layout
+
+Files:
+- aql_c_gfx1201_SQ_0_789.txt
+- aqlprofile_v2_gfx1201_SQ_0_789.txt
+- aql_c_gfx1201_SQ_0_790.txt
+- aqlprofile_v2_gfx1201_SQ_0_790.txt
+- aql_c_gfx1201_SQ_0_791.txt
+- aqlprofile_v2_gfx1201_SQ_0_791.txt
+- aql_c_gfx1201_SQ_1_789.txt
+- aqlprofile_v2_gfx1201_SQ_1_789.txt
+- aql_c_gfx1201_SQ_2_789.txt
+- aqlprofile_v2_gfx1201_SQ_2_789.txt

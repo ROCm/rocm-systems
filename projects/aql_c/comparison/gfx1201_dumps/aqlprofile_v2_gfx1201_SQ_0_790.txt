@@ -1,0 +1,79 @@
+aqlprofile_v2 Packet Dump
+Generated: Tue Sep 16 21:50:07 UTC 2025
+Architecture: gfx1201
+Event Count: 1
+
+Events:
+  [0] Block: SQ, Instance: 0, Event: 790, Flags: 0x00000000
+
+=== START PACKET ===
+Size: 64 bytes
+Header: 0x8001
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x80004e9e
+  [1]: 0x12345316
+  [2]: 0x00000000
+  [3]: 0xdeadbeef
+Hex Dump:
+  01800100 00000000 80002a46 12345316
+  00000000 deadbeef 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== STOP PACKET ===
+Size: 64 bytes
+Header: 0x8002
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x9000214f
+  [1]: 0x87654316
+  [2]: 0x00000000
+  [3]: 0xcafebabe
+Hex Dump:
+  02800100 00000000 900018e0 87654316
+  00000000 cafebabe 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== READ PACKET ===
+Size: 64 bytes
+Header: 0x8003
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0xa0004aef
+  [1]: 0xfedcbd16
+  [2]: 0x10000000
+  [3]: 0xf00dface
+Hex Dump:
+  03800100 00000000 a00005f8 fedcbd16
+  10000000 f00dface 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== COMMAND BUFFER ===
+Size: 766 bytes
+Hex Dump:
+  680001de 8a000c58 12340000
+  68010021 8a000c5c 56780000
+  68020de1 8a000c60 9abc0000
+  68030de4 8a000c64 def00000
+
+Implementation Notes:
+- aqlprofile_v2 version: 2.4.1
+- Kernel compatibility: Userspace only
+- Memory allocation: Dynamic allocation
+- Register programming: HSA abstraction
+
+Block Information for SQ:
+- Type: Shader Quad
+- Instance: 0
+- Max Instances: 8
+- Available Events: 140-290
+

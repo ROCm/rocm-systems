@@ -1,0 +1,35 @@
+GFX1201 CPC Block Summary
+============================
+Generated: Tue Sep 16 21:50:08 UTC 2025
+Block Type: CPC
+
+Counters Tested:
+- CPC:0:123
+- CPC:0:124
+- CPC:0:125
+- CPC:1:123
+- CPC:1:124
+
+Block Characteristics:
+- Architecture: RDNA3 (GFX12)
+- Register Base: 0x8c45
+- Instance Support: Multi-instance capable
+- Event Range: Variable per counter
+
+Comparison Focus:
+- Register programming sequences
+- Instance handling
+- Event ID encoding
+- Memory buffer layout
+
+Files:
+- aql_c_gfx1201_CPC_0_123.txt
+- aqlprofile_v2_gfx1201_CPC_0_123.txt
+- aql_c_gfx1201_CPC_0_124.txt
+- aqlprofile_v2_gfx1201_CPC_0_124.txt
+- aql_c_gfx1201_CPC_0_125.txt
+- aqlprofile_v2_gfx1201_CPC_0_125.txt
+- aql_c_gfx1201_CPC_1_123.txt
+- aqlprofile_v2_gfx1201_CPC_1_123.txt
+- aql_c_gfx1201_CPC_1_124.txt
+- aqlprofile_v2_gfx1201_CPC_1_124.txt

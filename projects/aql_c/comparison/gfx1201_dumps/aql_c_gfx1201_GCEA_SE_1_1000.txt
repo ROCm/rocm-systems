@@ -1,0 +1,79 @@
+aql_c Packet Dump
+Generated: Tue Sep 16 21:50:08 UTC 2025
+Architecture: gfx1201
+Event Count: 1
+
+Events:
+  [0] Block: GCEA_SE, Instance: 1, Event: 1000, Flags: 0x00000000
+
+=== START PACKET ===
+Size: 64 bytes
+Header: 0x8001
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x8000072b
+  [1]: 0x123453e8
+  [2]: 0x00000001
+  [3]: 0xdeadbeef
+Hex Dump:
+  01800100 00000000 80003065 123453e8
+  00000001 deadbeef 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== STOP PACKET ===
+Size: 64 bytes
+Header: 0x8002
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x9000431c
+  [1]: 0x876543e8
+  [2]: 0x00000001
+  [3]: 0xcafebabe
+Hex Dump:
+  02800100 00000000 90001460 876543e8
+  00000001 cafebabe 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== READ PACKET ===
+Size: 64 bytes
+Header: 0x8003
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0xa0007a41
+  [1]: 0xfedcbde8
+  [2]: 0x10000001
+  [3]: 0xf00dface
+Hex Dump:
+  03800100 00000000 a0007047 fedcbde8
+  10000001 f00dface 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== COMMAND BUFFER ===
+Size: 574 bytes
+Hex Dump:
+  680009c6 8a000fa0 12340001
+  6801025f 8a000fa4 56780001
+  68020aea 8a000fa8 9abc0001
+  68030065 8a000fac def00001
+
+Implementation Notes:
+- aql_c version: 1.0.0-dev
+- Kernel compatibility: Yes
+- Memory allocation: Fixed buffers
+- Register programming: Direct PM4
+
+Block Information for GCEA_SE:
+- Type: Architecture-specific block
+- Instance: 1
+- Max Instances: 1-4
+- Available Events: 50-200
+

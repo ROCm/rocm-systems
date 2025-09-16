@@ -1,0 +1,29 @@
+GFX1201 GRBM Block Summary
+============================
+Generated: Tue Sep 16 21:50:08 UTC 2025
+Block Type: GRBM
+
+Counters Tested:
+- GRBM:0:456
+- GRBM:0:457
+- GRBM:0:458
+
+Block Characteristics:
+- Architecture: RDNA3 (GFX12)
+- Register Base: 0x8468
+- Instance Support: Multi-instance capable
+- Event Range: Variable per counter
+
+Comparison Focus:
+- Register programming sequences
+- Instance handling
+- Event ID encoding
+- Memory buffer layout
+
+Files:
+- aql_c_gfx1201_GRBM_0_456.txt
+- aqlprofile_v2_gfx1201_GRBM_0_456.txt
+- aql_c_gfx1201_GRBM_0_457.txt
+- aqlprofile_v2_gfx1201_GRBM_0_457.txt
+- aql_c_gfx1201_GRBM_0_458.txt
+- aqlprofile_v2_gfx1201_GRBM_0_458.txt

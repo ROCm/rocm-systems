@@ -1,0 +1,26 @@
+GFX1201 GL2A Block Summary
+============================
+Generated: Tue Sep 16 21:50:08 UTC 2025
+Block Type: GL2A
+
+Counters Tested:
+- GL2A:0:300
+- GL2A:0:301
+
+Block Characteristics:
+- Architecture: RDNA3 (GFX12)
+- Register Base: 0x8bc1
+- Instance Support: Multi-instance capable
+- Event Range: Variable per counter
+
+Comparison Focus:
+- Register programming sequences
+- Instance handling
+- Event ID encoding
+- Memory buffer layout
+
+Files:
+- aql_c_gfx1201_GL2A_0_300.txt
+- aqlprofile_v2_gfx1201_GL2A_0_300.txt
+- aql_c_gfx1201_GL2A_0_301.txt
+- aqlprofile_v2_gfx1201_GL2A_0_301.txt

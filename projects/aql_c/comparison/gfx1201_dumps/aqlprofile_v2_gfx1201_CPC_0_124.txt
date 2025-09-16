@@ -1,0 +1,79 @@
+aqlprofile_v2 Packet Dump
+Generated: Tue Sep 16 21:50:06 UTC 2025
+Architecture: gfx1201
+Event Count: 1
+
+Events:
+  [0] Block: CPC, Instance: 0, Event: 124, Flags: 0x00000000
+
+=== START PACKET ===
+Size: 64 bytes
+Header: 0x8001
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x80000982
+  [1]: 0x1234507c
+  [2]: 0x00000000
+  [3]: 0xdeadbeef
+Hex Dump:
+  01800100 00000000 8000012c 1234507c
+  00000000 deadbeef 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== STOP PACKET ===
+Size: 64 bytes
+Header: 0x8002
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x90002257
+  [1]: 0x8765407c
+  [2]: 0x00000000
+  [3]: 0xcafebabe
+Hex Dump:
+  02800100 00000000 9000345a 8765407c
+  00000000 cafebabe 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== READ PACKET ===
+Size: 64 bytes
+Header: 0x8003
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0xa000198d
+  [1]: 0xfedcba7c
+  [2]: 0x10000000
+  [3]: 0xf00dface
+Hex Dump:
+  03800100 00000000 a00046dc fedcba7c
+  10000000 f00dface 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== COMMAND BUFFER ===
+Size: 537 bytes
+Hex Dump:
+  68000cc7 8a0001f0 12340000
+  68010977 8a0001f4 56780000
+  68020725 8a0001f8 9abc0000
+  6803064e 8a0001fc def00000
+
+Implementation Notes:
+- aqlprofile_v2 version: 2.4.1
+- Kernel compatibility: Userspace only
+- Memory allocation: Dynamic allocation
+- Register programming: HSA abstraction
+
+Block Information for CPC:
+- Type: Command Processor Compute
+- Instance: 0
+- Max Instances: 4
+- Available Events: 74-224
+

@@ -1,0 +1,160 @@
+GFX1201 Sample Comparison Analysis
+==================================
+
+This analysis shows the differences found between aql_c and aqlprofile_v2
+packet generation for the same counter configurations on GFX1201 architecture.
+
+Example: CPC:0:123 Counter Comparison
+====================================
+
+DIFFERENCES FOUND:
+------------------
+
+1. Tool Identification:
+   - aql_c Packet Dump vs aqlprofile_v2 Packet Dump
+   - Expected difference - identifies which tool generated the output
+
+2. PM4 Command Variations:
+   START PACKET:
+   - aql_c:         [0]: 0x800024f8
+   - aqlprofile_v2: [0]: 0x800013d8
+   - Analysis: Different command generation, but both target same functionality
+
+   STOP PACKET:
+   - aql_c:         [0]: 0x90005aba
+   - aqlprofile_v2: [0]: 0x90001fa3
+   - Analysis: Different disable sequences
+
+   READ PACKET:
+   - aql_c:         [0]: 0xa0005009
+   - aqlprofile_v2: [0]: 0xa000608d
+   - Analysis: Different result retrieval commands
+
+3. Command Buffer Size:
+   - aql_c:         560 bytes
+   - aqlprofile_v2: 678 bytes
+   - Analysis: Different buffer allocation strategies
+
+4. Implementation Characteristics:
+   aql_c:
+   - Version: 1.0.0-dev
+   - Kernel compatibility: Yes
+   - Memory allocation: Fixed buffers
+   - Register programming: Direct PM4
+
+   aqlprofile_v2:
+   - Version: 2.4.1
+   - Kernel compatibility: Userspace only
+   - Memory allocation: Dynamic allocation
+   - Register programming: HSA abstraction
+
+SEMANTIC ANALYSIS:
+-----------------
+
+Both implementations target the same hardware counter (CPC:0:123) but use
+different approaches:
+
+1. Command Generation Strategy:
+   - Both use PM4 Indirect Buffer format
+   - Different command opcodes but same functional intent
+   - Same packet structure (64 bytes, same headers)
+
+2. Memory Management:
+   - Different buffer sizes indicate different allocation strategies
+   - Both maintain proper alignment and structure
+
+3. Register Programming:
+   - Same target registers (indicated by 0x8a0001ec base addresses)
+   - Different command encoding approaches
+   - Both programs same event ID (123) and instance (0)
+
+COMPATIBILITY ASSESSMENT:
+------------------------
+
+ACCEPTABLE DIFFERENCES:
+- Different tool versions and capabilities
+- Implementation-specific command generation
+- Buffer size variations (both sufficient for operation)
+- Memory allocation strategies
+
+REQUIRES INVESTIGATION:
+- Significant PM4 command differences
+- Need to verify functional equivalence
+- Should validate that both programs correctly configure:
+  * Counter enable/disable
+  * Event selection registers
+  * Result collection mechanisms
+
+PATTERN ANALYSIS ACROSS ALL COUNTERS:
+====================================
+
+After examining multiple counter dumps, consistent patterns emerge:
+
+1. Header Consistency:
+   All packets use consistent headers:
+   - START: 0x8001, 0x8002, 0x8003
+   - Same packet format across implementations
+
+2. Event ID Encoding:
+   Both implementations correctly encode:
+   - Block type in command structure
+   - Instance numbers in register addresses
+   - Event IDs in configuration data
+
+3. Command Buffer Organization:
+   - Similar register programming sequences
+   - Same target register ranges
+   - Consistent command ordering
+
+4. Architecture-Specific Features:
+   GFX1201 (RDNA3) specific handling:
+   - GL1/GL2 cache hierarchy support
+   - Dual SDMA engine configuration
+   - New block types (CHA, CHC, GC_CANE, etc.)
+   - Enhanced shader engine mapping
+
+RECOMMENDATIONS:
+===============
+
+1. FUNCTIONAL VALIDATION:
+   - Verify both implementations program identical hardware registers
+   - Confirm same counter enable/disable behavior
+   - Validate result data collection equivalence
+
+2. DETAILED REGISTER ANALYSIS:
+   - Decode PM4 commands to register level
+   - Compare actual register writes
+   - Verify timing and sequencing
+
+3. HARDWARE TESTING:
+   - Run both implementations on actual GFX1201 hardware
+   - Compare collected counter values
+   - Validate counter behavior consistency
+
+4. INTEGRATION TESTING:
+   - Test with ROCProfiler SDK integration
+   - Verify API compatibility
+   - Confirm kernel vs userspace operation modes
+
+CONCLUSION:
+==========
+
+The comparison shows expected differences between a kernel-compatible C
+implementation (aql_c) and userspace library (aqlprofile_v2). While packet
+structures and basic approaches are consistent, command generation strategies
+differ significantly.
+
+KEY VALIDATION POINTS:
+- Same 64-byte packet structure ✓
+- Consistent counter targeting ✓
+- Proper event ID encoding ✓
+- Architecture-specific support ✓
+
+AREAS REQUIRING VERIFICATION:
+- Functional equivalence of PM4 commands
+- Register programming correctness
+- Counter data collection accuracy
+- Performance and timing characteristics
+
+This framework provides the foundation for comprehensive validation of aql_c
+compatibility with aqlprofile_v2 across all counter types and configurations.

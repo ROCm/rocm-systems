@@ -1,0 +1,79 @@
+aqlprofile_v2 Packet Dump
+Generated: Tue Sep 16 21:50:07 UTC 2025
+Architecture: gfx1201
+Event Count: 1
+
+Events:
+  [0] Block: GL1C, Instance: 0, Event: 200, Flags: 0x00000000
+
+=== START PACKET ===
+Size: 64 bytes
+Header: 0x8001
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x80001125
+  [1]: 0x123450c8
+  [2]: 0x00000000
+  [3]: 0xdeadbeef
+Hex Dump:
+  01800100 00000000 80005fb0 123450c8
+  00000000 deadbeef 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== STOP PACKET ===
+Size: 64 bytes
+Header: 0x8002
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0x9000022e
+  [1]: 0x876540c8
+  [2]: 0x00000000
+  [3]: 0xcafebabe
+Hex Dump:
+  02800100 00000000 90004e2a 876540c8
+  00000000 cafebabe 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== READ PACKET ===
+Size: 64 bytes
+Header: 0x8003
+PM4 IB Format: 0x0001
+DW Count Remain: 10
+Completion Signal: 0x0000000000000000
+PM4 IB Command:
+  [0]: 0xa0002830
+  [1]: 0xfedcbac8
+  [2]: 0x10000000
+  [3]: 0xf00dface
+Hex Dump:
+  03800100 00000000 a0002ec3 fedcbac8
+  10000000 f00dface 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+  00000000 00000000 00000000 00000000 00000000 00000000
+
+=== COMMAND BUFFER ===
+Size: 459 bytes
+Hex Dump:
+  68000c3b 8a000320 12340000
+  68010402 8a000324 56780000
+  680203bf 8a000328 9abc0000
+  68030f1d 8a00032c def00000
+
+Implementation Notes:
+- aqlprofile_v2 version: 2.4.1
+- Kernel compatibility: Userspace only
+- Memory allocation: Dynamic allocation
+- Register programming: HSA abstraction
+
+Block Information for GL1C:
+- Type: GL1 Texture Cache Controller
+- Instance: 0
+- Max Instances: 2
+- Available Events: 50-200
+
