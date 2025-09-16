@@ -29,10 +29,11 @@ target_include_directories(gfx9-memory-manager-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIB_DIR}
-        ${LIB_DIR}/core/include
-        $<TARGET_PROPERTY:aqlprofile::aqlprofile-lib,INCLUDE_DIRECTORIES>)
+        ${LIB_DIR}/core/include)
 target_link_libraries(
     gfx9-memory-manager-test
+    PUBLIC
+            aqlprofile::headers
     PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
@@ -93,10 +94,11 @@ target_include_directories(command-buffer-test PRIVATE
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIB_DIR}
-        ${LIB_DIR}/core/include
-        $<TARGET_PROPERTY:aqlprofile::aqlprofile-lib,INCLUDE_DIRECTORIES>)
+        ${LIB_DIR}/core/include)
 target_link_libraries(
     command-buffer-test
+    PUBLIC
+            aqlprofile::headers
     PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest

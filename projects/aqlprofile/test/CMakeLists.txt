@@ -41,8 +41,13 @@ target_include_directories ( ${EXE_NAME}
     ${ROCM_ROOT_DIR}/include
     ${TEST_DIR}/parser/
     ${TEST_DIR}/../src/core/include
-    $<BUILD_INTERFACE:${AQLPROFILE_BUILD_ROOT}/src/core/include>)
-target_link_libraries( ${EXE_NAME} PRIVATE pthread hsa-runtime64::hsa-runtime64 dl )
+)
+target_link_libraries( ${EXE_NAME}
+  PRIVATE
+      pthread
+      aqlprofile::headers
+      hsa-runtime64::hsa-runtime64
+      dl )
 install(TARGETS ${EXE_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
 ## Build the hsa (standalone) simple_convolution test
