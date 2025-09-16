@@ -25,6 +25,7 @@
 #include "queue_registration.hpp"
 #include "table.hpp"
 
+#include "rocprofiler-sdk/version.h"
 #include "lib/common/logging.hpp"
 
 void
@@ -83,8 +84,7 @@ rocprofiler_attach_set_api_table(const char* name,
 int
 rocprofiler_attach_get_version()
 {
-    constexpr int ROCPROFILER_ATTACH_VERSION = 1;
-    return ROCPROFILER_ATTACH_VERSION;
+    return ROCPROFILER_VERSION;
 }
 
 ROCPROFILER_EXTERN_C_FINI
