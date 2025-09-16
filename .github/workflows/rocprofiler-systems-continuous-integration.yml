@@ -36,6 +36,9 @@ env:
   PYTHON_VENV_NAME: "rocprofiler-systems"
   PYTHON_VENV_ACTIVATE: "rocprofiler-systems/bin/activate"
 
+  # TODO: Remove once Docker gfx images have these
+  HIP_PLATFORM: "amd"
+
 jobs:
   ubuntu:
     name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
@@ -62,6 +65,22 @@ jobs:
             MODE=Continuous
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
+
+          if [ '${{ matrix.system.os-release }}' = '24.04']; then
+            CODE_NAME=noble
+          else
+            CODE_NAME=jammy
+          fi
+          echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
+
+      # TODO: Remove this step once amdgpu logic has been added to gfx Dockers
+      - name: Install amdgpu (remove once added to gfx Dockers)
+        shell: bash
+        working-directory: tmp
+        run: |
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_7.0.70000-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
+          echo "✅ amdgpu Installed!"
 
       # TODO: Remove this step once the gfx Dockers are available
       - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
@@ -90,7 +109,7 @@ jobs:
           aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.system.arch }}.tar.gz --no-sign-request
           mv rocm-${{ matrix.system.arch }}.tar.gz /opt/${{ matrix.system.arch }}.tar.gz
           echo "✅ Latest TheRock Tarball Release for ${{ matrix.system.arch }} Downloaded!"
-      
+
       - name: Install Latest Nightly ROCm
         run: |
           set -e
@@ -115,5 +134,4 @@ jobs:
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
             -DCMAKE_PREFIX_PATH={{ env.ROCM_PATH }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
-            -DHIP_PLATFORM=amd
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
