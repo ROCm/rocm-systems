@@ -213,7 +213,7 @@ typedef struct aqlprofile_version_t {
 
 /**
  * @brief Query the version of aqlprofile library.
- * @param[out] version aqlprofile major version is stored if non-NULL
+ * @param[out] version aqlprofile version info is stored if non-NULL
  * @retval HSA_STATUS_SUCCESS returned when version is a valid pointer
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if version is a null
  */

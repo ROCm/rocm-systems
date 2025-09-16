@@ -38,11 +38,6 @@
  * by the preprocessor.
  * @addtogroup VERSIONING_GROUP
  *
- * @def AQLPROFILE_VERSION_NPI
- * @brief The NPI version of the interface as a macro so it can be used
- * by the preprocessor.
- * @addtogroup VERSIONING_GROUP
- *
  * @def AQLPROFILE_VERSION
  * @brief Numerically increasing version number encoding major, minor, and patch via
           computing `((10000 * <MAJOR>) + (100 * <MINOR>) + <PATCH>)`.
@@ -94,7 +89,6 @@
 #define AQLPROFILE_VERSION_MAJOR   @BUILD_VERSION_MAJOR@
 #define AQLPROFILE_VERSION_MINOR   @BUILD_VERSION_MINOR@
 #define AQLPROFILE_VERSION_PATCH   @BUILD_VERSION_PATCH@
-#define AQLPROFILE_VERSION_NPI     @BUILD_VERSION_NPI@
 #define AQLPROFILE_SOVERSION       @BUILD_VERSION_MAJOR@
 #define AQLPROFILE_VERSION_STRING "@VERSION_STRING@"
 #define AQLPROFILE_GIT_REVISION   "@AQLPROFILE_GIT_REVISION@"
