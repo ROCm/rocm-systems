@@ -24,17 +24,7 @@
 
 #include <rocprofiler-sdk/defines.h>
 
-#include <stdint.h>
-
 ROCPROFILER_EXTERN_C_INIT
-
-int
-rocprofiler_attach_set_api_table(const char* name,
-                                 uint64_t    lib_version,
-                                 uint64_t    lib_instance,
-                                 void**      tables,
-                                 uint64_t    num_tables,
-                                 void*       register_functor) ROCPROFILER_PUBLIC_API;
 
 int
 rocprofiler_attach_get_version() ROCPROFILER_API;
