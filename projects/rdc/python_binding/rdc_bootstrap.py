@@ -250,6 +250,30 @@ class rdc_field_t(c_int):
      RDC_HEALTH_POWER_THROTTLE_TIME = 3006
      RDC_HEALTH_THERMAL_THROTTLE_TIME = 3007
 
+     RDC_FI_CPU_COUNT = 10000
+     RDC_FI_CPU_MODEL = 10001
+     RDC_FI_CPU_CORE_ENERGY = 10002
+     RDC_FI_CPU_SOCKET_ENERGY = 10003
+     RDC_FI_CPU_THREADS_PER_CORE = 10004
+     RDC_FI_CPU_HSMP_DRIVER_VERSION = 10005
+     RDC_FI_CPU_SMU_FW_VERSION = 10006
+     RDC_FI_CPU_HSMP_PROTO_VERSION = 10007
+     RDC_FI_CPU_FCLK_FREQUENCY = 10008
+     RDC_FI_CPU_MCLK_FREQUENCY = 10009
+     RDC_FI_CPU_CCLK_LIMIT = 10010
+     RDC_FI_CPU_SOCKET_ACTIVE_FREQ_LIMIT = 10011
+     RDC_FI_CPU_SOCKET_FREQ_LIMIT_SRC = 10012
+     RDC_FI_CPU_SOCKET_FREQ_RANGE_MAX = 10013
+     RDC_FI_CPU_SOCKET_FREQ_RANGE_MIN = 10014
+     RDC_FI_CPU_CORE_FREQ_LIMIT = 10015
+     RDC_FI_CPU_CORE_BOOST_LIMIT = 10016
+     RDC_FI_CPU_SOCKET_C0_RESIDENCY = 10017
+     RDC_FI_CPU_SOCKET_LCLK_DPM_LEVEL = 10018
+     RDC_FI_CPU_FAMILY = 10019
+     RDC_FI_CPU_MODEL_ID = 10020
+     RDC_FI_CPU_CORES_PER_SOCKET = 10021
+     RDC_FI_CPU_SOCKET_COUNT = 10022
+
      _rdc_metric_type_lookup = {
         RDC_FI_INVALID: rdc_metric_type_t.INVALID,
         RDC_FI_GPU_COUNT: rdc_metric_type_t.LABEL,
@@ -277,7 +301,7 @@ class rdc_field_t(c_int):
      def get_rdc_metric_type(cls, rdc_metric_t):
         if isinstance(rdc_metric_t, str):
             rdc_metric_t = getattr(cls, rdc_metric_t, None)
-        
+
         # If the metric was found, do the lookup, otherwise default GAUGE
         if rdc_metric_t is not None:
             return cls._rdc_metric_type_lookup.get(rdc_metric_t, rdc_metric_type_t.GAUGE)
@@ -288,7 +312,7 @@ class rdc_field_t(c_int):
         for attr_name, attr_value in cls.__dict__.items():
             if isinstance(attr_value, int) and attr_value == value:
                 return attr_name
-        return "Unknown field value"    
+        return "Unknown field value"
 
 rdc_handle_t = c_void_p
 rdc_gpu_group_t = c_uint32
