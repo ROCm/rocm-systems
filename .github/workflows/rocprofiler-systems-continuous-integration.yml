@@ -119,7 +119,6 @@ jobs:
       - name: Install Latest Nightly ROCm
         run: |
           set -e
-          mkdir ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           tar -xf /opt/${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
