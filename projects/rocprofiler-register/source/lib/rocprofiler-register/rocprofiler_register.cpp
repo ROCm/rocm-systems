@@ -689,8 +689,12 @@ register_functor(const char*                                 common_name,
     auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
     _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
 
-    auto* reginfo = rocp_add_registered_library_api_table(
-        common_name, import_func, lib_version, api_tables, api_table_length, _instance_val);
+    auto* reginfo = rocp_add_registered_library_api_table(common_name,
+                                                          import_func,
+                                                          lib_version,
+                                                          api_tables,
+                                                          api_table_length,
+                                                          _instance_val);
 
     LOG_IF(WARNING, !reginfo) << fmt::format(
         "rocprofiler-register failed to create registration info for "
