@@ -372,7 +372,10 @@ SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
 
 SvmProfileControl::~SvmProfileControl() {
 #if defined(__linux__)
-  if (event != -1) eventfd_write(event, 1);
+  if (event != -1) {
+    eventfd_write(event, 1);
+    close(event);
+  }
 #endif
   if (poll_smi_thread_ != NULL) {
     exit = true;
@@ -380,7 +383,6 @@ SvmProfileControl::~SvmProfileControl() {
     os::CloseThread(poll_smi_thread_);
     poll_smi_thread_ = NULL;
   }
-  close(event);
 }
 
 template <typename... Args>
