@@ -126,6 +126,45 @@ struct memory_allocate_sample : storage_parsed_type_base
     // Stream handle
     size_t stream_handle;
 };
+
+struct ompt_region_sample : storage_parsed_type_base
+{
+    ompt_region_sample() = default;
+    ompt_region_sample(std::string _name, uint64_t _thread_id,
+                       int32_t _operation, uint64_t _correlation_id_internal,
+                       uint64_t _correlation_id_ancestor, uint64_t _start_timestamp,
+                       uint64_t _end_timestamp, std::string _args_str,
+                       std::string _call_stack)
+    : name(std::move(_name))
+    , thread_id(_thread_id)
+    , operation(_operation)
+    , correlation_id_internal(_correlation_id_internal)
+    , correlation_id_ancestor(_correlation_id_ancestor)
+    , start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , args_str(std::move(_args_str))
+    , call_stack(std::move(_call_stack))
+    {}
+
+    // Identification fields
+    std::string name;
+    uint64_t thread_id;
+    int32_t  operation;
+
+    // Correlation fields
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+
+    // Timing fields
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    // Callback arguments
+    std::string args_str;
+
+    // Additional fields
+    std::string call_stack;
+};
 #endif
 
 struct region_sample : storage_parsed_type_base
@@ -230,11 +269,12 @@ enum class entry_type : uint32_t
     kernel_dispatch       = 0x0003,
     memory_copy           = 0x0004,
 #if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
-    memory_alloc = 0x0005,
+    memory_alloc          = 0x0005,
+    ompt                  = 0x0006,
 #endif
-    amd_smi_sample   = 0x0006,
-    cpu_freq_sample  = 0x0007,
-    fragmented_space = 0xFFFF
+    amd_smi_sample        = 0x0007,
+    cpu_freq_sample       = 0x0008,
+    fragmented_space      = 0xFFFF
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys
