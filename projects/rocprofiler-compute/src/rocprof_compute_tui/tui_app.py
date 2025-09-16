@@ -105,7 +105,7 @@ class RocprofTUIApp(App):
             json.dump(self.recent_dirs, f, indent=2)
 
     def add_recent_dir(self, directory: str) -> None:
-        directory = Path(directory).resolve().as_posix()
+        directory = str(Path(directory).resolve())
 
         # Remove if exists, add to front, keep max 5
         if directory in self.recent_dirs:
