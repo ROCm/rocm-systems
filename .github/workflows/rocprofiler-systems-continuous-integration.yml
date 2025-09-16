@@ -115,6 +115,8 @@ jobs:
           mkdir ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           tar -xf /opt/${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          export PATH=${{ env.ROCM_PATH }}/bin:${PATH}
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
@@ -126,6 +128,7 @@ jobs:
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
           python3 ./scripts/run-ci.py \
+            -S ${PWD} \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
             --build-jobs 2 \
