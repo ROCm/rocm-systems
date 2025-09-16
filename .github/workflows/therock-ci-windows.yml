@@ -82,9 +82,10 @@ jobs:
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Fetch sources
+        timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
+          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
 
       - name: Configure Projects
         env:
