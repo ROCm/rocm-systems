@@ -63,7 +63,7 @@ if [ ${#files_with_missing_copyright[@]} -ne 0 ]; then
                 else
                     copyright_notice+="$comS"$'\n'
                 fi
-            done < LICENSE
+            done < LICENSE.md
 
             # Add the notice to the beginning of the file
             temp_file=$(mktemp)

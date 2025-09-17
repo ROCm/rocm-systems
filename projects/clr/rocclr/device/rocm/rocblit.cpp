@@ -526,7 +526,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
       // If requested engine is valid and available, use it
       if (recIdMask != 0 && (freeEngineMask & recIdMask) != 0) {
-        copyMask = recIdMask;
+        copyMask = recIdMask - (recIdMask & (recIdMask - 1));
       } else {
         // Otherwise use first available engine
         copyMask = freeEngineMask - (freeEngineMask & (freeEngineMask - 1));
@@ -538,6 +538,13 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     if (copyMask != 0 && status == HSA_STATUS_SUCCESS) {
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
+
+      // Check if engine type is SdmaInter and adjust agents accordingly
+      // ROCr copy api would always choose SDMA engine of the srcAgent if its a GPU
+      if (engine == HwQueueEngine::SdmaInter) {
+        srcAgent = dev().getBackendDevice();
+        forceSDMA = true;
+      }
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
@@ -2252,17 +2259,29 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
     }
   }
 
-  bool ipcShared = srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+  // Determine if we should use shader copy path based on various conditions
+  bool hwlCopyDisabled = setup_.disableHwlCopyBuffer_;
 
-  bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-                           (copyMetadata.copyEnginePreference_ ==
-                            amd::CopyMetadata::CopyEnginePreference::BLIT) ||
-                           (sizeIn[0] <= dev().settings().sdmaCopyThreshold_ &&
-                            !(p2p || ipcShared) &&
-                            !srcMemory.isHostMemDirectAccess() &&
-                            !dstMemory.isHostMemDirectAccess() &&
-                            copyMetadata.copyEnginePreference_ !=
-                              amd::CopyMetadata::CopyEnginePreference::SDMA);
+  // Check copy engine preferences
+  bool isSdmaPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  bool isBlitPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
+
+  // Check memory access patterns
+  bool isP2pOrIpc = p2p || srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+  bool neitherMemoryIsHostDirectAccess =
+      !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
+
+  // Determine shader copy path conditions
+  bool smallSizeWithNonSdmaPreference =
+      sizeIn[0] <= dev().settings().sdmaCopyThreshold_ && !isSdmaPreference;
+
+  bool nonP2PIpcOrDirectAccess =
+      !isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference;
+
+  const bool useShaderCopyPath = hwlCopyDisabled || smallSizeWithNonSdmaPreference ||
+                                 nonP2PIpcOrDirectAccess || isBlitPreference;
 
   if (!useShaderCopyPath) {
     if (amd::IS_HIP) {

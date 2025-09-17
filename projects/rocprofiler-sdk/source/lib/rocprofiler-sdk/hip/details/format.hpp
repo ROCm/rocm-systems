@@ -263,6 +263,9 @@ struct formatter<hipMemAllocationType> : rocprofiler::hip::details::base_formatt
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Invalid);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Pinned);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Max);
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Uncached);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemAllocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
@@ -279,6 +282,11 @@ struct formatter<hipMemLocationType> : rocprofiler::hip::details::base_formatter
         {
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Invalid);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Device);
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Host);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, HostNuma);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, HostNumaCurrent);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemLocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
@@ -427,6 +435,197 @@ ROCP_SDK_HIP_FORMATTER(HIP_LAUNCH_CONFIG_st,
                        static_cast<void*>(v.attrs),
                        v.numAttrs,
                        '}')
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+template <>
+struct formatter<hipMemcpy3DOperand> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(const hipMemcpy3DOperand& v, Ctx& ctx) const
+    {
+        switch(v.type)
+        {
+            case hipMemcpyOperandTypePointer:
+                return fmt::format_to(
+                    ctx.out(),
+                    "{{type=Pointer, ptr={}, rowLength={}, layerHeight={}, locHint={}}}",
+                    static_cast<void*>(v.op.ptr.ptr),
+                    v.op.ptr.rowLength,
+                    v.op.ptr.layerHeight,
+                    v.op.ptr.locHint);
+
+            case hipMemcpyOperandTypeArray:
+                return fmt::format_to(ctx.out(),
+                                      "{{type=Array, array={}, offset={}}}",
+                                      static_cast<void*>(v.op.array.array),
+                                      v.op.array.offset);
+
+            default:
+                return fmt::format_to(ctx.out(), "{{type=UNKNOWN({})}}", static_cast<int>(v.type));
+        }
+    }
+};
+ROCP_SDK_HIP_FORMATTER(hipAccessPolicyWindow,
+                       "{{base_ptr={}, hitProp={}, hitRatio={}, missProp={}, num_bytes={}}}",
+                       static_cast<void*>(v.base_ptr),
+                       v.hitProp,
+                       v.hitRatio,
+                       v.missProp,
+                       v.num_bytes)
+template <>
+struct formatter<hipSynchronizationPolicy> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipSynchronizationPolicy v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipSyncPolicy, Auto);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipSyncPolicy, Spin);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipSyncPolicy, Yield);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipSyncPolicy, BlockingSync);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipSyncPolicy);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+ROCP_SDK_HIP_FORMATTER(hipLaunchMemSyncDomainMap, "{{default={}, remote={}}}", v.default_, v.remote)
+template <>
+struct formatter<hipLaunchMemSyncDomain> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipLaunchMemSyncDomain v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchMemSyncDomain, Default);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchMemSyncDomain, Remote);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipLaunchMemSyncDomain);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+template <>
+struct formatter<hipMemcpySrcAccessOrder> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipMemcpySrcAccessOrder v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpySrcAccessOrder, Invalid);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpySrcAccessOrder, Stream);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpySrcAccessOrder, DuringApiCall);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpySrcAccessOrder, Any);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpySrcAccessOrder, Max);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemcpySrcAccessOrder);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+template <>
+struct formatter<hipAccessProperty> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipAccessProperty v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipAccessProperty, Normal);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipAccessProperty, Streaming);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipAccessProperty, Persisting);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipAccessProperty);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+ROCP_SDK_HIP_FORMATTER(hipOffset3D, "{{x={}, y={}, z={}}}", v.x, v.y, v.z)
+template <>
+struct formatter<hipLaunchAttributeID> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipLaunchAttributeID v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, AccessPolicyWindow);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, Cooperative);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, SynchronizationPolicy);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, Priority);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, MemSyncDomainMap);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, MemSyncDomain);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, Max);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipLaunchAttributeID);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+template <>
+struct formatter<hipLaunchAttributeValue> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipLaunchAttributeValue v, Ctx& ctx) const
+    {
+        return fmt::format_to(
+            ctx.out(),
+            "{{accessPolicyWindow={}, cooperative={}, priority={}, syncPolicy={}, "
+            "memSyncDomainMap={}, memSyncDomain={}}}",
+            v.accessPolicyWindow,
+            v.cooperative,
+            v.priority,
+            v.syncPolicy,
+            v.memSyncDomainMap,
+            v.memSyncDomain);
+    }
+};
+ROCP_SDK_HIP_FORMATTER(hipMemcpyAttributes,
+                       "{}srcAccessOrder={}, srcLocHint={}, dstLocHint={}, flags={}{}",
+                       '{',
+                       v.srcAccessOrder,
+                       v.srcLocHint,
+                       v.dstLocHint,
+                       v.flags,
+                       '}')
+ROCP_SDK_HIP_FORMATTER(hipMemcpy3DBatchOp,
+                       "{}src={}, dst={}, extent={}, srcAccessOrder={}, flags={}{}",
+                       '{',
+                       v.src,
+                       v.dst,
+                       v.extent,
+                       v.srcAccessOrder,
+                       v.flags,
+                       '}')
+ROCP_SDK_HIP_FORMATTER(hipMemcpy3DPeerParms,
+                       "{}srcArray={}, srcPos={}, srcPtr={}, srcDevice={}, dstArray={}, dstPos={}, "
+                       "dstPtr={}, dstDevice={}, extent={}{}",
+                       '{',
+                       static_cast<const void*>(v.srcArray),
+                       v.srcPos,
+                       v.srcPtr,
+                       v.srcDevice,
+                       static_cast<const void*>(v.dstArray),
+                       v.dstPos,
+                       v.dstPtr,
+                       v.dstDevice,
+                       v.extent,
+                       '}')
+template <>
+struct formatter<hipDriverEntryPointQueryResult> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipDriverEntryPointQueryResult v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, Success);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, SymbolNotFound);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, VersionNotSufficent);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipDriverEntryPointQueryResult);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
 #endif
 }  // namespace fmt
 

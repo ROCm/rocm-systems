@@ -3147,6 +3147,144 @@ typedef union rocprofiler_hip_api_args_t
         unsigned long long    flags;
     } hipMemGetHandleForAddressRange;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
+    struct
+    {
+        unsigned int* count;
+        hipModule_t   mod;
+    } hipModuleGetFunctionCount;
+    struct
+    {
+        hipDeviceptr_t dst;
+        size_t         dstPitch;
+        unsigned char  value;
+        size_t         width;
+        size_t         height;
+    } hipMemsetD2D8;
+    struct
+    {
+        hipDeviceptr_t dst;
+        size_t         dstPitch;
+        unsigned char  value;
+        size_t         width;
+        size_t         height;
+        hipStream_t    stream;
+    } hipMemsetD2D8Async;
+    struct
+    {
+        hipDeviceptr_t dst;
+        size_t         dstPitch;
+        unsigned short value;
+        size_t         width;
+        size_t         height;
+    } hipMemsetD2D16;
+    struct
+    {
+        hipDeviceptr_t dst;
+        size_t         dstPitch;
+        unsigned short value;
+        size_t         width;
+        size_t         height;
+        hipStream_t    stream;
+    } hipMemsetD2D16Async;
+    struct
+    {
+        hipDeviceptr_t dst;
+        size_t         dstPitch;
+        unsigned int   value;
+        size_t         width;
+        size_t         height;
+    } hipMemsetD2D32;
+    struct
+    {
+        hipDeviceptr_t dst;
+        size_t         dstPitch;
+        unsigned int   value;
+        size_t         width;
+        size_t         height;
+        hipStream_t    stream;
+    } hipMemsetD2D32Async;
+    struct
+    {
+        hipStream_t                    stream;
+        hipLaunchAttributeID           attr;
+        const hipLaunchAttributeValue* value_out;
+    } hipStreamGetAttribute;
+    struct
+    {
+        hipStream_t                    stream;
+        hipLaunchAttributeID           attr;
+        const hipLaunchAttributeValue* value;
+    } hipStreamSetAttribute;
+    struct
+    {
+        hipModule_t* module;
+        const void*  fatbin;
+    } hipModuleLoadFatBinary;
+    struct
+    {
+        void**               dsts;
+        void**               srcs;
+        size_t*              sizes;
+        size_t               count;
+        hipMemcpyAttributes* attrs;
+        size_t*              attrsIdxs;
+        size_t               numAttrs;
+        size_t*              failIdx;
+        hipStream_t          stream;
+    } hipMemcpyBatchAsync;
+    struct
+    {
+        size_t              numOps;
+        hipMemcpy3DBatchOp* opList;
+        size_t*             failIdx;
+        unsigned long long  flags;
+        hipStream_t         stream;
+    } hipMemcpy3DBatchAsync;
+    struct
+    {
+        hipMemcpy3DPeerParms* p;
+    } hipMemcpy3DPeer;
+    struct
+    {
+        hipMemcpy3DPeerParms* p;
+        hipStream_t           stream;
+    } hipMemcpy3DPeerAsync;
+    struct
+    {
+        const char*                     symbol;
+        void**                          funcPtr;
+        unsigned long long              flags;
+        hipDriverEntryPointQueryResult* driverStatus;
+    } hipGetDriverEntryPoint;
+    struct
+    {
+        const char*                     symbol;
+        void**                          funcPtr;
+        unsigned long long              flags;
+        hipDriverEntryPointQueryResult* driverStatus;
+    } hipGetDriverEntryPoint_spt;
+    struct
+    {
+        const void*    dev_ptr;
+        size_t         count;
+        hipMemLocation location;
+        unsigned int   flags;
+        hipStream_t    stream;
+    } hipMemPrefetchAsync_v2;
+    struct
+    {
+        const void*     dev_ptr;
+        size_t          count;
+        hipMemoryAdvise advice;
+        hipMemLocation  location;
+    } hipMemAdvise_v2;
+    struct
+    {
+        hipStream_t         stream;
+        unsigned long long* streamId;
+    } hipStreamGetId;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

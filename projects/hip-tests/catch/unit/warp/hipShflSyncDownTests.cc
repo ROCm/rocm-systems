@@ -56,6 +56,9 @@ template <typename T> static void runTestShflDown_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 // Use the mask argument to divide the warp into groups of 12 threads, and then
@@ -96,6 +99,9 @@ template <typename T> static void runTestShflDown_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 template <typename T> __global__ void shflDown_3(T* Input, T* Output) {
@@ -137,6 +143,9 @@ template <typename T> static void runTestShflDown_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void shflDown_4(int* Input, int* Output) {
@@ -193,6 +202,9 @@ static void runTestShflDown_4() {
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 /**

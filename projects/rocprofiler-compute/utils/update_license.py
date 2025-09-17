@@ -1,3 +1,28 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 #!/usr/bin/env python3
 # -------------------------------------------------------------------------------
 # Support script for license header management.
@@ -20,11 +45,11 @@ maxHeaderLines = 200
 
 def cacheLicenseFile(infile, comment="#"):
     if not Path(infile).is_file():
-        logging.error("Unable to access license file - >%s" % infile)
+        logging.error(f"Unable to access license file - >{infile}")
         sys.exit(1)
 
     license = ""
-    with open(infile, "r") as file_in:
+    with open(infile) as file_in:
         for line in file_in:
             license += comment
             if line.strip() != "":
@@ -55,17 +80,17 @@ if args.files:
     specificFiles = args.files.split(",")
 
 print("")
-logging.info("Source directory = %s" % srcDir)
+logging.info(f"Source directory = {srcDir}")
 if fileExtension:
-    logging.info("File extension   = %s" % fileExtension)
+    logging.info(f"File extension   = {fileExtension}")
 if specificFiles:
-    logging.info("Specific files   = %s" % specificFiles)
+    logging.info(f"Specific files   = {specificFiles}")
 
 # cache license file
 license = cacheLicenseFile(args.license)
 
 # Scan files in provided source directory...
-for filename in glob.iglob(srcDir + "/**", recursive=True):
+for filename in glob.iglob(f"{srcDir}/**", recursive=True):
     # skip directories
     if Path(filename).is_dir():
         continue
@@ -81,22 +106,22 @@ for filename in glob.iglob(srcDir + "/**", recursive=True):
     if specificFiles:
         found = False
         for file in specificFiles:
-            fullPath = str(Path(srcDir).joinpath(file))
+            fullPath = str(Path(srcDir) / file)
             if fullPath == filename:
                 found = True
                 break
         if not found:
             continue
 
-    logging.debug("Examining %s for license..." % filename)
+    logging.debug(f"Examining {filename} for license...")
 
     # Update license header contents if delimiters are found
-    with open(filename, "r") as file_in:
-        baseName = Path(filename).name
-        dirName = str(Path(filename).parent)
-        tmpFile = dirName + "/." + baseName + ".tmp"
+    with open(filename) as file_in:
+        base_name = Path(filename).name
+        dir_name = Path(filename).parent
+        tmp_file = dir_name / f".{base_name}.tmp"
 
-        file_out = open(tmpFile, "w")
+        file_out = open(tmp_file, "w")
         for line in file_in:
             if re.search(begDelim, line):
                 logging.debug("Found beginning delimiter")
@@ -122,10 +147,10 @@ for filename in glob.iglob(srcDir + "/**", recursive=True):
     file_out.close()
 
     # Check if file changed and update
-    if not filecmp.cmp(filename, tmpFile, shallow=False):
-        logging.info("%s changed" % filename)
-        shutil.copystat(filename, tmpFile)
+    if not filecmp.cmp(filename, tmp_file, shallow=False):
+        logging.info(f"{filename} changed")
+        shutil.copystat(filename, tmp_file)
         if not args.dryrun:
-            os.rename(tmpFile, filename)
+            os.rename(tmp_file, filename)
     else:
-        os.unlink(tmpFile)
+        os.unlink(tmp_file)
