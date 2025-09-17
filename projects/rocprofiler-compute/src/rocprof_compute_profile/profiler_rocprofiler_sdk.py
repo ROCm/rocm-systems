@@ -57,7 +57,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         # rocprofiler_sdk_tool_path = str(
         #     rocm_libdir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
         # )
-        rocprofiler_sdk_tool_api_path = "/home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/install/lib/rocprofiler-compute/librocprofiler-sdk-tool-for-compute.so"
+        rocprofiler_sdk_tool_api_path = "/home/amdtest/abhinab/iteration_multiplexing/projects/rocprofiler-compute/install/lib64/rocprofiler-compute/librocprofiler-sdk-tool-for-compute.so"
         ld_preload = [
             rocprofiler_sdk_tool_api_path,
             # args.rocprofiler_sdk_library_path,
