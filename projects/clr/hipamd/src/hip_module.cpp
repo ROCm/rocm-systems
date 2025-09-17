@@ -912,8 +912,11 @@ hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 bloc
 
 hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
                                                   unsigned int flags, uint32_t extFlags) {
-  if (launchParamsList == nullptr || numDevices > g_devices.size()) {
+  if (launchParamsList == nullptr) {
     return hipErrorInvalidValue;
+  }
+  if (numDevices > g_devices.size()) {
+    return hipErrorInvalidDevice;
   }
 
   std::vector<hipFunctionLaunchParams> functionLaunchParamsList(numDevices);

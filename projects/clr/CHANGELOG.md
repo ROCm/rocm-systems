@@ -92,6 +92,7 @@ All Beta warnings in usage of HIP Graph APIs are removed, they are now officiall
     - `hipPointerGetAttributes` returns `hipSuccess` instead of an error with invalid value `hipErrorInvalidValue`, in case `NULL` host or attribute pointer is passed as input parameter. It now matches the functionality of `cudaPointerGetAttributes` which changed with CUDA 11 and above releases.
     - `hipFree` previously there was an implicit wait which was applicable for all memory allocations, for synchronization purpose. This wait is now disabled for allocations made with `hipMallocAsync` and `hipMallocFromPoolAsync`, to match the behavior of CUDA API `cudaFree`
     - `hipFreeAsync` now returns `hipSuccess` when the input pointer is NULL, instead of ` hipErrorInvalidValue` , to be consistent with `hipFree`.
+    - Exceptions occurring during a kernel execution will not abort the process anymore but will return an error unless core dump is enabled.
 * Changes in hipRTC.
     - Removal of `hipRTC` symbols from HIP Runtime Library.
     Any application using `hipRTC` APIs should link explicitly with the `hipRTC` library. This makes the usage of `hipRTC` library on Linux the same as on Windows and matches the behavior of CUDA `nvRTC`.
@@ -222,6 +223,7 @@ HIP runtime has the following functional improvements which greatly improve runt
 * Compilation failure, HIP runtime refactored the vector type alignment with `__hip_vec_align_v`
 * A numerical error/corruption found in Pytorch  during graph replay. HIP runtime fixed the input sizes of kernel launch dimensions in hipExtModuleLaunchKernel for the execution of hipGraph capture.
 * A crash during kernel execution in a customer application. The structure of kernel arguments was updated via adding the size of kernel arguments, and HIP runtime does validation before launch kernel with the structured arguments.
+* Compilation error when using bfloat16 functions. HIP runtime removed the anonymous namespace from FP16 functions to resolve this issue.
 
 ## HIP 6.4.2 for ROCm 6.4.2
 
