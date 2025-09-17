@@ -18,18 +18,20 @@
  */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
-#include<vector>
+#include <vector>
 /**
  * @addtogroup hipMemcpy3DBatchAsync hipMemcpy3DBatchAsync
  * @{
  * @ingroup MemoryTest
- * `hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t*
- failIdx, unsigned long long flags, hipStream_t stream __dparm(0))` -
+ * `hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp*
+ opList, size_t* failIdx, unsigned long long flags, hipStream_t stream
+ __dparm(0))` -
  * Perform Batch of 3D copies.
  */
 // Helper to check array content
-void checkArrayContent(hipArray_t array, size_t width, size_t height, size_t depth, char expected) {
-  std::vector<char>hostBuf(width * height * depth);
+void checkArrayContent(hipArray_t array, size_t width, size_t height,
+                       size_t depth, char expected) {
+  std::vector<char> hostBuf(width * height * depth);
   hipMemcpy3DParms copyParms{};
   copyParms.srcArray = array;
   copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), width, width, height);
@@ -37,7 +39,7 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height, size_t dep
   copyParms.kind = hipMemcpyDeviceToHost;
   HIP_CHECK(hipMemcpy3D(&copyParms));
   for (size_t i = 0; i < width * height * depth; ++i) {
-    INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
+    INFO("Array FAILURE at Index: " << i << "\nval : " << hostBuf[i]);
     REQUIRE(hostBuf[i] == expected);
   }
 }
@@ -45,12 +47,14 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height, size_t dep
  * Test Description
  * ------------------------
  * - Test case to verify the Asynchronus 3D batch memory copy.
- * 1. Allocate device memory for two pointers (srcptr, dstptr). This is for Pointer to pointer copy.
+ * 1. Allocate device memory for two pointers (srcptr, dstptr). This is for
+ * Pointer to pointer copy.
  * 2. Fill the srcPtr with some data with memset api.
- * 3. Allocate devie memory for two arrays(srcArray, dstArray). This is for Array to Array copy.
+ * 3. Allocate devie memory for two arrays(srcArray, dstArray). This is for
+ * Array to Array copy.
  * 4. Fill the srcArray with some data via hipMemcpy3D.
- * 5. Prepare hipMemcpy3DBatchOp Array with appropriate data for both ptr-ptr copy and array-ptr
- *    copy.
+ * 5. Prepare hipMemcpy3DBatchOp Array with appropriate data for both ptr-ptr
+ * copy and array-ptr copy.
  * 6. Create Stream.
  * 7. Launch the hipMemcpy3DBatchAsync with appropriate fields.
  * 8. Copy the data from device to host and verify the data.
@@ -67,13 +71,14 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(16, 16, 4);
-  size_t elements_3d = extent.width * extent.height * extent.depth * sizeof(char);
+  size_t elements_3d =
+      extent.width * extent.height * extent.depth * sizeof(char);
 
   // Allocate buffers for pointer-ptr copy
   void *srcPtr0, *dstPtr0;
   HIP_CHECK(hipMalloc(&srcPtr0, elements_3d));
   HIP_CHECK(hipMalloc(&dstPtr0, elements_3d));
-  HIP_CHECK(hipMemset(srcPtr0, 'a', elements_3d));  // Fill with value
+  HIP_CHECK(hipMemset(srcPtr0, 'a', elements_3d)); // Fill with value
 
   // Allocate and fill hip array for array-to-ptr copy
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<char>();
@@ -82,10 +87,11 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
   HIP_CHECK(hipMalloc3DArray(&dstArray1, &channelDesc, extent, 0));
 
   // Fill srcArray1 with 'b'
-  std::vector<char>tmpHost(elements_3d);
+  std::vector<char> tmpHost(elements_3d);
   memset(tmpHost.data(), 'b', elements_3d);
   hipMemcpy3DParms fillParms{};
-  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width, extent.width, extent.height);
+  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width,
+                                        extent.width, extent.height);
   fillParms.dstArray = srcArray1;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
@@ -129,10 +135,11 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
   HIP_CHECK(hipStreamSynchronize(stream));
 
   //  Validate pointer-ptr copy (op 0)
-  std::vector<char>hostBuf(elements_3d);
-  HIP_CHECK(hipMemcpy(hostBuf.data(), dstPtr0, elements_3d, hipMemcpyDeviceToHost));
+  std::vector<char> hostBuf(elements_3d);
+  HIP_CHECK(
+      hipMemcpy(hostBuf.data(), dstPtr0, elements_3d, hipMemcpyDeviceToHost));
   for (size_t i = 0; i < elements_3d; ++i) {
-    INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
+    INFO("Array FAILURE at Index: " << i << "\nval : " << hostBuf[i]);
     REQUIRE(hostBuf[i] == 'a');
   }
   // Validate array-array copy (op 1)
@@ -149,12 +156,14 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_BasicFunctional") {
  * Test Description
  * ------------------------
  * - Test case to verify the Asynchronus 3D batch memory copy.
- * 1. Allocate Host memory for two pointers (srcptr, dstptr). This is for Pointer to pointer copy.
+ * 1. Allocate Host memory for two pointers (srcptr, dstptr). This is for
+ * Pointer to pointer copy.
  * 2. Fill the srcPtr with some data.
- * 3. Allocate devie memory for 1 array(srcArray). This is for Array to pointer copy.
+ * 3. Allocate devie memory for 1 array(srcArray). This is for Array to pointer
+ * copy.
  * 4. Fill the srcArray with some data via hipMemcpy3D.
- * 5. Prepare hipMemcpy3DBatchOp Array with appropriate data for both ptr-ptr copy and array-ptr
- *    copy.
+ * 5. Prepare hipMemcpy3DBatchOp Array with appropriate data for both ptr-ptr
+ * copy and array-ptr copy.
  * 6. Create Stream.
  * 7. Launch the hipMemcpy3DBatchAsync with appropriate fields.
  * 8. Copy the data from device to host and verify the data.
@@ -171,23 +180,25 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_PtrH2H_Array2ptr") {
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(16, 16, 4);
-  size_t elements_3d = extent.width * extent.height * extent.depth * sizeof(char);
+  size_t elements_3d =
+      extent.width * extent.height * extent.depth * sizeof(char);
 
   // Allocate buffers for pointer-ptr copy
-  std::vector<char>srcPtr(elements_3d, 'a');
-  std::vector<char>dstPtr(elements_3d, 'b');
+  std::vector<char> srcPtr(elements_3d, 'a');
+  std::vector<char> dstPtr(elements_3d, 'b');
 
   // Allocate and fill hip array for array-to-ptr copy
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<char>();
   hipArray_t srcArray;
   HIP_CHECK(hipMalloc3DArray(&srcArray, &channelDesc, extent, 0));
-  std::vector<char>dstPtr2(elements_3d, 'a');
+  std::vector<char> dstPtr2(elements_3d, 'a');
 
   // Fill srcArray with 'b'
-  std::vector<char>tmpHost(elements_3d);
+  std::vector<char> tmpHost(elements_3d);
   memset(tmpHost.data(), 'b', elements_3d);
   hipMemcpy3DParms fillParms{};
-  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width, extent.width, extent.height);
+  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width,
+                                        extent.width, extent.height);
   fillParms.dstArray = srcArray;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
@@ -221,7 +232,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_PtrH2H_Array2ptr") {
   ops[1].dst.op.ptr.ptr = dstPtr2.data();
   ops[1].dst.op.ptr.rowLength = extent.width;
   ops[1].dst.op.ptr.layerHeight = extent.height;
-  ops[1].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
+  ops[1].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
   ops[1].dst.op.ptr.locHint.id = 0;
   ops[1].extent = extent;
   ops[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -235,19 +246,134 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_PtrH2H_Array2ptr") {
 
   // Validate pointer-ptr copy (op 0)
   for (size_t i = 0; i < elements_3d; ++i) {
-    INFO("Pointer Copy Failure at Index: "<< i << "\nval : " <<dstPtr[i]);
+    INFO("Pointer Copy Failure at Index: " << i << "\nval : " << dstPtr[i]);
     REQUIRE(dstPtr[i] == 'a');
   }
   // Validate array-ptr copy (op 1)
   for (size_t i = 0; i < elements_3d; ++i) {
-    INFO("Pointer Copy Failure at Index: "<< i << "\nval : " <<dstPtr2[i]);
+    INFO("Pointer Copy Failure at Index: " << i << "\nval : " << dstPtr2[i]);
     REQUIRE(dstPtr2[i] == 'b');
   }
   // Cleanup
   HIP_CHECK(hipFreeArray(srcArray));
   HIP_CHECK(hipStreamDestroy(stream));
 }
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to verify the below Asynchronus 3D batch memory copy.
+ * 1. Op-1: Host pointer -> Device pointer
+ * 2. Op-2: host ptr -> device array
+ * 3. op-3: Device pointer -> Host pointer
+ * 4. Create Stream.
+ * 5. Launch the hipMemcpy3DBatchAsync with appropriate fields.
+ * 6. Validate the data after mem copy.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipMemcpy3DBatchAsync_MoreOps") {
+  CHECK_IMAGE_SUPPORT
+  constexpr int numOps = 3;
+  hipStream_t stream = NULL;
+  HIP_CHECK(hipStreamCreate(&stream));
+  hipExtent extent = make_hipExtent(16, 16, 4);
+  size_t elements_3d =
+      extent.width * extent.height * extent.depth * sizeof(char);
 
+  // Allocate buffers for pointer-ptr copy
+  std::vector<char> srcPtr(elements_3d, 'a');
+  std::vector<char> hostDstPtr(elements_3d, 'b');
+  void *dstPtr;
+  HIP_CHECK(hipMalloc(&dstPtr, elements_3d));
+
+  // Allocate and fill hip array for array-to-ptr copy
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<char>();
+  hipArray_t dstArray;
+  HIP_CHECK(hipMalloc3DArray(&dstArray, &channelDesc, extent, 0));
+  std::vector<char> dstPtr2(elements_3d, 'a');
+
+  // Fill dstArray with 'b'
+  std::vector<char> tmpHost(elements_3d);
+  memset(tmpHost.data(), 'b', elements_3d);
+  hipMemcpy3DParms fillParms{};
+  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width,
+                                        extent.width, extent.height);
+  fillParms.dstArray = dstArray;
+  fillParms.extent = extent;
+  fillParms.kind = hipMemcpyHostToDevice;
+  HIP_CHECK(hipMemcpy3D(&fillParms));
+
+  // Prepare batch ops array
+  hipMemcpy3DBatchOp ops[numOps];
+
+  // Op 0: Host pointer -> Device pointer
+  ops[0].src.type = hipMemcpyOperandTypePointer;
+  ops[0].src.op.ptr.ptr = srcPtr.data();
+  ops[0].src.op.ptr.rowLength = extent.width;
+  ops[0].src.op.ptr.layerHeight = extent.height;
+  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[0].src.op.ptr.locHint.id = 0;
+  ops[0].dst.type = hipMemcpyOperandTypePointer;
+  ops[0].dst.op.ptr.ptr = dstPtr;
+  ops[0].dst.op.ptr.rowLength = extent.width;
+  ops[0].dst.op.ptr.layerHeight = extent.height;
+  ops[0].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[0].dst.op.ptr.locHint.id = 0;
+  ops[0].extent = extent;
+  ops[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  ops[0].flags = hipMemcpyFlagDefault;
+
+  // Op 1: host ptr -> device array
+  ops[1].src.type = hipMemcpyOperandTypePointer;
+  ops[1].src.op.ptr.ptr = dstPtr2.data();
+  ops[1].src.op.ptr.rowLength = extent.width;
+  ops[1].src.op.ptr.layerHeight = extent.height;
+  ops[1].src.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[1].src.op.ptr.locHint.id = 0;
+  ops[1].dst.type = hipMemcpyOperandTypeArray;
+  ops[1].dst.op.array.array = dstArray;
+  ops[1].dst.op.array.offset = {0, 0, 0};
+  ops[1].extent = extent;
+  ops[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  ops[1].flags = hipMemcpyFlagDefault;
+
+  // Op 2: Device pointer -> Host pointer
+  ops[2].src.type = hipMemcpyOperandTypePointer;
+  ops[2].src.op.ptr.ptr = dstPtr;
+  ops[2].src.op.ptr.rowLength = extent.width;
+  ops[2].src.op.ptr.layerHeight = extent.height;
+  ops[2].src.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[2].src.op.ptr.locHint.id = 0;
+  ops[2].dst.type = hipMemcpyOperandTypePointer;
+  ops[2].dst.op.ptr.ptr = hostDstPtr.data();
+  ops[2].dst.op.ptr.rowLength = extent.width;
+  ops[2].dst.op.ptr.layerHeight = extent.height;
+  ops[2].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[2].dst.op.ptr.locHint.id = 0;
+  ops[2].extent = extent;
+  ops[2].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  ops[2].flags = hipMemcpyFlagDefault;
+
+  // Launch the batch
+  size_t failIdx;
+  unsigned long long flags = 0;
+  HIP_CHECK(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, flags, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Validate pointer-ptr copy (op 0)
+  for (size_t i = 0; i < elements_3d; ++i) {
+    INFO("Pointer Copy Failure at Index: " << i << "\nval : " << hostDstPtr[i]);
+    REQUIRE(hostDstPtr[i] == 'a');
+  }
+  checkArrayContent(dstArray, extent.width, extent.height, extent.depth, 'a');
+  // Cleanup
+  HIP_CHECK(hipFreeArray(dstArray));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
 /**
  * Test Description
  * ------------------------
@@ -271,14 +397,17 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_NegativeTests") {
   unsigned long long flags = 0;
   hipMemcpy3DBatchOp ops[numOps];
   SECTION("Zero Operations") {
-    HIP_CHECK_ERROR(hipMemcpy3DBatchAsync(0, ops, &failIdx, flags, stream), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemcpy3DBatchAsync(0, ops, &failIdx, flags, stream),
+                    hipErrorInvalidValue);
   }
   SECTION("Non Zero flag") {
-    HIP_CHECK_ERROR(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, 2, stream), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, 2, stream),
+                    hipErrorInvalidValue);
   }
   SECTION("Ops array as nullptr") {
-    HIP_CHECK_ERROR(hipMemcpy3DBatchAsync(numOps, nullptr, &failIdx, flags, stream),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemcpy3DBatchAsync(numOps, nullptr, &failIdx, flags, stream),
+        hipErrorInvalidValue);
   }
   // Cleanup
   HIP_CHECK(hipStreamDestroy(stream));
