@@ -155,7 +155,7 @@ RDC is packaged as part of the ROCm software repository. To install RDC using pr
             # or, to install a specific version
             $ sudo apt-get install rdc<x.y.z>
 
-    .. tab-item:: SLES 15 Service Pack 3
+    .. tab-item:: SLES
         :sync: sles-tab
 
         .. code-block:: shell
