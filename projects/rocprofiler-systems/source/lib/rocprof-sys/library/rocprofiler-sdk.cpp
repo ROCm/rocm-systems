@@ -982,7 +982,7 @@ get_ompt_standard_cb_storage()
 auto&
 get_ompt_lock_cb_storage()
 {
-    // uint64_t -> ompt_wait_id_t (cb definition)
+    // ompt_wait_id_t -> ompt_wait_id_t (cb definition)
     static auto _v = std::unordered_map<ompt_wait_id_t, rocprofsys_ompt_data_storage_t>{};
     return _v;
 }
