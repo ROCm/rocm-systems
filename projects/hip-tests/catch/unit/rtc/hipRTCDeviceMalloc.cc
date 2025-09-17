@@ -125,6 +125,8 @@ TEST_CASE("Unit_hiprtc_devicemalloc") {
 
   HIP_CHECK(hipFree(dX));
   HIP_CHECK(hipFree(dY));
+  HIP_CHECK(hipFree(pA));
+  HIP_CHECK(hipFree(pB));
   HIP_CHECK(hipFree(dOut));
 
   HIP_CHECK(hipModuleUnload(module));
