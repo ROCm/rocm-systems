@@ -390,7 +390,10 @@ rocpd_post_processing::get_pmc_event_with_sample_callback() const
 
         auto& agent_manager = m_agent_manager;
         auto  agent_primary_key =
-            agent_manager.get_agent_by_handle(_pmc.agent_handle).base_id;
+            agent_manager
+                .get_agent_by_id(_pmc.device_id,
+                                 static_cast<agent_type>(_pmc.device_type))
+                .base_id;
 
         auto event_id = data_processor->insert_event(
             track_primary_key, _pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
@@ -695,7 +698,9 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_amd_smi_sample_callback());
     parser.register_type_callback(entry_type::cpu_freq_sample,
                                   get_cpu_freq_sample_callback());
-    ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
+    parser.register_type_callback(entry_type::backtrace_region_sample,
+                                  get_backtrace_sample_callback());
+    ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..\n");
 #endif
 }
 
