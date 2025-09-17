@@ -21,11 +21,13 @@
 // SOFTWARE.
 
 #include "ptrace_session.hpp"
+#include "details/filesystem.hpp"
 
 #include "lib/common/logging.hpp"
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <link.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
@@ -105,6 +107,8 @@ ptrace_op_name(__ptrace_request op)
         return false;                                                                              \
     }
 
+using open_modes_vec_t = std::vector<int>;
+
 void
 get_auxv_entry(int pid, size_t& entry_addr)
 {
@@ -137,6 +141,102 @@ get_auxv_entry(int pid, size_t& entry_addr)
     }
     ROCP_TRACE << "Entry address found to be " << entry_addr << " from " << filename;
 }
+
+std::optional<std::string>
+get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
+{
+    const open_modes_vec_t default_link_open_modes = {(RTLD_LAZY | RTLD_NOLOAD)};
+    if(_name.empty()) return fs::current_path().string();
+
+    if(_open_modes.empty()) _open_modes = default_link_open_modes;
+
+    void* _handle = nullptr;
+    bool  _noload = false;
+    for(auto _mode : _open_modes)
+    {
+        _handle = dlopen(_name.data(), _mode);
+        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
+        if(_handle) break;
+    }
+
+    if(_handle)
+    {
+        struct link_map* _link_map = nullptr;
+        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
+        if(_link_map != nullptr && !std::string_view{_link_map->l_name}.empty())
+        {
+            return fs::absolute(fs::path{_link_map->l_name}).string();
+        }
+        if(_noload == false) dlclose(_handle);
+    }
+
+    return std::nullopt;
+}
+
+auto
+get_this_library_path()
+{
+    auto _this_lib_path = get_linked_path("librocprofv3-attach.so", {RTLD_NOLOAD | RTLD_LAZY});
+    LOG_IF(FATAL, !_this_lib_path) << "librocprofv3-attach.so"
+                                   << " could not locate itself in the list of loaded libraries";
+    return fs::path{*_this_lib_path}.parent_path().string();
+}
+
+void*
+get_library_handle(std::string_view _lib_name)
+{
+    void* _lib_handle = nullptr;
+
+    if(_lib_name.empty()) return nullptr;
+
+    auto _lib_path       = fs::path{_lib_name};
+    auto _lib_path_fname = _lib_path.filename();
+    auto _lib_path_abs =
+        (_lib_path.is_absolute()) ? _lib_path : (fs::path{get_this_library_path()} / _lib_path);
+
+    // check to see if the rocprofiler library is already loaded
+    _lib_handle = dlopen(_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+
+    if(_lib_handle)
+    {
+        LOG(INFO) << "loaded " << _lib_name << " library at " << _lib_path.string()
+                  << " (handle=" << _lib_handle << ") via RTLD_NOLOAD | RTLD_LAZY";
+    }
+
+    // try to load with the given path
+    if(!_lib_handle)
+    {
+        _lib_handle = dlopen(_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+
+        if(_lib_handle)
+        {
+            LOG(INFO) << "loaded " << _lib_name << " library at " << _lib_path.string()
+                      << " (handle=" << _lib_handle << ") via RTLD_GLOBAL | RTLD_LAZY";
+        }
+    }
+
+    // try to load with the absoulte path
+    if(!_lib_handle)
+    {
+        _lib_path   = _lib_path_abs;
+        _lib_handle = dlopen(_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    // try to load with the basename path
+    if(!_lib_handle)
+    {
+        _lib_path   = _lib_path_fname;
+        _lib_handle = dlopen(_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    LOG(INFO) << "loaded " << _lib_name << " library at " << _lib_path.string()
+              << " (handle=" << _lib_handle << ")";
+
+    LOG_IF(WARNING, _lib_handle == nullptr) << _lib_name << " failed to load\n";
+
+    return _lib_handle;
+}
+
 }  // namespace
 
 namespace rocprofiler
@@ -664,7 +764,7 @@ PTraceSession::find_symbol(void*& addr, const std::string& library, const std::s
     // Load the library in our process to determine the offset of the requested symbol from the
     // start address of the library
     addr        = nullptr;
-    libraryaddr = dlopen(library.c_str(), RTLD_LAZY);
+    libraryaddr = get_library_handle(library);
 
     if(!libraryaddr)
     {
