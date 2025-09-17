@@ -127,10 +127,14 @@ ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
 
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
     // connect. This will be changed in the future
-    if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin) _name = "omp_parallel";
+    if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
+       record.operation == ROCPROFILER_OMPT_ID_parallel_end)
+        _name = "omp_parallel";
     // Although not necessary to connect them, this forces a unified name instead of
     // the whole track being named omp_lock_init
-    if(record.operation == ROCPROFILER_OMPT_ID_lock_init) _name = "omp_lock";
+    if(record.operation == ROCPROFILER_OMPT_ID_lock_init ||
+       record.operation == ROCPROFILER_OMPT_ID_lock_destroy)
+        _name = "omp_lock";
 
     return _name;
 }
@@ -1164,8 +1168,7 @@ ompt_finalize_orphan_events()
 
 void
 ompt_cache_instant_event(
-    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* /*user_data*/,
-    rocprofiler_timestamp_t _beg_ts, rocprofiler_timestamp_t _end_ts,
+    rocprofiler_callback_tracing_record_t record, rocprofiler_timestamp_t _instant_ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
     auto args = function_args_t{};
@@ -1174,7 +1177,7 @@ ompt_cache_instant_event(
 
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
-    cache_ompt_region(&record, _beg_ts, _end_ts, call_stack->to_string(),
+    cache_ompt_region(&record, _instant_ts, _instant_ts, call_stack->to_string(),
                       ompt_get_args_string(args));
 }
 
@@ -1603,8 +1606,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         ROCPROFILER_CALL(
                             rocprofiler_get_timestamp(&ts));  // Set artificial end ts
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
-                        ompt_cache_instant_event(record, user_data, start_ts, start_ts,
-                                                 _bt_data);
+                        ompt_cache_instant_event(record, start_ts, _bt_data);
                         break;
                     }
                     default:
