@@ -32,7 +32,8 @@ AQLprofile is open source and hosted at `AQLprofile on GitHub <https://github.co
 
   .. grid-item-card:: Reference
 
-    * :doc:`Terms <reference/terms>`
+    * :doc:`Glossary <reference/glossary>`
+    * :doc:`Supported architectures and counter blocks <reference/supported-architectures>`
     * :doc:`APIs <reference/api-list>`
 
 
