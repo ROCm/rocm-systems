@@ -227,7 +227,11 @@ get_link_map()
 struct client_library
 {
     client_library() = default;
-    ~client_library() { delete configure_result; }
+    ~client_library()
+    {
+        delete configure_result;
+        delete configure_attach_result;
+    }
 
     client_library(const client_library&)     = delete;
     client_library(client_library&&) noexcept = default;
