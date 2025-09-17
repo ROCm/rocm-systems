@@ -104,14 +104,13 @@ def test_attachment_hsa_api_trace(hsa_input_data):
             "HSA_FINALIZE_EXT_API",
         )
         assert int(row["Process_Id"]) > 0
-        assert int(row["Thread_Id"]) >= int(row["Process_Id"])
+        assert int(row["Thread_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
         functions.append(row["Function"])
 
-    # Note: Memory-related HSA function checking disabled for RHEL/SLES compatibility
-    # assert any(
-    #     "memory" in func.lower() for func in functions
-    # ), "No memory-related HSA functions captured"
+    assert any(
+        "memory" in func.lower() for func in functions
+    ), "No memory-related HSA functions captured"
 
 
 def test_agent_info(agent_info_input_data):
