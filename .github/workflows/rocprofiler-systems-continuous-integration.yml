@@ -136,7 +136,7 @@ jobs:
             -S ${PWD} \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
-            --build-jobs 2 \
+            --build-jobs 16 \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
@@ -155,7 +155,7 @@ jobs:
         timeout-minutes: 10
         working-directory: projects/rocprofiler-systems
         run: |
-          cmake --build build --target install --parallel 2
+          cmake --build build --target install --parallel 16
 
       - name: CPack and Install
         working-directory: projects/rocprofiler-systems/
