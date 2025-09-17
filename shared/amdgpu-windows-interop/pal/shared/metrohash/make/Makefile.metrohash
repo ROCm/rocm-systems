@@ -1,0 +1,20 @@
+####
+#
+#   Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+#
+####
+
+#-----------------------------------------------------------------------
+# Common MetroHash Implementation Files
+#-----------------------------------------------------------------------
+
+vpath %.cpp $(METROHASH_DEPTH)/src
+
+CPPFILES += metrohash64.cpp     \
+            metrohash128.cpp
+
+#-----------------------------------------------------------------------
+# Common MetroHash Includes
+#-----------------------------------------------------------------------
+
+LCXXINCS += -I$(METROHASH_DEPTH)/src

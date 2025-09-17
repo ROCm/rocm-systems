@@ -124,6 +124,9 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_NegTsts") {
     HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&invalidConfig, function, kernelParams, NULL),
                     hipErrorInvalidConfiguration);
   }
+
+  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipFree(d_output));
 }
 
 bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThreads, int blockSize,
@@ -281,6 +284,8 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_With_Different_Kernels") {
     int result = 0;
     HIP_CHECK(hipMemcpy(&result, devMem, sizeof(result), hipMemcpyDefault));
     REQUIRE(result == 100);
+
+    HIP_CHECK(hipFree(devMem));
   }
 
   SECTION("Cooperative kernel with no arguments") {

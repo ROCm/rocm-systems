@@ -85,13 +85,18 @@ transpose_a(int* in, int* out, int M, int N)
 {
     __shared__ int tile[TILE_DIM][TILE_DIM];
 
-    int idx = (blockIdx.y * blockDim.y + threadIdx.y) * M + blockIdx.x * blockDim.x +
-              threadIdx.x;
-    tile[threadIdx.y][threadIdx.x] = in[idx];
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int x = blockIdx.x * TILE_DIM + tx;
+    int y = blockIdx.y * TILE_DIM + ty;
+
+    int v = 0;
+    if(x < M && y < N) v = in[y * M + x];  // guarded load
+    tile[ty][tx] = v;
     __syncthreads();
-    idx = (blockIdx.x * blockDim.x + threadIdx.y) * N + blockIdx.y * blockDim.y +
-          threadIdx.x;
-    out[idx] = tile[threadIdx.x][threadIdx.y];
+
+    int xt = blockIdx.y * TILE_DIM + tx;
+    int yt = blockIdx.x * TILE_DIM + ty;
+    if(xt < N && yt < M) out[yt * N + xt] = tile[tx][ty];  // guarded store
 }
 
 namespace
@@ -116,10 +121,12 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     std::default_random_engine _engine{ std::random_device{}() * (rank + 1) * (tid + 1) };
     std::uniform_int_distribution<int> _dist{ 0, 1000 };
 
-    size_t size       = sizeof(int) * M * N;
-    int*   inp_matrix = new int[size];
-    int*   out_matrix = new int[size];
-    for(size_t i = 0; i < M * N; i++)
+    const size_t elems      = static_cast<size_t>(M) * static_cast<size_t>(N);
+    const size_t size       = elems * sizeof(int);
+    int*         inp_matrix = new int[elems];
+    int*         out_matrix = new int[elems];
+
+    for(size_t i = 0; i < elems; i++)
     {
         inp_matrix[i] = _dist(_engine);
         out_matrix[i] = 0;
@@ -149,7 +156,7 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     HIP_API_CALL(hipMemcpyAsync(out_matrix, out, size, hipMemcpyDeviceToHost, stream));
     double time =
         std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
-    float GB = (float) size * nitr * 2 / (1 << 30);
+    float GB = static_cast<float>(size) * nitr * 2 / (1 << 30);
 
     print_lock.lock();
     std::cout << "[" << rank << "][" << tid << "] Runtime of transpose is " << time
