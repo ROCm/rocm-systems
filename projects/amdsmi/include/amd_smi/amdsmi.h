@@ -842,7 +842,8 @@ typedef struct {
     char build_date[AMDSMI_MAX_STRING_LENGTH];
     char part_number[AMDSMI_MAX_STRING_LENGTH];
     char version[AMDSMI_MAX_STRING_LENGTH];
-    uint64_t reserved[68];
+    char boot_firmware[AMDSMI_MAX_STRING_LENGTH]; // UBL (Unified BootLoader) Version information
+    uint64_t reserved[36];
 } amdsmi_vbios_info_t;
 
 /**
@@ -2360,7 +2361,8 @@ typedef struct {
  *  @platform{guest_mvf} @platform{guest_windows}
  *
  *  @details This function initializes the library and the internal data structures,
- *  including those corresponding to sources of information that SMI provides.
+ *  including those corresponding to sources of information that SMI provides. 
+ *  Singleton Design, requires the same number of inits as shutdowns.
  *
  *  The @p init_flags decides which type of processor
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
@@ -2385,7 +2387,8 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags);
  *  @platform{guest_mvf} @platform{guest_windows}
  *
  *  @details This function shuts down the library and internal data structures and
- *  performs any necessary clean ups.
+ *  performs any necessary clean ups. Singleton Design, requires the same number
+ *  of inits as shutdowns.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -4874,7 +4877,8 @@ amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t s
  *
  *  @details A utility function which retrieves the AFIDs from the CPER record.
  *
- *  @param[in] cper_buffer a pointer to the buffer with one CPER record. The caller must make sure the whole CPER record is loaded into the buffer.
+ *  @param[in] cper_buffer a pointer to the buffer with one CPER record.
+ *  The caller must make sure the whole CPER record is loaded into the buffer.
  *
  *  @param[in] buf_size is the size of the cper_buffer.
  *

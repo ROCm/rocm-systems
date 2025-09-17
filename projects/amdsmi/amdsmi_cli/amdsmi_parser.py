@@ -771,7 +771,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Optional arguments help text
         asic_help = "All asic information"
         bus_help = "All bus information"
-        vbios_help = "All video bios information (if available)"
+        vbios_help = "All video bios/IFWI information (if available)"
         limit_help = "All limit metric values (i.e. power and thermal limits)"
         driver_help = "Displays driver version"
         vram_help = "All vram information"
@@ -813,7 +813,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         if self.helpers.is_amdgpu_initialized():
             static_parser.add_argument('-a', '--asic', action='store_true', required=False, help=asic_help)
             static_parser.add_argument('-b', '--bus', action='store_true', required=False, help=bus_help)
-            static_parser.add_argument('-V', '--vbios', action='store_true', required=False, help=vbios_help)
+            # Accept vbios args without displaying them
+            static_parser.add_argument('-V', '--vbios', dest='vbios', action='store_true', required=False, help=argparse.SUPPRESS)
+            static_parser.add_argument('-I', '--ifwi', dest='vbios', action='store_true', required=False, help=vbios_help)
             static_parser.add_argument('-d', '--driver', action='store_true', required=False, help=driver_help)
             static_parser.add_argument('-v', '--vram', action='store_true', required=False, help=vram_help)
             static_parser.add_argument('-c', '--cache', action='store_true', required=False, help=cache_help)

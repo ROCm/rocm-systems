@@ -187,18 +187,33 @@ GPU: 0
 ### Changed
 
 - **Changed `amd-smi static --vbios` to `amd-smi static --ifwi`**.  
-  - `amd-smi static --vbios` can still be used but will not show up in help output. Users should now use `amd-smi static --ifwi` instead.
-  - `amd-smi static --ifwi` output also includes the build number as a new displayed field:
+  - VBIOS naming is replaced with IFWI (Integrated Firmware Image) for improved clarity and consistency.
+  - Mi300+ series devices now use a new version format with enhanced build information.
+  - Legacy command `amd-smi static --vbios` remains functional for backward compatibility, but displays updated IFWI heading.
+  - The Python, C & Rust API for `amdsmi_get_gpu_vbios_version` will now have a new field called `boot_firmware` which will return the legacy vbios version number which is also known as the Unified BootLoader Version (UBL version)
 
-  ```console
+  ```shell
   $ amd-smi static --ifwi
   GPU: 0
-    IFWI:
-      NAME: AMD MI300X_HW_SRIOV_CVS_1VF
-      BUILD_DATE: 2025/03/11 17:15
-      PART_NUMBER: 113-M3000100-103
-      VERSION: 022.040.003.043.000001
-      BUILD_NUMBER: 00143181
+      IFWI:
+          NAME: XXXXXXXXXXXXXXXXXX
+          BUILD_DATE: 2020/10/29 13:30
+          PART_NUMBER: 113-XXXXXXXX-111
+          VERSION: 000.000.000.000.000000 (Legacy format)
+  ...
+  ```
+
+  **New format (Mi300+ series and IFWI systems):**
+
+  ```shell
+  $ amd-smi static --ifwi
+  GPU: 0
+      IFWI:
+          NAME: XXXXXXXXXXXXXXXXXX
+          BUILD_DATE: 2020/10/29 13:30
+          PART_NUMBER: 113-XXXXXXXX-111
+          VERSION: 00111111 (New format)
+  ...
   ```
 
 ### Removed

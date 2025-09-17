@@ -972,7 +972,8 @@ pub struct AmdsmiVbiosInfoT {
     pub build_date: [::std::os::raw::c_char; 256usize],
     pub part_number: [::std::os::raw::c_char; 256usize],
     pub version: [::std::os::raw::c_char; 256usize],
-    pub reserved: [u64; 68usize],
+    pub boot_firmware: [::std::os::raw::c_char; 256usize],
+    pub reserved: [u64; 36usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -986,8 +987,10 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiVbiosInfoT, part_number) - 512usize];
     ["Offset of field: AmdsmiVbiosInfoT::version"]
         [::std::mem::offset_of!(AmdsmiVbiosInfoT, version) - 768usize];
+    ["Offset of field: AmdsmiVbiosInfoT::boot_firmware"]
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, boot_firmware) - 1024usize];
     ["Offset of field: AmdsmiVbiosInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, reserved) - 1024usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, reserved) - 1280usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

@@ -1028,7 +1028,8 @@ struct_amdsmi_vbios_info_t._fields_ = [
     ('build_date', ctypes.c_char * 256),
     ('part_number', ctypes.c_char * 256),
     ('version', ctypes.c_char * 256),
-    ('reserved', ctypes.c_uint64 * 68),
+    ('boot_firmware', ctypes.c_char * 256),
+    ('reserved', ctypes.c_uint64 * 36),
 ]
 
 amdsmi_vbios_info_t = struct_amdsmi_vbios_info_t

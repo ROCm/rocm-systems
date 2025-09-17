@@ -647,7 +647,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_vbios_info
 
-Description:  Returns the static information for the VBIOS on the device.
+Description:  Returns the static information for the VBIOS/IFWI on the device.
 
 Input parameters:
 
@@ -657,10 +657,11 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`name` | vbios name
-`build_date` | vbios build date
-`part_number` | vbios part number
-`version` | vbios version string
+`name` | VBIOS/IFWI name
+`build_date` | VBIOS/IFWI build date
+`part_number` | VBIOS/IFWI part number
+`version` | VBIOS/IFWI version string
+`boot_firmware` | Unified BootLoader version if available; N/A otherwise
 
 Exceptions that can be thrown by `amdsmi_get_gpu_vbios_info` function:
 
@@ -682,6 +683,7 @@ try:
             print(vbios_info['build_date'])
             print(vbios_info['part_number'])
             print(vbios_info['version'])
+            print(vbios_info['boot_firmware'])
 except AmdSmiException as e:
     print(e)
 ```

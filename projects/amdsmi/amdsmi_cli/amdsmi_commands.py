@@ -583,10 +583,12 @@ class AMDSMICommands():
                     if isinstance(value, str):
                         if value.strip() == '':
                             vbios_info[key] = "N/A"
-                static_dict['vbios'] = vbios_info
+                static_dict['ifwi'] = vbios_info
+                # Remove boot_firmware since it's not used
+                del static_dict['ifwi']['boot_firmware']
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict['vbios'] = "N/A"
-                logging.debug("Failed to get vbios info for gpu %s | %s", gpu_id, e.get_error_info())
+                static_dict['ifwi'] = "N/A"
+                logging.debug("Failed to get vbios/ifwi info for gpu %s | %s", gpu_id, e.get_error_info())
         if 'limit' in current_platform_args:
             if args.limit:
                 # Power limits

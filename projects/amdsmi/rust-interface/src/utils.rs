@@ -156,7 +156,7 @@ impl AmdsmiBdfT {
 }
 
 // Implement the getters for the C string fields in AmdsmiVbiosInfoT
-impl_cstr_getters!(AmdsmiVbiosInfoT, name, build_date, part_number, version);
+impl_cstr_getters!(AmdsmiVbiosInfoT, name, build_date, part_number, version, boot_firmware);
 
 // Implement the getters for the C string fields in AmdsmiAsicInfoT
 impl_cstr_getters!(AmdsmiAsicInfoT, market_name, vendor_name, asic_serial);

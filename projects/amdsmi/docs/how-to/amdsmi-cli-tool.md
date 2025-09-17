@@ -159,7 +159,7 @@ Static Arguments:
   -h, --help               show this help message and exit
   -a, --asic               All asic information
   -b, --bus                All bus information
-  -V, --vbios              All video bios information (if available)
+  -I, --ifwi               All video bios\IFWI information (if available)
   -d, --driver             Displays driver version
   -v, --vram               All vram information
   -c, --cache              All cache information
@@ -913,7 +913,7 @@ GPU: 0
         MAX_PCIE_SPEED: 32 GT/s
         PCIE_INTERFACE_VERSION: Gen 5
         SLOT_TYPE: PCIE
-    VBIOS:
+    IFWI:
         NAME: N/A
         BUILD_DATE: N/A
         PART_NUMBER: N/A

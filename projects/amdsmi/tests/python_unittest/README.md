@@ -122,6 +122,7 @@ test_bdf_device_id (__main__.TestAmdSmiPythonInterface) ...
   vbios_info['build_date'] is: 2021/03/28 21:35
   vbios_info['version'] is: 020.001.000.060.000000
   vbios_info['name'] is: 113-MSITV395MH.132
+  vbios_info['boot_firmware'] is: 01234567
 
 ###Test amdsmi_get_gpu_device_uuid
 
@@ -474,6 +475,7 @@ test_vbios_info (__main__.TestAmdSmiPythonInterface) ...
   vbios_info['build_date'] is: 2021/03/28 21:35
   vbios_info['name'] is: 113-MSITV395MH.132
   vbios_info['version'] is: 020.001.000.060.000000
+  vbios_info['boot_firmware'] is: 01234567
 
 ok
 test_vendor_name (__main__.TestAmdSmiPythonInterface) ...
@@ -544,6 +546,7 @@ test_walkthrough (__main__.TestAmdSmiPythonInterface) ...
   vbios_info['build_date'] is: 2021/03/28 21:35
   vbios_info['name'] is: 113-MSITV395MH.132
   vbios_info['version'] is: 020.001.000.060.000000
+  vbios_info['boot_firmware'] is: 01234567
 
 
 

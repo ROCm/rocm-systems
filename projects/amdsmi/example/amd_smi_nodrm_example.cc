@@ -139,11 +139,11 @@ int main() {
             ret = amdsmi_get_gpu_vbios_info(processor_handles[j], &vbios_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_vbios_info:\n");
-            printf("\tVBios Name: %s\n", vbios_info.name);
-            printf("\tBuild Date: %s\n", vbios_info.build_date);
-            printf("\tPart Number: %s\n", vbios_info.part_number);
-            printf("\tVBios Version String: %s\n\n",
-                   vbios_info.version);
+            printf("\tVBIOS/IFWI Name: %s\n", vbios_info.name);
+            printf("\tVBIOS/IFWI Build Date: %s\n", vbios_info.build_date);
+            printf("\tVBIOS/IFWI Part Number: %s\n", vbios_info.part_number);
+            printf("\tVBIOS/IFWI Version String: %s\n\n", vbios_info.version);
+            printf("\tVBIOS/IFWI Boot Firmware: %s\n\n", vbios_info.boot_firmware);
 
             // Get engine usage info
             amdsmi_engine_usage_t engine_usage = {};
