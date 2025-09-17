@@ -48,7 +48,7 @@ echo "Starting attachment test (${OUTPUT_FORMAT} format)..."
 
 # Start the test application in the background
 echo "Launching test application: ${TEST_APP}"
-${TEST_APP} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} &
 APP_PID=$!
 
 # Wait a moment for the application to start
