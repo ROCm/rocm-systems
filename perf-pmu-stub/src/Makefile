@@ -1,13 +1,21 @@
 # Standard kernel module Makefile
 obj-m := pmu_stub.o
-pmu_stub-y := pmu_main.o pmu_events.o
+
+# Include PMU stub and AQL C sources
+pmu_stub-y := pmu_main.o pmu_events.o \
+              aql_c/aql_cmd_buffer.o \
+              aql_c/aql_packet.o \
+              aql_c/aql_arch_detect.o \
+              aql_c/aql_gfx9_ops.o \
+              aql_c/aql_gfx12_ops.o \
+              aql_c/aql_pmc_interface.o
 
 # Kernel version and build directory
 KVERSION := $(shell uname -r)
 KERNELDIR ?= /lib/modules/$(KVERSION)/build
 
 # Compiler flags
-ccflags-y := -DDEBUG -g -Wall
+ccflags-y := -DDEBUG -g -Wall -D__KERNEL__ -I$(src)/aql_c
 
 # Default build target
 all:
