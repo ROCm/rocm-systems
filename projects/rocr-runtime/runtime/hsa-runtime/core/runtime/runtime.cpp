@@ -3268,7 +3268,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
 
   if (flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER) {
     size_t requested = size + alignment - rocr::os::PageSize();
-    auto mem = rocr::os::ReserveMemory(addr, requested);
+    auto mem = rocr::os::ReserveMemory(addr, requested, alignment, rocr::os::MEM_PROT_RW);
     if (mem == nullptr)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
