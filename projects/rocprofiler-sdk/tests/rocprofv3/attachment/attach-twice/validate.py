@@ -24,9 +24,6 @@
 
 import sys
 import pytest
-import csv
-import json
-import os
 
 
 def test_attachment_kernel_trace(kernel_input_data):
@@ -145,83 +142,5 @@ def test_agent_info(agent_info_input_data):
 
 
 if __name__ == "__main__":
-    # For running directly without pytest
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Validate attachment test output")
-
-    # Support both individual inputs and single JSON input
-    parser.add_argument("--json-input", help="Single JSON file containing all trace data")
-    parser.add_argument("--kernel-input", help="Kernel trace CSV/JSON file")
-    parser.add_argument("--memory-copy-input", help="Memory copy trace CSV/JSON file")
-    parser.add_argument("--hsa-input", help="HSA API trace CSV/JSON file")
-    parser.add_argument("--agent-input", help="Agent info CSV/JSON file")
-
-    args = parser.parse_args()
-
-    # Validate arguments
-    if args.json_input:
-        # Use the single JSON file for all inputs
-        if not os.path.exists(args.json_input):
-            print(f"Error: JSON input file {args.json_input} does not exist")
-            sys.exit(1)
-        args.kernel_input = args.json_input
-        args.memory_copy_input = args.json_input
-        args.hsa_input = args.json_input
-        args.agent_input = args.json_input
-    elif not all(
-        [args.kernel_input, args.memory_copy_input, args.hsa_input, args.agent_input]
-    ):
-        print(
-            "Error: Either --json-input or all four individual inputs (--kernel-input, --memory-copy-input, --hsa-input, --agent-input) are required"
-        )
-        sys.exit(1)
-
-    # Load data files (CSV or JSON)
-    def load_data_file(filepath, section_name):
-        if not os.path.exists(filepath):
-            print(f"Error: File {filepath} does not exist")
-            return []
-
-        if filepath.lower().endswith(".json"):
-            return load_json_data(filepath, section_name)
-        else:
-            return load_csv_data(filepath)
-
-    def load_csv_data(filepath):
-        with open(filepath, "r") as f:
-            return list(csv.DictReader(f))
-
-    def load_json_data(filepath, section_name):
-        from conftest import get_json_data
-
-        return get_json_data(filepath, section_name)
-
-    kernel_data = load_data_file(args.kernel_input, "kernel_dispatch")
-    memory_copy_data = load_data_file(args.memory_copy_input, "memory_copy")
-    hsa_data = load_data_file(args.hsa_input, "hsa_api")
-    agent_data = load_data_file(args.agent_input, "agent_info")
-
-    # Run tests
-    try:
-        test_attachment_kernel_trace(kernel_data)
-        print("[PASS] Kernel trace validation passed")
-
-        test_attachment_memory_copy_trace(memory_copy_data)
-        print("[PASS] Memory copy trace validation passed")
-
-        test_attachment_hsa_api_trace(hsa_data)
-        print("[PASS] HSA API trace validation passed")
-
-        test_agent_info(agent_data)
-        print("[PASS] Agent info validation passed")
-
-        print("\nAll attachment tests passed!")
-        sys.exit(0)
-
-    except AssertionError as e:
-        print(f"[FAIL] Validation failed: {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[ERROR] Unexpected error: {e}")
-        sys.exit(1)
+    exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
+    sys.exit(exit_code)

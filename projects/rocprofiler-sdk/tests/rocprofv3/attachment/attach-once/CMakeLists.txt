@@ -50,19 +50,33 @@ set_tests_properties(
 
 # Validate the output from the attached profiling
 add_test(
-    NAME rocprofv3-test-attachment-attach-once-validate
+    NAME rocprofv3-test-attachment-attach-once-csv-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --kernel-input
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_kernel_trace.csv --hsa-input
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_hsa_api_trace.csv
         --memory-copy-input
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
-        --agent-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-        --json-input
+        --agent-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv)
+
+set_tests_properties(
+    rocprofv3-test-attachment-attach-once-csv-validate
+    PROPERTIES TIMEOUT 30 LABELS "integration-tests" DEPENDS
+               rocprofv3-test-attachment-attach-once-execute FIXTURES_REQUIRED
+               rocprofv3-test-attachment-attach-once)
+
+add_test(
+    NAME rocprofv3-test-attachment-attach-once-json-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --kernel-input
+        ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json --hsa-input
+        ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+        --memory-copy-input
+        ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json --agent-input
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json)
 
 set_tests_properties(
-    rocprofv3-test-attachment-attach-once-validate
+    rocprofv3-test-attachment-attach-once-json-validate
     PROPERTIES TIMEOUT 30 LABELS "integration-tests" DEPENDS
                rocprofv3-test-attachment-attach-once-execute FIXTURES_REQUIRED
                rocprofv3-test-attachment-attach-once)
