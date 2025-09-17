@@ -1303,20 +1303,20 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_agent_fw_info_t data)
 {
-    ROCP_SDK_SAVE_DATA_FIELD(size);  
-    ROCP_SDK_SAVE_DATA_FIELD(mec2_fw_version);      
-    ROCP_SDK_SAVE_DATA_FIELD(mec_fw_version);       
-    ROCP_SDK_SAVE_DATA_FIELD(rlc_fw_version);       
-    ROCP_SDK_SAVE_DATA_FIELD(rlc_srlc_fw_version);  
-    ROCP_SDK_SAVE_DATA_FIELD(rlc_srlg_fw_version);  
-    ROCP_SDK_SAVE_DATA_FIELD(rlc_srls_fw_version);  
-    ROCP_SDK_SAVE_DATA_FIELD(sdma2_fw_version);     
-    ROCP_SDK_SAVE_DATA_FIELD(sdma_fw_version);      
-    ROCP_SDK_SAVE_DATA_FIELD(smc_fw_version);       
-    ROCP_SDK_SAVE_DATA_FIELD(sos_fw_version);       
-    ROCP_SDK_SAVE_DATA_FIELD(ta_ras_fw_version);    
-    ROCP_SDK_SAVE_DATA_FIELD(ta_xgmi_fw_version);   
-    ROCP_SDK_SAVE_DATA_FIELD(vcn_fw_version);       
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(mec2_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(mec_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_srlc_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_srlg_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_srls_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(sdma2_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(sdma_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(smc_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(sos_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(ta_ras_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(ta_xgmi_fw_version);
+    ROCP_SDK_SAVE_DATA_FIELD(vcn_fw_version);
 }
 
 template <typename ArchiveT, typename EnumT, typename ValueT>

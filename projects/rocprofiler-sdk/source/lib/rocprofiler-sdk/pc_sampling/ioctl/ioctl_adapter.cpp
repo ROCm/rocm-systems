@@ -461,7 +461,7 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
 
 rocprofiler_status_t
 check_firmware_compatibility(const rocprofiler_agent_t*       agent,
-                                        rocprofiler_pc_sampling_method_t method)
+                             rocprofiler_pc_sampling_method_t method)
 {
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
@@ -553,7 +553,8 @@ ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& r
             // This should never happened, unless the KFD is broken.
             continue;
         }
-        if(check_firmware_compatibility(agent, get_rocp_pcs_method_from_kfd(ioctl_cfg.method)) == ROCPROFILER_STATUS_SUCCESS)
+        if(check_firmware_compatibility(agent, get_rocp_pcs_method_from_kfd(ioctl_cfg.method)) ==
+           ROCPROFILER_STATUS_SUCCESS)
             rocp_configs.emplace_back(rocp_cfg);
     }
 
@@ -615,9 +616,9 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint64_t                         interval,
                  uint32_t*                        ioctl_pcs_id)
 {
-if (auto status = check_firmware_compatibility(agent, method);
-    status != ROCPROFILER_STATUS_SUCCESS)
-    return status ;
+    auto status = check_firmware_compatibility(agent, method);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
     pcs_ioctl_version_t pcs_ioctl_version = 0;
     auto status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;

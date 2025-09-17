@@ -126,7 +126,7 @@ ROCPROFILER_CXX_CODE(
  */
 typedef struct rocprofiler_agent_fw_info_v0_t
 {
-    uint64_t size;  ///< size of this struct
+    uint64_t size;                 ///< size of this struct
     uint32_t mec2_fw_version;      ///< Firmware version for MEC2 engine
     uint32_t mec_fw_version;       ///< Firmware version for MEC engine
     uint32_t rlc_fw_version;       ///< Firmware version for RLC engine
@@ -241,8 +241,9 @@ typedef struct rocprofiler_agent_v0_t
     int32_t                               logical_node_type_id;
     rocprofiler_agent_runtime_visiblity_t runtime_visibility;
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
-    rocprofiler_agent_fw_info_t firmware_info;  ///< GPU only. Detailed firmware version information for the agent's microcontrollers and engines.
-    
+    rocprofiler_agent_fw_info_t firmware_info;  ///< GPU only. Detailed firmware version information
+                                                ///< for the agent's microcontrollers and engines.
+
     /// @var fw_version
     /// @brief GPU only. Identifier (rev) of the GPU uEngine or Firmware, may be 0
     ///
