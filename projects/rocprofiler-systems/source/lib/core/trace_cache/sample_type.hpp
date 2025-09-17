@@ -130,8 +130,8 @@ struct memory_allocate_sample : storage_parsed_type_base
 struct ompt_region_sample : storage_parsed_type_base
 {
     ompt_region_sample() = default;
-    ompt_region_sample(std::string _name, uint64_t _thread_id,
-                       int32_t _operation, uint64_t _correlation_id_internal,
+    ompt_region_sample(std::string _name, uint64_t _thread_id, int32_t _operation,
+                       uint64_t _correlation_id_internal,
                        uint64_t _correlation_id_ancestor, uint64_t _start_timestamp,
                        uint64_t _end_timestamp, std::string _args_str,
                        std::string _call_stack)
@@ -148,8 +148,8 @@ struct ompt_region_sample : storage_parsed_type_base
 
     // Identification fields
     std::string name;
-    uint64_t thread_id;
-    int32_t  operation;
+    uint64_t    thread_id;
+    int32_t     operation;
 
     // Correlation fields
     uint64_t correlation_id_internal;
@@ -269,12 +269,12 @@ enum class entry_type : uint32_t
     kernel_dispatch       = 0x0003,
     memory_copy           = 0x0004,
 #if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
-    memory_alloc          = 0x0005,
-    ompt                  = 0x0006,
+    memory_alloc = 0x0005,
+    ompt         = 0x0006,
 #endif
-    amd_smi_sample        = 0x0007,
-    cpu_freq_sample       = 0x0008,
-    fragmented_space      = 0xFFFF
+    amd_smi_sample   = 0x0007,
+    cpu_freq_sample  = 0x0008,
+    fragmented_space = 0xFFFF
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

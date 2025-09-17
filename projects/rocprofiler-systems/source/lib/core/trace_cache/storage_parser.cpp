@@ -163,17 +163,15 @@ storage_parser::consume_storage()
             case entry_type::ompt:
             {
                 ompt_region_sample _ompt_region_sample;
-                parse_data(
-                    sample.data(), _ompt_region_sample.name,
-                    _ompt_region_sample.thread_id, _ompt_region_sample.operation,
-                    _ompt_region_sample.correlation_id_internal,
-                    _ompt_region_sample.correlation_id_ancestor,
-                    _ompt_region_sample.start_timestamp,
-                    _ompt_region_sample.end_timestamp,
-                    _ompt_region_sample.args_str,
-                    _ompt_region_sample.call_stack);
-                
-                    invoke_callbacks(header.type, _ompt_region_sample);
+                parse_data(sample.data(), _ompt_region_sample.name,
+                           _ompt_region_sample.thread_id, _ompt_region_sample.operation,
+                           _ompt_region_sample.correlation_id_internal,
+                           _ompt_region_sample.correlation_id_ancestor,
+                           _ompt_region_sample.start_timestamp,
+                           _ompt_region_sample.end_timestamp,
+                           _ompt_region_sample.args_str, _ompt_region_sample.call_stack);
+
+                invoke_callbacks(header.type, _ompt_region_sample);
                 break;
             }
 #endif

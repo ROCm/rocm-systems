@@ -259,7 +259,7 @@ postprocessing_callback
 rocpd_post_processing::get_ompt_callback() const
 {
     [[maybe_unused]] auto parse_args = []([[maybe_unused]] const std::string& arg_str) {
-#if ROCPROFSYS_USE_ROCM > 0
+#    if ROCPROFSYS_USE_ROCM > 0
         rocprofiler_sdk::function_args_t args;
         const std::string                delimiter = ";;";
 
@@ -294,12 +294,12 @@ rocpd_post_processing::get_ompt_callback() const
         }
 
         return args;
-#endif
+#    endif
     };
 
-        return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
-#if ROCPROFSYS_USE_ROCM > 0
-        auto  _ors            = static_cast<const struct ompt_region_sample&>(parsed);
+    return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
+#    if ROCPROFSYS_USE_ROCM > 0
+        auto  _ors           = static_cast<const struct ompt_region_sample&>(parsed);
         auto& data_processor = get_data_processor();
         auto& n_info         = node_info::get_instance();
         auto  process        = m_metadata.get_process_info();
@@ -310,7 +310,7 @@ rocpd_post_processing::get_ompt_callback() const
         auto _name                 = _ors.name;
         auto name_primary_key      = data_processor.insert_string(_name.c_str());
 
-        auto category_primary_key = 
+        auto category_primary_key =
             data_processor.insert_string(trait::name<category::rocm_ompt_api>::value);
 
         size_t stack_id        = _ors.correlation_id_internal;
@@ -332,7 +332,7 @@ rocpd_post_processing::get_ompt_callback() const
         data_processor.insert_region(n_info.id, process.pid, thread_primary_key,
                                      _ors.start_timestamp, _ors.end_timestamp,
                                      name_primary_key, event_primary_key);
-#endif
+#    endif
     };
 }
 

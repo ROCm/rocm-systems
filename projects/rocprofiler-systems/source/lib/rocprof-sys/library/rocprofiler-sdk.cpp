@@ -958,13 +958,13 @@ get_kernel_dispatch_timestamps()
 // Wrapper around rocprofiler_iterate_callback_tracing_kind_operation_args
 template <typename ArgsType>
 void
-ompt_get_cb_args(const rocprofiler_callback_tracing_record_t& record,
-                           rocprofiler_callback_tracing_operation_args_cb_t callback,
-                           ArgsType&                                    args)
+ompt_get_cb_args(const rocprofiler_callback_tracing_record_t&     record,
+                 rocprofiler_callback_tracing_operation_args_cb_t callback,
+                 ArgsType&                                        args)
 {
     rocprofiler_iterate_callback_tracing_kind_operation_args(
-        record, callback,
-        (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ? 1 : 2, &args);
+        record, callback, (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ? 1 : 2,
+        &args);
 }
 
 auto&
@@ -1105,7 +1105,7 @@ ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
     const void* codeptr_ra_address = payload_data->args.parallel_begin.codeptr_ra;
 
     auto args = function_args_t{};
-    ompt_get_cb_args(record, iterate_args_callback ,args);
+    ompt_get_cb_args(record, iterate_args_callback, args);
     get_ompt_parallel_cb_storage().emplace(
         reinterpret_cast<uintptr_t>(codeptr_ra_address),
         rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
@@ -1169,7 +1169,7 @@ ompt_cache_instant_event(
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
     auto args = function_args_t{};
-    ompt_get_cb_args(record, iterate_args_callback ,args);
+    ompt_get_cb_args(record, iterate_args_callback, args);
     auto call_stack = get_backtrace(_bt_data);
 
     cache_category<category::rocm_ompt_api>();
