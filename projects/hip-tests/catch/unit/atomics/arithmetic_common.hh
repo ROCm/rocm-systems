@@ -116,21 +116,11 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
   if constexpr (operation == AtomicOperation::kAdd) {
     return atomicAdd(mem, val);
   } else if constexpr (operation == AtomicOperation::kAddSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicAdd_system(mem, val);
-    } else {
-      return atomicAdd_system(mem, val);
-    }
+    return atomicAdd_system(mem, val);
   } else if constexpr (operation == AtomicOperation::kSub) {
     return atomicSub(mem, val);
   } else if constexpr (operation == AtomicOperation::kSubSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicSub_system(mem, val);
-    } else {
-      return atomicSub_system(mem, val);
-    }
+    return atomicSub_system(mem, val);
   } else if constexpr (operation == AtomicOperation::kInc) {
     return atomicInc(mem, val);
   } else if constexpr (operation == AtomicOperation::kDec) {
@@ -142,14 +132,9 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
   } else if constexpr (operation == AtomicOperation::kCASAdd) {
     return CASAtomicAdd(mem, val);
   } else if constexpr (operation == AtomicOperation::kCASAddSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return CASAtomicAddSystem(mem, val);
-    } else {
-      return CASAtomicAddSystem(mem, val);
-    }
+    return CASAtomicAddSystem(mem, val);
   } else if constexpr (operation == AtomicOperation::kBuiltinAdd) {
-    if (std::is_floating_point_v<TestType> || allocType == LinearAllocs::hipHostMalloc) {
+    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc) {
       HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
         return __hip_atomic_fetch_add(mem, val, __ATOMIC_RELAXED, memory_scope);
       }

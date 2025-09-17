@@ -67,21 +67,11 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
   if constexpr (operation == AtomicOperation::kMin) {
     return atomicMin(mem, val);
   } else if constexpr (operation == AtomicOperation::kMinSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicMin_system(mem, val);
-    } else {
-      return atomicMin_system(mem, val);
-    }
+    return atomicMin_system(mem, val);
   } else if constexpr (operation == AtomicOperation::kMax) {
     return atomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kMaxSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicMax_system(mem, val);
-    } else {
-      return atomicMax_system(mem, val);
-    }
+    return atomicMax_system(mem, val);
   } else if constexpr (operation == AtomicOperation::kUnsafeMin) {
     return unsafeAtomicMin(mem, val);
   } else if constexpr (operation == AtomicOperation::kSafeMin) {
@@ -91,14 +81,14 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
   } else if constexpr (operation == AtomicOperation::kSafeMax) {
     return safeAtomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kBuiltinMin) {
-    if (std::is_floating_point_v<TestType> || allocType == LinearAllocs::hipHostMalloc)
+    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
       HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
       return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
     } else {
       return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
     }
   } else if constexpr (operation == AtomicOperation::kBuiltinMax) {
-    if (std::is_floating_point_v<TestType> || allocType == LinearAllocs::hipHostMalloc)
+    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
       HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
       return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
     } else {

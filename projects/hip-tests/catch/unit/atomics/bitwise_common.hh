@@ -56,36 +56,21 @@ __host__ __device__ TestType GetTestValue() {
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllocs allocType) {
+__device__ TestType PerformAtomicOperation(TestType* const mem) {
   const auto mask = kMask;
 
   if constexpr (operation == AtomicOperation::kAnd) {
     return atomicAnd(mem, mask);
   } else if constexpr (operation == AtomicOperation::kAndSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicAnd_system(mem, mask);
-    } else {
-      return atomicAnd_system(mem, mask);
-    }
+    return atomicAnd_system(mem, mask);
   } else if constexpr (operation == AtomicOperation::kOr) {
     return atomicOr(mem, mask);
   } else if constexpr (operation == AtomicOperation::kOrSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicOr_system(mem, mask);
-    } else {
-      return atomicOr_system(mem, mask);
-    }
+    return atomicOr_system(mem, mask);
   } else if constexpr (operation == AtomicOperation::kXor) {
     return atomicXor(mem, mask);
   } else if constexpr (operation == AtomicOperation::kXorSystem) {
-    if (allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicXor_system(mem, mask);
-    } else {
-      return atomicXor_system(mem, mask);
-    }
+    return atomicXor_system(mem, mask);
   } else if constexpr (operation == AtomicOperation::kBuiltinAnd) {
     return __hip_atomic_fetch_and(mem, mask, __ATOMIC_RELAXED, memory_scope);
   } else if constexpr (operation == AtomicOperation::kBuiltinOr) {
@@ -97,8 +82,7 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
-    const LinearAllocs allocType) {
+__global__ void TestKernel(TestType* const global_mem, TestType* const old_vals) {
   __shared__ TestType shared_mem;
 
   const auto tid = cg::this_grid().thread_rank();
@@ -110,7 +94,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
     __syncthreads();
   }
 
-  old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(mem, allocType);
+  old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(mem);
 
   if constexpr (use_shared_mem) {
     __syncthreads();
@@ -136,8 +120,7 @@ __device__ void GenerateMemoryTraffic(uint8_t* const begin_addr, uint8_t* const 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
 __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
-                           const unsigned int width, const unsigned pitch,
-                           const LinearAllocs allocType) {
+                           const unsigned int width, const unsigned pitch) {
   extern __shared__ uint8_t shared_mem[];
 
   const auto tid = cg::this_grid().thread_rank();
@@ -158,7 +141,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
 
   if (tid < n) {
     old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(
-        PitchedOffset(mem, pitch, tid % width), allocType);
+        PitchedOffset(mem, pitch, tid % width));
   } else {
     uint8_t* const begin_addr = reinterpret_cast<uint8_t*>(atomic_addr + 1);
     uint8_t* const end_addr = reinterpret_cast<uint8_t*>(atomic_addr) + pitch;
@@ -249,11 +232,10 @@ void LaunchKernel(const TestParams& p, hipStream_t stream, TestType* const mem_p
   const auto shared_mem_size = use_shared_mem ? p.width * p.pitch : 0u;
   if (p.width == 1 && p.pitch == sizeof(TestType))
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
-        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.alloc_type);
+        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals);
   else
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
-        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals,
-            p.width, p.pitch, p.alloc_type);
+        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.width, p.pitch);
 }
 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,

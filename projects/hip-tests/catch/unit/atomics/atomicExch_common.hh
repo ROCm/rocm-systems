@@ -36,9 +36,7 @@ __device__ T perform_atomic_exch(T* address, T val) {
   if constexpr (scope == AtomicScopes::device) {
     return atomicExch(address, val);
   } else if (scope == AtomicScopes::system) {
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return atomicExch_system(address, val);
-    }
+    return atomicExch_system(address, val);
   } else if (scope == AtomicScopes::builtin) {
     return __hip_atomic_exchange(address, val, __ATOMIC_RELAXED, memory_scope);
   }
