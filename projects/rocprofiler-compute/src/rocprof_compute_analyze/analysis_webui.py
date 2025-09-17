@@ -153,7 +153,7 @@ class webui_analysis(OmniAnalyze_Base):
             console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
             base_data[base_run].filter_kernel_ids = (
-                [int(k) for k in kernel_filter] if kernel_filter else []
+                [str(k) for k in kernel_filter] if kernel_filter else []
             )
             base_data[base_run].filter_gpu_ids = (
                 [int(g) for g in gcd_filter] if gcd_filter else []
