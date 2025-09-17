@@ -51,6 +51,8 @@ message(STATUS "ROCm root inferred from compiler: ${ROCM_ROOT_DIR}")
 
 # Candidate lib directories for libomptarget across ROCm layouts
 set(_LLVM_LIB_HINTS
+    "${ROCmVersion_DIR}/llvm/lib"
+    "${ROCmVersion_DIR}/lib"
     "${ROCM_ROOT_DIR}/lib"
     "${ROCM_ROOT_DIR}/llvm/lib"
     "$ENV{ROCM_PATH}/llvm/lib"
@@ -69,7 +71,9 @@ endif()
 # Use the directory that actually contains the library we found
 get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib}")
+set(_COMMON_RPATH
+    "${_rocm_llvm_lib};${_rocm_clang_lib};${ROCmVersion_DIR}/llvm/lib;$ORIGIN"
+)
 list(REMOVE_DUPLICATES _COMMON_RPATH)
 
 message(STATUS "libomptarget found at: ${LIBOMPTARGET_SO}")
@@ -106,9 +110,11 @@ foreach(tgt openmp-target-lib openmp-target)
     target_link_options(
         ${tgt}
         PUBLIC
+            "-Wl,--enable-new-dtags"
             "-L${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_clang_lib}"
+            "-Wl,-rpath,'$ORIGIN'"
     )
 endforeach()
 
