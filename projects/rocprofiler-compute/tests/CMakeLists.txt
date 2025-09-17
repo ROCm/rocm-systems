@@ -1,5 +1,5 @@
 set(CMAKE_HIP_COMPILER
-    "amdclang++"
+    "/opt/rocm/llvm/bin/amdclang++"
     CACHE STRING "desired c++ compiler" FORCE)
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
@@ -36,3 +36,41 @@ set_source_files_properties(${OCCUPANCY} PROPERTIES LANGUAGE HIP)
 add_executable(occupancy ${OCCUPANCY})
 set_target_properties(occupancy PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                                            ${CMAKE_SOURCE_DIR}/tests)
+
+
+message(STATUS "GPU_NAME: ${GPU_NAME}")
+
+if(KOKKOS_ARCH)
+    message(STATUS "Using KOKKOS_ARCH: ${GPU_NAME}. Building mock_kokkos test.")
+    # set(CMAKE_HIP_ARCHITECTURES ${GPU_NAME})
+    set(CMAKE_HIP_ARCHITECTURES ${GPU_NAME} CACHE STRING "HIP GPU architecture" FORCE)
+    set(KOKKOS_BUILD_DIR "${CMAKE_SOURCE_DIR}/tests/kokkos-build" CACHE PATH "Kokkos build dir" FORCE)
+    set(Kokkos_DIR "${KOKKOS_BUILD_DIR}/lib/cmake/Kokkos")
+    find_package(Kokkos REQUIRED)
+
+    message(STATUS "Using KOKKOS_BUILD_DIR: ${KOKKOS_BUILD_DIR}. Building mock_kokkos test.")
+    message(STATUS "Using Kokkos_DIR: ${Kokkos_DIR}. Building mock_kokkos test.")
+    message(STATUS "Found Kokkos: ${Kokkos_DIR}")
+
+    add_subdirectory(
+        ${CMAKE_SOURCE_DIR}/sample/kokkos_mock_app
+        ${CMAKE_BINARY_DIR}/kokkos_mock_app_build
+
+        )
+
+    
+    # set(Kokkos_DIR "${CMAKE_BINARY_DIR}/kokkos-build/lib/cmake/Kokkos")
+    # find_package(Kokkos REQUIRED)
+
+    # set(MOCK_KOKKOS ../sample/mock_kokkos_minimal.cpp)
+    # set_source_files_properties(${MOCK_KOKKOS} PROPERTIES LANGUAGE HIP)
+    # add_executable(mock_kokkos ${MOCK_KOKKOS})
+    # target_link_libraries(mock_kokkos PRIVATE Kokkos::kokkos)
+    # set_target_properties(mock_kokkos PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+    #                                         ${CMAKE_SOURCE_DIR}/tests)
+    message(STATUS "Built mock_kokkos test.")
+
+else()
+    message(ERROR
+            "KOKKOS_ARCH not set. Skipping mock_kokkos test build.")
+endif()

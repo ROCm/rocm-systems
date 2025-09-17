@@ -1811,11 +1811,11 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     kokkos_app_dir = str(
         Path(__file__).parent.parent
         / "build"
-        / "kokkos-miniapps"
-        / "lulesh-2.0"
-        / "kokkos-no-uvm"
+        / "kokkos_mock_app_build"
     )
-    kokkos_app = kokkos_app_dir + "/lulesh.kk"
+    num_kernels = 1
+    kokkos_app = kokkos_app_dir + "/mock_kokkos_minimal"
+    print('*'*80)
     config["app_kokkos"] = [kokkos_app]
     if not os.path.exists(kokkos_app):
         print("Kokkos app not found at {}, skipping test".format(kokkos_app))
@@ -1859,6 +1859,10 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         OTHER_CSV_FILES + KOKKOS_TRACE_FILES + MARKER_TRACE_FILES
     )
 
+    print('='*20)
+    print(file_dict.keys())
+    print('='*20)
+    
     for f in KOKKOS_TRACE_FILES:
         df = pd.read_csv(os.path.join(workload_dir, f))
         if df.empty:
