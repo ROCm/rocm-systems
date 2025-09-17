@@ -711,16 +711,11 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
             "[hipGraph] Using batched submission for straight-line %zu kernels",
             straightLineSequence_.size());
     status = RunStraightLineBatchOptimized(launch_stream);
-  } else if (false && isParallelStraightLineKernels_  &&
+  } else if (isParallelStraightLineKernels_  &&
              instantiateDeviceId_ == launch_stream->DeviceId()) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] Using parallel batched submission for %zu chains", parallelChains_.size());
     status = RunParallelStraightLineBatchOptimized(launch_stream);
-  } else if (false && isMixedWithBatching_ && max_streams_ == 1 &&
-             instantiateDeviceId_ == launch_stream->DeviceId()) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Using mixed batched submission for kernels"); 
-    status = RunMixedBatchOptimized(launch_stream);
   } else if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       // If the graph has kernels that does device side allocation,  during packet capture, heap is
@@ -1008,13 +1003,6 @@ void GraphExec::DetectGraphTopology() {
               parallelChains_.size(), topoOrder_.size());
     }
   }
-  if (IsMixedWithBatchingOpportunities()) {
-    isMixedWithBatching_ = true;
-    BuildMixedBatches();
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Detected mixed topology with %zu batched kernel sequences",
-            mixedBatches_.size());
-  }
 }
 
 // ================================================================================================
@@ -1059,152 +1047,5 @@ hipError_t GraphExec::RunParallelStraightLineBatchOptimized(hip::Stream* stream)
   }
   return hipSuccess;
 }
-
 // ================================================================================================
-bool GraphExec::IsMixedWithBatchingOpportunities() const {
-  if (topoOrder_.empty()) return false;
-  
-  bool hasKernels = false;
-  bool hasNonKernels = false;
-  
-  for (const auto& node : topoOrder_) {
-    if (node->GetType() == hipGraphNodeTypeKernel) {
-      hasKernels = true;
-    } else {
-      hasNonKernels = true;
-    }
-  }
-
-  if (!hasKernels || !hasNonKernels) return false;
-  
-  // look for consecutive kernel sequences >= 2
-  int consecutiveKernels = 0;
-  bool foundBatchableSequence = false;
-  
-  for (const auto& node : topoOrder_) {
-    if (node->GetType() == hipGraphNodeTypeKernel) {
-      consecutiveKernels++;
-      if (consecutiveKernels >= 2) {
-        foundBatchableSequence = true;
-      }
-    } else {
-      consecutiveKernels = 0;
-    }
-  }
-  
-  return foundBatchableSequence;
-}
-
-// ================================================================================================
-void GraphExec::BuildMixedBatches() {
-  mixedBatches_.clear();
-  mixedBatchPackets_.clear();
-  mixedBatchKernelNames_.clear();
-  
-  std::vector<GraphKernelNode*> currentBatch;
-  std::vector<uint8_t*> currentBatchPackets;
-  std::vector<std::string> currentBatchKernelNames;
-  
-  for (const auto& node : topoOrder_) {
-    if (node->GetType() == hipGraphNodeTypeKernel) {
-      auto* kernelNode = static_cast<GraphKernelNode*>(node);
-      currentBatch.push_back(kernelNode);
-      
-      if (kernelNode->GraphCaptureEnabled()) {
-        std::vector<uint8_t*>& gpuPackets = kernelNode->GetAqlPackets();
-        const std::string& kernelName = kernelNode->GetKernelName();
-        
-        currentBatchPackets.insert(currentBatchPackets.end(), gpuPackets.begin(), gpuPackets.end());
-        for (size_t i = 0; i < gpuPackets.size(); ++i) {
-          currentBatchKernelNames.push_back(kernelName);
-        }
-      }
-    } else {
-      if (currentBatch.size() >= 2) {
-        mixedBatches_.push_back(std::move(currentBatch));
-        mixedBatchPackets_.push_back(std::move(currentBatchPackets));
-        mixedBatchKernelNames_.push_back(std::move(currentBatchKernelNames));
-      }
-      
-      currentBatch.clear();
-      currentBatchPackets.clear();
-      currentBatchKernelNames.clear();
-    }
-  }
-  
-  if (currentBatch.size() >= 2) {
-    mixedBatches_.push_back(std::move(currentBatch));
-    mixedBatchPackets_.push_back(std::move(currentBatchPackets));
-    mixedBatchKernelNames_.push_back(std::move(currentBatchKernelNames));
-  }
-
-  for (size_t i = 0; i < mixedBatches_.size(); ++i) {
-    for (auto* kernelNode : mixedBatches_[i]) {
-      kernelToBatch_[kernelNode] = i;
-    }
-  }
-}
-// ================================================================================================
-hipError_t GraphExec::RunMixedBatchOptimized(hip::Stream* stream) {
-
-  //std::unordered_map<GraphKernelNode*, size_t> kernelToBatch;
-  
-  hipError_t status = hipSuccess;
-  size_t currentBatchIndex = SIZE_MAX;
-  std::vector<bool> batchSubmitted(mixedBatches_.size(), false);
-
-  // If the graph has kernels that does device side allocation,  during packet capture, heap is
-  // allocated because heap pointer has to be added to the AQL packet, and initialized during
-  // graph launch.
-  amd::AccumulateCommand* accumulate = nullptr;
-  bool initialized = false;
-  if (!initialized && HasHiddenHeap()) {
-    stream->vdev()->HiddenHeapInit();
-    initialized = true;
-  }
-  for (const auto& node : topoOrder_) {
-    if (node->GetType() == hipGraphNodeTypeKernel) {
-      auto* kernelNode = static_cast<GraphKernelNode*>(node);
-      // Check if this kernel is part of a batch
-      auto batchIt = kernelToBatch_.find(kernelNode);
-      if (batchIt != kernelToBatch_.end()) {
-        size_t batchIndex = batchIt->second;
-        if (!batchSubmitted[batchIndex]) {
-          if (batchIndex < mixedBatchPackets_.size() && !mixedBatchPackets_[batchIndex].empty()) {
-            accumulate =
-                new amd::AccumulateCommand(*stream, mixedBatchPackets_[batchIndex],
-                                           mixedBatchKernelNames_[batchIndex], {}, nullptr);
-            accumulate->enqueue();
-            accumulate->release();
-          }
-        }
-        batchSubmitted[batchIndex] = true;
-        // Skip individual execution since it's handled by the batch
-        continue;
-      } else {  
-        accumulate = new amd::AccumulateCommand(*stream, {}, {}, {}, nullptr);
-        // Non-batched kernel - execute individually
-        if (node->GraphCaptureEnabled()) {
-          if (node->GetEnabled()) {
-            std::vector<uint8_t*>& gpuPackets = node->GetAqlPackets();
-            for (auto& packet : gpuPackets) {
-              stream->vdev()->dispatchAqlPacket(packet, node->GetKernelName(), accumulate);
-            }
-          }
-          accumulate->enqueue();
-          accumulate->release();
-        }
-      }
-    } else {
-      node->SetStream(stream);
-      status = node->CreateCommand(node->GetQueue());
-      if (status != hipSuccess) return status;
-      node->EnqueueCommands(stream);
-    }
-  }
-  
-  return hipSuccess;
-}
-// ================================================================================================
-
 }  // namespace hip

@@ -833,10 +833,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::vector<std::string> cachedKernelNames_; 
   std::vector<std::vector<uint8_t*>> parallelChainPackets_;
   std::vector<std::vector<std::string>> parallelChainKernelNames_;
-  // Mixed topology batching support
   std::vector<std::vector<GraphKernelNode*>> mixedBatches_;
   std::vector<std::vector<uint8_t*>> mixedBatchPackets_;
   std::vector<std::vector<std::string>> mixedBatchKernelNames_;
+  std::unordered_map<GraphKernelNode*, size_t> kernelToBatch_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
