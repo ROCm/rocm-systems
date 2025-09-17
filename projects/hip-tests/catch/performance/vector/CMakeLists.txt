@@ -1,4 +1,4 @@
-# Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,11 +18,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_subdirectory(memset)
-add_subdirectory(memcpy)
-add_subdirectory(kernelLaunch)
-add_subdirectory(stream)
-add_subdirectory(event)
-add_subdirectory(warpSync)
-add_subdirectory(example)
-add_subdirectory(vector)
+# As CUDA use 32-bit sync masks and not 64-bit this has been disabled on Nvidia
+if(HIP_PLATFORM MATCHES "amd")
+  set(TEST_SRC
+      vector.cc
+  )
+endif()
+
+hip_add_exe_to_target(NAME VectorPerformance
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME build_tests
+                      COMPILE_OPTIONS -std=c++17)
