@@ -23,6 +23,20 @@ jobs:
     outputs:
       components: ${{ steps.configure.outputs.components }}
     steps:
+      - name: "Fetch 'build_tools' from repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: build_tools
+          path: "prejob"
+          repository: "ROCm/TheRock"
+
+      # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
+      # Post-job cleanup isn't necessary since no executables are launched in this job.
+      - name: Pre-job cleanup processes on Windows
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
+
       - name: "Checking out repository"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -54,6 +68,18 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/build
       THEROCK_BIN_DIR: "./build/bin"
     steps:
+      - name: "Fetch 'build_tools' from repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: build_tools
+          path: "prejob"
+          repository: "ROCm/TheRock"
+
+      - name: Pre-job cleanup processes on Windows
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
+
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -78,3 +104,10 @@ jobs:
         run: |
           if [ "${{ inputs.PLATFORM }}" == "linux" ]; then source ${VENV_DIR}/bin/activate ; else . ${VENV_DIR}/Scripts/activate ; fi
           ${{ matrix.components.test_script }}
+      
+      # GitHub's 'Complete job' step is unaware of launched executables
+      # and will fail to clean up orphan processes.
+      - name: Post-job cleanup processes on Windows
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
