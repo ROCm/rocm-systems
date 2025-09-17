@@ -615,9 +615,9 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint64_t                         interval,
                  uint32_t*                        ioctl_pcs_id)
 {
-    if(check_firmware_compatibility(agent, method) != ROCPROFILER_STATUS_SUCCESS)
-        return ROCPROFILER_STATUS_INCOMPATIBLE_FIRMWARE;
-
+if (auto status = check_firmware_compatibility(agent, method);
+    status != ROCPROFILER_STATUS_SUCCESS)
+    return status ;
     pcs_ioctl_version_t pcs_ioctl_version = 0;
     auto status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
