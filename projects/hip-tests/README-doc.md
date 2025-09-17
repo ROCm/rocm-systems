@@ -52,7 +52,7 @@ HIP tests can be built for a specific arch, users can pass `-DOFFLOAD_ARCH_STR="
 
 ### SPIR-V mode
 
-HIP tests can be built with SPIRV offload arch, to enable it users can pass `-DENABLE_SPIRV=ON` to cmake config command. SPIR-V also expects warp size, by default its set of 32, but if you want pass a custom value, you can do it via `-DSPIRV_WARP_SIZE=64`.
+HIP tests can be built with SPIRV offload arch, to enable it users can pass `-DENABLE_SPIRV=ON` to cmake config command.
 
 A special note about SPIRV tests, all the arch specific skip tests will be skipped.
 
