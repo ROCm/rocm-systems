@@ -124,12 +124,16 @@ set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
+<<<<<<< HEAD
     hipLinkCreate.cc)
 
 if(BUILD_SHARED_LIBS)
   set(TEST_SRC
       ${TEST_SRC}
       hipGetProcAddressModuleApis.cc)
+=======
+    hipGetProcAddressModuleApis.cc)
+>>>>>>> 4823563a47 (cleanup)
 endif()
 
 add_custom_target(copyKernel.code
