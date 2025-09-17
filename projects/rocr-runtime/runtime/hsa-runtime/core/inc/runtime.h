@@ -527,6 +527,9 @@ class Runtime {
   static void AsyncEventsLoop(void*);
   static void AsyncIPCSockServerConnLoop(void*);
 
+  // Add this flag to make DestroyAgents idempotent
+  bool agents_destroyed_ = false;
+
   struct AllocationRegion {
     AllocationRegion()
         : region(NULL),

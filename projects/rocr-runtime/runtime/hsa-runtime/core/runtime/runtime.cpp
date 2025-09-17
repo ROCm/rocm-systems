@@ -234,6 +234,9 @@ void Runtime::RegisterDriver(std::unique_ptr<Driver> driver) {
 }
 
 void Runtime::DestroyAgents() {
+  if (agents_destroyed_) return; // <-- Prevent double execution
+  agents_destroyed_ = true;      // <-- Mark as destroyed
+
   agents_by_node_.clear();
 
   std::for_each(gpu_agents_.begin(), gpu_agents_.end(), DeleteObject());
@@ -2074,7 +2077,8 @@ Runtime::Runtime()
       internal_queue_create_notifier_user_data_(nullptr),
       ref_count_(0),
       kfd_version{},
-      ipc_sock_server_fd_(0) {
+      ipc_sock_server_fd_(0),
+      agents_destroyed_(false) {
 
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
