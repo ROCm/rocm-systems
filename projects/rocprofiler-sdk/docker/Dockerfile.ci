@@ -29,6 +29,7 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
 
 RUN set -euo pipefail; \
     if [ -f /etc/debian_version ]; then \
+        sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak_$(date +%F_%T) && sudo sed -i '$d' /etc/apt/sources.list && \
         apt-get update && \
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common git cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
         add-apt-repository ppa:git-core/ppa && \
@@ -41,7 +42,6 @@ RUN set -euo pipefail; \
         apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
         python3 -m pip install -U awscli pipx && \
         python3 -m pip install -U --user -r /root/requirements.txt; \
-        rm -rf /etc/apt/sources.list.d/amdgpu-proprietary.list /etc/apt/sources.list.d/amdgpu.list /etc/apt/sources.list.d/rocm.list; \
         apt-get update; \
     elif [ $(grep -i "ID=.*rhel" /etc/os-release | wc -l) -gt 0 ]; then \
         dnf clean all || true; \
