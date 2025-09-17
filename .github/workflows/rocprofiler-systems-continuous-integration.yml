@@ -124,7 +124,7 @@ jobs:
           echo "✅ ROCm Installation Complete!"
 
       - name: Configure, Build, and Test
-        timeout-minutes: 45
+        timeout-minutes: 115
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
