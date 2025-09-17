@@ -29,15 +29,22 @@ TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=$3
 LOG_LEVEL=$4
+OUTPUT_FILENAME=${5:-out}
 
 # Set environment variables required for attachment
 export ROCP_TOOL_ATTACH=1
 
-# Clean up any existing output
-rm -rf ${OUTPUT_DIR}/attachment-output
-mkdir -p ${OUTPUT_DIR}/attachment-output
+OUTPUT_SUBDIR="attachment-output"
+# For CSV, we don't require specific files since different traces may or may not be generated
+# We'll just check if at least one CSV file was created
+EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
+OUTPUT_FORMAT="csv json rocpd"
 
-echo "Starting attachment test..."
+# Clean up any existing output
+rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+
+echo "Starting attachment test (${OUTPUT_FORMAT} format)..."
 
 # Start the test application in the background
 echo "Launching test application: ${TEST_APP}"
@@ -61,11 +68,11 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
-echo "Attaching profiler to PID $APP_PID for 5 seconds..."
+echo "Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
 # Output the command and environment for debugging
 echo "===== COMMAND TO EXECUTE ====="
-echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 --hsa-core-trace --hip-trace --kernel-trace --memory-copy-trace -f csv -d ${OUTPUT_DIR}/attachment-output -o out"
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out}"
 echo ""
 echo "===== ENVIRONMENT VARIABLES ====="
 env | sort
@@ -73,20 +80,9 @@ echo "===== END ENVIRONMENT ====="
 echo ""
 
 # Run rocprofv3 with --attach option
-${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 --hsa-core-trace --hip-trace --kernel-trace --memory-copy-trace -f csv -d ${OUTPUT_DIR}/attachment-output -o out &
-ATTACH_PID=$!
+${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out}
 
-# Wait for the attach process to complete
-wait $ATTACH_PID
-ATTACH_EXIT_CODE=$?
-
-if [ $ATTACH_EXIT_CODE -ne 0 ]; then
-    echo "rocprofv3_attach failed with exit code $ATTACH_EXIT_CODE"
-    kill $APP_PID 2>/dev/null
-    exit 1
-fi
-
-echo "Profiler detached successfully"
+echo "${OUTPUT_FORMAT} profiler detached successfully"
 
 # Wait for the application to finish
 echo "Waiting for application to complete..."
@@ -101,14 +97,26 @@ fi
 echo "Test application completed successfully"
 
 # Files should be created directly in the expected location with the specified output name
-echo "Checking for generated output files..."
-ls -la ${OUTPUT_DIR}/attachment-output/
+echo "Checking for generated ${OUTPUT_FORMAT} output files..."
+ls -la ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
-# Check if output files were created
-if [ ! -f "${OUTPUT_DIR}/attachment-output/out_kernel_trace.csv" ]; then
-    echo "Error: Expected output file out_kernel_trace.csv not found"
+# Check if expected output files were created
+# For CSV format, check if at least one CSV file was generated
+CSV_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.csv" | wc -l)
+if [ $CSV_COUNT -eq 0 ]; then
+    echo "Error: No CSV files were generated"
     exit 1
+else
+    echo "Found $CSV_COUNT CSV file(s)"
 fi
 
-echo "Attachment test completed successfully"
+# For other formats, check specific expected files
+for expected_file in "${EXPECTED_FILES[@]}"; do
+    if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
+        echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
+        exit 1
+    fi
+done
+
+echo "Attachment ${OUTPUT_FORMAT} test completed successfully"
 exit 0

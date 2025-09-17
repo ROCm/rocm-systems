@@ -29,15 +29,21 @@ TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=$3
 LOG_LEVEL=$4
+OUTPUT_FILENAME=${5:-out}
 
 # Set environment variables required for attachment
 export ROCP_TOOL_ATTACH=1
 
-# Clean up any existing output
-rm -rf ${OUTPUT_DIR}/reattachment-output
-mkdir -p ${OUTPUT_DIR}/reattachment-output
+# Set output directory based on format
+OUTPUT_SUBDIR="attachment-output"
+EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
+OUTPUT_FORMAT="csv json rocpd"
 
-echo "Starting reattachment test..."
+# Clean up any existing output
+rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+
+echo "Starting attachment test (${OUTPUT_FORMAT} format)..."
 
 # Start the test application in the background
 echo "Launching test application: ${TEST_APP}"
@@ -63,12 +69,12 @@ if [ ! -f "${ROCPROFV3}" ]; then
 fi
 
 # First attachment
-echo "First attachment: Attaching profiler to PID $APP_PID for 5 seconds..."
+echo "First attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
 
 # Run first rocprofv3 with --attach option
 echo "About to launch first rocprofv3 process..."
-${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 --hsa-core-trace --hip-trace --kernel-trace --memory-copy-trace -f csv -d ${OUTPUT_DIR}/reattachment-output -o out &
+${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out} &
 FIRST_ROCPROF_PID=$!
 ATTACH_PID=$FIRST_ROCPROF_PID
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
@@ -78,12 +84,12 @@ wait $ATTACH_PID
 ATTACH_EXIT_CODE=$?
 
 if [ $ATTACH_EXIT_CODE -ne 0 ]; then
-    echo "First rocprofv3_attach failed with exit code $ATTACH_EXIT_CODE"
+    echo "First rocprofv3_attach ${OUTPUT_FORMAT} test failed with exit code $ATTACH_EXIT_CODE"
     kill $APP_PID 2>/dev/null
     exit 1
 fi
 
-echo "First profiler detached successfully"
+echo "First ${OUTPUT_FORMAT} profiler detached successfully"
 
 # Check temp files created by first run
 echo "=== TEMP FILES AFTER FIRST RUN ==="
@@ -102,7 +108,7 @@ fi
 
 # Clear output files between attachments
 echo "Clearing output files before second attachment..."
-rm -rf ${OUTPUT_DIR}/reattachment-output/*
+rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/*
 
 # Check if the application is still running
 if ! kill -0 $APP_PID 2>/dev/null; then
@@ -111,12 +117,12 @@ if ! kill -0 $APP_PID 2>/dev/null; then
 fi
 
 # Second attachment
-echo "Second attachment: Attaching profiler to PID $APP_PID for 5 seconds..."
+echo "Second attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
 
 # Run second rocprofv3 with --attach option
 echo "About to launch second rocprofv3 process..."
-${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 --hsa-core-trace --hip-trace --kernel-trace --memory-copy-trace -f csv -d ${OUTPUT_DIR}/reattachment-output -o out &
+${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out} &
 SECOND_ROCPROF_PID=$!
 ATTACH_PID=$SECOND_ROCPROF_PID
 echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"
@@ -126,12 +132,12 @@ wait $ATTACH_PID
 ATTACH_EXIT_CODE=$?
 
 if [ $ATTACH_EXIT_CODE -ne 0 ]; then
-    echo "Second rocprofv3_attach failed with exit code $ATTACH_EXIT_CODE"
+    echo "Second rocprofv3_attach ${OUTPUT_FORMAT} test failed with exit code $ATTACH_EXIT_CODE"
     kill $APP_PID 2>/dev/null
     exit 1
 fi
 
-echo "Second profiler detached successfully"
+echo "Second ${OUTPUT_FORMAT} profiler detached successfully"
 
 # Check temp files created by second run
 echo "=== TEMP FILES AFTER SECOND RUN ==="
@@ -169,14 +175,26 @@ fi
 echo "Test application completed successfully"
 
 # Files should be created directly in the expected location with the specified output name
-echo "Checking for generated output files..."
-ls -la ${OUTPUT_DIR}/reattachment-output/
+echo "Checking for generated ${OUTPUT_FORMAT} output files..."
+ls -la ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
-# Check if output files were created
-if [ ! -f "${OUTPUT_DIR}/reattachment-output/out_kernel_trace.csv" ]; then
-    echo "Error: Expected output file out_kernel_trace.csv not found"
+# Check if expected output files were created
+# For CSV format, check if at least one CSV file was generated
+CSV_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.csv" | wc -l)
+if [ $CSV_COUNT -eq 0 ]; then
+    echo "Error: No CSV files were generated"
     exit 1
+else
+    echo "Found $CSV_COUNT CSV file(s)"
 fi
 
-echo "Reattachment test completed successfully"
+# For other formats, check specific expected files
+for expected_file in "${EXPECTED_FILES[@]}"; do
+    if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
+        echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
+        exit 1
+    fi
+done
+
+echo "Reattachment ${OUTPUT_FORMAT} test completed successfully"
 exit 0
