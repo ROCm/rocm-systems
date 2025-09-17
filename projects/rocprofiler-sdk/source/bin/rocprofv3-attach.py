@@ -45,12 +45,14 @@ def main(
 
     print(f"Attaching to PID {pid} using library {attach_library}")
 
-    # Load the shared library into ctypes
-    c_lib = ctypes.CDLL(attach_library)
-
-    c_lib.attach.restype = ctypes.c_int
-    c_lib.attach.argtypes = [ctypes.c_uint]
-    attach_status = c_lib.attach(int(pid))
+    # Load the shared library into ctypes and attach
+    try:
+        c_lib = ctypes.CDLL(attach_library)
+        c_lib.attach.restype = ctypes.c_int
+        c_lib.attach.argtypes = [ctypes.c_uint]
+        attach_status = c_lib.attach(int(pid))
+    except Exception as e:
+        raise RuntimeError(f"Exception during library load and attachment: {e}")
 
     if attach_status != 0:
         raise RuntimeError(
@@ -59,9 +61,15 @@ def main(
 
     print(f"Attaching to PID {pid} using library {attach_library} :: success")
 
+    def detach():
+        try:
+            c_lib.detach()
+        except Exception as e:
+            print(f"Exception during detachment: {e}")
+
     def signal_handler(sig, frame):
         print("\nCaught signal SIGINT, detaching")
-        c_lib.detach()
+        detach()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -73,7 +81,7 @@ def main(
     else:
         time.sleep(int(duration) / 1000)
 
-    c_lib.detach()
+    detach()
 
 
 if __name__ == "__main__":
