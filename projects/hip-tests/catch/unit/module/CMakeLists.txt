@@ -85,12 +85,8 @@ if(HIP_PLATFORM MATCHES "amd")
 set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
-    hipHccModuleLaunchKernel.cc)
-
-if(BUILD_SHARED_LIBS)
-  set(TEST_SRC
-      ${TEST_SRC}
-      hipGetProcAddressModuleApis.cc)
+    hipHccModuleLaunchKernel.cc
+    hipGetProcAddressModuleApis.cc)
 endif()
 
 add_custom_target(empty_module.code
