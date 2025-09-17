@@ -4807,8 +4807,8 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     }
 
 
-    uint32_t device_counter(AMDSMI_MAX_DEVICES);
-    amdsmi_processor_handle device_list[AMDSMI_MAX_DEVICES];
+    uint32_t device_counter(AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP);
+    amdsmi_processor_handle device_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP];
     for (auto socket_idx = uint32_t(0); socket_idx < socket_counter; ++socket_idx) {
         if (auto api_status = amdsmi_get_processor_handles(socket_list[socket_idx], &device_counter, device_list);
             (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
@@ -4856,14 +4856,14 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     /*
      *  Note: The link topology table is sorted by the number of hops and link weight.
      */
-    topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES] = {nullptr};
+    topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP] = {nullptr};
     topology_nearest_info->count = static_cast<uint32_t>(link_topology_order.size());
     auto topology_nearest_counter = uint32_t(0);
     while (!link_topology_order.empty()) {
         auto link_info = link_topology_order.top();
         link_topology_order.pop();
 
-        if (topology_nearest_counter < AMDSMI_MAX_DEVICES) {
+        if (topology_nearest_counter < (AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP)) {
             topology_nearest_info->processor_list[topology_nearest_counter++] = link_info.target_processor_handle;
         }
     }

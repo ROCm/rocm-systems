@@ -2204,8 +2204,8 @@ struct_amdsmi_topology_nearest_t._pack_ = 1 # source:False
 struct_amdsmi_topology_nearest_t._fields_ = [
     ('count', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
-    ('processor_list', ctypes.POINTER(None) * 32),
-    ('reserved', ctypes.c_uint64 * 15),
+    ('processor_list', ctypes.POINTER(None) * 256),
+    ('reserved', ctypes.c_uint64 * 14),
 ]
 
 amdsmi_topology_nearest_t = struct_amdsmi_topology_nearest_t

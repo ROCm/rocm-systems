@@ -2092,7 +2092,7 @@ typedef struct {
  */
 typedef struct {
     uint32_t count;
-    amdsmi_processor_handle processor_list[AMDSMI_MAX_DEVICES+1];
+    amdsmi_processor_handle processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP];
     uint64_t reserved[14];
 } amdsmi_topology_nearest_t;
 
