@@ -80,7 +80,7 @@ echo "===== END ENVIRONMENT ====="
 echo ""
 
 # Run rocprofv3 with --attach option
-${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out}
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out}
 
 echo "${OUTPUT_FORMAT} profiler detached successfully"
 

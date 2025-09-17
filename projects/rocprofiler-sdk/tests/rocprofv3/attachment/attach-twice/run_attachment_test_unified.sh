@@ -74,7 +74,7 @@ echo "First attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTP
 
 # Run first rocprofv3 with --attach option
 echo "About to launch first rocprofv3 process..."
-${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out} &
 FIRST_ROCPROF_PID=$!
 ATTACH_PID=$FIRST_ROCPROF_PID
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
@@ -122,7 +122,7 @@ echo "Second attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUT
 
 # Run second rocprofv3 with --attach option
 echo "About to launch second rocprofv3 process..."
-${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out} &
 SECOND_ROCPROF_PID=$!
 ATTACH_PID=$SECOND_ROCPROF_PID
 echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"
