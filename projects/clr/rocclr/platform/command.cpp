@@ -160,12 +160,12 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     }
 
     if (profilingInfo().enabled_) {
-      ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
               &command(), ((profilingInfo().end_ - epoch) / 1000),
               ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
               ((profilingInfo().end_ - profilingInfo().start_) / 1000));
     } else {
-      ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete", &command());
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete", &command());
     }
     release();
   }
@@ -177,7 +177,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 bool Event::resetStatus(int32_t status) {
   int32_t currentStatus = this->status();
   if (currentStatus != CL_COMPLETE) {
-    ClPrint(LOG_ERROR, LOG_CMD, "command is reset before complete current status :%d",
+    ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :%d",
             currentStatus);
   }
   if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
@@ -191,7 +191,7 @@ bool Event::resetStatus(int32_t status) {
 // ================================================================================================
 bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* data,
                         bool blocking) {
-  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "invalid status");
+  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "Invalid status");
 
   CallBackEntry* entry = new CallBackEntry(status, callback, data, blocking);
   if (entry == NULL) {
@@ -240,8 +240,8 @@ bool Event::awaitCompletion() {
       return false;
     }
 
-    ClPrint(LOG_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d", this,
-            status());
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
+            this, status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
       while (status() > CL_COMPLETE) {
@@ -255,7 +255,7 @@ bool Event::awaitCompletion() {
         lock_.wait();
       }
     }
-    ClPrint(LOG_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
   }
 
   return status() == CL_COMPLETE;
@@ -353,7 +353,7 @@ void Command::enqueue() {
     Agent::postEventCreate(as_cl(static_cast<Event*>(this)), type_);
   }
 
-  ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
           amd::activity_prof::getOclCommandKindString(this->type()), this, queue_);
 
   // Direct dispatch logic below will submit the command immediately, but the command status

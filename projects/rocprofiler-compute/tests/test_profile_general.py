@@ -60,6 +60,7 @@ CHIP_IDS = {
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -77,8 +78,6 @@ ALL_CSVS_MI100 = sorted([
     "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
@@ -88,7 +87,6 @@ ALL_CSVS_MI100 = sorted([
     "pmc_perf_4.csv",
     "pmc_perf_5.csv",
     "pmc_perf_6.csv",
-    "pmc_perf_7.csv",
     "sysinfo.csv",
 ])
 
@@ -150,7 +148,6 @@ ALL_CSVS_MI350 = sorted([
     "pmc_perf_10.csv",
     "pmc_perf_11.csv",
     "pmc_perf_12.csv",
-    "pmc_perf_13.csv",
     "sysinfo.csv",
 ])
 
@@ -163,6 +160,24 @@ ROOF_ONLY_FILES = sorted([
     "roofline.csv",
     "sysinfo.csv",
     "timestamps.csv",
+])
+
+PC_SAMPLING_HOST_TRAP_FILES = sorted([
+    "pmc_perf_0.csv",
+    "pmc_perf.csv",
+    "ps_file_agent_info.csv",
+    "ps_file_pc_sampling_host_trap.csv",
+    "ps_file_results.json",
+    "sysinfo.csv",
+])
+
+PC_SAMPLING_STOCHASTIC_FILES = sorted([
+    "pmc_perf_0.csv",
+    "pmc_perf.csv",
+    "ps_file_agent_info.csv",
+    "ps_file_pc_sampling_stochastic.csv",
+    "ps_file_results.json",
+    "sysinfo.csv",
 ])
 
 METRIC_THRESHOLDS = {
@@ -541,7 +556,7 @@ def validate(test_name, workload_dir, file_dict, args=[]):
 # --
 
 
-@pytest.mark.misc
+@pytest.mark.path
 def test_path(binary_handler_profile_rocprof_compute):
     workload_dir = test_utils.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir)
@@ -565,7 +580,7 @@ def test_path(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("This test is not supported for {}".format(soc))
+        print(f"This test is not supported for {soc}")
         assert 0
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
@@ -573,8 +588,10 @@ def test_path(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
-def test_path_rocpd(binary_handler_profile_rocprof_compute):
+@pytest.mark.path
+def test_path_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
     workload_dir = test_utils.get_output_dir()
     options = ["--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
@@ -585,10 +602,13 @@ def test_path_rocpd(binary_handler_profile_rocprof_compute):
     )
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    assert code == 0
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         # roofline is not supported on MI100
@@ -625,7 +645,7 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
     """Test roofline with multiple data types"""
     if soc in ("MI100"):
@@ -668,7 +688,7 @@ def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
     """Test roofline with invalid data type"""
     if soc in ("MI100"):
@@ -698,7 +718,7 @@ def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_file_validation(binary_handler_profile_rocprof_compute):
     """Test file validation paths in roofline"""
     if soc in ("MI100"):
@@ -727,8 +747,12 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_rocpd(binary_handler_profile_rocprof_compute):
+    if soc == "MI100":
+        pytest.skip("Roofline not supported on MI100")
+        return
+
     workload_dir = test_utils.get_output_dir()
     options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
@@ -744,6 +768,32 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
+def test_analyze_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
+
+    db_name = "test"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "db",
+        "--output-name",
+        f"{db_name}",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+    assert os.path.isfile(f"{db_name}.db")
+
+    # Remove test.db
+    os.remove(f"{db_name}.db")
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline
 def test_roofline_workload_dir_not_set_error():
     """
     Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
@@ -771,7 +821,7 @@ def test_roofline_workload_dir_not_set_error():
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": None,
@@ -802,7 +852,7 @@ def test_roofline_workload_dir_not_set_error():
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -826,7 +876,7 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
     """
     Test empirical_roofline() when num_kernels == 0
@@ -847,13 +897,52 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=False, roof=True
+        config, workload_dir, options, check_success=True, roof=True
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
+def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
+    """
+    Test roofline multi-attempt profiling with `--kernel`
+    Expect to be able to re-profile from same workload if kernels are valid.
+    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--kernel-names",
+    ]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+    # Don't clean output dir, use same workload
+    options.extend(["--kernel", config["kernel_name_1"]])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    # Test nonexistent kernel on roof profile using existing profiling data
+    # Since already profiled, throw error if non-existent kernel requested for roofline
+    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=False, roof=True
+    )
+    assert returncode == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline
 def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_compute):
     """
     Test datatype validation error in empirical_roofline()
@@ -879,11 +968,15 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
         return
+
+    # Test `--kernel` filtering outputs are present and labelled correctly
+    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
+    filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
 
     plot_configurations = [
         {
@@ -895,8 +988,15 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
             "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
         },
         {
-            "options": ["--device", "0", "--roof-only", "--kernel-names"],
-            "expected_files": ["kernelName_legend.pdf"],
+            "options": [
+                "--device",
+                "0",
+                "--roof-only",
+                "--kernel-names",
+                "--kernel",
+                config["kernel_name_1"],
+            ],
+            "expected_files": [filter_kernelName, filter_empirRoof],
         },
     ]
 
@@ -916,7 +1016,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -942,7 +1042,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         pytest.skip("plotext not available for CLI testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -962,7 +1062,7 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
     """
     Test handling of missing roofline.csv file
@@ -990,7 +1090,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1016,7 +1116,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
     """
     Test CLI plot generation with invalid datatype
@@ -1044,7 +1144,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
                 self.roofline_data_type = ["FP32"]
 
         args = MockArgs()
-        mspec = generate_machine_specs(None)
+        mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),
@@ -1068,7 +1168,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.misc
+@pytest.mark.roofline
 def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute):
     """
     Test ceiling data validation in generate_plot()
@@ -1112,7 +1212,7 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     # TODO - verify expected device id in results
@@ -1150,7 +1250,7 @@ def test_kernel(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1186,7 +1286,7 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1226,7 +1326,7 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1263,7 +1363,7 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1303,7 +1403,7 @@ def test_join_type_grid(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1340,7 +1440,7 @@ def test_join_type_kernel(binary_handler_profile_rocprof_compute):
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
-        print("Testing isn't supported yet for {}".format(soc))
+        print(f"Testing isn't supported yet for {soc}")
         assert 0
 
     validate(
@@ -1606,7 +1706,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 
 @pytest.mark.section
 def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics"]
+    options = ["--list-metrics", "gfx90a"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
@@ -1616,7 +1716,54 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
+@pytest.mark.section
+def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
+    options = ["--list-metrics", "gfx90a", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-metrics
+    assert code == 1
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
+    options = ["--list-available-metrics"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "0 -> Top Stats" in output
+    assert "1 -> System Info" in output
+
+
+@pytest.mark.section
+def test_list_available_metrics_with_block(
+    binary_handler_profile_rocprof_compute, capsys
+):
+    options = ["--list-available-metrics", "--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    # Should return code 1 since --block cannot be used with --list-available-metrics
+    assert code == 1
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
     import sys
@@ -1658,6 +1805,70 @@ def test_comprehensive_error_paths():
         assert "coll_level can not be None" in str(e)
 
 
+@pytest.mark.pc_sampling
+def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
+    if soc in ("MI100"):
+        assert True
+        return
+
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "1048576",
+    ]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_mat_mul_max",
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.pc_sampling
+def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
+    if soc in ("MI100") or soc in ("MI200"):
+        assert True
+        return
+
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "stochastic",
+        "--pc-sampling-interval",
+        "1048576",
+    ]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_mat_mul_max",
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.sets_func
 class TestSetsIntegration:
     def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
@@ -1676,7 +1887,7 @@ class TestSetsIntegration:
 
         memory_metrics = ["16.1.2", "17.1.0"]
         for metric_id in memory_metrics:
-            assert metric_id in open(Path(workload_dir) / "log.txt", "r").read(), (
+            assert metric_id in open(Path(workload_dir) / "log.txt").read(), (
                 f"Expected memory metric {metric_id} not found"
             )
 
@@ -1711,6 +1922,10 @@ class TestSetsIntegration:
         )
 
         assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        assert test_utils.check_file_pattern(
+            "- 11.2.3", f"{workload_dir}/profiling_config.yaml"
+        )
 
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 

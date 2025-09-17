@@ -1,3 +1,9 @@
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+ 
 #ifndef HSA_PERF_SRC_UTILS_OS_H_
 #define HSA_PERF_SRC_UTILS_OS_H_
 

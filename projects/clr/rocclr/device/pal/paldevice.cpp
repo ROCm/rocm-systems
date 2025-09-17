@@ -256,7 +256,7 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
 
   // Create setting for the offline target
   if ((palSettings == nullptr) ||
-      !palSettings->create(properties, heaps, wscaps, isa.xnack() == amd::Isa::Feature::Enabled)) {
+      !palSettings->create(properties, heaps, wscaps, isa)) {
     LogPrintfError("Unable to create PAL setting for offline PAL device %s", isa.targetId());
     return false;
   }
@@ -1005,7 +1005,7 @@ bool Device::create(Pal::IDevice* device) {
 
   pal::Settings* gpuSettings = reinterpret_cast<pal::Settings*>(settings_);
   if (!gpuSettings ||
-      !gpuSettings->create(properties(), heaps_, wscaps, isa->xnack() == amd::Isa::Feature::Enabled,
+      !gpuSettings->create(properties(), heaps_, wscaps, *isa,
                            appProfile_.reportAsOCL12Device())) {
     return false;
   }
@@ -2420,7 +2420,8 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
   iDev()->CreateSamplerSrds(1, &samplerInfo, hwState);
 }
 
-void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
+void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
+                        const void* agentInfo) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2527,7 +2528,7 @@ void Device::svmFree(void* ptr) const {
 void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   constexpr bool kForceAlloc = true;
-  amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, kParent, kForceAlloc);
+  amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, -1, kParent, kForceAlloc);
   assert(mem != nullptr);
   return mem->getSvmPtr();
 }
@@ -2548,7 +2549,8 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
-bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) {
+bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                          VmmLocationType access_location) {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
   if (amd_mem_obj == nullptr) {
     // If the amd_mem_obj is null, the check if this is a valid va_addr, but not-mapped,

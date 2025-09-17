@@ -82,5 +82,6 @@ TEST_CASE("Unit_ballot") {
   }
 
   HIP_CHECK(hipFree(device_ballot));
+  free(host_ballot);
   REQUIRE(divergent_count == 1);
 }

@@ -766,6 +766,13 @@ enum hipLimit_t {
 /** Event is captured in the graph as an external event node when performing stream capture. */
 #define hipEventRecordExternal 0x01
 
+//Flags that can be used with hipStreamWaitEvent.
+/** Default flag. */
+#define hipEventWaitDefault 0x00
+
+/** Wait is captured in the graph as an external event node when performing stream capture. */
+#define hipEventWaitExternal 0x01
+
 /** Disable performing a system scope sequentially consistent memory fence when the event
  * transitions from recording to recorded.  This can be used for events that are only being
  * used to measure timing, and do not require the event inspection operations
@@ -823,14 +830,17 @@ enum hipLimit_t {
 
 /** Allocates the memory as write-combined. On some system configurations, write-combined allocation
  * may be transferred faster across the PCI Express bus, however, could have low read efficiency by
- * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.*/
+ * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.
+ * @note  This flag is only for CUDA source compatibility but not functional within HIP runtime,
+ * because the allocation path is currently not supported on the AMD platform.*/
 #define hipHostAllocWriteCombined 0x4
 
 /** Allocates the memory as write-combined. On some system configurations, write-combined allocation
  * may be transferred faster across the PCI Express bus, however, could have low read efficiency by
  * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.
  * @note  This flag is the same definition as #hipHostAllocWriteCombined which is equivalent to
- * cudaHostAllocWriteCombined.*/
+ * cudaHostAllocWriteCombined. It is only for CUDA source compatibility but not functional within
+ * HIP runtime, because the allocation path is currently not supported on the AMD platform.*/
 #define hipHostMallocWriteCombined 0x4
 
 /**
@@ -1194,6 +1204,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
 /**
@@ -2895,13 +2906,19 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  *
  * @param[in] stream  Stream to make wait
  * @param[in] event  Event to wait on
- * @param[in] flags  Parameters to control the operation [must be 0]
+ * @param[in] flags  Parameters to control the operation
  *
- * @returns #hipSuccess, #hipErrorInvalidHandle
+ * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue,
+ * #hipErrorStreamCaptureIsolation
  *
  * This function inserts a wait operation into the specified stream.
  * All future work submitted to @p stream will wait until @p event reports completion before
  * beginning execution.
+ *
+ * Flags include:
+ *   hipEventWaitDefault: Default event creation flag.
+ *   hipEventWaitExternal: Wait is captured in the graph as an external event node when
+ *                           performing stream capture
  *
  * This function only waits for commands in the current stream to complete.  Notably, this function
  * does not implicitly wait for commands in the default stream to complete, even if the specified
@@ -2921,6 +2938,16 @@ hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int
  * @see hipStreamCreateWithFlags
  */
 hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
+/**
+ * @brief Queries the Id of a stream.
+ *
+ * @param[in] stream  Stream to be queried
+ * @param[in,out] flags  Pointer to an unsigned long long in which the stream's id is returned
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
+ *
+ * @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority, hipStreamGetPriority
+ */
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
 /**
  * @brief Queries the priority of a stream.
  *
@@ -6372,8 +6399,22 @@ hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned l
  */
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
 /**
- * @brief builds module from code object which resides in host memory. Image is pointer to that
- * location.
+ * @brief builds module from code object data which resides in host memory.
+ *
+ * The "image" is a pointer to the location of code object data. This data can be either
+ * a single code object or a fat binary (fatbin), which serves as the entry point for loading and
+ * launching device-specific kernel executions.
+ *
+ * By default, the following command generates a fatbin:
+ *
+ * "amdclang++ -O3 -c --offload-device-only --offload-arch=<GPU_ARCH> <input_file> -o <output_file>"
+ *
+ * For more details, refer to:
+ * <a
+ * href= "https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/kernel_language_cpp_support.html#kernel-compilation">
+ * Kernel Compilation</a> in the HIP kernel language C++ support, or
+ * <a
+ * href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html">HIP runtime compilation (HIP RTC)</a>.
  *
  * @param [in] image  The pointer to the location of data
  * @param [out] module  Retuned module
@@ -9137,7 +9178,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  * @param [out] handle - value of the returned handle.
  * @param [in] size - size of the allocation.
  * @param [in] prop - properties of the allocation.
- * @param [in] flags - hipDeviceMallocUncached for uncached allocation, or 0 for default
+ * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.

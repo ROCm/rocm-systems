@@ -33,9 +33,6 @@ namespace rocprofiler
 namespace rccl
 {
 static_assert(RCCL_API_TRACE_VERSION_MAJOR == 0, "Major version updated for RCCL dispatch table");
-static_assert(RCCL_API_TRACE_VERSION_PATCH == 0, "Patch version updated for RCCL dispatch table");
-
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 37)
 
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAllGather_fn, 0)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAllReduce_fn, 1)
@@ -74,5 +71,17 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, mscclRunAlgo_fn, 33)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, mscclUnloadAlgo_fn, 34)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommRegister_fn, 35)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommDeregister_fn, 36)
+#if RCCL_API_TRACE_VERSION_PATCH >= 1
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAllReduceWithBias_fn, 37)
+#endif
+
+#if RCCL_API_TRACE_VERSION_PATCH == 0
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 37)
+#elif RCCL_API_TRACE_VERSION_PATCH == 1
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 38)
+#else
+INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 0)
+#endif
+
 }  // namespace rccl
 }  // namespace rocprofiler

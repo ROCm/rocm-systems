@@ -33,6 +33,33 @@
 
 /***********************************************************************
  *
+ * INTERNAL HELPER MACROS
+ *
+ * Determine if compiler supports __has_cpp_attrribute and __has_c_attribute,
+ * and check if the attribute can be used without warning giving the language
+ * version the attribute was introduced (clang and gcc <=6 report true but warn
+ * if attribute is used).  The DYNSINT_STD_FOR_VER_HAS_X_ATTRIBUTES parameter
+ * is the minumum version of the language that the attribute was introduced.
+ */
+#if defined(__cplusplus) && defined(__has_cpp_attribute)
+#    define DYNINST_HAS_HAS_CPP_ATTRIBUTE 1
+#    define DYNINST_STD_FOR_VER_HAS_CPP_ATTRIBUTE(minV)                                  \
+        (__GNUC__ > 6 || __cplusplus >= (minV))
+#else
+#    define DYNINST_HAS_HAS_CPP_ATTRIBUTE               0
+#    define DYNINST_STD_FOR_VER_HAS_CPP_ATTRIBUTE(minV) 0
+#endif
+#if defined(__STDC_VERSION__) && defined(__has_c_attribute)
+#    define DYNINST_HAS_HAS_C_ATTRIBUTE 1
+#    define DYNINST_STD_FOR_VER_HAS_C_ATTRIBUTE(minV)                                    \
+        (__GNUC__ > 6 || __STDC_VERSION__ >= (minV))
+#else
+#    define DYNINST_HAS_HAS_C_ATTRIBUTE               0
+#    define DYNINST_STD_FOR_VER_HAS_C_ATTRIBUTE(minV) 0
+#endif
+
+/***********************************************************************
+ *
  * DYNINST_FALLTHROUGH
  *
  * Eliminates "this statement may fall through" warnings when used as the last
@@ -52,30 +79,32 @@
  *    }
  */
 
-#if defined(__cpluscplus) && defined(__has_cpp_attribute)
-#    if __has_cpp_attribute(fallthrough)
+#if DYNINST_HAS_HAS_CPP_ATTRIBUTE
+#    if __has_cpp_attribute(fallthrough) && DYNINST_STD_FOR_VER_HAS_CPP_ATTRIBUTE(201703)
 #        define DYNINST_FALLTHROUGH [[fallthrough]]
 #    elif __has_cpp_attribute(gcc::fallthrough)
 #        define DYNINST_FALLTHROUGH [[gcc::fallthrough]]
 #    elif __has_cpp_attribute(clang::fallthrough)
 #        define DYNINST_FALLTHROUGH [[clang::fallthrough]]
 #    endif
-#elif !defined(__cpluscplus) && defined(__has_c_attribute)
-#    if __has_c_attribute(fallthrough)
+#elif DYNINST_HAS_HAS_C_ATTRIBUTE
+#    if __has_c_attribute(fallthrough) && DYNINST_STD_FOR_VER_HAS_C_ATTRIBUTE(202311L)
 #        define DYNINST_FALLTHROUGH [[fallthrough]]
-#    elif __STDC_VERSION__ > 201710
-// scoped attribute names are only valid in C starting with 2x
+#    elif __STDC_VERSION__ >= 202311L
+// scoped attribute names not valid in C until C23 (:: is not a token)
 #        if __has_c_attribute(gcc::fallthrough)
 #            define DYNINST_FALLTHROUGH [[gcc::fallthrough]]
 #        elif __has_c_attribute(clang::fallthrough)
 #            define DYNINST_FALLTHROUGH [[clang::fallthrough]]
 #        endif
 #    endif
-#elif defined(__has_attribute)
+#endif
+
+#if !defined(DYNINST_FALLTHROUGH) && defined(__has_attribute)
 #    if __has_attribute(fallthrough)
 #        define DYNINST_FALLTHROUGH __attribute__((fallthrough))
-#    elif __cplusplus || __STDC_VERSION__ > 201710
-// scoped attribute names are only valid in C++ or C starting with 2x
+#    elif __cplusplus || __STDC_VERSION__ >= 202311L
+// scoped attribute names not valid in C until C23 (:: is not a token)
 #        if __has_attribute(gcc::fallthrough)
 #            define DYNINST_FALLTHROUGH __attribute__((gcc::fallthrough))
 #        elif __has_attribute(clang::fallthrough)
@@ -89,6 +118,39 @@
         do                                                                               \
         {                                                                                \
         } while(0)
+#endif
+
+/***********************************************************************
+ *
+ * DYNINST_DEPRECATED(msg)
+ *
+ * Adds an annotation to a function, method, variable or type that it is
+ * deprecated, and will produce a warning if it used.  The parameter msg
+ * must be a quoted string.
+ *
+ * The annotation should be placed before the definition or declaration.
+ * For example:
+ *
+ *   DYNINST_DEPRECRATED("Use NewFoo") int Foo();
+ */
+
+#if DYNINST_HAS_HAS_CPP_ATTRIBUTE && DYNINST_STD_FOR_VER_HAS_CPP_ATTRIBUTE(201402L)
+#    if __has_cpp_attribute(deprecated)
+#        define DYNINST_DEPRECATED(msg) [[deprecated(msg)]]
+#    endif
+#elif DYNINST_HAS_HAS_C_ATTRIBUTE && DYNINST_STD_FOR_VER_HAS_C_ATTRIBUTE(202311L)
+#    if __has_c_attribute(deprecated)
+#        define DYNINST_DEPRECATED(msg) [[deprecated(msg)]]
+#    endif
+#endif
+#if !defined(DYNINST_DEPRECATED) && defined(__has_attribute)
+#    if __has_attribute(deprecated)
+#        define DYNINST_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#    endif
+#endif
+
+#if !defined(DYNINST_DEPRECATED)
+#    define DYNINST_DEPRECATED(msg)
 #endif
 
 /***********************************************************************

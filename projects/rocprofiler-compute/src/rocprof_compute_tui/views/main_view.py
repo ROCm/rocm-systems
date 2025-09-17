@@ -29,6 +29,7 @@ Contains the main view layout and organization for the application.
 """
 
 from pathlib import Path
+from typing import Any, Optional
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -37,7 +38,6 @@ from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from rocprof_compute_tui.analysis_tui import tui_analysis
-from rocprof_compute_tui.config import DEFAULT_START_PATH
 from rocprof_compute_tui.utils.tui_utils import Logger, LogLevel
 from rocprof_compute_tui.widgets.center_panel.center_area import CenterPanel
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import MenuBar
@@ -49,20 +49,16 @@ from utils import file_io
 class MainView(Horizontal):
     """Main view layout for the application."""
 
-    selected_path = reactive(None)
-    kernel_to_df_dict = reactive({})
-    top_kernel_to_df_list = reactive([])
+    selected_path: reactive[Optional[Path]] = reactive(None)
+    kernel_to_df_dict: reactive[dict[str, dict[str, Any]]] = reactive({})
+    top_kernel_to_df_list: reactive[list[dict[str, Any]]] = reactive([])
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(id="main-container")
-        self.start_path = (
-            # NOTE: is cwd the best choice?
-            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
-        )
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
 
-    def flush(self):
+    def flush(self) -> None:
         """Required for stdout compatibility."""
         pass
 
@@ -92,16 +88,27 @@ class MainView(Horizontal):
 
     @on(DataTable.CellSelected)
     def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
-        try:
-            row_data = event.data_table.get_row_at(event.coordinate.row)
+        table = event.data_table
+        row_idx = event.coordinate.row
+
+        visible_data = table.get_row_at(row_idx)
+        description = self._get_row_description(table, row_idx)
+
+        if self.metric_description is not None:
             self.metric_description.text = (
-                f"Selected Metric ID: {row_data[0]}\nSelected Metric: {row_data[1]}\n"
+                f"Selected Metric ID: {visible_data[0]}\n"
+                f"Selected Metric: {visible_data[1]}\n"
+                f"Description: {description}"
             )
-            self.logger.info(f"Row {event.coordinate.row} data displayed")
-        except Exception as e:
-            error_msg = f"Error displaying row {event.coordinate.row}: {str(e)}"
-            self.metric_description.text = error_msg
-            self.logger.error(error_msg)
+
+    def _get_row_description(self, table: DataTable, row_idx: int) -> str:
+        """Get description for a table row with safe attribute access."""
+        try:
+            if hasattr(table, "_df") and table._df is not None:
+                return str(table._df.iloc[row_idx].get("Description", "No description"))
+        except (IndexError, AttributeError, KeyError):
+            pass
+        return "N/A"
 
     @work(thread=True)
     def run_analysis(self) -> None:
@@ -109,63 +116,58 @@ class MainView(Horizontal):
         self.top_kernel_to_df_list = []
 
         if not self.selected_path:
-            self.app.call_from_thread(
-                lambda: self.query_one("#kernel-view").update_view(
-                    "No directory selected for analysis", LogLevel.ERROR
-                )
+            self._update_kernel_view(
+                "No directory selected for analysis", LogLevel.ERROR
             )
             return
 
         try:
             self.logger.info(f"Starting analysis on: {self.selected_path}")
+            self.logger.info("Loading...")
 
-            self.app.call_from_thread(
-                lambda: self.query_one("#kernel-view").update_view(
-                    f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
-                )
+            self._update_kernel_view(
+                f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
             )
 
             # 1. Create and TUI analyzer
             analyzer = tui_analysis(
-                self.app.args, self.app.supported_archs, self.selected_path
+                self.app.args, self.app.supported_archs, str(self.selected_path)
             )
             analyzer.sanitize()
 
             # 2. Load and process system info and Configure SoC
-            sysinfo_path = Path(self.selected_path) / "sysinfo.csv"
+            sysinfo_path = self.selected_path / "sysinfo.csv"
             if not sysinfo_path.exists():
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
-            sys_info = file_io.load_sys_info(sysinfo_path).iloc[0].to_dict()
+
+            sys_info = file_io.load_sys_info(str(sysinfo_path)).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
+            analyzer.set_soc(self.app.soc)
 
             # 3. run analysis
-            analyzer.set_soc(self.app.soc)
             analyzer.pre_processing()
             self.kernel_to_df_dict = analyzer.run_kernel_analysis()
             self.top_kernel_to_df_list = analyzer.run_top_kernel()
 
             if not self.kernel_to_df_dict or not self.top_kernel_to_df_list:
-                self.app.call_from_thread(
-                    lambda: self.query_one("#kernel-view").update_view(
-                        "Analysis completed but not all data was returned",
-                        LogLevel.WARNING,
-                    )
+                self._update_kernel_view(
+                    "Analysis completed but not all data was returned", LogLevel.WARNING
                 )
             else:
                 self.app.call_from_thread(self.refresh_results)
                 self.logger.info("Kernel Analysis completed successfully")
-                # self.logger.info(f"{self.kernel_to_df_dict}")
 
         except Exception as e:
             import traceback
 
             error_msg = f"Analysis failed: {str(e)}"
             self.logger.error(f"{error_msg}\n{traceback.format_exc()}")
-            self.app.call_from_thread(
-                lambda: self.query_one("#kernel-view").update_view(
-                    error_msg, LogLevel.ERROR
-                )
-            )
+            self._update_kernel_view(error_msg, LogLevel.ERROR)
+
+    def _update_kernel_view(self, message: str, log_level: LogLevel) -> None:
+        self.app.call_from_thread(
+            lambda: self.query_one("#kernel-view").update_view(message, log_level)
+        )
 
     def refresh_results(self) -> None:
         kernel_view = self.query_one("#kernel-view")

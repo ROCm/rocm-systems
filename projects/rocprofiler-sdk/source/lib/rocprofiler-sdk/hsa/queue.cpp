@@ -68,11 +68,11 @@ namespace hsa
 {
 namespace
 {
+constexpr int64_t NUM_SIGNALS = 16;
 std::atomic<int64_t>&
 get_balanced_signal_slots()
 {
-    constexpr int64_t NUM_SIGNALS = 16;
-    static auto*&     atomic = common::static_object<std::atomic<int64_t>>::construct(NUM_SIGNALS);
+    static auto*& atomic = common::static_object<std::atomic<int64_t>>::construct(NUM_SIGNALS);
     return *atomic;
 }
 
@@ -638,6 +638,11 @@ Queue::sync() const
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
     }
+    // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
+    // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
+    // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
+    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
+        "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
 }
 
 void

@@ -25,13 +25,35 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       asynchronously
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
     - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
+    - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
+    - `hipStreamGetId`          queries the id of a stream
 * Changed HIP APIs
-    - `hipMemCreate`  now can take hipDeviceMallocUncached as a flag to allocate uncached memory
+    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
+    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
+      hipMemAllocationType and allocates uncached memory if so
 
 ### Optimized
 
 * Improved hip module loading latency
 * Optimized kernel metadata retrieval during module post load
+
+## HIP 7.0.2 for ROCm 7.0.2
+
+### Added
+
+* Support for rocBLAS and hipBLASL targeting the new AMD GPUs gfx1150 and gfx1151.
+* Support for the `hipMemAllocationTypeUncached` flag, enabling developers to allocate uncached memory. This flag is now supported in the following APIs:
+    - `hipMemGetAllocationGranularity` determines the recommended allocation granularity for uncached memory.
+    - `hipMemCreate` allocates memory with uncached properties.
+
+### Resolved issues
+
+* A compilation failure affecting applications that compile kernels using `hiprtc` with the compiler option `std=c++11`.
+* A permission-related error occurred during the execution of hipLaunchHostFunc. This API is now supported and permitted to run during stream capture, aligning its behavior with CUDA.
+* A numerical error during graph capture of kernels that rely on a remainder in `globalWorkSize`, in frameworks like MIOpen and PyTorch, where the grid size is not a multiple of the block size. To ensure correct replay behavior, HIP runtime now stores this remainder in `hip::GraphKernelNode` during `hipExtModuleLaunchKernel` capture, enabling accurate execution and preventing corruption.
+* A page fault occurred during viewport rendering while running the file undo.blend in Blender. The issue was resolved by the HIP runtime, which reused the same context during image creation.
+* Resolved a segmentation fault in `gpu_metrics`, which is used in threshold logic for command submission patches to GPU device(s) during CPU synchronization.
 
 ## HIP 7.0 for ROCm 7.0
 
@@ -43,17 +65,17 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipDrvLaunchKernelEx`  dispatches the device kernel represented by a HIP function object.
     - `hipMemGetHandleForAddressRange`  gets a handle for the address range requested.
     - `num_threads`  Total number of threads in the group. The legacy API size is alias.
-    - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
 * New support for Open Compute Project (OCP) floating-point `FP4`/`FP6`/`FP8` as the following. For details, see [Low precision floating point document](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/low_fp_types.html).
     - Data types for `FP4`/`FP6`/`FP8`.
     - HIP APIs for `FP4`/`FP6`/`FP8`, which are compatible with corresponding CUDA APIs.
     - HIP Extensions APIs for microscaling formats, which are supported on AMD GPUs.
 * New `wptr` and `rptr` values in `ClPrint`, for better logging in dispatch barrier methods.
-* New debug mask, to print precise code object information for logging.
 * The `_sync()` version of crosslane builtins such as `shfl_sync()` are enabled by default. These can be disabled by setting the preprocessor macro `HIP_DISABLE_WARP_SYNC_BUILTINS`.
 * Added `constexpr` operators for `fp16`/`bf16`.
 * Added warp level primitives: `__syncwarp` and reduce intrinsics (e.g. `__reduce_add_sync()`)
-* Extended fine grained system memory pool.
+* Support for the flags in APIs as following, now allows uncached memory allocation.
+    - `hipExtHostRegisterUncached`, used in `hipHostRegister`.
+    - `hipHostMallocUncached` and `hipHostAllocUncached`, used in `hipHostMalloc` and `hipHostAlloc`.
 * `num_threads`  total number of threads in the group. The legacy API size is alias.
 * Added PCI CHIP ID information as the device attribute.
 * Added new tests applications for OCP data types `FP4`/`FP6`/`FP8`.
@@ -70,6 +92,7 @@ All Beta warnings in usage of HIP Graph APIs are removed, they are now officiall
     - `hipPointerGetAttributes` returns `hipSuccess` instead of an error with invalid value `hipErrorInvalidValue`, in case `NULL` host or attribute pointer is passed as input parameter. It now matches the functionality of `cudaPointerGetAttributes` which changed with CUDA 11 and above releases.
     - `hipFree` previously there was an implicit wait which was applicable for all memory allocations, for synchronization purpose. This wait is now disabled for allocations made with `hipMallocAsync` and `hipMallocFromPoolAsync`, to match the behavior of CUDA API `cudaFree`
     - `hipFreeAsync` now returns `hipSuccess` when the input pointer is NULL, instead of ` hipErrorInvalidValue` , to be consistent with `hipFree`.
+    - Exceptions occurring during a kernel execution will not abort the process anymore but will return an error unless core dump is enabled.
 * Changes in hipRTC.
     - Removal of `hipRTC` symbols from HIP Runtime Library.
     Any application using `hipRTC` APIs should link explicitly with the `hipRTC` library. This makes the usage of `hipRTC` library on Linux the same as on Windows and matches the behavior of CUDA `nvRTC`.
@@ -186,7 +209,6 @@ HIP runtime has the following functional improvements which greatly improve runt
  Developers can now use the environment variable `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` to change the default allocation size with expected scratch limit in ROCR runtime. On top of it, this value can also be overwritten programmatically in the application using the HIP API `hipDeviceSetLimit(hipExtLimitScratchCurrent, value)` to reset the scratch limit value.
 * HIP runtime now enables peer-to-peer (P2P) memory copies to utilize all available SDMA engines, rather than being limited to a single engine. It also selects the best engine first to give optimal bandwidth.
 * Improved launch latency for `D2D` copies and `memset` on MI300 series.
-* Memory manager was implemented to improve the efficiency of memory usage and speed-up memory allocation/free in memory pools.
 * Introduced a threshold to handle the command submission patch to the GPU device(s), considering the synchronization with CPU, for performance improvement.
 
 ### Resolved issues
@@ -201,6 +223,7 @@ HIP runtime has the following functional improvements which greatly improve runt
 * Compilation failure, HIP runtime refactored the vector type alignment with `__hip_vec_align_v`
 * A numerical error/corruption found in Pytorch  during graph replay. HIP runtime fixed the input sizes of kernel launch dimensions in hipExtModuleLaunchKernel for the execution of hipGraph capture.
 * A crash during kernel execution in a customer application. The structure of kernel arguments was updated via adding the size of kernel arguments, and HIP runtime does validation before launch kernel with the structured arguments.
+* Compilation error when using bfloat16 functions. HIP runtime removed the anonymous namespace from FP16 functions to resolve this issue.
 
 ## HIP 6.4.2 for ROCm 6.4.2
 
