@@ -78,14 +78,14 @@ jobs:
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
       # TODO: Remove this step once amdgpu logic has been added to gfx Dockers
-      - name: Install amdgpu (remove once added to gfx Dockers)
+      - name: Install amdgpu and dependencies (remove once added to gfx Dockers)
         shell: bash
         run: |
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_7.0.70000-1_all.deb
           apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
           apt-get update
-          apt install -y amd-smi-lib rocjpeg-test rocdecode-test rccl-dev
-          echo "✅ amdgpu Installed!"
+          apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
+          echo "✅ amdgpu and ROCm dependencies Installed!"
 
       # TODO: Remove this step once the gfx Dockers are available
       - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
@@ -143,6 +143,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
-            -DROCPROFSYS_BUILD_{DYNINST,TBB,BOOST,ELFUTILS,LIBIBERTY}=ON \
+            -DROCPROFSYS_BUILD_DYNINST=ON \
+            -DROCPROFSYS_BUILD_BOOST=ON \
+            -DROCPROFSYS_BUILD_TBB=ON \
+            -DROCPROFSYS_BUILD_ELFUTILS=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_BUILD_TESTING=ON
