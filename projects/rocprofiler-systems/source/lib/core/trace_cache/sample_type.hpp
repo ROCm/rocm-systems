@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #pragma once
+#include "core/agent.hpp"
 #include <cstdint>
 #include <stdint.h>
 #include <string>
@@ -149,15 +150,12 @@ struct region_sample : storage_parsed_type_base
     uint64_t    thread_id;
     std::string name;
 
-    // Correlation fields
     uint64_t correlation_id_internal;
     uint64_t correlation_id_ancestor;
 
-    // Timing fields
     uint64_t start_timestamp;
     uint64_t end_timestamp;
 
-    // Additional fields
     std::string call_stack;
     std::string args_str;
     std::string category;
@@ -177,7 +175,8 @@ struct in_time_sample : storage_parsed_type_base
 
 struct pmc_event_with_sample : in_time_sample
 {
-    size_t      agent_handle;
+    uint32_t    device_id;
+    uint8_t     device_type;
     std::string pmc_info_name;
     double      value;
 };
@@ -239,17 +238,14 @@ struct backtrace_region_sample : storage_parsed_type_base
     , extdata(std::move(_extdata))
     {}
 
-    // Identification fields
     uint32_t    type;
     uint64_t    thread_id;
     std::string track_name;
     std::string name;
 
-    // Timing fields
     uint64_t start_timestamp;
     uint64_t end_timestamp;
 
-    // Additional fields
     std::string category;
     std::string call_stack;
     std::string line_info;

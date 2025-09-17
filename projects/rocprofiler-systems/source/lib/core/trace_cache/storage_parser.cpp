@@ -191,7 +191,7 @@ storage_parser::consume_storage()
                     _pmc_event_with_sample.parent_stack_id,
                     _pmc_event_with_sample.correlation_id,
                     _pmc_event_with_sample.call_stack, _pmc_event_with_sample.line_info,
-                    _pmc_event_with_sample.agent_handle,
+                    _pmc_event_with_sample.device_id, _pmc_event_with_sample.device_type,
                     _pmc_event_with_sample.pmc_info_name, _pmc_event_with_sample.value);
                 invoke_callbacks(header.type, _pmc_event_with_sample);
                 break;
