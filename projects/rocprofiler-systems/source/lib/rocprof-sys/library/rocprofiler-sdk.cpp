@@ -959,18 +959,6 @@ get_kernel_dispatch_timestamps()
 
 #if(ROCPROFILER_VERSION >= 600)
 
-// Wrapper around rocprofiler_iterate_callback_tracing_kind_operation_args
-template <typename ArgsType>
-void
-ompt_get_cb_args(const rocprofiler_callback_tracing_record_t&     record,
-                 rocprofiler_callback_tracing_operation_args_cb_t callback,
-                 ArgsType&                                        args)
-{
-    rocprofiler_iterate_callback_tracing_kind_operation_args(
-        record, callback, (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ? 1 : 2,
-        &args);
-}
-
 auto&
 get_ompt_standard_cb_storage()
 {
@@ -1027,7 +1015,8 @@ ompt_push_standard_callback(const rocprofiler_callback_tracing_record_t& record,
                             const rocprofiler_timestamp_t&               _beg_ts)
 {
     auto args = function_args_t{};
-    ompt_get_cb_args(record, iterate_args_callback, args);
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 1, &args);
     get_ompt_standard_cb_storage().emplace(
         record.correlation_id.internal,
         rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
@@ -1043,7 +1032,8 @@ ompt_pop_standard_callback(
     if(it == get_ompt_standard_cb_storage().end())
     {
         auto args = function_args_t{};
-        ompt_get_cb_args(record, iterate_args_callback, args);
+        rocprofiler_iterate_callback_tracing_kind_operation_args(
+            record, iterate_args_callback, 2, &args);
         ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
                                 _bt_data);
         return;
@@ -1067,7 +1057,8 @@ ompt_push_lock_callback(const rocprofiler_callback_tracing_record_t& record,
     const ompt_wait_id_t wait_id_value = payload_data->args.lock_init.wait_id;
 
     auto args = function_args_t{};
-    ompt_get_cb_args(record, iterate_args_callback, args);
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 1, &args);
     get_ompt_lock_cb_storage().emplace(
         wait_id_value, rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
 }
@@ -1085,7 +1076,8 @@ ompt_pop_lock_callback(const rocprofiler_callback_tracing_record_t&             
     if(it == get_ompt_lock_cb_storage().end())
     {
         auto args = function_args_t{};
-        ompt_get_cb_args(record, iterate_args_callback, args);
+        rocprofiler_iterate_callback_tracing_kind_operation_args(
+            record, iterate_args_callback, 2, &args);
         ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
                                 _bt_data);
         return;
@@ -1109,7 +1101,8 @@ ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
     const void* codeptr_ra_address = payload_data->args.parallel_begin.codeptr_ra;
 
     auto args = function_args_t{};
-    ompt_get_cb_args(record, iterate_args_callback, args);
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 1, &args);
     get_ompt_parallel_cb_storage().emplace(
         reinterpret_cast<uintptr_t>(codeptr_ra_address),
         rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
@@ -1130,7 +1123,8 @@ ompt_pop_parallel_callback(
     if(it == get_ompt_parallel_cb_storage().end())
     {
         auto args = function_args_t{};
-        ompt_get_cb_args(record, iterate_args_callback, args);
+        rocprofiler_iterate_callback_tracing_kind_operation_args(
+            record, iterate_args_callback, 2, &args);
         ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
                                 _bt_data);
         return;
@@ -1172,7 +1166,8 @@ ompt_cache_instant_event(
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
     auto args = function_args_t{};
-    ompt_get_cb_args(record, iterate_args_callback, args);
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 2, &args);
     auto call_stack = get_backtrace(_bt_data);
 
     cache_category<category::rocm_ompt_api>();
@@ -1199,7 +1194,11 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
     if(get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations()) ompt_get_cb_args(record, save_args, args);
+        if(config::get_perfetto_annotations())
+        {
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, 1,
+                                                                     &args);
+        }
 
         uint64_t _beg_ts   = ts;
         auto     stream_id = stream_id_top();
@@ -1242,7 +1241,11 @@ ompt_tracing_callback_stop(
     if(get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations()) ompt_get_cb_args(record, save_args, args);
+        if(config::get_perfetto_annotations())
+        {
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, 2,
+                                                                     &args);
+        }
 
         uint64_t _end_ts = ts;
         tracing::pop_perfetto_ts(
