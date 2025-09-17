@@ -12,7 +12,6 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
-      - 'projects/rocprofiler-sdk/docker/Dockerfile.ci'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
