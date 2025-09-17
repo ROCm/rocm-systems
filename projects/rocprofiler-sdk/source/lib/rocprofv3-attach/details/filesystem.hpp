@@ -38,7 +38,7 @@
 #    endif
 #endif
 
-#if defined(ROCPROFILER_REGISTER_HAS_CPP_LIB_FILESYSTEM) &&                              \
+#if defined(ROCPROFILER_REGISTER_HAS_CPP_LIB_FILESYSTEM) &&                                        \
     ROCPROFILER_REGISTER_HAS_CPP_LIB_FILESYSTEM > 0
 #    include <filesystem>
 namespace fs = ::std::filesystem;  // NOLINT
