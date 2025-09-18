@@ -8,6 +8,16 @@ build/
 # Validation build artifacts
 projects/aql_c_port/validation/build/
 
+# Kernel module build artifacts
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+
 # IDE files
 .vscode/
 .idea/

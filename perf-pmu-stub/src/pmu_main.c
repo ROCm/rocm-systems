@@ -16,6 +16,7 @@
 #include <linux/device.h>
 
 #include "pmu_stub.h"
+#include "kfd_test.h"
 
 /* Global PMU instance */
 static struct pmu_stub *pmu_stub_instance;
@@ -403,6 +404,17 @@ static int __init pmu_stub_init(void)
 
     pmu_info("PMU Stub module loaded successfully\n");
     pmu_info("Events available under: /sys/bus/event_source/devices/%s/\n", PMU_NAME);
+
+    /* Test KFD ioctl functionality */
+    pmu_info("Testing KFD ioctl functionality...\n");
+    ret = kfd_test_get_version();
+    if (ret == 0) {
+        kfd_test_print_result();
+        pmu_info("KFD integration test completed successfully\n");
+    } else {
+        kfd_test_print_result();
+        pmu_info("KFD integration test failed, but module will continue to load\n");
+    }
 
     return 0;
 }

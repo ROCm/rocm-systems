@@ -1,8 +1,8 @@
 # Standard kernel module Makefile
 obj-m := pmu_stub.o
 
-# Include PMU stub and AQL C sources
-pmu_stub-y := pmu_main.o pmu_events.o \
+# Include PMU stub, KFD test, and AQL C sources
+pmu_stub-y := pmu_main.o pmu_events.o kfd_test.o \
               aql_c/aql_cmd_buffer.o \
               aql_c/aql_packet.o \
               aql_c/aql_arch_detect.o \
