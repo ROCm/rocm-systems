@@ -10,6 +10,12 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+if(ROCPROFILER_MEMCHECK STREQUAL "AddressSanitizer")
+    set(IS_DISABLED ON)
+else()
+    set(IS_DISABLED OFF)
+endif()
+
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
 else()
@@ -46,7 +52,9 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "failed to retrieve stream ID|ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         FIXTURES_SETUP
-        rocprofv3-test-attachment-attach-once)
+        rocprofv3-test-attachment-attach-once
+        DISABLED
+        "${IS_DISABLED}")
 
 # Validate the output from the attached profiling
 add_test(
