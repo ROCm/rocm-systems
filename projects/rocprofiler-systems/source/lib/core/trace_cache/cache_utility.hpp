@@ -34,8 +34,15 @@ namespace trace_cache
 {
 constexpr size_t buffer_size     = 100 * tim::units::megabyte;
 constexpr size_t flush_threshold = 80 * tim::units::megabyte;
-const auto filename = "/tmp/buffered_storage_" + std::to_string(get_root_process_id()) +
-                      "_" + std::to_string(getpid()) + ".bin";
+
+const auto tmp_directory = std::string{ "/tmp/" };
+const auto file_postfix =
+    "_" + std::to_string(get_root_process_id()) + "_" + std::to_string(getpid());
+
+const auto buffered_storage_filename =
+    std::string{ tmp_directory + "buffered_storage" + file_postfix + ".bin" };
+const auto metadata_filepath =
+    std::string{ tmp_directory + "metadata" + file_postfix + ".json" };
 
 constexpr size_t minimal_fragmented_memory_size = sizeof(entry_type) + sizeof(size_t);
 using buffer_array_t                            = std::array<uint8_t, buffer_size>;

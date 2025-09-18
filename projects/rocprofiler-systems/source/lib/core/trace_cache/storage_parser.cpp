@@ -242,6 +242,8 @@ storage_parser::consume_storage()
     ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system\n",
                      m_filename.c_str());
     std::remove(m_filename.c_str());
+
+    m_on_finished_callback();
 }
 
 void
