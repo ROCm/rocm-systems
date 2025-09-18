@@ -40,6 +40,10 @@ OUTPUT_SUBDIR="attachment-output"
 EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
 OUTPUT_FORMAT="csv json rocpd"
 
+# Get path to marker file
+MARKER_FILE="${OUTPUT_DIR}/attachment_test_application_complete"
+rm -f ${MARKER_FILE}
+
 # Clean up any existing output
 rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
 mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
@@ -86,8 +90,13 @@ echo "${OUTPUT_FORMAT} profiler detached successfully"
 
 # Wait for the application to finish
 echo "Waiting for application to complete..."
-wait $APP_PID
-APP_EXIT_CODE=$?
+# Wait for the marker file to exist
+until [ -f "$MARKER_FILE" ]; do
+  sleep 1
+done
+APP_EXIT_CODE=$(cat "$MARKER_FILE")
+rm -f ${MARKER_FILE}
+
 
 if [ $APP_EXIT_CODE -ne 0 ]; then
     echo "Test application failed with exit code $APP_EXIT_CODE"

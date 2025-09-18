@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <unistd.h>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -38,6 +39,21 @@ simple_kernel(float* data, int size)
     }
 }
 
+void
+create_marker_file(const int status)
+{
+    std::ofstream markerFile("attachment_test_application_complete");
+    if(markerFile.is_open())
+    {
+        markerFile << status;
+        markerFile.close();
+    }
+    else
+    {
+        std::cerr << "Failed to generate marker file for attachment test";
+    }
+}
+
 int
 main(int /*argc*/, char** /*argv*/)
 {
@@ -49,6 +65,7 @@ main(int /*argc*/, char** /*argv*/)
     if(err != hipSuccess || device_count == 0)
     {
         std::cerr << "No HIP devices found or error getting device count" << std::endl;
+        create_marker_file(1);
         return 1;
     }
 
@@ -59,6 +76,7 @@ main(int /*argc*/, char** /*argv*/)
     if(err != hipSuccess)
     {
         std::cerr << "Failed to set device 0" << std::endl;
+        create_marker_file(1);
         return 1;
     }
 
@@ -74,6 +92,7 @@ main(int /*argc*/, char** /*argv*/)
     {
         std::cerr << "Failed to allocate device memory" << std::endl;
         delete[] h_data;
+        create_marker_file(1);
         return 1;
     }
 
@@ -151,6 +170,6 @@ main(int /*argc*/, char** /*argv*/)
     delete[] h_data;
 
     std::cout << "Attachment test app finished" << std::endl;
-
+    create_marker_file(0);
     return 0;
 }
