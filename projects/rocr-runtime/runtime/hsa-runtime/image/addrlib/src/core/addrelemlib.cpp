@@ -116,7 +116,7 @@ ElemLib* ElemLib::Create(
 */
 VOID ElemLib::Flt32sToInt32s(
     ADDR_FLT_32     value,      ///< [in] ADDR_FLT_32 value
-    UINT_32         bits,       ///< [in] nubmer of bits in value
+    UINT_32         bits,       ///< [in] number of bits in value
     NumberType      numberType, ///< [in] the type of number
     UINT_32*        pResult)    ///< [out] Int32 value
 {
@@ -134,7 +134,7 @@ VOID ElemLib::Flt32sToInt32s(
             return;        // these are zero-bit components, so don't set result
 
         case ADDR_UINT_BITS:            // unsigned integer bit field, clamped to range
-            uscale = (1<<bits) - 1;
+            uscale = (1U<<bits) - 1;
             if (bits == 32)               // special case unsigned 32-bit int
             {
                 *pResult = value.i;
@@ -169,7 +169,7 @@ VOID ElemLib::Flt32sToInt32s(
             {
                 if (value.f >= 1)
                 {
-                     *pResult = (1<<bits) - 1;
+                     *pResult = (1U<<bits) - 1;
                 }
                 else
                 {
@@ -216,7 +216,7 @@ VOID ElemLib::Flt32sToInt32s(
                             final = mask;
                         }
 
-                        scaled.f  = value.f * ((1<<bits) - 1);
+                        scaled.f  = value.f * ((1U<<bits) - 1);
                         shifted.f = (scaled.f * 256);
                         truncated = ((shifted.i&0x7FFFFF) + (INT_64)0x800000) << 8;
                         altShift  = 126 + 24 + 8 - ((shifted.i>>23)&0xFF);
