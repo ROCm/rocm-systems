@@ -47,8 +47,7 @@ TEST_CASE("Unit_hipMemsetD2D8_BasicFunctional") {
   constexpr size_t numW = 256;
   size_t pitch_A;
   size_t width = numW * sizeof(char);
-  size_t sizeElements = width * numH;
-  size_t elements = numW * numH;
+  size_t sizeElements = numW * numH;
   char *A_d;
   HIP_CHECK(
       hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH, 4 * sizeof(char)));
@@ -56,7 +55,7 @@ TEST_CASE("Unit_hipMemsetD2D8_BasicFunctional") {
   HIP_CHECK(hipMemsetD2D8(A_d, pitch_A, memsetval, width, numH));
   HIP_CHECK(hipMemcpy2D(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost));
 
-  for (size_t i = 0; i < elements; i++) {
+  for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
@@ -83,7 +82,7 @@ TEST_CASE("Unit_hipMemsetD2D8_UnEvenRowsCols") {
   cols = GENERATE(4, 5, 100);
   size_t devPitch;
   constexpr char memsetval = 'c';
-  size_t size = sizeof(char) * rows * cols;
+  size_t size = rows * cols;
   std::vector<char>A_h(size, 'a');
   std::vector<char>B_h(size, 'a');
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(char) * cols, rows,
@@ -91,9 +90,7 @@ TEST_CASE("Unit_hipMemsetD2D8_UnEvenRowsCols") {
   HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h.data(), sizeof(char) * cols, sizeof(char) * cols, rows,
                         hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemsetD2D8(A_d, devPitch, memsetval, sizeof(char) * cols, rows));
-  HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(char) * cols, A_d, devPitch, sizeof(char) * cols, rows,
                         hipMemcpyDeviceToHost));
@@ -134,7 +131,7 @@ TEST_CASE("Unit_hipMemsetD2D8_KernelOperation") {
   constexpr size_t numW = 64;
   size_t devPitchA, devPitchC;
   size_t width = numW * sizeof(char);
-  size_t sizeElements = width * numH;
+  size_t sizeElements = numW * numH;
 
   std::vector<char>C_h(sizeElements, 'a');
   HIP_CHECK(

@@ -48,8 +48,7 @@ TEST_CASE("Unit_hipMemsetD2D32Async_BasicFunctional") {
   constexpr size_t numW = 256;
   size_t pitch_A;
   size_t width = numW * sizeof(int);
-  size_t sizeElements = width * numH;
-  size_t elements = numW * numH;
+  size_t sizeElements = numW * numH;
   int *A_d;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -59,7 +58,7 @@ TEST_CASE("Unit_hipMemsetD2D32Async_BasicFunctional") {
   HIP_CHECK(hipMemsetD2D32Async(A_d, pitch_A, memsetval, width, numH, stream));
   HIP_CHECK(hipMemcpy2DAsync(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
-  for (size_t i = 0; i < elements; i++) {
+  for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
@@ -81,6 +80,7 @@ TEST_CASE("Unit_hipMemsetD2D32Async_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemsetD2D32Async_UnEvenRowsCols") {
+  constexpr int memsetval = 5;
   int *A_d;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
@@ -89,22 +89,21 @@ TEST_CASE("Unit_hipMemsetD2D32Async_UnEvenRowsCols") {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t size = sizeof(int) * rows * cols;
-  std::vector<int>A_h(size, 1);
+  size_t size = rows * cols;
   std::vector<int>B_h(size, 1);
 
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(int) * cols, rows,
                              sizeof(int)));
-  HIP_CHECK(hipMemcpy2DAsync(A_d, devPitch, A_h.data(), sizeof(int) * cols, sizeof(int) * cols, rows,
-                             hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemsetD2D32Async(A_d, devPitch, 5, sizeof(int) * cols, rows, stream));
+
+  HIP_CHECK(hipMemsetD2D32Async(A_d, devPitch, memsetval, sizeof(int) * cols, rows, stream));
   HIP_CHECK(hipMemcpy2DAsync(B_h.data(), sizeof(int) * cols, A_d, devPitch, sizeof(int) * cols, rows,
                              hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
-      INFO("Memset2D mismatch at index:" << i << " computed:" << B_h[i * cols + j]);
-      REQUIRE(B_h[i * cols + j] == 5);
+      INFO("Memset2D mismatch at index:" << i << " computed:" << B_h[i * cols + j]
+                                              << " memsetval:" << memsetval);
+      REQUIRE(B_h[i * cols + j] == memsetval);
     }
   }
   HIP_CHECK(hipStreamDestroy(stream));

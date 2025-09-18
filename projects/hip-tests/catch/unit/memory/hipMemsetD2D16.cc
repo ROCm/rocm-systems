@@ -48,8 +48,8 @@ TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
   constexpr size_t numW = 256;
   size_t pitch_A;
   size_t width = numW * sizeof(uint16_t);
-  size_t sizeElements = width * numH;
-  size_t elements = numW * numH;
+  size_t sizeElements = numW * numH;
+
   uint16_t *A_d;
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH,
                              2 * sizeof(uint16_t)));
@@ -58,7 +58,7 @@ TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
   HIP_CHECK(hipMemsetD2D16(A_d, pitch_A, memsetval, width, numH));
   HIP_CHECK(hipMemcpy2D(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost));
 
-  for (size_t i = 0; i < elements; i++) {
+  for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
@@ -80,30 +80,27 @@ TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
   uint16_t *A_d;
+  constexpr uint16_t memsetVal = 5;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(5, 6, 100);
   size_t devPitch;
 
-  size_t size = sizeof(uint16_t) * rows * cols;
-  std::vector<uint16_t>A_h(size, 1);
+  size_t size = rows * cols;
   std::vector<uint16_t>B_h(size, 1);
 
   HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(uint16_t) * cols,
                              rows, 2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h.data(), sizeof(uint16_t) * cols, sizeof(uint16_t) * cols, rows,
-                        hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipMemsetD2D16(A_d, devPitch, 5, sizeof(uint16_t) * cols, rows));
-  HIP_CHECK(hipDeviceSynchronize());
-
+  HIP_CHECK(hipMemsetD2D16(A_d, devPitch, memsetVal, sizeof(uint16_t) * cols, rows));
   HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(uint16_t) * cols, A_d, devPitch, sizeof(uint16_t) * cols, rows,
                         hipMemcpyDeviceToHost));
 
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
-      INFO("Memset2D mismatch at index:" << i << " computed:" << B_h[i * cols + j]);
-      REQUIRE(B_h[i * cols + j] == 5);
+      INFO("Memset2D mismatch at index:" << i << " computed:" << B_h[i * cols + j]
+                                              << " memsetval:" << memsetVal);
+      REQUIRE(B_h[i * cols + j] == memsetVal);
     }
   }
   HIP_CHECK(hipFree(A_d));

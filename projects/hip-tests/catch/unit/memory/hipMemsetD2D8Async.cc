@@ -49,8 +49,8 @@ TEST_CASE("Unit_hipMemsetD2D8Async_BasicFunctional") {
   constexpr size_t numW = 256;
   size_t pitch_A;
   size_t width = numW * sizeof(char);
-  size_t sizeElements = width * numH;
-  size_t elements = numW * numH;
+  size_t sizeElements = numW * numH;
+
   char *A_d;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -61,7 +61,7 @@ TEST_CASE("Unit_hipMemsetD2D8Async_BasicFunctional") {
   HIP_CHECK(hipMemsetD2D8Async(A_d, pitch_A, memsetval, width, numH, stream));
   HIP_CHECK(hipMemcpy2DAsync(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
-  for (size_t i = 0; i < elements; i++) {
+  for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipMemsetD2D8Async_UnEvenRowsCols") {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t size = sizeof(char) * rows * cols;
+  size_t size = rows * cols;
   std::vector<char>A_h(size, 'a');
   std::vector<char>B_h(size, 'a');
 
@@ -141,7 +141,7 @@ TEST_CASE("Unit_hipMemsetD2D8Async_KernelOperation") {
   constexpr size_t numW = 64;
   size_t devPitchA, devPitchC;
   size_t width = numW * sizeof(char);
-  size_t sizeElements = width * numH;
+  size_t sizeElements = numW * numH;
 
   std::vector<char>C_h(sizeElements, 'a');
   HIP_CHECK(
