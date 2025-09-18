@@ -3,3 +3,5 @@
 warn_about_unknown_commands: false
 indent: 4
 line_length: 90
+disable_formatting: false
+list_expansion: favour-inlining
