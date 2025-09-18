@@ -414,7 +414,7 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const AgentInfo* agentInfo = nullptr) const;  // nullptr uses default CPU agent
+                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const;
 
   bool deviceAllowAccess(void* dst) const;
