@@ -23,7 +23,7 @@
 
 ##############################################################################
 
-import os
+from pathlib import Path
 from typing import Any, Optional
 
 import yaml
@@ -103,8 +103,8 @@ class MIGPUSpecs:
                         | -- memory partition mode
         """
 
-        current_dir = os.path.dirname(__file__)
-        yaml_file_path = os.path.join(current_dir, "mi_gpu_spec.yaml")
+        current_dir = Path(__file__).parent
+        yaml_file_path = current_dir / "mi_gpu_spec.yaml"
 
         # Load the YAML data
         yaml_data = cls._load_yaml(yaml_file_path)

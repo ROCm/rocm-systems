@@ -207,7 +207,7 @@ class grid_group : public thread_group {
   __CG_QUALIFIER__ bool is_valid() const { return internal::grid::is_valid(); }
   //! @copydoc thread_group::sync
   __CG_QUALIFIER__ void sync() const { internal::grid::sync(); }
-  __CG_QUALIFIER__ dim3 group_dim() const { return internal::workgroup::block_dim(); }
+  __CG_QUALIFIER__ dim3 group_dim() const { return internal::grid::grid_dim(); }
 };
 
 /** \ingroup CooperativeGConstruct

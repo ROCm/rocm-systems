@@ -25,9 +25,6 @@
 
 import argparse
 import csv
-import glob
-import os
-import re
 import shlex
 import shutil
 import time
@@ -129,7 +126,7 @@ class RocProfCompute_Base:
         # handle rocpd format
         if args.format_rocprof_output == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = glob.glob(f"{args.path}/results_*.csv")
+            result_files = list(Path(args.path).glob("results_*.csv"))
 
             with open(output_file, "w", newline="") as outfile:
                 writer = None
@@ -148,9 +145,12 @@ class RocProfCompute_Base:
 
             # Delete results_*.csv files
             for file in result_files:
-                os.remove(file)
+                Path(file).unlink()
                 console_debug(f"Deleted file: {file}")
-            return
+            return None
+
+        # Collect files to process - normalize to Path objects
+        files: list[Path] = []
 
         # Set default output directory if not specified
         if isinstance(args.path, str):
@@ -158,30 +158,20 @@ class RocProfCompute_Base:
             files = [
                 file
                 for pattern in csv_patterns
-                for file in glob.glob(f"{args.path}/{pattern}")
+                for file in Path(args.path).glob(pattern)
             ]
 
             if args.hip_trace:
-                # remove hip api trace ouputs from this list
-                files = [
-                    f
-                    for f in files
-                    if not re.compile(r"^.*_hip_api_trace\.csv$").match(
-                        os.path.basename(f)
-                    )
-                ]
+                # remove hip api trace outputs from this list
+                files = [f for f in files if not f.name.endswith("_hip_api_trace.csv")]
 
             if args.kokkos_trace:
-                # remove marker api trace ouputs from this list
+                # remove marker api trace outputs from this list
                 files = [
-                    f
-                    for f in files
-                    if not re.compile(r"^.*_marker_api_trace\.csv$").match(
-                        os.path.basename(f)
-                    )
+                    f for f in files if not f.name.endswith("_marker_api_trace.csv")
                 ]
         elif isinstance(args.path, list):
-            files = args.path
+            files = [Path(path) for path in args.path]
         else:
             console_error(f"Invalid workload directory. Cannot resolve {args.path}")
 
@@ -189,6 +179,11 @@ class RocProfCompute_Base:
         df = None
         for i, file in enumerate(files):
             current_df = pd.read_csv(file)
+
+            if current_df.empty:
+                console_warning("join_prof", f"Empty dataframe from {file}")
+                continue
+
             if args.join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
                 current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
@@ -203,7 +198,8 @@ class RocProfCompute_Base:
                 )
             else:
                 console_error(
-                    f"{args.join_type} is an unrecognized option for --join-type"
+                    "join_prof",
+                    f"{args.join_type} is an unrecognized option for --join-type",
                 )
 
             if df is None:
@@ -215,7 +211,8 @@ class RocProfCompute_Base:
                 )
 
         if df is None or df.empty:
-            return
+            console_warning("join_prof", "No data available after processing all files")
+            return None
 
         # TODO: check for any mismatch in joins
         duplicate_cols = {
@@ -251,10 +248,11 @@ class RocProfCompute_Base:
             current_df = df[cols]
             if not test_df_column_equality(current_df):
                 console_warning(
-                    f"Detected differing {key} values while joining pmc_perf.csv"
+                    "join_prof",
+                    f"Detected differing {key} values while joining pmc_perf.csv",
                 )
             else:
-                console_debug(f"Successfully joined {key} in pmc_perf.csv")
+                console_debug("join_prof", f"Successfully joined {key} in pmc_perf.csv")
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
@@ -334,7 +332,8 @@ class RocProfCompute_Base:
             df["End_Timestamp"] = mean_end
 
         # finally, join the drop key
-        df = df.drop(columns=["key"])
+        if "key" in df.columns:
+            df = df.drop(columns=["key"])
 
         # save to file and delete old file(s)
         # skip if we're being called outside of rocprof-compute
@@ -343,8 +342,8 @@ class RocProfCompute_Base:
             if not args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
-                    if "SQ_" not in file or "SQC_" not in file:
-                        os.remove(file)
+                    if "SQ_" not in file.name or "SQC_" not in file.name:
+                        file.unlink()
             return None
         else:
             return df
@@ -410,7 +409,7 @@ class RocProfCompute_Base:
         print_status(status_msg)
 
         # Run profiling on each input file
-        input_files = sorted(glob.glob(f"{args.path}/perfmon/*.txt"))
+        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
         total_runs = len(input_files)
         total_profiling_time = 0.0
 
@@ -440,7 +439,7 @@ class RocProfCompute_Base:
                     "-i",
                     "-r",
                     f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    fname,
+                    str(fname),
                 ])
                 # log output from profile filtering
                 if not success:
@@ -455,7 +454,7 @@ class RocProfCompute_Base:
                     "-i",
                     "-r",
                     f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    fname,
+                    str(fname),
                 ])
                 # log output from profile filtering
                 if not success:
@@ -471,10 +470,10 @@ class RocProfCompute_Base:
                 "rocprofv3",
                 "rocprofiler-sdk",
             ):
-                options = self.get_profiler_options(fname, self._soc)
+                options = self.get_profiler_options(str(fname), self._soc)
                 start_time = time.time()
                 run_prof(
-                    fname=fname,
+                    fname=str(fname),
                     profiler_options=options,
                     workload_dir=args.path,
                     mspec=self._soc._mspec,
@@ -500,8 +499,7 @@ class RocProfCompute_Base:
         ):
             return
 
-        input_files = glob.glob(f"{args.path}/perfmon/*.txt")
-        total_runs = len(input_files)
+        total_runs = len(list(Path(args.path).glob("perfmon/*.txt")))
 
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 

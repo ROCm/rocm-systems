@@ -95,8 +95,9 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
       }
     }
   } else {
-    if (entity_info.entity_role != RDC_DEVICE_ROLE_PHYSICAL) {
-      RDC_LOG(RDC_INFO, "GPU " << entity_info.device_index
+    if ((entity_info.entity_role != RDC_DEVICE_ROLE_PHYSICAL) &&
+        (entity_info.device_type == RDC_DEVICE_TYPE_GPU)) {
+      RDC_LOG(RDC_INFO, "GPU " << entity_info.device_index << "." << entity_info.device_type
                                << " is not partitionable, but a partition instance was provided.");
       return RDC_ST_BAD_PARAMETER;
     }
