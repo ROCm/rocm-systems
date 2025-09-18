@@ -131,7 +131,13 @@ if(hip_VERSION VERSION_LESS "6.2")
 endif()
 
 target_link_libraries(rocprofiler-sdk-hip INTERFACE hip::host)
-rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
+# TODO: As of 2025/5/29, the hip::host target does not advertise its
+# include directory but amdhip64 does. This ordinarily wouldn't be an issue
+# because most folks just get it transitively, but here this is doing direct
+# property copying to get usage requirements.
+# The proper fix is for hip to export a hip::headers target with only usage
+# requirements and depend on that.
+rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::amdhip64)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -252,35 +258,44 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_path(
-    drm_INCLUDE_DIR
-    NAMES drm.h
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+# TODO: Work with rocprof team to determine when xf86drm is needed and transition
+# to using pkg_check (like ROCR) vs loose find_library and find_path.
+find_package(PkgConfig)
+pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+target_include_directories(rocprofiler-sdk-drm SYSTEM INTERFACE ${DRM_INCLUDE_DIRS}
+                                                                ${DRM_AMDGPU_INCLUDE_DIRS})
+target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM PkgConfig::DRM_AMDGPU)
 
-find_path(
-    xf86drm_INCLUDE_DIR
-    NAMES xf86drm.h
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+# find_path(
+#     drm_INCLUDE_DIR
+#     NAMES drm.h
+#     HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+#     PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+#     PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
 
-find_library(
-    drm_LIBRARY
-    NAMES drm
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+# find_path(
+#     xf86drm_INCLUDE_DIR
+#     NAMES xf86drm.h
+#     HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+#     PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+#     PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
 
-find_library(
-    drm_amdgpu_LIBRARY
-    NAMES drm_amdgpu
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+# find_library(
+#     drm_LIBRARY
+#     NAMES drm
+#     HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+#     PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
 
-target_include_directories(rocprofiler-sdk-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
-                                                                ${xf86drm_INCLUDE_DIR})
-target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
+# find_library(
+#     drm_amdgpu_LIBRARY
+#     NAMES drm_amdgpu
+#     HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+#     PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+
+# target_include_directories(rocprofiler-sdk-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
+#                                                                 ${xf86drm_INCLUDE_DIR})
+# target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
 
 # ----------------------------------------------------------------------------------------#
 #

@@ -9,3 +9,4 @@ set(containers_sources ring_buffer.cpp record_header_buffer.cpp ring_buffer.cpp
 
 target_sources(rocprofiler-sdk-common-library PRIVATE ${containers_sources}
                                                       ${containers_headers})
+target_link_libraries(rocprofiler-sdk-common-library PRIVATE rocprofiler-sdk-hip-nolink)
