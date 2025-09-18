@@ -231,7 +231,9 @@ struct metadata
                         const std::vector<std::string>& _command_line = {});
 
     std::string_view   get_marker_message(uint64_t corr_id) const;
-    std::string_view   get_kernel_name(uint64_t kernel_id, uint64_t rename_id) const;
+    std::string_view   get_kernel_name(uint64_t kernel_id,
+                                       bool     rename_kernel,
+                                       uint64_t rename_id) const;
     std::string_view   get_kind_name(rocprofiler_callback_tracing_kind_t kind) const;
     std::string_view   get_kind_name(rocprofiler_buffer_tracing_kind_t kind) const;
     std::string_view   get_operation_name(rocprofiler_callback_tracing_kind_t kind,

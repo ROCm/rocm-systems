@@ -874,6 +874,12 @@ bool IsCompatibleWithGenericTarget(const std::string& coTarget, const std::strin
 std::vector<std::string> getLinkOptions(const LinkArguments& args) {
   std::vector<std::string> res;
 
+  { // process optimization level
+    std::string opt("-O");
+    opt += std::to_string(args.optimization_level_);
+    res.push_back(opt);
+  }
+
   const auto irArgCount = args.linker_ir2isa_args_count_;
   if (irArgCount > 0) {
     res.reserve(irArgCount);
@@ -1010,12 +1016,108 @@ bool LinkProgram::AddLinkerOptions(unsigned int num_options, hipJitOption* optio
       return false;
     }
     switch (options_ptr[opt_idx]) {
+      case hipJitOptionMaxRegisters:
+        link_args_.max_registers_ = *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionThreadsPerBlock:
+        link_args_.threads_per_block_ =
+            *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionWallTime:
+        link_args_.wall_time_ = *(reinterpret_cast<float*>(options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionInfoLogBuffer: {
+        link_args_.info_log_ = (reinterpret_cast<char*>(options_vals_ptr[opt_idx]));
+        break;
+      }
+      case hipJitOptionInfoLogBufferSizeBytes:
+        link_args_.info_log_size_ = (reinterpret_cast<uint64_t>(options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionErrorLogBuffer: {
+        link_args_.error_log_ = reinterpret_cast<char*>(options_vals_ptr[opt_idx]);
+        break;
+      }
+      case hipJitOptionErrorLogBufferSizeBytes:
+        link_args_.error_log_size_ = (reinterpret_cast<uint64_t>(options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionOptimizationLevel:
+        link_args_.optimization_level_ =
+            *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+      break;
+      case hipJitOptionTargetFromContext:
+        link_args_.target_from_hip_context_ =
+            *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionTarget:
+        link_args_.jit_target_ = *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionFallbackStrategy:
+        link_args_.fallback_strategy_ =
+            *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionGenerateDebugInfo:
+        link_args_.generate_debug_info_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionLogVerbose:
+        link_args_.log_verbose_ = reinterpret_cast<uint64_t>(options_vals_ptr[opt_idx]);
+        break;
+      case hipJitOptionGenerateLineInfo:
+        link_args_.generate_line_info_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionCacheMode:
+        link_args_.cache_mode_ = *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionSm3xOpt:
+        link_args_.sm3x_opt_ = *(reinterpret_cast<bool*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionFastCompile:
+        link_args_.fast_compile_ = *(reinterpret_cast<bool*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionGlobalSymbolNames: {
+        link_args_.global_symbol_names_ = reinterpret_cast<const char**>(options_vals_ptr[opt_idx]);
+        break;
+      }
+      case hipJitOptionGlobalSymbolAddresses: {
+        link_args_.global_symbol_addresses_ = reinterpret_cast<void**>(options_vals_ptr[opt_idx]);
+        break;
+      }
+      case hipJitOptionGlobalSymbolCount:
+        link_args_.global_symbol_count_ =
+            *(reinterpret_cast<uint64_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionLto:
+        link_args_.lto_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionFtz:
+        link_args_.ftz_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionPrecDiv:
+        link_args_.prec_div_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionPrecSqrt:
+        link_args_.prec_sqrt_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionFma:
+        link_args_.fma_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionPositionIndependentCode:
+        link_args_.pic_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionMinCTAPerSM:
+        link_args_.min_cta_per_sm_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionMaxThreadsPerBlock:
+        link_args_.max_threads_per_block_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
+      case hipJitOptionOverrideDirectiveValues:
+        link_args_.override_directive_values_ = *(reinterpret_cast<uint32_t*>(&options_vals_ptr[opt_idx]));
+        break;
       case hipJitOptionIRtoISAOptExt: {
         link_args_.linker_ir2isa_args_ = reinterpret_cast<const char**>(options_vals_ptr[opt_idx]);
         break;
       }
       case hipJitOptionIRtoISAOptCountExt:
-        link_args_.linker_ir2isa_args_count_ = reinterpret_cast<size_t>(options_vals_ptr[opt_idx]);
+        link_args_.linker_ir2isa_args_count_ = reinterpret_cast<uint64_t>(options_vals_ptr[opt_idx]);
         break;
       default:
         break;

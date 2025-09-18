@@ -220,10 +220,10 @@ The following example:
 ROCPROFSYS_ROCM_GROUP_BY_QUEUE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-By default, Perfetto trace will show the HIP streams to which kernel
-and memory copy operations submitted. With the
-``ROCPROFSYS_ROCM_GROUP_BY_QUEUE=ON`` setting, the trace will display HSA queues
-to which these kernel and memory operations were submitted.
+By default, the Perfetto trace groups the kernel dispatch and memory copy
+operations to tracks corresponding to their HIP Stream ID. However, with the
+``ROCPROFSYS_ROCM_GROUP_BY_QUEUE=ON`` setting, the events are on separate tracks
+and grouped by hardware queue.
 
 ROCPROFSYS_USE_RCCLP
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

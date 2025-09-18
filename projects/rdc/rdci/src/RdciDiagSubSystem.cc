@@ -177,7 +177,8 @@ void RdciDiagSubSystem::process() {
     for (uint32_t j = 0; j < test_result.per_gpu_result_count; j++) {
       const rdc_diag_per_gpu_result_t& gpu_result = test_result.gpu_results[j];
       if (strlen(gpu_result.gpu_result.msg) > 0) {
-        std::cout << " GPU " << gpu_result.gpu_index << " " << gpu_result.gpu_result.msg << "\n";
+        // Support both GPU and CPU device result reporting
+        std::cout << " Device " << gpu_result.gpu_index << " " << gpu_result.gpu_result.msg << "\n";
       }
     }
   }

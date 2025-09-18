@@ -15,9 +15,9 @@ This table provides the current status of the migration of specific ROCm systems
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
 | `aqlprofile`           | Public          | Completed        |                                       | [![CodeQL](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml) <br> [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml) |
-| `clr`                  | Public          | Completed        |                                       |                                       |
-| `hip`                  | Public          | Completed        |                                       |                                       |
-| `hipother`             | Public          | Completed        |                                       |                                       |
+| `clr`                  | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Fhip-clr?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=335&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
+| `hip`                  | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Fhip-clr?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=335&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
+| `hipother`             | Public          | Completed        | [![Azure Pipelines](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2Fhip-clr?repoName=ROCm%2Frocm-systems&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=335&repoName=ROCm%2Frocm-systems&branchName=develop) |                                       |
 | `hip-tests`            | Public          | Completed        |                                       |                                       |
 | `rdc`                  | Public          | Completed        |                                       |                                       |
 | `rocm-core`            | Public          | Completed        |                                       |                                       |
@@ -97,6 +97,7 @@ To begin contributing or building, see the [CONTRIBUTING.md](./CONTRIBUTING.md) 
 This super-repo contains multiple subprojects, each of which retains the license under which it was originally published.
 
 📁 Refer to the `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file within each `projects/` or `shared/` directory for specific license terms.
+📄 Refer to the header notice in individual files outside `projects/` or `shared/` folders for their specific license terms.
 
 > **Note**: The root of this repository does not define a unified license across all components.
 

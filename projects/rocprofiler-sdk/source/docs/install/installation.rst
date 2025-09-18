@@ -12,21 +12,7 @@ This document provides information required to install ROCprofiler-SDK from sour
 Supported systems
 -----------------
 
-ROCprofiler-SDK is supported only on Linux. The following distributions are tested:
-
-- Ubuntu 20.04
-- Ubuntu 22.04
-- Ubuntu 24.04
-- OpenSUSE 15.5
-- OpenSUSE 15.6
-- Red Hat 8.8
-- Red Hat 8.9
-- Red Hat 8.10
-- Red Hat 9.2
-- Red Hat 9.3
-- Red Hat 9.4
-
-ROCprofiler-SDK might operate as expected on other `Linux distributions <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_, but has not been tested.
+ROCprofiler-SDK is supported on the Linux distributions specified in the `system requirements <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
 
 Identifying the operating system
 --------------------------------
@@ -68,15 +54,18 @@ Building ROCprofiler-SDK from source
 
 .. code-block:: bash
 
-    git clone https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
+    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+    cd rocm-systems
+    git sparse-checkout init --cone
+    git sparse-checkout set projects/rocprofiler-sdk
+    git checkout develop
     cmake                                         \
         -B rocprofiler-sdk-build                \
-        -D ROCPROFILER_BUILD_TESTS=ON           \
-        -D ROCPROFILER_BUILD_SAMPLES=ON         \
-        -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
-        rocprofiler-sdk-source
+        -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
+        -DCMAKE_PREFIX_PATH=/opt/rocm           \
+        projects/rocprofiler-sdk
 
-    cmake --build rocprofiler-sdk-build --target all --parallel 8
+    cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 
 Installing ROCprofiler-SDK
 ---------------------------
@@ -122,10 +111,3 @@ If you have ROCm version 6.2 or later installed, you can use the package manager
       .. code-block:: shell
 
          $ sudo dnf install rocprofiler-sdk
-
-   .. tab-item:: SUSE Linux Enterprise Server
-
-      .. code-block:: shell
-
-         $ sudo zypper install rocprofiler-sdk
-

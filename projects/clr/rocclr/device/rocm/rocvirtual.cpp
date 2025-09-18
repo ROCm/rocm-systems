@@ -773,7 +773,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
         mem = memories[index];
         const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
         if (mem == nullptr) {
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
                   desc.name_.c_str(), globalAddress);
           //! This condition is for SVM fine-grain
           if (dev().isFineGrainedSystem(true)) {
@@ -787,7 +787,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
           gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
 
           const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
                   desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
                   gpuMem->getDeviceMemory(),
                   reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
@@ -874,10 +874,10 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
           if (desc.size_ > kMaxBytes) {
             bytes += "...";
           }
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
                   desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
         } else {
-          ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
                   desc.typeName_.c_str(), desc.name_.c_str(),
                   (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
                   : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
@@ -1583,7 +1583,9 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   if (mem_segment == Device::MemorySegment::kKernArg &&
       (gpu_.dev().settings().kernel_arg_impl_ != KernelArgImpl::HostKernelArgs) &&
       gpu_.dev().info().largeBar_) {
-    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_));
+    amd::Device::AllocationFlags flags = {};
+    flags.executable_ = true;
+    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags));
     if (pool_base_ != nullptr) {
       // @note Workaround first access penalty.
       // KFD may update CPU page tables on the first CPU access
@@ -1622,7 +1624,8 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
   } else {
     // Reset the signal for the barrier packet
     hsa_signal_silent_store_relaxed(pool_signal_[active_chunk_], kInitSignalValueOne);
-    ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Issue barrier to flush chunk %d", active_chunk_);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Issue barrier to flush chunk %d",
+            active_chunk_);
     // Currently don't skip wait signal check, because SDMA engine cna be used in staging copy
     constexpr bool kSkipSignal = false;
     // Dispatch a barrier packet into the queue
@@ -2946,7 +2949,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     constexpr bool kParent = false;
     amd::Memory* vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
@@ -3490,7 +3493,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                                              gpuKernel.KernargSegmentAlignment());
       command_->SetKernelName(gpuKernel.getDemangledName().c_str());
     } else {
-      ClPrint(amd::LOG_INFO, amd::LOG_KERN,
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
               "KernargSegmentByteSize = %lu "
               "KernargSegmentAlignment = %lu",
               gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
@@ -3545,11 +3548,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     // Validate privateMemSize is more than max allowed.
     size_t maxStackSize = dev().MaxStackSize();
     if (dispatchPacket.private_segment_size > maxStackSize) {
-      ClPrint(amd::LOG_INFO, amd::LOG_KERN,
+      ClPrint(amd::LOG_ERROR, amd::LOG_KERN,
               "Scratch size (%u) exceeds max allowed (%zu) for kernel : %s",
               dispatchPacket.private_segment_size, maxStackSize,
               gpuKernel.getDemangledName().c_str());
-      LogError("Scratch size exceeds max allowed.");
       return false;
     }
   }
