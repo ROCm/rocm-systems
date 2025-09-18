@@ -10,8 +10,7 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer"
-                               "UndefinedBehaviorSanitizer")
+set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer")
 
 if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
     set(IS_DISABLED ON)
