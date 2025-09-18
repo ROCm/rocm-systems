@@ -193,7 +193,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
 {
-    SAVE_DATA_FIELD(record);
+    std::visit([&ar](const auto record) { cereal::save(ar, record); }, data.record);
 }
 
 #undef SAVE_DATA_FIELD
