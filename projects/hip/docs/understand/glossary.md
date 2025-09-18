@@ -8,7 +8,7 @@ The default device can be set with `hipSetDevice`.
 
 * **active host thread** - the thread which is running the HIP APIs.
 
-* **HIP-Clang** - Heterogeneous AMDGPU Compiler, with its capability to compile HIP programs on AMD platform (https://github.com/RadeonOpenCompute/llvm-project).
+* **HIP-Clang** - Heterogeneous AMDGPU Compiler, with its capability to compile HIP programs on AMD platform (https://github.com/ROCm/llvm-project).
 
 * **clr** - a repository for AMD Compute Language Runtime, contains source codes for AMD's compute languages runtimes: HIP and OpenCL.
 clr (https://github.com/ROCm/clr) contains the following three parts,

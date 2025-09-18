@@ -3,7 +3,7 @@
 # https://linuxconfig.org/how-to-create-systemd-service-unit-in-linux
 # https://www.linux.com/tutorials/systemd-services-beyond-starting-and-stopping/
 [Unit]
-Description=Radeon Data Center Daemon (rdcd)
+Description=ROCm Data Center Daemon (rdcd)
 After=network.target
 
 # Add any services that must be started before rdcd here

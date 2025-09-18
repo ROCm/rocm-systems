@@ -146,7 +146,7 @@ message(
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
 # this must go after some CMAKE_* variables
-project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/RadeonOpenCompute/rdc")
+project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/ROCm/rdc")
 
 # Include CMAKE_INSTALL_* variables
 # this must go after project()
@@ -167,7 +167,7 @@ set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gn
 set(CPACK_PACKAGE_NAME ${RDC_PACKAGE} CACHE INTERNAL "")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
 set(CPACK_PACKAGE_CONTACT "RDC Support <rdc.support@amd.com>" CACHE STRING "")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Data Center Tools" CACHE STRING "")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "ROCm Data Center Tools" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION
     "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}."
     CACHE STRING
