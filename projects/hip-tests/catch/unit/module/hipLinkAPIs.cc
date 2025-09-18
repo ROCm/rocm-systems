@@ -22,11 +22,11 @@ THE SOFTWARE.
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
+#include <filesystem>
+#include <fstream>
 #include <limits.h>
 #include <string.h>
 #include <unistd.h>
-#include <filesystem>
-#include <fstream>
 #include <vector>
 
 #define SPIRV_FILE "addKernel.spv"
@@ -83,8 +83,8 @@ TEST_CASE("Unit_hipLinkAPIs_GlobalDeviceData") {
 
   hipLinkState_t linkState;
 
-  HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(),
-                          lopts, &linkState));
+  HIP_CHECK(
+      hipLinkCreate(jit_options.size(), jit_options.data(), lopts, &linkState));
 
   const char *filename = SPIRV_FILE;
   bool from_file;
@@ -109,10 +109,9 @@ TEST_CASE("Unit_hipLinkAPIs_GlobalDeviceData") {
   if (!from_file) {
     std::vector<char> co_source;
     REQUIRE(load_co_from_file(filename, &co_source) == true);
-    HIP_CHECK(hipLinkAddData(linkState, hipJitInputSpirv,
-                             reinterpret_cast<void *>(co_source.data()),
-                             co_source.size(), "LinkSPIRV1", 0,
-                             nullptr, nullptr));
+    HIP_CHECK(hipLinkAddData(
+        linkState, hipJitInputSpirv, reinterpret_cast<void *>(co_source.data()),
+        co_source.size(), "LinkSPIRV1", 0, nullptr, nullptr));
   } else {
     HIP_CHECK(hipLinkAddFile(linkState, hipJitInputSpirv, filename, 0, nullptr,
                              nullptr));
@@ -170,8 +169,8 @@ TEST_CASE("Unit_hipLinkAPIs_Texture") {
 
   hipLinkState_t linkState;
 
-  HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(),
-                          lopts, &linkState));
+  HIP_CHECK(
+      hipLinkCreate(jit_options.size(), jit_options.data(), lopts, &linkState));
 
   const char *filename = SPIRV_FILE;
   bool from_file;
@@ -196,10 +195,9 @@ TEST_CASE("Unit_hipLinkAPIs_Texture") {
   if (!from_file) {
     std::vector<char> co_source;
     REQUIRE(load_co_from_file(filename, &co_source) == true);
-    HIP_CHECK(hipLinkAddData(linkState, hipJitInputSpirv,
-                             reinterpret_cast<void *>(co_source.data()),
-                             co_source.size(), "LinkSPIRV1", 0,
-                             nullptr, nullptr));
+    HIP_CHECK(hipLinkAddData(
+        linkState, hipJitInputSpirv, reinterpret_cast<void *>(co_source.data()),
+        co_source.size(), "LinkSPIRV1", 0, nullptr, nullptr));
   } else {
     HIP_CHECK(hipLinkAddFile(linkState, hipJitInputSpirv, filename, 0, nullptr,
                              nullptr));
@@ -247,8 +245,8 @@ TEST_CASE("Unit_hipLinkAPIs_hipLinkAddData_Negative") {
 
   hipLinkState_t linkState;
 
-  HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(),
-                          lopts, &linkState));
+  HIP_CHECK(
+      hipLinkCreate(jit_options.size(), jit_options.data(), lopts, &linkState));
 
   const char *filename = SPIRV_FILE;
   std::vector<char> co_source;
@@ -303,12 +301,12 @@ TEST_CASE("Unit_hipLinkAPIs_hipLinkComplete_Negative") {
   std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
                                            hipJitOptionIRtoISAOptCountExt};
   size_t isaoptssize = 4;
-  void *lopts[] = { reinterpret_cast<void *>(isaopts),
-                    reinterpret_cast<void *>(isaoptssize) };
+  void *lopts[] = {reinterpret_cast<void *>(isaopts),
+                   reinterpret_cast<void *>(isaoptssize)};
 
   hipLinkState_t linkState;
-  HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(),
-                          lopts, &linkState));
+  HIP_CHECK(
+      hipLinkCreate(jit_options.size(), jit_options.data(), lopts, &linkState));
   HIP_CHECK(hipLinkAddFile(linkState, hipJitInputSpirv, SPIRV_FILE, 0, nullptr,
                            nullptr));
 
@@ -337,7 +335,7 @@ TEST_CASE("Unit_hipLinkAPIs_hipLinkComplete_Negative") {
  * Test Description
  * ------------------------
  * - This test case tests the Negetive scenario
- * - for the hipLinkComplete With Invalid link state
+ * - for the hipLinkDestroy With Invalid link state
  * Test source
  * ------------------------
  * - unit/module/hipLinkAPIs.cc
@@ -346,7 +344,143 @@ TEST_CASE("Unit_hipLinkAPIs_hipLinkComplete_Negative") {
  * - HIP_VERSION >= 6.4
  */
 TEST_CASE("Unit_hipLinkAPIs_hipLinkDestroy_Negative") {
-  HIP_CHECK_ERROR(hipLinkDestroy(nullptr), hipErrorInvalidValue);
+  SECTION("Invalid linkstate") {
+    HIP_CHECK_ERROR(hipLinkDestroy(nullptr), hipErrorInvalidValue);
+  }
+  SECTION("Destroying already destroyed linkstate") {
+    const char *isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm",
+                             "-inlinehint-threshold=1"};
+    std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
+                                             hipJitOptionIRtoISAOptCountExt};
+    size_t isaoptssize = 4;
+    void *lopts[] = {reinterpret_cast<void *>(isaopts),
+                     reinterpret_cast<void *>(isaoptssize)};
+
+    hipLinkState_t linkState;
+    HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(), lopts,
+                            &linkState));
+    HIP_CHECK(hipLinkDestroy(linkState));
+    HIP_CHECK_ERROR(hipLinkDestroy(linkState), hipErrorInvalidValue);
+  }
 }
 
+/**
+ * Test Description
+ * ------------------------
+ * - This test case tests the following scenario:-
+ * - 1) Create hip link and extract module from Bundled/Un-bundled
+ * -    file using hip link APIs,
+ * -      Section 1 : Bundled with Data
+ * -      Section 2 : Un-bundled with Data
+ * -      Section 3 : Bundled with File
+ * -      Section 4 : Un-bundled with File
+ * - 4) Get the function count from module and validate it.
+ * Test source
+ * ------------------------
+ * - unit/module/hipLinkAPIs.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.4
+ */
+TEST_CASE("Unit_hipLinkAPIs_GetFunctionCount") {
+  const char *isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm",
+                           "-inlinehint-threshold=1"};
+  std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
+                                           hipJitOptionIRtoISAOptCountExt};
+  size_t isaoptssize = 4;
+  void *lopts[] = {reinterpret_cast<void *>(isaopts),
+                   reinterpret_cast<void *>(isaoptssize)};
+
+  hipLinkState_t linkState;
+
+  HIP_CHECK(
+      hipLinkCreate(jit_options.size(), jit_options.data(), lopts, &linkState));
+
+  const char *filename = SPIRV_FILE;
+  bool from_file;
+
+  SECTION("Link Add Data with Bundled Spirv") {
+    from_file = false;
+    filename = SPIRV_BUNDLED_FILE;
+  }
+  SECTION("Link Add Data with UnBundled Spirv") {
+    from_file = false;
+    filename = SPIRV_FILE;
+  }
+  SECTION("Link Add File with Bundled Spirv") {
+    from_file = true;
+    filename = SPIRV_BUNDLED_FILE;
+  }
+  SECTION("Link Add File with UnBundled Spirv") {
+    from_file = true;
+    filename = SPIRV_FILE;
+  }
+
+  if (!from_file) {
+    std::vector<char> co_source;
+    REQUIRE(load_co_from_file(filename, &co_source) == true);
+    HIP_CHECK(hipLinkAddData(
+        linkState, hipJitInputSpirv, reinterpret_cast<void *>(co_source.data()),
+        co_source.size(), "LinkSPIRV1", 0, nullptr, nullptr));
+  } else {
+    HIP_CHECK(hipLinkAddFile(linkState, hipJitInputSpirv, filename, 0, nullptr,
+                             nullptr));
+  }
+
+  void *linkOut;
+  size_t linkSize = 0;
+  HIP_CHECK(hipLinkComplete(linkState, &linkOut, &linkSize));
+
+  hipModule_t module;
+  HIP_CHECK(hipModuleLoadData(&module, linkOut));
+
+  unsigned int func_count;
+  HIP_CHECK(hipModuleGetFunctionCount(&func_count, module));
+  REQUIRE(func_count == 2);
+  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipLinkDestroy(linkState));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - This test case tests the following Negetive scenarios
+ * - for the hipLinkAddFile and hipLinkAddData APIs with
+ * - cuda only hipJitInputType values.
+ * Test source
+ * ------------------------
+ * - unit/module/hipLinkAPIs.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.4
+ */
+TEST_CASE("Unit_hipLinkAddFile_hipLinkAddData_with_cuda_only_inputTypes") {
+  hipLinkState_t linkState;
+  const char *isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm",
+                           "-inlinehint-threshold=1"};
+  std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
+                                           hipJitOptionIRtoISAOptCountExt};
+  size_t isaoptssize = 4;
+  void *lopts[] = {reinterpret_cast<void *>(isaopts),
+                   reinterpret_cast<void *>(isaoptssize)};
+  const char *filename = SPIRV_FILE;
+  std::vector<char> co_source;
+  REQUIRE(load_co_from_file(filename, &co_source) == true);
+  HIP_CHECK(
+      hipLinkCreate(jit_options.size(), jit_options.data(),
+                    lopts, &linkState));
+  hipJitInputType inputType = GENERATE(
+      hipJitInputCubin, hipJitInputPtx, hipJitInputFatBinary, hipJitInputObject,
+      hipJitInputLibrary, hipJitInputNvvm, hipJitInputLLVMBitcode,
+      hipJitInputLLVMBundledBitcode, hipJitInputLLVMArchivesOfBundledBitcode);
+  HIP_CHECK_ERROR(
+      hipLinkAddFile(linkState, inputType, filename, 0, nullptr, nullptr),
+      hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipLinkAddData(linkState, inputType,
+                                 reinterpret_cast<void *>(co_source.data()),
+                                 co_source.size(), "LinkSPIRV1", 0, nullptr,
+                                 nullptr),
+                  hipErrorInvalidValue);
+  HIP_CHECK(hipLinkDestroy(linkState));
+}
 #endif
