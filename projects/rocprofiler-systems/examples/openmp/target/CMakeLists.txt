@@ -71,9 +71,10 @@ endif()
 # Use the directory that actually contains the library we found
 get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
-set(_COMMON_RPATH
-    "${_rocm_llvm_lib};${_rocm_clang_lib};${ROCmVersion_DIR}/llvm/lib;$ORIGIN"
-)
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN")
+if(ROCmVersion_DIR)
+    list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
+endif()
 list(REMOVE_DUPLICATES _COMMON_RPATH)
 
 message(STATUS "libomptarget found at: ${LIBOMPTARGET_SO}")
@@ -114,7 +115,6 @@ foreach(tgt openmp-target-lib openmp-target)
             "-L${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_clang_lib}"
-            "-Wl,-rpath,'$ORIGIN'"
     )
 endforeach()
 
