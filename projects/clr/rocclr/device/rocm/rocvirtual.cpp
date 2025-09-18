@@ -1431,24 +1431,32 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   profiling_ = profiling;
   cooperative_ = cooperative;
 
+  constexpr uint16_t kernelDispatchHBits =
+      (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+  constexpr uint16_t barrierHBits = (1 << HSA_PACKET_HEADER_BARRIER);
+  constexpr uint16_t agentScopeHBits =
+      (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  constexpr uint16_t systemScopeHBits =
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  // acquire=SYSTEM, release=AGENT (needed for GFX12)
+  constexpr uint16_t sysAcquireAgentReleaseHBits =
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
   if (device.settings().fenceScopeAgent_) {
+    const auto& isa = device.isa();
+    const bool isGfx12 = (isa.versionMajor() == 12) && (isa.versionMinor() == 0) &&
+                         (isa.versionStepping() == 0 || isa.versionStepping() == 1);
+
     dispatchPacketHeaderNoSync_ =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    dispatchPacketHeader_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-                            (1 << HSA_PACKET_HEADER_BARRIER) |
-                            (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                            (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+        (kernelDispatchHBits | (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
+    dispatchPacketHeader_ = (kernelDispatchHBits | barrierHBits |
+                             (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
   } else {
-    dispatchPacketHeaderNoSync_ =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    dispatchPacketHeader_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-                            (1 << HSA_PACKET_HEADER_BARRIER) |
-                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    dispatchPacketHeaderNoSync_ = (kernelDispatchHBits | systemScopeHBits);
+    dispatchPacketHeader_ = (kernelDispatchHBits | barrierHBits | systemScopeHBits);
   }
 
   aqlHeader_ = dispatchPacketHeader_;
@@ -1582,7 +1590,9 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   if (mem_segment == Device::MemorySegment::kKernArg &&
       (gpu_.dev().settings().kernel_arg_impl_ != KernelArgImpl::HostKernelArgs) &&
       gpu_.dev().info().largeBar_) {
-    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_));
+    amd::Device::AllocationFlags flags = {};
+    flags.executable_ = true;
+    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags));
     if (pool_base_ != nullptr) {
       // @note Workaround first access penalty.
       // KFD may update CPU page tables on the first CPU access
@@ -2946,7 +2956,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     constexpr bool kParent = false;
     amd::Memory* vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;

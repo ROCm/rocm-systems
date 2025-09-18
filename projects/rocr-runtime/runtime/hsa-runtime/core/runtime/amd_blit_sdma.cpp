@@ -353,7 +353,9 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
   const uint32_t total_command_size = total_poll_command_size + cmd_size + sync_command_size +
       total_timestamp_command_size + interrupt_command_size + flush_cmd_size + total_gang_command_size;
   const uint32_t pad_size = total_command_size < min_submission_size_ ?
-                            min_submission_size_ - total_command_size : 0;
+                            min_submission_size_ - total_command_size :
+                            core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() ?
+                              AlignUp(total_command_size, 64) - total_command_size : 0;
 
   uint64_t curr_index;
   char* command_addr;
@@ -716,6 +718,9 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
       std::atomic_thread_fence(std::memory_order_release);
 
       *reinterpret_cast<uint64_t*>(queue_resource_.Queue_DoorBell) = new_index;
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId));
+      }
 
       atomic::Store(&cached_commit_index_, new_index, std::memory_order_release);
       break;

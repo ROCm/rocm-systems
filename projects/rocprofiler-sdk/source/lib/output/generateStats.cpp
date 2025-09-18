@@ -62,7 +62,7 @@ get_stats(const stats_map_t& data_v)
 }  // namespace
 
 stats_entry_t
-generate_stats(const output_config& /*cfg*/,
+generate_stats(const output_config&                                               cfg,
                const metadata&                                                    tool_metadata,
                const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& data)
 {
@@ -72,6 +72,7 @@ generate_stats(const output_config& /*cfg*/,
         for(auto record : data.get(ditr))
         {
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
+                                                             cfg.kernel_rename,
                                                              record.correlation_id.external.value);
 
             kernel_stats[kernel_name] += (record.end_timestamp - record.start_timestamp);

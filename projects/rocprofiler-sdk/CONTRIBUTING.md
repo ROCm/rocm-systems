@@ -34,7 +34,7 @@ By creating a pull request, you agree to the statements made in the [code licens
 
 ## Code License ##
 
-All code contributed to this project will be licensed under the license identified in the [License.txt](../LICENSE.txt). Your contribution will be accepted under the same license.
+All code contributed to this project will be licensed under the license identified in the [LICENSE.md](../LICENSE.md). Your contribution will be accepted under the same license.
 
 ## Release Cadence ##
 
