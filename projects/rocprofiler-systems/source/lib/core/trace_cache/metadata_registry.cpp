@@ -212,7 +212,8 @@ from_json_code_object(const nlohmann::json& _json)
     rocprofiler_callback_tracing_code_object_load_data_t co = {};
     co.code_object_id = _json["code_object_id"].get<long long>();
     auto uri_str      = _json["uri"].get<std::string>();
-    strncpy(const_cast<char*>(co.uri), uri_str.c_str(), sizeof(co.uri) - 1);
+    co.uri            = new char[uri_str.size() + 1];
+    strncpy(const_cast<char*>(co.uri), uri_str.c_str(), uri_str.size() + 1);
     co.load_base    = _json["load_base"].get<long long>();
     co.load_size    = _json["load_size"].get<long long>();
     co.load_delta   = _json["load_delta"].get<long long>();
@@ -254,8 +255,9 @@ from_json_kernel_symbol(const nlohmann::json& _json)
     ks.kernel_id         = _json["kernel_id"].get<long long>();
     ks.code_object_id    = _json["code_object_id"].get<long long>();
     auto kernel_name_str = _json["kernel_name"].get<std::string>();
+    ks.kernel_name       = new char[kernel_name_str.size() + 1];
     strncpy(const_cast<char*>(ks.kernel_name), kernel_name_str.c_str(),
-            sizeof(ks.kernel_name) - 1);
+            sizeof(ks.kernel_name) + 1);
     ks.kernel_object             = _json["kernel_object"].get<long long>();
     ks.kernarg_segment_size      = _json["kernarg_segment_size"].get<int>();
     ks.kernarg_segment_alignment = _json["kernarg_segment_alignment"].get<int>();
@@ -417,21 +419,21 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
     const auto& queue_array = _json["queues"];
     for(const auto& queue_json : queue_array)
     {
-        auto handle = queue_json["handle"].get<long long>();
+        auto handle = queue_json.get<long long>();
         _registry.add_queue(static_cast<uint64_t>(handle));
     }
 
     const auto& stream_array = _json["streams"];
     for(const auto& stream_json : stream_array)
     {
-        auto handle = stream_json["handle"].get<long long>();
+        auto handle = stream_json.get<long long>();
         _registry.add_stream(static_cast<uint64_t>(handle));
     }
 
     const auto& string_array = _json["strings"];
     for(const auto& string_json : string_array)
     {
-        auto str = string_json["value"].get<std::string>();
+        auto str = string_json.get<std::string>();
         _registry.add_string(str);
     }
 
