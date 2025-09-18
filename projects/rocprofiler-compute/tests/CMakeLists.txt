@@ -11,18 +11,12 @@ endif()
 set(VCOPY_SOURCES ../sample/vcopy.cpp)
 set_source_files_properties(${VCOPY_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(vcopy ${VCOPY_SOURCES})
-set_target_properties(
-    vcopy
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
-)
+set_target_properties(vcopy PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 set(VMEM_SOURCES ../sample/vmem.hip)
 set_source_files_properties(${VMEM_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(vmem ${VMEM_SOURCES})
-set_target_properties(
-    vmem
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
-)
+set_target_properties(vmem PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 set(VSEQ_SOURCES ../sample/vsequential_access.cpp)
 set_source_files_properties(${VSEQ_SOURCES} PROPERTIES LANGUAGE HIP)
