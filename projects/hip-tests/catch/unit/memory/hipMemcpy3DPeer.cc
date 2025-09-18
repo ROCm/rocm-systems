@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   constexpr int numW = 16;
   constexpr int numH = 16;
   constexpr int depth = 4;
-  size_t volume = numW * numH * depth * sizeof(char);
+  size_t volume = numW * numH * depth;
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
   if (device_count <= 1) {
