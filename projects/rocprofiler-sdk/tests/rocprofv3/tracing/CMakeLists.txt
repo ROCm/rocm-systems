@@ -28,8 +28,9 @@ add_test(
     NAME rocprofv3-test-trace-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
-        --memory-copy-trace --marker-trace --kfd-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace
-        -o cmdl-input/out --output-format pftrace csv json rocpd --log-level ${LOG_LEVEL} --
+        --memory-copy-trace --marker-trace --kfd-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o cmdl-input/out --output-format
+        pftrace csv json rocpd --log-level ${LOG_LEVEL} --
         $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(

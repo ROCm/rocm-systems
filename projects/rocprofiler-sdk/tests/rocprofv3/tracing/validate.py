@@ -320,6 +320,7 @@ def test_marker_api_trace_json(json_data):
         assert marker["thread_id"] >= data["metadata"]["pid"]
         assert marker["end_timestamp"] >= marker["start_timestamp"]
 
+
 # rocprofv3 does not support output of KFD data to CSV
 def test_kfd_trace_json(json_data):
     data = json_data["rocprofiler-sdk-tool"]
@@ -345,7 +346,9 @@ def test_kfd_trace_json(json_data):
         op_id = record["operation"]
 
         assert get_kind_name(kind_id) in valid_kind
-        assert op_id >= 0 and op_id < len(data["strings"]["buffer_records"][kind_id]["operations"])
+        assert op_id >= 0 and op_id < len(
+            data["strings"]["buffer_records"][kind_id]["operations"]
+        )
         assert record["pid"] >= data["metadata"]["pid"]
 
         if "end_timestamp" in record:
