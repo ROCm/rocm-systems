@@ -118,13 +118,15 @@ def create_df_kernel_top_stats(
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
         first_filter = filter_dispatch_ids[0]
-        if first_filter.startswith(">"):
-            match = re.match(r">\s*(\d+)", first_filter)
+
+        if isinstance(first_filter, str) and first_filter.startswith(">"):
+            match = re.match(r">\s*(\d+)", str(first_filter))
             if match:
                 threshold = int(match.group(1))
                 df = df[df["Dispatch_ID"] > threshold]
         else:
-            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
+            filter_strings = [str(f) for f in filter_dispatch_ids]
+            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
     dispatch_columns = (
