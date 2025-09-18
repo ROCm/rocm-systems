@@ -1,4 +1,4 @@
-/* Copyright (c) 2013 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2013 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -436,8 +436,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
 
   // Peep signal +2 ahead to see if its done
   auto temp_id = (current_id_ + 2) % signal_list_.size();
-  // If GPU is still busy with processing, then add more signals to avoid more frequent stalls
-  if (hsa_signal_load_relaxed(signal_list_[temp_id]->signal_) > 0) {
+  // If GPU is still busy with processing or if timestamps havent been saved out,
+  // then add more signals to avoid more frequent stalls
+  if (hsa_signal_load_relaxed(signal_list_[temp_id]->signal_) > 0 ||
+      !signal_list_[temp_id]->flags_.done_) {
     std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
     if ((signal != nullptr) && CreateSignal(signal.get())) {
       // Find valid new index
@@ -453,10 +455,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   if (!new_signal) {
     // Find valid index
     ++current_id_ %= signal_list_.size();
-
     // Make sure the previous operation on the current signal is done
     WaitCurrent();
 
+    size_t next = (current_id_ + 1) % signal_list_.size();
     // Have to wait the next signal in the queue to avoid a race condition between
     // a GPU waiter(which may be not triggered yet) and CPU signal reset below
     WaitNext();
@@ -1009,7 +1011,6 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   // Check for queue full and wait if needed.
   uint64_t index = hsa_queue_add_write_index_screlease(gpu_queue_, 1);
-  uint64_t read = hsa_queue_load_read_index_relaxed(gpu_queue_);
   fence_dirty_ = true;
 
   if (addSystemScope_) {
@@ -1055,16 +1056,16 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
     current_signal->flags_.isPacketDispatch_ = true;
   }
 
-
   // Make sure the slot is free for usage
   while ((index - hsa_queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
-    amd::Os::yield();
+    // Active spin - no yield
   }
 
   // Add blocking command if the original value of read index was behind of the queue size.
   // Note: direct dispatch relies on the slot stall above to keep the forward progress
   // of the app if a dispatched kernel requires some CPU input for completion
-  if (blocking || (!AMD_DIRECT_DISPATCH && (index - read) >= sw_queue_size)) {
+  if (blocking || (!AMD_DIRECT_DISPATCH &&
+                   (index - hsa_queue_load_read_index_relaxed(gpu_queue_)) >= sw_queue_size)) {
     if (packet->completion_signal.handle == 0) {
       packet->completion_signal = Barriers().ActiveSignal();
     }
@@ -1102,7 +1103,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernel_object,
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
-          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2, read, index);
+          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
+          hsa_queue_load_read_index_scacquire(gpu_queue_), index);
 
   hsa_signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
@@ -1158,34 +1160,229 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 }
 
 // ================================================================================================
-inline bool VirtualGPU::dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                          amd::AccumulateCommand* vcmd) {
-  if (vcmd == nullptr) {
+template <typename AqlPacket>
+bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
+                                               bool blocking, bool attach_signal,
+                                               const std::vector<std::string>* kernelNames) {
+  if (packets.empty()) {
     return false;
   }
 
-  vcmd->addKernelName(kernelName);
-  amd::ScopedLock lock(execution());
+  const uint32_t queueSize = gpu_queue_->size;
+  const uint32_t queueMask = queueSize - 1;
+  const uint32_t sw_queue_size = queueMask;
+  const size_t numPackets = packets.size();
+  size_t kMaxBatchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
+  const size_t kGpuLagPackets = 16;
 
+  // Staggered copy pattern: powers of 2 (1, 2, 4, 8.. to DEBUG_HIP_GRAPH_BATCH_SIZE
+  size_t processedPackets = 0;
+  size_t batchSize = 1;
+
+  while (processedPackets < numPackets) {
+    uint64_t currentReadIndex = hsa_queue_load_read_index_scacquire(gpu_queue_);
+    uint64_t currentWriteIndex = hsa_queue_load_write_index_relaxed(gpu_queue_);
+
+    if (currentWriteIndex - currentReadIndex >= kGpuLagPackets) {
+      //GPU is busy, so we can copy more packets
+      batchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
+    }
+
+    // Process all remaining packets in one batch
+    if (processedPackets + batchSize > numPackets) {
+      batchSize = numPackets - processedPackets;
+    }
+
+    // Check if we have enough space in the queue for this batch
+    // If queue is full, reset batch size to 1 and wait
+    if (currentWriteIndex + batchSize - currentReadIndex >= sw_queue_size) {
+      batchSize = 1;
+    }
+
+    // Now reserve space for the batch
+    uint64_t startIndex = hsa_queue_add_write_index_screlease(gpu_queue_, batchSize);
+
+    // Make sure the slot is free for usage
+    while ((startIndex - hsa_queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
+      // Active spin - no yield
+    }
+
+    fence_dirty_ = true;
+
+    // Save header of first packet in this batch
+    AqlPacket* firstPacket = packets[processedPackets];
+    uint16_t firstPacketHeader = firstPacket->header;
+    uint16_t firstPacketRest = firstPacket->setup;
+
+    // Process batchSize packets
+    for (size_t i = 0; i < batchSize; ++i) {
+      size_t packetIndex = processedPackets + i;
+      uint64_t index = startIndex + i;
+
+      AqlPacket* packet = packets[packetIndex];
+      uint16_t header = packet->header;
+
+
+      bool attachSignal = timestamp_ != nullptr || attach_signal;
+
+      packet->completion_signal =
+          Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
+
+      if (std::is_same<decltype(packet), hsa_kernel_dispatch_packet_t*>::value &&
+          timestamp_ != nullptr) {
+        // If profiling is enabled, store the correlation ID in the dispatch packet
+        if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+          auto dispatchPacket = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet);
+          dispatchPacket->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
+        }
+
+        ProfilingSignal* current_signal = Barriers().GetLastSignal();
+        current_signal->flags_.isPacketDispatch_ = true;
+      }
+
+      //Add blocking command if needed (only for the last packet)
+      if (blocking && (packetIndex == numPackets - 1)) {
+        if (packet->completion_signal.handle == 0) {
+          packet->completion_signal = Barriers().ActiveSignal();
+        }
+      }
+
+      AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
+
+      // For first packet in batch, invalidate header before writing
+      if (i == 0) {
+        if (addSystemScope_) {
+          // Add system scope on the acq on first packet
+          firstPacketHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+          firstPacketHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+        }
+        packet->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
+
+        // Copy the packet and then write the valid of the first packet
+        *aql_loc = *packet;
+
+        // Restore the header of the first packet
+        packet->header = firstPacketHeader;
+      } else {
+        // For the end packet in batch set flags
+        if (i == batchSize - 1) {
+          if (addSystemScope_) {
+            // Add system scope on the release on last packet
+            packet->header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+            packet->header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+            addSystemScope_ = false;
+          }
+          auto expected_fence_state =
+              extractAqlBits(packet->header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                             HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+          // Reset fence_dirty_ flag if we submit a packet with system scopes
+          if (expected_fence_state == amd::Device::kCacheStateSystem) {
+            fence_dirty_ = false;
+          }
+          fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
+        }
+
+        // Copy the packet to the queue
+        *aql_loc = *packet;
+      }
+
+      // Print kernel name for kernel dispatch packets
+      if (kernelNames && packetIndex < kernelNames->size()) {
+        uint8_t packetType =
+            extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
+        if (packetType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Graph shader name : %s",
+                  (*kernelNames)[packetIndex].c_str());
+
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
+                  "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
+                  "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+                  "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], "
+                  "private_seg_size=%zu, group_seg_size=%zu, kernel_obj=0x%zx, "
+                  "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
+                  "rptr=%u, wptr=%u",
+                  gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
+                  extractAqlBits(header, HSA_PACKET_HEADER_BARRIER,
+                                HSA_PACKET_HEADER_WIDTH_BARRIER),
+                  extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                                HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+                  extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                                HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+                  packet->setup,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_x,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_y,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_z,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_x,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_y,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_z,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->private_segment_size,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->group_segment_size,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernel_object,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
+                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
+                  hsa_queue_load_read_index_scacquire(gpu_queue_), index);
+            }
+      }
+    }
+
+    // Write valid header for the first packet in the batch
+    AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[startIndex & queueMask];
+    packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), firstPacketHeader, firstPacketRest);
+
+    // Ring doorbell for this batch
+    hsa_signal_store_screlease(gpu_queue_->doorbell_signal, startIndex);
+
+    processedPackets += batchSize;
+
+    TrackQueueProgress(*packets[processedPackets - 1], startIndex + batchSize - 1);
+    // Double the batch size for next iteration, cap at DEBUG_HIP_GRAPH_BATCH_SIZE
+    if (batchSize < kMaxBatchSize) {
+      batchSize *= 2;
+    }
+  }
+
+  // Mark the flag indicating if a dispatch is outstanding
+  hasPendingDispatch_ = true;
+
+  // Wait on signal for the last packet if blocking
+  if (blocking) {
+    LogInfo("Runtime reached the AQL queue limit. SW is much ahead of HW. Blocking AQL queue!");
+    if (!Barriers().WaitCurrent()) {
+      LogPrintfError("Failed blocking queue wait with signal [0x%lx]",
+                     packets.back()->completion_signal.handle);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// ================================================================================================
+bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                                        const std::vector<std::string>& kernelNames,
+                                        amd::AccumulateCommand* vcmd) {
+  if (vcmd == nullptr || packets.empty() || packets.size() != kernelNames.size()) {
+    return false;
+  }
+
+  amd::ScopedLock lock(execution());
   profilingBegin(*vcmd);
 
   dispatchBlockingWait();
-  auto packet = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(aqlpacket);
-  ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Graph shader name : %s", kernelName.c_str());
 
-  // The Aqlpacket with valid header will trigger the issue that AQL fill
-  // the header before filling the body. However, the CP can handle the AQL package
-  // after seeing the valid AQL header with the AQL package's body is NULL.
-  // This patch fixes this potential issue that filling AQL header before
-  // filling the AQL body.
-  uint16_t packetHeader = packet->header;
-  packet->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
-  dispatchGenericAqlPacket(packet, packetHeader, packet->setup, false);
-  packet->header = packetHeader;
+  // Add all kernel names in bulk
+  vcmd->addKernelNames(kernelNames);
+
+  // Dispatch all packets with a single doorbell ring
+  // Cast packets vector to AQL packets vector on the fly
+  const auto& aqlPackets =
+      reinterpret_cast<const std::vector<hsa_kernel_dispatch_packet_t*>&>(packets);
+  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, false, &kernelNames);
 
   profilingEnd();
 
-  return true;
+  return result;
 }
 
 // ================================================================================================

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -394,9 +394,20 @@ void GraphExec::GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph) {
 }
 
 // ================================================================================================
-hipError_t GraphExec::AllocKernelArgForGraphNode() {
+hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   hipError_t status = hipSuccess;
-  for (auto& node : topoOrder_) {
+
+  // Clear previous capture status and batches
+  nodeCaptureStatus_.clear();
+  nodeCaptureStatus_.resize(topoOrder_.size(), false);
+
+  // Clear previous batches
+  packetBatches_.clear();
+
+  // Process nodes and create batches of consecutive captured nodes
+  for (size_t i = 0; i < topoOrder_.size(); ++i) {
+    auto& node = topoOrder_[i];
+
     if (node->GetType() == hipGraphNodeTypeKernel) {
       // Check if graph requires hidden heap and set as part of graphExec param.
       static bool initialized = false;
@@ -405,19 +416,51 @@ hipError_t GraphExec::AllocKernelArgForGraphNode() {
         initialized = true;
       }
     }
+
     if (node->GraphCaptureEnabled()) {
-      status = node->CaptureAndFormPacket(GetKernelArgManager());
+      // Start of a potential batch - try to capture packets for this node
+      std::vector<uint8_t*> currentBatch;
+      std::vector<std::string> currentKernelNames;
+
+      // Collect packets from consecutive captured nodes
+      size_t j = i;
+      size_t capturedNodeCount = 0;
+      while (j < topoOrder_.size() && topoOrder_[j]->GraphCaptureEnabled()) {
+        auto& currentNode = topoOrder_[j];
+        status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &currentBatch,
+                                                             &currentKernelNames);
+
+        if (status != hipSuccess || currentBatch.empty()) {
+          LogError("Packet capture failed");
+          return status;
+        }
+        // Mark this node as successfully captured
+        nodeCaptureStatus_[j] = true;
+        ++j;
+        ++capturedNodeCount;
+      }
+
+      // Add the batch if it has packets
+      if (!currentBatch.empty()) {
+        packetBatches_.emplace_back(std::move(currentBatch), std::move(currentKernelNames),
+                                    capturedNodeCount);
+      }
+
+      // Skip the nodes we just processed, the index will be incremented by the loop
+      i = j - 1;
     } else if (node->GetType() == hipGraphNodeTypeGraph) {
       auto childNode = reinterpret_cast<hip::ChildGraphNode*>(node);
       if (childNode->GetChildGraph()->max_streams_ == 1) {
         childNode->SetGraphCaptureStatus(true);
-        status = childNode->AllocKernelArgForGraphNode();
+        status = childNode->CaptureAndFormPacketsForGraph();
+        nodeCaptureStatus_[i] = (status == hipSuccess);
         if (status != hipSuccess) {
-          return status;
+          status = hipSuccess; // Continue with other nodes
         }
       }
     }
   }
+
   return status;
 }
 
@@ -427,8 +470,8 @@ hipError_t GraphExec::CaptureAQLPackets() {
   size_t kernArgSizeForGraph = 0;
   GetKernelArgSizeForGraph(kernArgSizeForGraph);
   // When we support multi device graph lauch we need to allocate the kenel args on respective
-  // device for each kernel Assume graph has nodes of same device allocate kernel args on the device
-  // from the first node
+  // device for each kernel Assume graph has nodes of same device allocate kernel args on the
+  // device from the first node
   auto device = g_devices[topoOrder_[0]->GetDeviceId()]->devices()[0];
   // Add a larger initial pool to accomodate for any updates to kernel args
   bool bStatus =
@@ -437,10 +480,11 @@ hipError_t GraphExec::CaptureAQLPackets() {
     return hipErrorMemoryAllocation;
   }
 
-  status = AllocKernelArgForGraphNode();
+  status = CaptureAndFormPacketsForGraph();
   if (status != hipSuccess) {
     return status;
   }
+
   kernArgManager_->ReadBackOrFlush();
   return status;
 }
@@ -471,18 +515,37 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
   if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
     accumulate = new amd::AccumulateCommand(*hip_stream, {}, nullptr);
   }
-  for (int i = 0; i < topoOrder_.size(); i++) {
-    if (topoOrder_[i]->GraphCaptureEnabled()) {
-      if (topoOrder_[i]->GetEnabled()) {
-        std::vector<uint8_t*>& gpuPackets = topoOrder_[i]->GetAqlPackets();
-        for (auto& packet : gpuPackets) {
-          hip_stream->vdev()->dispatchAqlPacket(packet, topoOrder_[i]->GetKernelName(), accumulate);
+
+  size_t batchIndex = 0;
+
+  // Process nodes in topological order with mixed execution strategy
+  for (size_t i = 0; i < topoOrder_.size(); ++i) {
+    auto& node = topoOrder_[i];
+
+    if (!node->GraphCaptureEnabled()) {
+      // Node doesn't support capture - execute individually
+      node->SetStream(hip_stream);
+      status = node->CreateCommand(node->GetQueue());
+      node->EnqueueCommands(hip_stream);
+    } else if (i < nodeCaptureStatus_.size() && nodeCaptureStatus_[i]) {
+      // Node was successfully captured - find which batch it belongs to
+      // and dispatch the entire batch
+      if (batchIndex < packetBatches_.size()) {
+        // Dispatch this batch
+        bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
+            packetBatches_[batchIndex].packets, packetBatches_[batchIndex].kernelNames, accumulate);
+        if (!batchStatus) {
+          status = hipErrorUnknown;
+          accumulate->release();
+          return status;
         }
+
+        // Skip all consecutive captured nodes that belong to this batch
+        // Use the tracked node count to skip directly instead of parsing one by one
+        i += packetBatches_[batchIndex].capturedNodeCount - 1;  // -1 because loop will increment
+
+        ++batchIndex;
       }
-    } else {
-      topoOrder_[i]->SetStream(hip_stream);
-      status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
-      topoOrder_[i]->EnqueueCommands(hip_stream);
     }
   }
 

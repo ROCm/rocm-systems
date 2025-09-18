@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2024 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1393,6 +1393,11 @@ class AccumulateCommand : public Command {
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
+
+  //! Add multiple kernel names in bulk
+  void addKernelNames(const std::vector<std::string>& kernelNames) {
+    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  }
 
   //! Add kernel timestamp to the list if available
   void addTimestamps(uint64_t startTs, uint64_t endTs) {
