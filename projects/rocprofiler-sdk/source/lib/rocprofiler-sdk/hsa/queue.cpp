@@ -600,6 +600,55 @@ Queue::Queue(const AgentCache&  agent,
     *queue = _intercept_queue;
 }
 
+Queue::Queue(
+    const AgentCache&       agent,
+    CoreApiTable            core_api,
+    AmdExtTable             ext_api,
+    hsa_queue_t*            queue,
+    set_write_interceptor_t set_write_interceptor)  // NOLINT(performance-unnecessary-value-param)
+: _core_api(core_api)
+, _ext_api(ext_api)
+, _agent(agent)
+, _intercept_queue(queue)
+{
+    if(!context::get_registered_contexts([](const context::context* ctx) {
+            return (ctx->counter_collection || ctx->device_counter_collection ||
+                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+        }).empty())
+    {
+        CHECK(_agent.cpu_pool().handle != 0);
+        CHECK(_agent.get_hsa_agent().handle != 0);
+
+        // Set state of the queue to allow profiling
+        aql::set_profiler_active_on_queue(
+            _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
+                hsa_signal_t completion;
+                create_signal(0, &completion);
+                pkt.ext_amd_aql_pm4.completion_signal = completion;
+                counters::submitPacket(_intercept_queue, &pkt);
+                constexpr auto timeout_hint =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+                if(core_api.hsa_signal_wait_relaxed_fn(completion,
+                                                       HSA_SIGNAL_CONDITION_EQ,
+                                                       0,
+                                                       timeout_hint.count(),
+                                                       HSA_WAIT_STATE_ACTIVE) != 0)
+                {
+                    ROCP_FATAL << "Could not set agent to be profiled";
+                }
+                core_api.hsa_signal_destroy_fn(completion);
+            });
+    }
+
+    set_write_interceptor(WriteInterceptor, this);
+
+    create_signal(0, &ready_signal);
+    create_signal(0, &block_signal);
+    create_signal(0, &_active_kernels);
+    _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
+    _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
+}
+
 Queue::~Queue()
 {
     sync();

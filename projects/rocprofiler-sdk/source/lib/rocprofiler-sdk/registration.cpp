@@ -54,6 +54,7 @@
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
@@ -172,6 +173,19 @@ get_status()
     return _v;
 }
 
+struct attach_status
+{
+    bool has_attach_table = false;
+    bool is_attached      = false;
+};
+
+auto*
+get_attach_status()
+{
+    static auto*& _v = common::static_object<attach_status>::construct(false);
+    return _v;
+}
+
 auto&
 get_invoked_configures()
 {
@@ -213,7 +227,11 @@ get_link_map()
 struct client_library
 {
     client_library() = default;
-    ~client_library() { delete configure_result; }
+    ~client_library()
+    {
+        delete configure_result;
+        delete configure_attach_result;
+    }
 
     client_library(const client_library&)     = delete;
     client_library(client_library&&) noexcept = default;
@@ -221,12 +239,14 @@ struct client_library
     client_library& operator=(const client_library&) = delete;
     client_library& operator=(client_library&&) noexcept = delete;
 
-    std::string                          name               = {};
-    void*                                dlhandle           = nullptr;
-    decltype(::rocprofiler_configure)*   configure_func     = nullptr;
-    rocprofiler_tool_configure_result_t* configure_result   = nullptr;
-    rocprofiler_client_id_t              internal_client_id = {};
-    rocprofiler_client_id_t              mutable_client_id  = {};
+    std::string                                 name                    = {};
+    void*                                       dlhandle                = nullptr;
+    decltype(::rocprofiler_configure)*          configure_func          = nullptr;
+    decltype(::rocprofiler_configure_attach)*   configure_attach_func   = nullptr;
+    rocprofiler_tool_configure_result_t*        configure_result        = nullptr;
+    rocprofiler_tool_configure_attach_result_t* configure_attach_result = nullptr;
+    rocprofiler_client_id_t                     internal_client_id      = {};
+    rocprofiler_client_id_t                     mutable_client_id       = {};
 };
 
 using client_library_vec_t = std::vector<std::optional<client_library>>;
@@ -245,16 +265,20 @@ find_clients()
         return true;
     };
 
-    auto emplace_client = [&data, priority_offset](
-                              std::string_view _name,
-                              void*            _dlhandle,
-                              auto*            _cfg_func) -> std::optional<client_library>& {
+    auto emplace_client =
+        [&data, priority_offset](
+            std::string_view                    _name,
+            void*                               _dlhandle,
+            auto*                               _cfg_func,
+            rocprofiler_configure_attach_func_t _attach_func) -> std::optional<client_library>& {
         constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
         uint32_t       _prio          = priority_offset + data.size();
         return data.emplace_back(
             client_library{std::string{_name},
                            _dlhandle,
                            _cfg_func,
+                           _attach_func,
+                           nullptr,
                            nullptr,
                            rocprofiler_client_id_t{client_id_size, nullptr, _prio},
                            rocprofiler_client_id_t{client_id_size, nullptr, _prio}});
@@ -266,10 +290,16 @@ find_clients()
         return _sym;
     };
 
+    auto rocprofiler_configure_attach_dlsym = [](auto _handle) {
+        decltype(::rocprofiler_configure_attach)* _sym = nullptr;
+        *(void**) (&_sym) = dlsym(_handle, "rocprofiler_configure_attach");
+        return _sym;
+    };
+
     if(get_forced_configure() && is_unique_configure_func(get_forced_configure()))
     {
         ROCP_INFO << "adding forced configure";
-        emplace_client("(forced)", nullptr, get_forced_configure());
+        emplace_client("(forced)", nullptr, get_forced_configure(), nullptr);
     }
 
     auto get_env_libs = []() {
@@ -330,6 +360,7 @@ find_clients()
                 ROCP_INFO << "[ROCP_TOOL_LIBRARIES] '" << itr
                           << "' is not already loaded, doing a local lazy dlopen...";
                 handle = dlopen(itr.c_str(), RTLD_LOCAL | RTLD_LAZY);
+                ROCP_INFO << "[ROCP_TOOL_LIBRARIES] dlopen result: " << handle;
             }
 
             if(!handle)
@@ -348,27 +379,31 @@ find_clients()
 
             if(handle)
             {
-                auto _sym = rocprofiler_configure_dlsym(handle);
+                auto _sym        = rocprofiler_configure_dlsym(handle);
+                auto _attach_sym = rocprofiler_configure_attach_dlsym(handle);
                 // FATAL bc they explicitly said this was a tool library
                 ROCP_CI_LOG_IF(WARNING, !_sym)
                     << "[ROCP_TOOL_LIBRARIES] rocprofiler-sdk tool library '" << itr
                     << "' did not contain rocprofiler_configure symbol (search method: dlsym)";
-                if(_sym && is_unique_configure_func(_sym)) emplace_client(itr, handle, _sym);
+                if(_sym && is_unique_configure_func(_sym))
+                    emplace_client(itr, handle, _sym, _attach_sym);
             }
         }
     }
 
     if(rocprofiler_configure && is_unique_configure_func(rocprofiler_configure))
-        emplace_client("unknown", nullptr, rocprofiler_configure);
+        emplace_client("unknown", nullptr, rocprofiler_configure, nullptr);
 
-    auto _default_configure = rocprofiler_configure_dlsym(RTLD_DEFAULT);
-    auto _next_configure    = rocprofiler_configure_dlsym(RTLD_NEXT);
+    auto _default_configure        = rocprofiler_configure_dlsym(RTLD_DEFAULT);
+    auto _next_configure           = rocprofiler_configure_dlsym(RTLD_NEXT);
+    auto _default_configure_attach = rocprofiler_configure_attach_dlsym(RTLD_DEFAULT);
+    auto _next_configure_attach    = rocprofiler_configure_attach_dlsym(RTLD_NEXT);
 
     if(_default_configure && is_unique_configure_func(_default_configure))
-        emplace_client("(RTLD_DEFAULT)", nullptr, _default_configure);
+        emplace_client("(RTLD_DEFAULT)", nullptr, _default_configure, _default_configure_attach);
 
     if(_next_configure && is_unique_configure_func(_next_configure))
-        emplace_client("(RTLD_NEXT)", nullptr, _next_configure);
+        emplace_client("(RTLD_NEXT)", nullptr, _next_configure, _next_configure_attach);
 
     // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
     // libraries
@@ -404,7 +439,8 @@ find_clients()
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
 
-            auto* _sym = rocprofiler_configure_dlsym(handle);
+            auto* _sym        = rocprofiler_configure_dlsym(handle);
+            auto* _attach_sym = rocprofiler_configure_attach_dlsym(handle);
 
             // symbol not found
             if(!_sym)
@@ -430,7 +466,7 @@ find_clients()
             }
             else if(is_unique_configure_func(_sym))
             {
-                auto& entry                    = emplace_client(itr, handle, _sym);
+                auto& entry                    = emplace_client(itr, handle, _sym, _attach_sym);
                 entry->internal_client_id.name = entry->name.c_str();
             }
         }
@@ -521,6 +557,21 @@ invoke_client_configures()
         if(_result)
         {
             itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
+
+            if(itr->configure_attach_func)
+            {
+                auto* _attach_result =
+                    itr->configure_attach_func(ROCPROFILER_VERSION,
+                                               ROCPROFILER_VERSION_STRING,
+                                               itr->internal_client_id.handle - get_client_offset(),
+                                               &itr->mutable_client_id);
+
+                if(_attach_result)
+                {
+                    itr->configure_attach_result =
+                        new rocprofiler_tool_configure_attach_result_t{*_attach_result};
+                }
+            }
         }
         else
         {
@@ -582,6 +633,84 @@ invoke_client_finalizers()
     }
 
     return true;
+}
+
+rocprofiler_status_t
+invoke_client_attaches()
+{
+    ROCP_INFO << "Calling tool_attach for all registered clients. # of clients: "
+              << get_num_clients();
+
+    if(!get_clients())
+    {
+        ROCP_INFO << "No registered clients to attach";
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
+
+    auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    for(auto& itr : *get_clients())
+    {
+        if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_attach)
+        {
+            auto _contexts = context::get_client_contexts(itr->internal_client_id);
+
+            ROCP_INFO << fmt::format(
+                "Client {} is attaching... Number of contexts: {}", itr->name, _contexts.size());
+
+            itr->configure_attach_result->tool_attach(nullptr,
+                                                      _contexts.data(),
+                                                      _contexts.size(),
+                                                      itr->configure_attach_result->tool_data);
+
+            ret = ROCPROFILER_STATUS_SUCCESS;
+        }
+        else if(itr)
+        {
+            ROCP_INFO << "Client " << itr->name << " does not have tool_attach function";
+        }
+    }
+
+    return ret;
+}
+
+rocprofiler_status_t
+invoke_client_detaches()
+{
+    ROCP_INFO << "Calling tool_detach for all registered clients. # of clients: "
+              << get_num_clients();
+
+    if(!get_clients())
+    {
+        ROCP_INFO << "No registered clients to detach";
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
+
+    auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    for(auto& itr : *get_clients())
+    {
+        if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_detach)
+        {
+            context::stop_client_contexts(itr->internal_client_id);
+
+            hsa::async_copy_sync();
+            hsa::queue_controller_sync();
+            pc_sampling::service_sync();
+
+            auto _fini_status = get_fini_status();
+            if(_fini_status == 0) set_fini_status(-1);
+            itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
+            if(_fini_status == 0) set_fini_status(_fini_status);
+            context::deactivate_client_contexts(itr->internal_client_id);
+
+            ret = ROCPROFILER_STATUS_SUCCESS;
+        }
+        else if(itr)
+        {
+            ROCP_INFO << "Client " << itr->name << " does not have tool_detach function";
+        }
+    }
+
+    return ret;
 }
 
 void
@@ -778,6 +907,18 @@ finalize()
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
+}
+
+rocprofiler_status_t
+attach()
+{
+    return invoke_client_attaches();
+}
+
+rocprofiler_status_t
+detach()
+{
+    return invoke_client_detaches();
 }
 }  // namespace registration
 }  // namespace rocprofiler
@@ -1081,6 +1222,21 @@ rocprofiler_set_api_table(const char* name,
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_ROCJPEG_TABLE, lib_version, lib_instance, std::make_tuple(rocjpeg_api));
+    }
+    else if(std::string_view{name} == "rocattach")
+    {
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected rocprofiler attach library to pass 1 API table, not "
+            << num_tables;
+
+        auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
+
+        // unlike other APIs, we do not offer tracing for our own attach library
+        // forward the table to the relevant code sections, then move on
+        rocprofiler::hsa::queue_controller_init(rocattach_api);
+        rocprofiler::code_object::initialize(rocattach_api);
+
+        rocprofiler::registration::get_attach_status()->has_attach_table = true;
     }
     else
     {
