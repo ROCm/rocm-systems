@@ -260,37 +260,33 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     const auto* call_stack      = "";
     const auto* line_info       = "";
 
-    auto insert_event_and_sample = [&](const char* _track_name, const char* _pmc_name,
-                                       double _value) {
+    auto insert_event_and_sample = [&](const char* _track_name, double _value) {
         trace_cache::get_buffer_storage().store(
             trace_cache::entry_type::pmc_event_with_sample, _track_name, timestamp_ns,
             event_metadata, stack_id, parent_stack_id, correlation_id, call_stack,
-            line_info, device_id, static_cast<uint8_t>(agent_type::CPU), _pmc_name,
+            line_info, device_id, static_cast<uint8_t>(agent_type::CPU), _track_name,
             _value);
     };
 
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
     {
-        auto        _hw_cnt_labels = *get_papi_labels(_tid);
         const auto& hw_counters =
             static_cast<backtrace_metrics::hw_counter_data_t>(value);
-        for(size_t i = 0; i < _hw_cnt_labels.size() && i < hw_counters.size(); ++i)
-        {
-            std::string _desc = tim::papi::get_event_info(_hw_cnt_labels[i]).short_descr;
-            if(_desc.empty()) _desc = _hw_cnt_labels[i];
-            std::stringstream track_name_ss;
-            track_name_ss << "Thread " << _desc << " [" << _tid << "] (S)";
-            insert_event_and_sample(track_name_ss.str().c_str(),
-                                    track_name_ss.str().c_str(), hw_counters.at(i));
-        }
+
+        size_t idx = 0;
+        apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
+            if(idx < hw_counters.size())
+            {
+                insert_event_and_sample(_track_name.c_str(), hw_counters.at(idx));
+            }
+            ++idx;
+        });
     }
     else
     {
-        std::stringstream track_name_ss;
-        track_name_ss << trait::name<Category>::value << " [" << _tid << "]";
-
-        insert_event_and_sample(track_name_ss.str().c_str(), track_name_ss.str().c_str(),
-                                value);
+        apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
+            insert_event_and_sample(_track_name.c_str(), value);
+        });
     }
 }
 }  // namespace

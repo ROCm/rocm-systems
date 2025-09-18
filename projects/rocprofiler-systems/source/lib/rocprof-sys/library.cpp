@@ -45,6 +45,7 @@
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
@@ -759,18 +760,15 @@ rocprofsys_finalize_hidden(void)
     }
     else if(_is_child)
     {
-        // TODO: Child and parent process finalize methods start to look a like,
-        // brainstorm new approach
-        sampling::block_samples();
-        tim::signals::block_signals(get_sampling_signals(),
-                                    tim::signals::sigmask_scope::process);
         set_state(State::Finalized);
-
-        push_enable_sampling_on_child_threads(false);
-        set_sampling_on_all_future_threads(false);
 
         if(get_use_sampling())
         {
+            sampling::block_samples();
+            tim::signals::block_signals(get_sampling_signals(),
+                                        tim::signals::sigmask_scope::process);
+            push_enable_sampling_on_child_threads(false);
+            set_sampling_on_all_future_threads(false);
             ROCPROFSYS_VERBOSE_F(1, "Shutting down sampling for child process...\n");
             sampling::shutdown();
             ROCPROFSYS_VERBOSE_F(
@@ -788,10 +786,9 @@ rocprofsys_finalize_hidden(void)
 #endif
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
-        const auto _filepath =
-            std::string{ "/tmp/metadata_" + std::to_string(get_root_process_id()) + "_" +
-                         std::to_string(getpid()) + ".json" };
-        _manager.get_metadata_registry().save_to_file(_filepath, _agents);
+        _manager.shutdown();
+        _manager.get_metadata_registry().save_to_file(trace_cache::metadata_filepath,
+                                                      _agents);
 
         std::quick_exit(EXIT_SUCCESS);
         return;

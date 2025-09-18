@@ -31,8 +31,8 @@ namespace rocprofsys
 {
 namespace rocpd
 {
-data_processor::data_processor(std::shared_ptr<data_storage::database> db)
-: _database(std::move(db))
+data_processor::data_processor(std::shared_ptr<data_storage::database> database)
+: _database(std::move(database))
 {
     if(!_database)
     {

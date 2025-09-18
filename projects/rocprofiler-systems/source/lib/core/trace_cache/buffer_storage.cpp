@@ -53,12 +53,12 @@ buffer_storage::buffer_storage(pid_t _pid)
 
     m_task_group = std::make_unique<PTL::TaskGroup<void>>(m_thread_pool.get());
     m_task_group->exec([this, _pid]() {
-        std::ofstream _ofs(filename, std::ios::binary | std::ios::out);
+        std::ofstream _ofs(buffered_storage_filename, std::ios::binary | std::ios::out);
 
         if(!_ofs)
         {
             std::stringstream _ss;
-            _ss << "Error opening file for writing: " << filename;
+            _ss << "Error opening file for writing: " << buffered_storage_filename;
             throw std::runtime_error(_ss.str());
         }
 

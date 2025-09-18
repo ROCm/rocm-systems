@@ -21,13 +21,11 @@
 // SOFTWARE.
 
 #pragma once
-#include "core/agent.hpp"
 #include <cstdint>
 #include <stdint.h>
 #include <string>
 #include <unistd.h>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #if ROCPROFSYS_USE_ROCM > 0

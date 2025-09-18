@@ -84,7 +84,6 @@ struct backtrace_metrics : comp::empty_base
     static void                     init_perfetto(int64_t _tid, valid_array_t);
     static void                     fini_perfetto(int64_t _tid, valid_array_t);
     static void                     init_cache(int64_t _tid, valid_array_t);
-    static void                     fini_rocpd(int64_t _tid, valid_array_t);
     static std::vector<std::string> get_hw_counter_labels(int64_t);
 
     template <typename Tp>

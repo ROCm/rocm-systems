@@ -104,12 +104,13 @@ private:
     };
 
 public:
-    explicit data_processor(std::shared_ptr<data_storage::database> db);
+    explicit data_processor(std::shared_ptr<data_storage::database> database);
 
-    data_processor() = delete;
-
-    data_processor(const data_processor&)            = delete;
-    data_processor& operator=(const data_processor&) = delete;
+    data_processor()                                  = delete;
+    data_processor(const data_processor&)             = delete;
+    data_processor& operator=(const data_processor&)  = delete;
+    data_processor(const data_processor&&)            = delete;
+    data_processor& operator=(const data_processor&&) = delete;
 
     size_t insert_string(const char* str);
 
