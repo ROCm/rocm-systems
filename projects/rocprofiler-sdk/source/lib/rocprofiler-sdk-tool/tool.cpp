@@ -2615,6 +2615,7 @@ tool_fini(void* /*tool_data*/)
                          counters_output.get_generator(),
                          marker_output.get_generator(),
                          scratch_memory_output.get_generator(),
+                         kfd_output.get_generator(),
                          rccl_output.get_generator(),
                          memory_allocation_output.get_generator(),
                          rocdecode_output.get_generator(),
@@ -2657,8 +2658,8 @@ tool_fini(void* /*tool_data*/)
                           memory_copy_output.get_generator(),
                           marker_output.get_generator(),
                           memory_allocation_output.get_generator(),
-                          kfd_output.get_generator(),
                           scratch_memory_output.get_generator(),
+                          kfd_output.get_generator(),
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
                           counters_output.get_generator());
