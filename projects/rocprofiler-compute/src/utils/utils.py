@@ -808,7 +808,7 @@ def run_prof(
     if rocprof_cmd == "rocprofiler-sdk":
         for key, value in options.items():
             new_env[key] = value
-        console_debug("rocprof sdk env vars: {}".format(new_env))
+        console_debug(f"rocprof sdk env vars: {new_env}")
 
         if is_mode_live_attach:
             from contextlib import contextmanager
@@ -852,7 +852,7 @@ def run_prof(
 
         else:
             app_cmd = options.pop("APP_CMD")
-            console_debug("rocprof sdk user provided command: {}".format(app_cmd))
+            console_debug(f"rocprof sdk user provided command: {app_cmd}")
             success, output = capture_subprocess_output(
                 app_cmd, new_env=new_env, profileMode=True
             )
