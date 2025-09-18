@@ -3513,7 +3513,8 @@ void Device::RemoveKernel(Kernel& gpuKernel) const {
 // ================================================================================================
 ProfilingSignal::~ProfilingSignal() {
   if (signal_.handle != 0) {
-    if (hsa_signal_load_relaxed(signal_) > 0) {
+    if (hsa_signal_load_relaxed(signal_) > 0
+        && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
       LogError("Runtime shouldn't destroy a signal that is still busy!");
       if (hsa_signal_wait_scacquire(signal_, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                     kUnlimitedWait, HSA_WAIT_STATE_BLOCKED) != 0) {
