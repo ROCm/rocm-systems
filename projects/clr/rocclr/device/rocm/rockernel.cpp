@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -19,7 +19,6 @@
  THE SOFTWARE. */
 
 #include "rockernel.hpp"
-#include "hsa/amd_hsa_kernel_code.h"
 
 #include <algorithm>
 
@@ -46,7 +45,7 @@ bool Kernel::postLoad() {
   hsa_status_t hsaStatus;
   hsa_executable_symbol_t symbol;
   hsa_agent_t agent = program()->rocDevice().getBackendDevice();
-  hsaStatus = hsa_executable_get_symbol_by_name(program()->hsaExecutable(), symbolName().c_str(),
+  hsaStatus = Hsa::executable_get_symbol_by_name(program()->hsaExecutable(), symbolName().c_str(),
                                                 &agent, &symbol);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     DevLogPrintfError("Cannot Get Symbol : %s, failed with hsa_status: %d \n", symbolName().c_str(),
@@ -54,7 +53,7 @@ bool Kernel::postLoad() {
     return false;
   }
 
-  hsaStatus = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+  hsaStatus = Hsa::executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
                                              &kernelCodeHandle_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     DevLogPrintfError(" Cannot Get Symbol Info: %s, failed with hsa_status: %d \n ",
@@ -62,7 +61,7 @@ bool Kernel::postLoad() {
     return false;
   }
 
-  hsaStatus = hsa_executable_symbol_get_info(
+  hsaStatus = Hsa::executable_symbol_get_info(
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK, &kernelHasDynamicCallStack_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     DevLogPrintfError(" Cannot Get Dynamic callstack info, failed with hsa_status: %d \n ",
@@ -80,7 +79,7 @@ bool Kernel::postLoad() {
     // retrieve the kernel code object handle of such a kernel. The address of the variable and the
     // kernel code object handle are known only after the hsa executable is loaded. The below code
     // copies the kernel code object handle to the address of the variable.
-    hsaStatus = hsa_executable_get_symbol_by_name(program()->hsaExecutable(),
+    hsaStatus = Hsa::executable_get_symbol_by_name(program()->hsaExecutable(),
                                                   RuntimeHandle().c_str(), &agent, &kernelSymbol);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       DevLogPrintfError("Cannot get Kernel Symbol by name: %s, failed with hsa_status: %d \n",
@@ -88,7 +87,7 @@ bool Kernel::postLoad() {
       return false;
     }
 
-    hsaStatus = hsa_executable_symbol_get_info(
+    hsaStatus = Hsa::executable_symbol_get_info(
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &variable_size);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       DevLogPrintfError(
@@ -96,7 +95,7 @@ bool Kernel::postLoad() {
       return false;
     }
 
-    hsaStatus = hsa_executable_symbol_get_info(
+    hsaStatus = Hsa::executable_symbol_get_info(
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &variable_address);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       DevLogPrintfError("[ROC][Kernel] Cannot get Kernel Address, failed with hsa_status: %d \n",
@@ -107,7 +106,7 @@ bool Kernel::postLoad() {
     const struct RuntimeHandle runtime_handle = {
         kernelCodeHandle_, WorkitemPrivateSegmentByteSize(), WorkgroupGroupSegmentByteSize()};
     hsaStatus =
-        hsa_memory_copy(reinterpret_cast<void*>(variable_address), &runtime_handle, variable_size);
+        Hsa::memory_copy(reinterpret_cast<void*>(variable_address), &runtime_handle, variable_size);
 
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       DevLogPrintfError("[ROC][Kernel] HSA Memory copy failed, failed with hsa_status: %d \n",
@@ -121,8 +120,8 @@ bool Kernel::postLoad() {
   // We set the value to HSA if the value is uninitialized
   uint32_t wavefront_size = workGroupInfo_.wavefrontPerSIMD_;
   if (wavefront_size == 0 &&
-      hsa_agent_get_info(program()->rocDevice().getBackendDevice(), HSA_AGENT_INFO_WAVEFRONT_SIZE,
-                         &wavefront_size) != HSA_STATUS_SUCCESS) {
+      Hsa::agent_get_info(program()->rocDevice().getBackendDevice(), HSA_AGENT_INFO_WAVEFRONT_SIZE,
+                          &wavefront_size) != HSA_STATUS_SUCCESS) {
     DevLogPrintfError("[ROC][Kernel] Cannot get Wavefront Size, failed with hsa_status: %d \n",
                       hsaStatus);
     return false;

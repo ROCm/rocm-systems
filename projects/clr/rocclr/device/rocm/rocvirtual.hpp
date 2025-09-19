@@ -25,11 +25,7 @@
 #include "rocdevice.hpp"
 #include "utils/flags.hpp"
 #include "utils/util.hpp"
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
 #include "rocprintf.hpp"
-#include "hsa/hsa_ven_amd_aqlprofile.h"
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
@@ -56,13 +52,13 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
     wait_state = HSA_WAIT_STATE_ACTIVE;
   }
 
-  if (hsa_signal_load_relaxed(signal) > 0) {
+  if (Hsa::signal_load_relaxed(signal) > 0) {
     // When it is blocked wait, we wait in active state for 100 us before proceeding to wait in
     // blocked state indefinitely.
     if (!active_wait) {
       ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host active wait for Signal = (0x%lx) for %d ns",
               signal.handle, kTimeout100us);
-      if (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
+      if (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                     kTimeout100us, HSA_WAIT_STATE_ACTIVE) != 0) {
         if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
           ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
@@ -76,7 +72,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
 
     // This is unlimited wait, but we wait for 4 secs and check if the device is
     // unstable, if so we return, otherwise we continue to wait in the while loop.
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
+    while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
         ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
@@ -98,7 +94,7 @@ inline void fetchSignalTime(hsa_signal_t signal, hsa_agent_t gpu_device, uint64_
                             uint64_t* end) {
   if (start != nullptr && end != nullptr) {
     hsa_amd_profiling_dispatch_time_t time = {};
-    hsa_amd_profiling_get_dispatch_time(gpu_device, signal, &time);
+    Hsa::profiling_get_dispatch_time(gpu_device, signal, &time);
     *start = time.start;
     *end = time.end;
   }
@@ -307,7 +303,7 @@ class VirtualGPU : public device::VirtualDevice {
     bool GetSDMAProfiling() { return sdma_profiling_; }
     void SetSDMAProfiling(bool profile) {
       sdma_profiling_ = profile;
-      hsa_amd_profiling_async_copy_enable(profile);
+      Hsa::profiling_async_copy_enable(profile);
     }
 
    private:
@@ -558,7 +554,7 @@ class VirtualGPU : public device::VirtualDevice {
       if ((last_write_index_ == 0) && (last_completion_signal_.handle == 0)) {
         result = true;
       } else {
-        result = (hsa_signal_load_relaxed(last_completion_signal_) == 0);
+        result = (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
       }
     }
     return result;
