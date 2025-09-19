@@ -95,6 +95,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithBlockingStream") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
@@ -223,6 +224,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithNonBlockingStream") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 10 or 11 \n");
@@ -265,6 +267,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithStreamPerThread") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamPerThread));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 15 \n");
@@ -623,7 +626,8 @@ TEST_CASE("Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation") {
   HIP_CHECK(hipSetDevice(1));
 
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
-
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
+  
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 500 or 501 \n");
