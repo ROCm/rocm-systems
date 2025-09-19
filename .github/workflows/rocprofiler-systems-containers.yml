@@ -111,8 +111,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
-        gpu: [ 'gfx94X', 'gfx950' ]
+        #system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        #gpu: [ 'gfx94X', 'gfx950' ]
+        # TRY ONE IMAGE FOR NOW TO TEST OUT GHCR
+        system: 
+          - { distro: "ubuntu", version: "22.04" }
+        gpu: [ 'gfx94X' ]
 
     steps:
       - uses: actions/checkout@v4
