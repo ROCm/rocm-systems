@@ -1174,7 +1174,10 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
             console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
 
-    if isinstance(workload.filter_dispatch_ids[0], str) and ">" in workload.filter_dispatch_ids[0]:
+    if (
+        isinstance(workload.filter_dispatch_ids[0], str)
+        and ">" in workload.filter_dispatch_ids[0]
+    ):
         dispatch_match = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
         df = df[
             df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]

@@ -601,7 +601,8 @@ add_custom_target(
     # Create VERSION.sha file
     COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
     # Build standalone binary
-    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution and fork
+    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
+    # and fork
     # bombs as explained in
     # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
