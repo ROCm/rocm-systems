@@ -51,6 +51,13 @@
         }                                                                                          \
     }
 
+
+int
+start()
+{
+    return 1;
+}
+
 namespace{
 struct tool_data_t
 {
@@ -154,6 +161,8 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
         if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
            pos != profile_cache.end())
         {
+            std::cout << "Found profile in cache for agent "
+                      << dispatch_data.dispatch_info.agent_id.handle << "\n";
             *config = pos->second;
             return true;
         }
@@ -226,6 +235,8 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
     // Return the profile to collect those counters for this dispatch
     *config = profile;
+    std::cout << "Created profile " << profile.handle << " for agent "
+              << dispatch_data.dispatch_info.agent_id.handle << "\n";
 }
 
 /**

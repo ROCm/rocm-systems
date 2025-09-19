@@ -25,19 +25,6 @@
 
 #define COUNTER_COLLECTION_API __attribute__((visibility("default")))
 
-#include <cstdint>
 
-void
-setup() COUNTER_COLLECTION_API;
-
-void
-shutdown() COUNTER_COLLECTION_API;
-
-void
+int
 start() COUNTER_COLLECTION_API;
-
-void
-stop() COUNTER_COLLECTION_API;
-
-void
-identify(uint64_t corr_id) COUNTER_COLLECTION_API;
