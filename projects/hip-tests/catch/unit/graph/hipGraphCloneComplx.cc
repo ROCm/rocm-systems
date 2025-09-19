@@ -642,6 +642,7 @@ static void hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec") {
@@ -735,6 +736,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec") {
@@ -827,6 +829,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec") {
@@ -938,6 +941,7 @@ static void hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec") {
@@ -1295,6 +1299,8 @@ static void hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec() {
   }
 
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_3));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_4));
   HIP_CHECK(hipGraphDestroy(childgraph));
   HIP_CHECK(hipEventDestroy(event_start));
   HIP_CHECK(hipEventDestroy(event_end));
