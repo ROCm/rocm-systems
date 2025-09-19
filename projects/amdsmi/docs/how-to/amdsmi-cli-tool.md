@@ -811,8 +811,6 @@ Command Modifiers:
   --loglevel LEVEL         Set the logging level from the possible choices:
 ```
 
-(cmd-ras)=
-
 ### amd-smi ras
 
 Displays RAS information of specified devices.
@@ -1177,4 +1175,8 @@ This example code shows how to dump AFID errors in a CPER file
 ~$  sudo amd-smi ras --afid --cper-file /tmp/cper_dump/fatal-1.cper
 ```
 
-Refer to amd_smi_cper_example.py & amd_smi_afid_example.py for API examples
+Refer to
+[amd_smi_cper_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_cper_example.py)
+and
+[amd_smi_afid_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_afid_example.py)
+for API examples.

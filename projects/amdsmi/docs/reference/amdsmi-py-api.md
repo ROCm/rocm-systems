@@ -1306,7 +1306,7 @@ Example:
         print(e)
 ```
 
-Refer to amd_smi_cper_example.py for a complete example
+Refer to [amd_smi_cper_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_cper_example.py) for a complete example.
 
 ### amdsmi_get_afids_from_cper
 
@@ -1343,7 +1343,7 @@ Example:
         print(e)
 ```
 
-Refer to amd_smi_afid_example.py for a complete example
+Refer to [amd_smi_afid_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_afid_example.py) for a complete example.
 
 
 ### amdsmi_get_gpu_ras_feature_info

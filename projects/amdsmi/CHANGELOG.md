@@ -16,7 +16,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   values through the `-G/--gpuboard` or `-b/--baseboard` options or obtain all of them as normal using the `amd-smi metric` command without
   any options. If the hardware does not support gpuboard or baseboard temperatures, then the values will be hidden from the default `metric` view.
 
-```conosle
+```console
 $ amd-smi metric -b
 GPU: 0
     BASEBOARD:

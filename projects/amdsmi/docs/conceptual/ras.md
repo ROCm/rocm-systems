@@ -70,18 +70,18 @@ information](/doxygen/docBin/html/group__tagRasInfo) for available APIs.
 ::::{tab-item} Python
 See related APIs:
 
-- [](#amdsmi_get_gpu_ecc_count)
-- [](#amdsmi_get_gpu_ecc_enabled)
-- [](#amdsmi_get_gpu_ecc_status)
-- [](#amdsmi_get_gpu_total_ecc_count)
-- [](#amdsmi_get_gpu_cper_entries)
-- [](#amdsmi_get_afids_from_cper)
-- [](#amdsmi_get_gpu_ras_feature_info)
-- [](#amdsmi_get_gpu_ras_block_features_enabled)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_count)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_enabled)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_status)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_total_ecc_count)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_cper_entries)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_afids_from_cper)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ras_feature_info)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ras_block_features_enabled)
 ::::
 
 ::::{tab-item} amd-smi CLI
-See [`amd-smi ras --help`](#cmd-ras) for details and available options.
+See [`amd-smi ras --help`](/how-to/amdsmi-cli-tool.md#amd-smi-ras) for details and available options.
 ```shell
 amd-smi ras --help
 ```
