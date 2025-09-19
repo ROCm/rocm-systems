@@ -213,7 +213,7 @@ def generate_custom(args, cmake_args, ctest_args):
 
     return f"""
         set(CTEST_PROJECT_NAME "{_PROJECT_NAME}")
-        set(CTEST_NIGHTLY_START_TIME "07:00:00 UTC")
+        set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
         set(CTEST_DROP_METHOD "https")
         set(CTEST_DROP_SITE_CDASH TRUE)
