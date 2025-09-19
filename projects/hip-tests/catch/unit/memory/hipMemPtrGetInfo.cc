@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -55,4 +55,18 @@ TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
   HIP_CHECK(hipFree(iPtr));
   HIP_CHECK(hipFree(fPtr));
   HIP_CHECK(hipFree(sPtr));
+}
+
+/*
+This testcase verifies the scenario of
+hipMemPtrGetInfo API being called on a zero-sized allocation.
+*/
+TEST_CASE("Unit_hipMemPtrGetInfo_SizeZeroAllocation") {
+  int* iPtr;
+  size_t sSetSize = 0, sGetSize;
+  HIP_CHECK(hipMalloc(&iPtr, sSetSize));
+  HIP_CHECK(hipMemPtrGetInfo(iPtr, &sGetSize));
+  REQUIRE(sGetSize == sSetSize);
+
+  HIP_CHECK(hipFree(iPtr));
 }
