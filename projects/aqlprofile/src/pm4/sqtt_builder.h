@@ -342,6 +342,8 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
                                           Primitives::sqtt_mode_on_value());
           base_addr += base_step;
       }
+      // Reset the GRBM to broadcast mode
+      SetGRBMToBroadcast(cmd_buffer);
     } else {
       SetGRBMToBroadcast(cmd_buffer);
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
