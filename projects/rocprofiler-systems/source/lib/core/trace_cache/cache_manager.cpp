@@ -133,58 +133,59 @@ cache_manager::post_process_bulk()
         {
             ROCPROFSYS_PRINT(
                 "Generating rocpd with collected data. This may take a while..\n");
-        }
 
-        auto _cache_files = get_cache_files();
+            auto _cache_files = get_cache_files();
 
-        std::vector<std::thread> rocpd_threads;
-        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+            std::vector<std::thread> rocpd_threads;
+            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-        rocpd_threads.emplace_back([this]() {
-            rocpd_post_processing _post_processing(
-                m_metadata, get_agent_manager_instance(), std::to_string(getpid()));
-            storage_parser _parser(buffered_storage_filename);
-            _post_processing.register_parser_callback(_parser);
-            _post_processing.post_process_metadata();
-            _parser.consume_storage();
-        });
+            rocpd_threads.emplace_back([this]() {
+                rocpd_post_processing _post_processing(
+                    m_metadata, get_agent_manager_instance(), std::to_string(getpid()));
+                storage_parser _parser(buffered_storage_filename);
+                _post_processing.register_parser_callback(_parser);
+                _post_processing.post_process_metadata();
+                _parser.consume_storage();
+            });
 
-        for(const auto& [pid, files] : _cache_files)
-        {
-            if(!files.buff_storage.empty() && !files.metadata.empty())
+            for(const auto& [pid, files] : _cache_files)
             {
-                rocpd_threads.emplace_back([pid = pid, files = files]() {
-                    ROCPROFSYS_DEBUG("Creating database for [%d] from buffered storage "
-                                     "file: %s and from metadata file: %s\n",
-                                     pid, files.buff_storage.c_str(),
-                                     files.metadata.c_str());
+                if(!files.buff_storage.empty() && !files.metadata.empty())
+                {
+                    rocpd_threads.emplace_back([pid = pid, files = files]() {
+                        ROCPROFSYS_DEBUG(
+                            "Creating database for [%d] from buffered storage "
+                            "file: %s and from metadata file: %s\n",
+                            pid, files.buff_storage.c_str(), files.metadata.c_str());
 
-                    std::vector<std::shared_ptr<agent>> _agents;
-                    metadata_registry                   _metadata;
+                        std::vector<std::shared_ptr<agent>> _agents;
+                        metadata_registry                   _metadata;
 
-                    auto res = _metadata.load_from_file(files.metadata, _agents);
-                    if(!res)
-                    {
-                        ROCPROFSYS_WARNING(0, "Load from file for metadata failed: %s\n",
-                                           files.metadata.c_str());
-                        return;
-                    }
+                        auto res = _metadata.load_from_file(files.metadata, _agents);
+                        if(!res)
+                        {
+                            ROCPROFSYS_WARNING(0,
+                                               "Load from file for metadata failed: %s\n",
+                                               files.metadata.c_str());
+                            return;
+                        }
 
-                    agent_manager         _agent_manager{ _agents };
-                    rocpd_post_processing _post_processing(_metadata, _agent_manager,
-                                                           std::to_string(pid));
-                    storage_parser        _parser(files.buff_storage);
-                    _post_processing.register_parser_callback(_parser);
-                    _post_processing.post_process_metadata();
-                    _parser.consume_storage();
-                    std::remove(files.metadata.c_str());  // Remove metadata file
-                });
+                        agent_manager         _agent_manager{ _agents };
+                        rocpd_post_processing _post_processing(_metadata, _agent_manager,
+                                                               std::to_string(pid));
+                        storage_parser        _parser(files.buff_storage);
+                        _post_processing.register_parser_callback(_parser);
+                        _post_processing.post_process_metadata();
+                        _parser.consume_storage();
+                        std::remove(files.metadata.c_str());  // Remove metadata file
+                    });
+                }
             }
-        }
 
-        for(auto& thread : rocpd_threads)
-        {
-            thread.join();
+            for(auto& thread : rocpd_threads)
+            {
+                thread.join();
+            }
         }
     }
 }

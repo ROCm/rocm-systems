@@ -33,6 +33,7 @@
 #include "trace_cache/storage_parser.hpp"
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -695,7 +696,13 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_backtrace_sample_callback());
     ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..\n");
 
-    parser.register_on_finished_callback([&]() { m_data_processor->flush(); });
+    parser.register_on_finished_callback(
+        std::make_unique<std::function<void()>>([this]() {
+            if(m_data_processor != nullptr)
+            {
+                m_data_processor->flush();
+            }
+        }));
 #endif
 }
 

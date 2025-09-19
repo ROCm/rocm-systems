@@ -49,7 +49,7 @@ public:
                                 const postprocessing_callback& callback);
 
     void consume_storage();
-    void register_on_finished_callback(const std::function<void()>& callback);
+    void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback);
 
 private:
     friend class cache_manager;
@@ -88,7 +88,7 @@ private:
 
     std::string                                                m_filename;
     std::map<entry_type, std::vector<postprocessing_callback>> m_callbacks;
-    std::function<void()> m_on_finished_callback = {};
+    std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
 };
 
 }  // namespace trace_cache
