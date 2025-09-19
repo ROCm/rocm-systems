@@ -61,6 +61,7 @@ struct buffered_output
     void flush();
     void read();
     void clear();
+    void reset();
     void destroy();
 
     uint64_t           get_num_bytes() const;
@@ -129,6 +130,18 @@ void
 buffered_output<Tp, DomainT>::clear()
 {
     if(!enabled) return;
+}
+
+template <typename Tp, domain_type DomainT>
+void
+buffered_output<Tp, DomainT>::reset()
+{
+    if(!enabled) return;
+
+    if(auto*& filebuf = get_tmp_file_buffer<type>(buffer_type_v); filebuf)
+    {
+        filebuf->reset();
+    }
 }
 
 template <typename Tp, domain_type DomainT>
