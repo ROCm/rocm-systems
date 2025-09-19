@@ -122,5 +122,5 @@ jobs:
             ELFUTILS_DOWNLOAD_VERSION=0.188
             BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
-            rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:systems-ci-${{ matrix.gpu }}
+            ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
