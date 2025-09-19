@@ -19,179 +19,171 @@ class TestStatus(Enum):
     NOT_INSTALLED = "NOT INSTALLED"
     NOT_TESTED = "NOT TESTED"
 
-class CommandExecutor:
-    @staticmethod
-    def run_command(command, shell=False):
-        """Run a command and return stdout, stderr, and return code"""
-        try:
-            if isinstance(command, str) and not shell:
-                command = command.split()
+def run_command(command, shell=False):
+    """Run a command and return stdout, stderr, and return code"""
+    try:
+        if isinstance(command, str) and not shell:
+            command = command.split()
 
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=shell,
-                universal_newlines=True
-            )
-            stdout, stderr = process.communicate()
-            return stdout, stderr, process.returncode
-        except Exception as e:
-            logging.error(f"Error executing command: {command}, error: {str(e)}")
-            return "", str(e), 1
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=shell,
+            universal_newlines=True
+        )
+        stdout, stderr = process.communicate()
+        return stdout, stderr, process.returncode
+    except Exception as e:
+        logging.error(f"Error executing command: {command}, error: {str(e)}")
+        return "", str(e), 1
 
-class ReportGenerator:
-    @staticmethod
-    def generate_table_report(results):
-        """Generate a pretty table report of test results"""
-        table = PrettyTable()
-        table.title = "RDHC Test Results"
-        table.field_names = ["Test Name", "Description", "Status", "Details"]
-        table.align = "l"  # Left align all columns
-        # Standard test descriptions
-        descriptions = {
-            "gpu_presence": "Check for AMD GPUs in the system",
-            "amdgpu_driver": "Check if AMDGPU driver is working properly",
-            "rocminfo": "Check if rocminfo is working properly",
-            "rocm_smi": "Check if rocm-smi is working properly",
-            "lib_dependencies": "Check rocm libraries runtime dependencies"
-        }
+def generate_table_report(results):
+    """Generate a pretty table report of test results"""
+    table = PrettyTable()
+    table.title = "RDHC Test Results"
+    table.field_names = ["Test Name", "Description", "Status", "Details"]
+    table.align = "l"  # Left align all columns
+    # Standard test descriptions
+    descriptions = {
+        "gpu_presence": "Check for AMD GPUs in the system",
+        "amdgpu_driver": "Check if AMDGPU driver is working properly",
+        "rocminfo": "Check if rocminfo is working properly",
+        "amd_smi": "Check if amd-smi is working properly",
+        "lib_dependencies": "Check rocm libraries runtime dependencies"
+    }
 
-        for test_name, result in results.items():
-            # For component tests, create a standard description
-            if test_name.startswith("rocm-") or test_name.startswith("hip-"):
-                description = f"Verify {test_name} usability"
-            else:
-                description = descriptions.get(test_name, f"Check {test_name} usability")
-
-            table.add_row([
-                test_name,
-                description,
-                result["status"],
-                result["reason"][:50] + "..." if len(result["reason"]) > 50 else result["reason"]
-            ])
-
-        return table
-
-    @staticmethod
-    def generate_table_system_info(system_info):
-        """Generate a pretty table report of amdgpu driver information"""
-        table = PrettyTable()
-
-        table.align = "l"  # Left align all columns
-        table.title = "General Information"
-        table.header = False  # No header row
-        # If system_info is empty, add a placeholder row
-        if not system_info:
-            table.add_row(["No information available", "N/A"])
+    for test_name, result in results.items():
+        # For component tests, create a standard description
+        if test_name.startswith("rocm-") or test_name.startswith("hip-"):
+            description = f"Verify {test_name} usability"
         else:
-            for key, value in system_info.items():
-                # Add a row for each key-value pair
-                table.add_row([key, value])
-        return table
+            description = descriptions.get(test_name, f"Check {test_name} usability")
 
-    @staticmethod
-    def generate_table_gpu_info(gpu_info_dict):
-        """Generate a pretty table report of GPU information"""
+        table.add_row([
+            test_name,
+            description,
+            result["status"],
+            result["reason"][:50] + "..." if len(result["reason"]) > 50 else result["reason"]
+        ])
 
-        # Create a function to flatten the nested dictionary
-        def flatten_dict(d, parent_key='', sep=':'):
-            items = []
-            for k, v in d.items():
-                new_key = parent_key + sep + k if parent_key else k
-                if isinstance(v, dict):
-                    items.extend(flatten_dict(v, new_key, sep=sep).items())
-                else:
-                    items.append((new_key, v))
-            return dict(items)
+    return table
 
-        # create the table
-        table = PrettyTable()
-        table.title = "GPU Device Information"
-        table.align = "l"  # Left align all columns
-        col_width = 25  # Maximum width for each column
+def generate_table_system_info(system_info):
+    """Generate a pretty table report of amdgpu driver information"""
+    table = PrettyTable()
 
-        # Flatten each GPU dictionary
-        flattened_gpus = {}
-        for gpu_key, gpu_data in gpu_info_dict.items():
-            flattened_gpus[gpu_key] = flatten_dict(gpu_data)
+    table.align = "l"  # Left align all columns
+    table.title = "General Information"
+    table.header = False  # No header row
+    # If system_info is empty, add a placeholder row
+    if not system_info:
+        table.add_row(["No information available", "N/A"])
+    else:
+        for key, value in system_info.items():
+            # Add a row for each key-value pair
+            table.add_row([key, value])
+    return table
 
-        # Get all unique keys across all GPUs while preserving order
-        all_keys = []
-        for gpu_data in flattened_gpus.values():
-            for key in gpu_data.keys():
-                if key not in all_keys:
-                    all_keys.append(key)
+def generate_table_gpu_info(gpu_info_dict):
+    """Generate a pretty table report of GPU information"""
 
-        # table.field_names = ["##, "Property", "GPU_O", "GPU_1", ...."]
-        table.field_names = ["##", "Property"] + list(flattened_gpus.keys())
+    # Create a function to flatten the nested dictionary
+    def flatten_dict(d, parent_key='', sep=':'):
+        items = []
+        for k, v in d.items():
+            new_key = parent_key + sep + k if parent_key else k
+            if isinstance(v, dict):
+                items.extend(flatten_dict(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, v))
+        return dict(items)
 
-        # Add rows to the table
-        for idx, key in enumerate(all_keys):
-            row = [idx, key]    # Add row number as first column
-            for gpu_key in flattened_gpus.keys():
-                # row.append(flattened_gpus[gpu_key].get(key, "N/A"))
-                value = flattened_gpus[gpu_key].get(key, "N/A")
-                # Convert to string if not already
-                value_str = str(value)
-                # print(f"Processing key: {key}, value_str: {value_str} ; value :{value}")
+    # create the table
+    table = PrettyTable()
+    table.title = "GPU Device Information"
+    table.align = "l"  # Left align all columns
+    col_width = 25  # Maximum width for each column
 
-                # Apply text wrapping if value exceeds max_width
-                if len(value_str) > col_width:
-                    wrapped_value = textwrap.fill(value_str, width=col_width)
-                    row.append(wrapped_value)
-                else:
-                    row.append(value_str)
+    # Flatten each GPU dictionary
+    flattened_gpus = {}
+    for gpu_key, gpu_data in gpu_info_dict.items():
+        flattened_gpus[gpu_key] = flatten_dict(gpu_data)
 
-            table.add_row(row)
+    # Get all unique keys across all GPUs while preserving order
+    all_keys = []
+    for gpu_data in flattened_gpus.values():
+        for key in gpu_data.keys():
+            if key not in all_keys:
+                all_keys.append(key)
 
-        return table
+    # table.field_names = ["##, "Property", "GPU_O", "GPU_1", ...."]
+    table.field_names = ["##", "Property"] + list(flattened_gpus.keys())
 
-    @staticmethod
-    def generate_table_firmware_info(firmware_info):
-        """Generate a pretty table report of amdgpu firmware version informations"""
+    # Add rows to the table
+    for idx, key in enumerate(all_keys):
+        row = [idx, key]    # Add row number as first column
+        for gpu_key in flattened_gpus.keys():
+            # row.append(flattened_gpus[gpu_key].get(key, "N/A"))
+            value = flattened_gpus[gpu_key].get(key, "N/A")
+            # Convert to string if not already
+            value_str = str(value)
+            # print(f"Processing key: {key}, value_str: {value_str} ; value :{value}")
 
-        gpu_dict = firmware_info
-        # Create a flattened table with FW_ID as rows and GPUs as columns
-        table = PrettyTable()
-        table.align = "l"  # Left align all columns
-        table.title = "AMDGPU Firmware Version Information"
-        # table.field_names = ["##, "FW_ID", "GPU_O", "GPU_1", ...."]
-        table.field_names = ["##","FW_ID"] + list(gpu_dict.keys())
+            # Apply text wrapping if value exceeds max_width
+            if len(value_str) > col_width:
+                wrapped_value = textwrap.fill(value_str, width=col_width)
+                row.append(wrapped_value)
+            else:
+                row.append(value_str)
 
-        # Get all firmware IDs while preserving order
-        fw_ids = []
-        for gpu_key, gpu_data in gpu_dict.items():
-            for fw_key, fw_data in gpu_data['FW_LIST'].items():
-                if fw_data['FW_ID'] not in fw_ids:
-                    fw_ids.append(fw_data['FW_ID'])
+        table.add_row(row)
 
-        # Add rows to the table
-        for idx, fw_id in enumerate(fw_ids):
-            row = [idx, fw_id]    # Add row number and FW_ID as first two columns
-            for gpu_key in gpu_dict.keys():
-                # Find the version for this firmware ID in this GPU
-                version = "N/A"
-                for fw_key, fw_data in gpu_dict[gpu_key]['FW_LIST'].items():
-                    if fw_data['FW_ID'] == fw_id:
-                        version = fw_data['FW_VERSION']
-                        break
-                row.append(version)
-            table.add_row(row)
+    return table
 
-        return table
+def generate_table_firmware_info(firmware_info):
+    """Generate a pretty table report of amdgpu firmware version informations"""
 
-    @staticmethod
-    def export_to_json(results, filename):
-        """Export test results to a JSON file"""
-        try:
-            with open(filename, 'w') as f:
-                json.dump(results, f, indent=4)
-            logging.info(f"Results exported to {filename}")
-            return True
-        except Exception as e:
-            logging.error(f"Error exporting results to JSON: {e}")
-            return False
+    gpu_dict = firmware_info
+    # Create a flattened table with FW_ID as rows and GPUs as columns
+    table = PrettyTable()
+    table.align = "l"  # Left align all columns
+    table.title = "AMDGPU Firmware Version Information"
+    # table.field_names = ["##, "FW_ID", "GPU_O", "GPU_1", ...."]
+    table.field_names = ["##","FW_ID"] + list(gpu_dict.keys())
+
+    # Get all firmware IDs while preserving order
+    fw_ids = []
+    for gpu_key, gpu_data in gpu_dict.items():
+        for fw_key, fw_data in gpu_data['FW_LIST'].items():
+            if fw_data['FW_ID'] not in fw_ids:
+                fw_ids.append(fw_data['FW_ID'])
+
+    # Add rows to the table
+    for idx, fw_id in enumerate(fw_ids):
+        row = [idx, fw_id]    # Add row number and FW_ID as first two columns
+        for gpu_key in gpu_dict.keys():
+            # Find the version for this firmware ID in this GPU
+            version = "N/A"
+            for fw_key, fw_data in gpu_dict[gpu_key]['FW_LIST'].items():
+                if fw_data['FW_ID'] == fw_id:
+                    version = fw_data['FW_VERSION']
+                    break
+            row.append(version)
+        table.add_row(row)
+
+    return table
+
+def export_to_json(results, filename):
+    """Export test results to a JSON file"""
+    try:
+        with open(filename, 'w') as f:
+            json.dump(results, f, indent=4)
+        logging.info(f"Results exported to {filename}")
+        return True
+    except Exception as e:
+        logging.error(f"Error exporting results to JSON: {e}")
+        return False
 
 class ROCMHealthCheck:
     def __init__(self, logger=None):
@@ -274,7 +266,9 @@ class ROCMHealthCheck:
                 os_info = f.read().lower()
                 if "ubuntu" in os_info:
                     return "ubuntu"
-                elif "rhel" in os_info or "centos" in os_info or "fedora" in os_info or "almalinux" in os_info:
+                elif "rhel" in os_info or "centos" in os_info or\
+                     "fedora" in os_info or "almalinux" in os_info or\
+                     "azurelinux" in os_info:
                     return "rhel"
                 elif "sles" in os_info or "suse" in os_info:
                     return "sles"
@@ -315,7 +309,7 @@ class ROCMHealthCheck:
 
         for component in self.all_components:
             if os_type == "ubuntu":
-                stdout, _, ret_code = CommandExecutor.run_command(f"dpkg -l {component}*", shell=True)
+                stdout, _, ret_code = run_command(f"dpkg -l {component}*", shell=True)
                 if ret_code == 0 and "ii" in stdout:
                     # Extract exact package name from dpkg output
                     for line in stdout.split("\n"):
@@ -326,7 +320,7 @@ class ROCMHealthCheck:
                                 break
 
             elif os_type == "rhel":
-                stdout, _, ret_code = CommandExecutor.run_command(f"rpm -q {component}", shell=True)
+                stdout, _, ret_code = run_command(f"rpm -q {component}", shell=True)
                 if ret_code == 0:
                     # Extract package name from rpm output
                     for line in stdout.split("\n"):
@@ -335,7 +329,7 @@ class ROCMHealthCheck:
                             break
 
             elif os_type == "sles":
-                stdout, _, ret_code = CommandExecutor.run_command(f"zypper se -i {component}", shell=True)
+                stdout, _, ret_code = run_command(f"zypper se -i {component}", shell=True)
                 if ret_code == 0 and "i  | " in stdout:
                     # Extract package name from zypper output
                     for line in stdout.split("\n"):
@@ -432,9 +426,14 @@ class ROCMHealthCheck:
 
     def test_GPUPresence(self):
         """Test if AMD GPU is present in the system"""
-        stdout, _, ret_code = CommandExecutor.run_command( "lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators' ", shell=True)
-        if ret_code == 0 and stdout.strip():
-            gpu_hw = stdout.strip()
+
+        # AMD GPUs PCI class codes: 03xx (Display controllers ), 12xx (Processing accelerators)
+        # use class codes also to identify AMD GPUs
+        stdout, _, ret_code = run_command( "lspci -d 1002: -nn | grep -Ei \
+                                           'Display controller|Processing accelerators|\[03[[:xdigit:]]{2}\]|\[12[[:xdigit:]]{2}\]' ",\
+                                            shell=True)
+        gpu_hw = stdout.strip()
+        if ret_code == 0 and gpu_hw:
             self.logger.debug(f"--Found AMD GPU(s): \n{gpu_hw}")
             return TestStatus.PASS.value, "Found AMD GPU(s)."
         return TestStatus.FAIL.value, "No AMD GPU detected."
@@ -445,34 +444,35 @@ class ROCMHealthCheck:
         all_checks_passed = True
 
         # Check if amdgpu driver is loaded
-        stdout, _, ret_code = CommandExecutor.run_command("lsmod | grep amdgpu", shell=True)
+        stdout, _, ret_code = run_command("lsmod | grep amdgpu", shell=True)
         if ret_code != 0 or not stdout.strip():
             return TestStatus.FAIL.value, "AMDGPU driver module is not loaded."
 
         # Check DKMS status
         self.logger.info("--Checking DKMS status for amdgpu driver...")
         # Get current running kernel version
-        stdout, stderr, ret_code = CommandExecutor.run_command("uname -r", shell=True)
+        stdout, stderr, ret_code = run_command("uname -r", shell=True)
         if ret_code != 0:
             self.logger.debug(f"----Failed to get Linux kernel version")
 
         current_kernel = stdout.strip()
 
-        stdout, stderr, ret_code = CommandExecutor.run_command("dkms status", shell=True)
+        stdout, stderr, ret_code = run_command("dkms status", shell=True)
+        stdout = stdout.strip()
         if ret_code != 0:
             self.logger.debug(f"----Failed to check DKMS status")
         else:
             if current_kernel:
                 # Highlight the dkms status with "*" for the current kernel installed
                 dkms_output = []
-                for line in stdout.strip().split('\n'):
+                for line in stdout.split('\n'):
                     if "amdgpu" in line and current_kernel in line:
                         dkms_output.append(f"{line.strip()} *")
                     else:
                         dkms_output.append(line.strip())
                 self.system_info["dkms status"] = "\n".join(dkms_output)
             else:
-                self.system_info["dkms status"] = stdout.strip()
+                self.system_info["dkms status"] = stdout
 
         if "amdgpu" in stdout and "installed" in stdout:
             self.logger.debug("--AMDGPU DKMS module is installed.")
@@ -536,7 +536,7 @@ class ROCMHealthCheck:
 
     def test_rocminfo(self):
         """Test if rocminfo works properly"""
-        stdout, stderr, ret_code = CommandExecutor.run_command("rocminfo")
+        stdout, stderr, ret_code = run_command("rocminfo")
         if ret_code != 0:
             self.logger.error(f"--rocminfo command failed: \n{stderr}")
             return TestStatus.FAIL.value, f"rocminfo command failed."
@@ -552,7 +552,7 @@ class ROCMHealthCheck:
 
     def test_rocm_agent_enumerator(self):
         """Test if rocm_agent_enumerator works properly"""
-        stdout, stderr, ret_code = CommandExecutor.run_command("rocm_agent_enumerator")
+        stdout, stderr, ret_code = run_command("rocm_agent_enumerator")
         if ret_code != 0:
             self.logger.error(f"--rocm_agent_enumerator command failed: \n{stderr}")
             return TestStatus.FAIL.value, f"rocm_agent_enumerator command failed."
@@ -574,29 +574,31 @@ class ROCMHealthCheck:
         results = {}
 
         # Test basic amd-smi command
-        stdout, stderr, ret_code = CommandExecutor.run_command("amd-smi version")
+        stdout, stderr, ret_code = run_command("amd-smi version")
         self.logger.debug(f"--amd-smi version: \n {stdout.strip()}")
         if ret_code != 0:
             self.logger.error(f"--amd-smi command failed: \n{stderr}")
             return TestStatus.FAIL.value, f"amd-smi command failed: {stderr}"
 
         # Test list options and save the data for report
-        stdout, stderr, ret_code = CommandExecutor.run_command("amd-smi list")
-        if ret_code == 0  and stdout.strip():
-            self.logger.debug(f"amd-smi list : \n {stdout.strip()}")
+        stdout, stderr, ret_code = run_command("amd-smi list")
+        stdout = stdout.strip()
+        if ret_code == 0  and stdout:
+            self.logger.debug(f"amd-smi list : \n {stdout}")
             results["list"] = "Passed"
-            self.gpu_info_dict = self._convert_string_to_dict(stdout.strip())
+            self.gpu_info_dict = self._convert_string_to_dict(stdout)
         else:
             self.logger.warning(f"!!! amd-smi list failed: {stderr}")
             results["list"] = "Failed"
 
         # Test static options and save the data for report
         smi_static_dict = {}
-        stdout, stderr, ret_code = CommandExecutor.run_command("amd-smi static --asic --bus --vbios --driver --vram")
-        if ret_code == 0  and stdout.strip():
-            self.logger.debug(f"amd-smi static : \n {stdout.strip()}")
+        stdout, stderr, ret_code = run_command("amd-smi static --asic --bus --vbios --driver --vram")
+        stdout = stdout.strip()
+        if ret_code == 0  and stdout:
+            self.logger.debug(f"amd-smi static : \n {stdout}")
             results["static"] = "Passed"
-            smi_static_dict = self._convert_string_to_dict(stdout.strip())
+            smi_static_dict = self._convert_string_to_dict(stdout)
         else:
             self.logger.warning(f"!!! amd-smi static failed: {stderr}")
             results["static"] = "Failed"
@@ -609,13 +611,14 @@ class ROCMHealthCheck:
                     gpu_data.update(smi_static_dict[gpu_key])
 
         # Check firmware option
-        stdout, stderr, ret_code = CommandExecutor.run_command("amd-smi firmware")
-        if ret_code == 0 and  stdout.strip():
-            self.logger.debug(f"amd-smi firmware: \n {stdout.strip()}")
+        stdout, stderr, ret_code = run_command("amd-smi firmware")
+        stdout = stdout.strip()
+        if ret_code == 0 and  stdout:
+            self.logger.debug(f"amd-smi firmware: \n {stdout}")
             results["firmware"] = "Passed"
             # Store firmware info in gpu_fw_info_dict
             # Format the string to make it valid YAML
-            self.gpu_fw_info_dict = self._convert_string_to_dict(stdout.strip())
+            self.gpu_fw_info_dict = self._convert_string_to_dict(stdout)
         else:
             self.logger.warning(f"!!! amd-smi firmware failed: {stderr}")
             results["firmware"] = "Failed"
@@ -676,7 +679,7 @@ class ROCMHealthCheck:
             return TestStatus.FAIL.value, "ROCm library path not found."
 
         # Get list of libraries in the ROCm path
-        stdout, stderr, ret_code = CommandExecutor.run_command(f"find {rocm_lib_path} {max_depth_arg} -name '*.so*'", shell=True)
+        stdout, stderr, ret_code = run_command(f"find {rocm_lib_path} {max_depth_arg} -name '*.so*'", shell=True)
         if ret_code != 0:
             self.logger.error(f"--Error finding libraries in {rocm_lib_path}: \n{stderr}")
             return TestStatus.FAIL.value, f"Error finding libraries: {stderr}"
@@ -738,7 +741,7 @@ class ROCMHealthCheck:
                     self.logger.warning(f"!!! Library symlink {lib}->{rplib} ; pointing outside of ROCm library path {rocm_lib_path}.")
                 continue
 
-            stdout, stderr, ret_code = CommandExecutor.run_command(f"ldd {lib}", shell=True)
+            stdout, stderr, ret_code = run_command(f"ldd {lib}", shell=True)
             # Check if its not a dynamic library
             if "not a dynamic executable" in stderr:
                 continue
@@ -1035,7 +1038,7 @@ class ROCMHealthCheck:
 
         # Check if the specified drivers are loaded
         for module in driver_config["modules"]:
-            stdout_mod, _, ret_mod = CommandExecutor.run_command(f"lsmod | grep {module}", shell=True)
+            stdout_mod, _, ret_mod = run_command(f"lsmod | grep {module}", shell=True)
             if ret_mod == 0 and stdout_mod.strip():
                 driver_name = f"{driver_config['name']}-{module}"
                 nic_drivers_found.append(driver_name)
@@ -1152,20 +1155,20 @@ class ROCMHealthCheck:
 
         # 1. Check if mpirun command is in the PATH environment
         self.logger.info("----Checking MPI availability...")
-        stdout, stderr, ret_code = CommandExecutor.run_command("which mpirun")
+        stdout, stderr, ret_code = run_command("which mpirun")
         if ret_code != 0:
             warnings += 1
             self.logger.warning("!!! mpirun is not found in PATH. Install OpenMPI or MPICH.")
         else:
             # Get MPI version for additional info
-            stdout_ver, _, _ = CommandExecutor.run_command("mpirun --version")
+            stdout_ver, _, _ = run_command("mpirun --version")
             mpi_version = stdout_ver.split('\n')[1] if stdout_ver else "Unknown version"
             self.logger.info(f"------Found MPI: {mpi_version}")
 
         # 2. Check if network cards (NICs) are present in hardware list
         self.logger.info("----Checking for network interface cards...")
         nic_brand = None
-        nic_cards, stderr, ret_code = CommandExecutor.run_command("lspci -nn | grep -i 'ethernet\|network\|infiniband'", shell=True)
+        nic_cards, stderr, ret_code = run_command("lspci -nn | grep -i 'ethernet\|network\|infiniband'", shell=True)
         if ret_code != 0 or not nic_cards.strip():
             errors += 1
             cluster_readiness_issues.append("No network cards found in hardware")
@@ -1204,7 +1207,7 @@ class ROCMHealthCheck:
         rdma_modules = ["rdma_cm", "ib_core", "ib_uverbs", "rdma_ucm"]
         rdma_modules_loaded = []
         for module in rdma_modules:
-            stdout_mod, _, ret_mod = CommandExecutor.run_command(f"lsmod | grep {module}", shell=True)
+            stdout_mod, _, ret_mod = run_command(f"lsmod | grep {module}", shell=True)
             if ret_mod == 0 and stdout_mod.strip():
                 rdma_modules_loaded.append(module)
 
@@ -1217,7 +1220,7 @@ class ROCMHealthCheck:
 
         # 5. Check RDMA link status
         self.logger.info("----Checking RDMA link...")
-        stdout_rdma, stderr, ret_code = CommandExecutor.run_command("rdma link", shell=True)
+        stdout_rdma, stderr, ret_code = run_command("rdma link", shell=True)
         if ret_code == 0 and stdout_rdma.strip():
             self.logger.info(f"------: \n{stdout_rdma.strip()}")
         else:
@@ -1263,12 +1266,12 @@ class ROCMHealthCheck:
     def test_check_hipcc(self):
         """Test hipcc package"""
         # Check if hipcc is available
-        stdout, stderr, ret_code = CommandExecutor.run_command("which hipcc")
+        stdout, stderr, ret_code = run_command("which hipcc")
         if ret_code != 0:
             return TestStatus.FAIL.value, "hipcc not found in PATH."
 
         # Check version of hipcc
-        stdout, stderr, ret_code = CommandExecutor.run_command("hipcc --version")
+        stdout, stderr, ret_code = run_command("hipcc --version")
         if ret_code != 0:
             return TestStatus.FAIL.value, f"hipcc version check failed: {stderr}"
 
@@ -1390,7 +1393,7 @@ class ROCMHealthCheck:
             tuple: (TestStatus, message)
         """
         self.logger.info(f"--Checking {comp_name} with a simple program [{test_target_name}]...")
-        stdout, stderr, ret_code = CommandExecutor.run_command(
+        stdout, stderr, ret_code = run_command(
             f"cmake --build build --target {test_target_name}; ctest --test-dir build -R \"^{test_target_name}$\"", shell=True)
         self.logger.debug(f"\n{stdout.strip()}")
         if ret_code != 0:
@@ -1417,7 +1420,7 @@ class ROCMHealthCheck:
         # Test 1: Simple convolution test
         self.logger.debug("----Checking MIOpen convolution with default parameters...")
         conv_cmd = f"{miopen_driver} conv"
-        stdout, stderr, ret_code = CommandExecutor.run_command(conv_cmd, shell=True)
+        stdout, stderr, ret_code = run_command(conv_cmd, shell=True)
         if ret_code != 0:
             self.logger.error(f"!!!! MIOpen convolution test failed: \n{stderr}")
             test_results.append(("Convolution", False, stderr))
@@ -1428,7 +1431,7 @@ class ROCMHealthCheck:
         # Test 2: Pooling test
         self.logger.debug("----Checking MIOpen pooling with default parameters...")
         pool_cmd = f"{miopen_driver} pool"
-        stdout, stderr, ret_code = CommandExecutor.run_command(pool_cmd, shell=True)
+        stdout, stderr, ret_code = run_command(pool_cmd, shell=True)
         if ret_code != 0:
             self.logger.error(f"!!!! MIOpen pooling test failed: \n{stderr}")
             test_results.append(("Pooling", False, stderr))
@@ -1439,7 +1442,7 @@ class ROCMHealthCheck:
         # Test 3: Activation test
         self.logger.debug("----Checking MIOpen activation test with default parameters...")
         activ_cmd = f"{miopen_driver} activ -m relu"
-        stdout, stderr, ret_code = CommandExecutor.run_command(activ_cmd, shell=True)
+        stdout, stderr, ret_code = run_command(activ_cmd, shell=True)
         if ret_code != 0:
             self.logger.error(f"!!!! MIOpen activation test failed: \n{stderr}")
             test_results.append(("Activation", False, stderr))
@@ -1580,7 +1583,7 @@ class ROCMHealthCheck:
 
                     # Clone repository
                     self.logger.info("Cloning rocm-examples repository...")
-                    stdout, stderr, ret_code = CommandExecutor.run_command(
+                    stdout, stderr, ret_code = run_command(
                         "git clone https://github.com/ROCm/rocm-examples.git", shell=True)
                     if ret_code != 0:
                         self.logger.error(f"Failed to clone rocm-examples: \n{stderr}")
@@ -1596,7 +1599,7 @@ class ROCMHealthCheck:
                 if not os.path.exists(os.path.join(examples_dir, "build")):
                     # Configure with cmake
                     self.logger.info("Configuring rocm-examples with cmake...")
-                    stdout, stderr, ret_code = CommandExecutor.run_command(
+                    stdout, stderr, ret_code = run_command(
                         "cmake -S . -B build")
                     if ret_code != 0:
                         self.logger.error(f"Failed to configure rocm-examples: \n{stderr}")
@@ -1607,7 +1610,7 @@ class ROCMHealthCheck:
 
                 # Get the avilabale build targets dynamically.
                 self.logger.info("Retrieving available build targets...")
-                stdout, stderr, ret_code = CommandExecutor.run_command(
+                stdout, stderr, ret_code = run_command(
                     "cmake --build build --target help", shell=True)
                 if ret_code != 0:
                     self.logger.error(f"Failed to retrieve build targets: \n{stderr}")
@@ -1762,16 +1765,16 @@ def main():
     health_check.system_info["RDHC directory"] = temp_dir
     health_check.system_info["Json output file"] = args.json
 
-    table = ReportGenerator.generate_table_system_info(health_check.system_info)
+    table = generate_table_system_info(health_check.system_info)
     print(table)
     if health_check.gpu_info_dict:
-        table = ReportGenerator.generate_table_gpu_info(health_check.gpu_info_dict)
+        table = generate_table_gpu_info(health_check.gpu_info_dict)
         print(table)
     if health_check.gpu_fw_info_dict:
-        table = ReportGenerator.generate_table_firmware_info(health_check.gpu_fw_info_dict)
+        table = generate_table_firmware_info(health_check.gpu_fw_info_dict)
         print(table)
 
-    table = ReportGenerator.generate_table_report(health_check.results)
+    table = generate_table_report(health_check.results)
     print(table)
 
     # Export results to JSON if requested
@@ -1789,7 +1792,7 @@ def main():
             "firmware_info": health_check.gpu_fw_info_dict,
             "test_results": health_check.results
         }
-        ReportGenerator.export_to_json(combined_data, json_path)
+        export_to_json(combined_data, json_path)
 
 if __name__ == "__main__":
     main()
