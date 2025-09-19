@@ -22,10 +22,11 @@
 # THE SOFTWARE.
 
 ##############################################################################
+from typing import Any, Optional, Union
 
-
+import pandas as pd
 import yaml
-from textual.widgets import Collapsible, DataTable, Label
+from textual.widgets import Collapsible, DataTable, Label, Static
 
 from rocprof_compute_tui.widgets.charts import (
     MemoryChart,
@@ -35,7 +36,9 @@ from rocprof_compute_tui.widgets.charts import (
 )
 
 
-def create_table(df, hidden_columns=[]):
+def create_table(
+    df: pd.DataFrame, hidden_columns: Optional[list[str]] = []
+) -> Union[DataTable, Label]:
     table = DataTable(zebra_stripes=True)
 
     df = df.reset_index().dropna()
@@ -44,8 +47,8 @@ def create_table(df, hidden_columns=[]):
     if df.empty:
         return Label("No table data generated")
 
-    table._df = df
-    table._visible_cols = [col for col in df.columns if col not in hidden_columns]
+    table._df = df  # type: ignore[attr-defined]
+    table._visible_cols = [col for col in df.columns if col not in hidden_columns]  # type: ignore[attr-defined]
 
     table.add_columns(*table._visible_cols)
     for _, row in df.iterrows():
@@ -54,7 +57,9 @@ def create_table(df, hidden_columns=[]):
     return table
 
 
-def create_widget_from_data(df, tui_style=None, context=""):
+def create_widget_from_data(
+    df: Optional[pd.DataFrame], tui_style: Optional[str] = None, context: str = ""
+) -> Union[Label, Static, DataTable]:
     if df is None or df.empty:
         return Label(
             f"Data not available{f' for {context}' if context else ''}",
@@ -75,15 +80,17 @@ def create_widget_from_data(df, tui_style=None, context=""):
         return Label(f"Unknown display type: {tui_style}")
 
 
-def load_config(config_path):
-    with open(config_path, "r") as file:
+def load_config(config_path: str) -> dict[str, Any]:
+    with open(config_path) as file:
         return yaml.safe_load(file)
 
 
-def build_section_from_config(dfs, section_config):
+def build_section_from_config(
+    dfs: dict[str, Any], section_config: dict[str, Any]
+) -> Collapsible:
     title = section_config["title"]
     collapsed = section_config.get("collapsed", True)
-    children = []
+    children: list[Collapsible] = []
 
     for subsection_config in section_config["subsections"]:
         subsection_title = subsection_config.get("title", "Untitled")
@@ -139,7 +146,7 @@ def build_section_from_config(dfs, section_config):
     return Collapsible(*children, title=title, collapsed=collapsed)
 
 
-def build_all_sections(dfs, config_path):
+def build_all_sections(dfs: dict[str, Any], config_path: str) -> list[Collapsible]:
     config = load_config(config_path)
     return [
         build_section_from_config(dfs, section_config)
