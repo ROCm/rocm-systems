@@ -22,8 +22,6 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_RDCENTITYCODEC_H_
 #define INCLUDE_RDC_LIB_RDCENTITYCODEC_H_
 
-#include "rdc/rdc.h"
-
 /*
  *
  * See rdc.h for description of entity_index
@@ -36,6 +34,7 @@ THE SOFTWARE.
  *
  *
  */
+#include <cstdint>
 static constexpr uint32_t RDC_ENTITY_TYPE_SHIFT = 29;
 static constexpr uint32_t RDC_ENTITY_ROLE_SHIFT = 27;
 static constexpr uint32_t RDC_ENTITY_INSTANCE_SHIFT = 11;
@@ -46,9 +45,5 @@ static constexpr uint32_t RDC_ENTITY_ROLE_MASK = 0x3;        // 2 bits for role.
 static constexpr uint32_t RDC_ENTITY_INSTANCE_MASK = 0x3FF;  // 10 bits for instance.
 static constexpr uint32_t RDC_ENTITY_DEVICE_MASK = 0x3FF;    // 10 bits for device.
 
-rdc_entity_info_t rdc_get_info_from_entity_index(uint32_t entity_index);
-uint32_t rdc_get_entity_index_from_info(rdc_entity_info_t info);
-bool rdc_is_partition_string(const char* s);
-bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* partition);
-
+// entity functions are declared in rdc.h
 #endif  // INCLUDE_RDC_LIB_RDCENTITYCODEC_H_

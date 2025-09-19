@@ -469,7 +469,7 @@ static void cpumap_to_cpu_ci(char *shared_cpu_map,
 			     struct proc_cpuinfo *cpuinfo,
 			     HsaCacheProperties *this_cache)
 {
-	int num_hexs, bit;
+	uint32_t num_hexs, bit;
 	uint32_t proc, apicid, mask;
 	char *ch_ptr;
 
@@ -482,7 +482,7 @@ static void cpumap_to_cpu_ci(char *shared_cpu_map,
 	while (num_hexs-- > 0) {
 		mask = strtol(ch_ptr, NULL, 16); /* each X */
 		for (bit = 0; bit < 32; bit++) {
-			if (!((1 << bit) & mask))
+			if (!((1U << bit) & mask))
 				continue;
 			proc = num_hexs * 32 + bit;
 			apicid = cpuinfo[proc].apicid;
