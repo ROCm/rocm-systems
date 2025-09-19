@@ -15,6 +15,9 @@
 #include <linux/list.h>
 #include <linux/device.h>
 
+/* Forward declarations */
+struct aql_perf_stats;
+
 /* Module information */
 #define MODULE_NAME "pmu_stub"
 #define PMU_NAME "pmu_stub"
@@ -23,12 +26,11 @@
 /* Maximum number of concurrent events we support */
 #define PMU_STUB_MAX_EVENTS 64
 
-/* Event types we support (dummy events for demonstration) */
+/* Event types we support (maps to GFX12 hardware counters) */
 enum pmu_stub_event_id {
-    PMU_STUB_EVENT_CYCLES = 0x00,
-    PMU_STUB_EVENT_INSTRUCTIONS = 0x01,
-    PMU_STUB_EVENT_CACHE_MISSES = 0x02,
-    PMU_STUB_EVENT_BANDWIDTH = 0x03,
+    PMU_STUB_EVENT_SQ_WAVES = 0x00,        /* sq_waves - GFX12_PERF_SEL_SQ_WAVES */
+    PMU_STUB_EVENT_SQ_INSTRUCTIONS = 0x01, /* sq_instructions - GFX12_PERF_SEL_SQ_INSTS */
+    PMU_STUB_EVENT_TA_BUSY = 0x02,          /* ta_busy - GFX12_PERF_SEL_TA_BUSY */
     PMU_STUB_EVENT_MAX
 };
 
@@ -46,6 +48,7 @@ struct pmu_stub_event {
     u64 prev_count;
     u64 period;
     bool active;
+    bool uses_aql_hardware;                  /* Event uses AQL hardware counters */
 };
 
 /* Main PMU structure */
@@ -63,15 +66,21 @@ struct pmu_stub {
     struct hrtimer timer;
     ktime_t timer_period;
 
+    /* AQL Hardware Integration */
+    bool aql_available;                      /* AQL feature available */
+    bool prefer_hardware;                    /* Prefer hardware over simulation */
+    struct mutex aql_mutex;                  /* Protects AQL operations */
+
     /* Statistics */
     atomic64_t total_events;
     atomic64_t total_samples;
+    atomic64_t hardware_events;              /* Number of hardware events */
+    atomic64_t simulation_events;            /* Number of simulation events */
 
     /* Simulated counter values */
-    atomic64_t counter_cycles;
-    atomic64_t counter_instructions;
-    atomic64_t counter_cache_misses;
-    atomic64_t counter_bandwidth;
+    atomic64_t counter_sq_waves;
+    atomic64_t counter_sq_instructions;
+    atomic64_t counter_ta_busy;
 };
 
 /* Function prototypes */
@@ -95,13 +104,20 @@ void pmu_stub_print_event_stats(struct pmu_stub *pmu);
 int pmu_stub_init_sysfs(struct pmu_stub *pmu);
 void pmu_stub_cleanup_sysfs(struct pmu_stub *pmu);
 
+/* AQL Hardware Integration Functions */
+int aql_pmu_init(void);
+void aql_pmu_cleanup(void);
+bool aql_pmu_is_available(void);
+int aql_pmu_event_init(struct perf_event *event);
+void aql_pmu_event_destroy(struct perf_event *event);
+int aql_pmu_event_start(struct perf_event *event);
+int aql_pmu_event_stop(struct perf_event *event);
+uint64_t aql_pmu_event_read(struct perf_event *event);
+void aql_pmu_get_stats(struct aql_perf_stats *stats);
+
 /* Debug helpers */
-#ifdef DEBUG
 #define pmu_debug(fmt, ...) \
-    pr_debug("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
-#else
-#define pmu_debug(fmt, ...) do {} while (0)
-#endif
+    pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 
 #define pmu_info(fmt, ...) \
     pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)

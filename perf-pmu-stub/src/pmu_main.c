@@ -1,7 +1,8 @@
 /*
  * pmu_main.c - Main PMU Stub Driver Implementation
  *
- * This module implements a skeleton PMU driver for the Linux perf subsystem.
+ * This module implements a PMU driver for the Linux perf subsystem that
+ * exposes GFX12 hardware performance counters through AQL integration.
  */
 
 #include <linux/module.h>
@@ -17,14 +18,16 @@
 
 #include "pmu_stub.h"
 #include "kfd_test.h"
+#include "aql_perf.h"
 
 /* Global PMU instance */
 static struct pmu_stub *pmu_stub_instance;
 
 /* Module parameters */
-static bool debug_enable = false;
+bool debug_enable = true;
 module_param(debug_enable, bool, 0644);
-MODULE_PARM_DESC(debug_enable, "Enable debug output (default: false)");
+MODULE_PARM_DESC(debug_enable, "Enable debug output (default: true)");
+EXPORT_SYMBOL(debug_enable);
 
 static int timer_period_ms = 100;
 module_param(timer_period_ms, int, 0644);
@@ -59,29 +62,42 @@ static struct attribute_group pmu_stub_format_group = {
 };
 
 /* Event attributes */
-static ssize_t pmu_stub_event_show(struct device *dev,
-                                   struct device_attribute *attr,
-                                   char *buf)
+static ssize_t pmu_stub_event_show_sq_waves(struct device *dev,
+                                            struct device_attribute *attr,
+                                            char *buf)
 {
-    /* Show event configuration */
-    return sprintf(buf, "config=0x%llx\n", (u64)0);
+    /* Show event configuration for sq_waves */
+    return sprintf(buf, "config=0x%llx\n", (u64)PMU_STUB_EVENT_SQ_WAVES);
+}
+
+static ssize_t pmu_stub_event_show_sq_instructions(struct device *dev,
+                                                   struct device_attribute *attr,
+                                                   char *buf)
+{
+    /* Show event configuration for sq_instructions */
+    return sprintf(buf, "config=0x%llx\n", (u64)PMU_STUB_EVENT_SQ_INSTRUCTIONS);
+}
+
+static ssize_t pmu_stub_event_show_ta_busy(struct device *dev,
+                                           struct device_attribute *attr,
+                                           char *buf)
+{
+    /* Show event configuration for ta_busy */
+    return sprintf(buf, "config=0x%llx\n", (u64)PMU_STUB_EVENT_TA_BUSY);
 }
 
 /* Define individual event attributes */
-static struct device_attribute pmu_stub_event_attr_cycles =
-    __ATTR(cycles, 0444, pmu_stub_event_show, NULL);
-static struct device_attribute pmu_stub_event_attr_instructions =
-    __ATTR(instructions, 0444, pmu_stub_event_show, NULL);
-static struct device_attribute pmu_stub_event_attr_cache_misses =
-    __ATTR(cache_misses, 0444, pmu_stub_event_show, NULL);
-static struct device_attribute pmu_stub_event_attr_bandwidth =
-    __ATTR(bandwidth, 0444, pmu_stub_event_show, NULL);
+static struct device_attribute pmu_stub_event_attr_sq_waves =
+    __ATTR(sq_waves, 0444, pmu_stub_event_show_sq_waves, NULL);
+static struct device_attribute pmu_stub_event_attr_sq_instructions =
+    __ATTR(sq_instructions, 0444, pmu_stub_event_show_sq_instructions, NULL);
+static struct device_attribute pmu_stub_event_attr_ta_busy =
+    __ATTR(ta_busy, 0444, pmu_stub_event_show_ta_busy, NULL);
 
 static struct attribute *pmu_stub_event_attrs[] = {
-    &pmu_stub_event_attr_cycles.attr,
-    &pmu_stub_event_attr_instructions.attr,
-    &pmu_stub_event_attr_cache_misses.attr,
-    &pmu_stub_event_attr_bandwidth.attr,
+    &pmu_stub_event_attr_sq_waves.attr,
+    &pmu_stub_event_attr_sq_instructions.attr,
+    &pmu_stub_event_attr_ta_busy.attr,
     NULL,
 };
 
@@ -106,10 +122,9 @@ enum hrtimer_restart pmu_stub_timer_handler(struct hrtimer *timer)
     spin_lock_irqsave(&pmu->lock, flags);
 
     /* Update simulated counters */
-    atomic64_add(1000, &pmu->counter_cycles);
-    atomic64_add(500, &pmu->counter_instructions);
-    atomic64_add(10, &pmu->counter_cache_misses);
-    atomic64_add(100, &pmu->counter_bandwidth);
+    atomic64_add(1000, &pmu->counter_sq_waves);
+    atomic64_add(500, &pmu->counter_sq_instructions);
+    atomic64_add(10, &pmu->counter_ta_busy);
 
     /* Update active events */
     for (i = 0; i < PMU_STUB_MAX_EVENTS; i++) {
@@ -119,17 +134,14 @@ enum hrtimer_restart pmu_stub_timer_handler(struct hrtimer *timer)
                 /* Simulate counter increment based on event type */
                 u64 delta = 0;
                 switch (event->attr.config) {
-                case PMU_STUB_EVENT_CYCLES:
+                case PMU_STUB_EVENT_SQ_WAVES:
                     delta = 1000;
                     break;
-                case PMU_STUB_EVENT_INSTRUCTIONS:
+                case PMU_STUB_EVENT_SQ_INSTRUCTIONS:
                     delta = 500;
                     break;
-                case PMU_STUB_EVENT_CACHE_MISSES:
+                case PMU_STUB_EVENT_TA_BUSY:
                     delta = 10;
-                    break;
-                case PMU_STUB_EVENT_BANDWIDTH:
-                    delta = 100;
                     break;
                 }
                 local64_add(delta, &event->count);
@@ -171,6 +183,7 @@ void pmu_stub_free_event_idx(struct pmu_stub *pmu, int idx)
 static int pmu_stub_event_init(struct perf_event *event)
 {
     struct pmu_stub *pmu = pmu_stub_instance;
+    int ret;
 
     pmu_debug("event_init: config=0x%llx\n", event->attr.config);
 
@@ -190,17 +203,30 @@ static int pmu_stub_event_init(struct perf_event *event)
         return -EOPNOTSUPP;
     }
 
-    /* We don't support exclude filters */
-    if (event->attr.exclude_user || event->attr.exclude_kernel ||
-        event->attr.exclude_hv || event->attr.exclude_idle) {
-        pmu_err("Exclude filters not supported\n");
-        return -EOPNOTSUPP;
+    // /* We don't support exclude filters */
+    // if (event->attr.exclude_user || event->attr.exclude_kernel ||
+    //     event->attr.exclude_hv || event->attr.exclude_idle) {
+    //     pmu_err("Exclude filters not supported\n");
+    //     return -EOPNOTSUPP;
+    // }
+
+    /* Try AQL hardware counters first if available and preferred */
+    if (pmu->aql_available && pmu->prefer_hardware) {
+        ret = aql_pmu_event_init(event);
+        if (ret == 0) {
+            pmu_debug("Using AQL hardware counter for event config=0x%llx\n", event->attr.config);
+            atomic64_inc(&pmu->hardware_events);
+            atomic64_inc(&pmu->total_events);
+            return 0;
+        }
+        pmu_debug("AQL hardware counter not available, falling back to simulation\n");
     }
 
-    /* Initialize event */
+    /* Initialize event for simulation */
     event->hw.idx = -1;
     event->hw.config = event->attr.config;
 
+    atomic64_inc(&pmu->simulation_events);
     atomic64_inc(&pmu->total_events);
 
     return 0;
@@ -214,22 +240,55 @@ static int pmu_stub_add(struct perf_event *event, int flags)
     unsigned long irq_flags;
     int idx;
 
-    pmu_debug("add: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
+    pmu_info("add: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%llx\n",
+             event->attr.config, flags, hwc->config_base);
 
+    /* Check if this is an AQL hardware event */
+    if (hwc->config_base != 0) {
+        pmu_debug("add: AQL hardware event detected, hwc->config_base=0x%llx\n", hwc->config_base);
+        /* AQL hardware event - start measurement if requested */
+        if (flags & PERF_EF_START) {
+            pmu_debug("add: Starting AQL hardware event immediately (PERF_EF_START flag set)\n");
+            int ret = aql_pmu_event_start(event);
+            if (ret) {
+                pmu_err("add: Failed to start AQL hardware event: %d\n", ret);
+                return ret;
+            }
+            hwc->state = 0;
+            pmu_debug("add: AQL hardware event started successfully, state=0\n");
+        } else {
+            hwc->state = PERF_HES_STOPPED;
+            pmu_debug("add: AQL hardware event added but not started, state=PERF_HES_STOPPED\n");
+        }
+
+        /* Set initial counter value */
+        local64_set(&event->count, 0);
+
+        pmu_debug("add: Added AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        return 0;
+    }
+
+    pmu_debug("add: Handling simulation event (hwc->config_base=0)\n");
+
+    /* Simulation event handling */
     spin_lock_irqsave(&pmu->lock, irq_flags);
 
     /* Get free event slot */
     idx = pmu_stub_get_event_idx(pmu);
     if (idx < 0) {
+        pmu_err("add: No free event slots available\n");
         spin_unlock_irqrestore(&pmu->lock, irq_flags);
         return -EAGAIN;
     }
+
+    pmu_debug("add: Allocated simulation event slot %d\n", idx);
 
     /* Assign event to slot */
     hwc->idx = idx;
     pmu->events[idx].event = event;
     pmu->events[idx].prev_count = 0;
     pmu->events[idx].active = false;
+    pmu->events[idx].uses_aql_hardware = false;
 
     /* Set initial counter value */
     local64_set(&event->count, 0);
@@ -238,8 +297,10 @@ static int pmu_stub_add(struct perf_event *event, int flags)
     if (flags & PERF_EF_START) {
         pmu->events[idx].active = true;
         hwc->state = 0;
+        pmu_debug("add: Started simulation event immediately (PERF_EF_START flag set)\n");
     } else {
         hwc->state = PERF_HES_STOPPED;
+        pmu_debug("add: Simulation event added but not started\n");
     }
 
     pmu->num_events++;
@@ -247,10 +308,13 @@ static int pmu_stub_add(struct perf_event *event, int flags)
     /* Start timer if this is the first event */
     if (pmu->num_events == 1) {
         hrtimer_start(&pmu->timer, pmu->timer_period, HRTIMER_MODE_REL);
+        pmu_debug("add: Started simulation timer (first event)\n");
     }
 
     spin_unlock_irqrestore(&pmu->lock, irq_flags);
 
+    pmu_debug("add: Successfully added simulation event config=0x%llx, slot=%d, total_events=%d\n",
+              event->attr.config, idx, pmu->num_events);
     return 0;
 }
 
@@ -261,16 +325,40 @@ static void pmu_stub_del(struct perf_event *event, int flags)
     struct hw_perf_event *hwc = &event->hw;
     unsigned long irq_flags;
 
-    pmu_debug("del: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
+    pmu_info("del: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%llx\n",
+             event->attr.config, flags, hwc->config_base);
 
+    /* Check if this is an AQL hardware event */
+    if (hwc->config_base != 0) {
+        pmu_debug("del: Removing AQL hardware event\n");
+        /* AQL hardware event - stop and cleanup */
+        if (flags & PERF_EF_UPDATE) {
+            pmu_debug("del: Reading final count (PERF_EF_UPDATE flag set)\n");
+            pmu_stub_read(event);
+        }
+
+        pmu_debug("del: Stopping AQL hardware event\n");
+        aql_pmu_event_stop(event);
+        pmu_debug("del: Destroying AQL hardware event\n");
+        aql_pmu_event_destroy(event);
+
+        pmu_debug("del: Removed AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        return;
+    }
+
+    pmu_debug("del: Removing simulation event\n");
+
+    /* Simulation event handling */
     spin_lock_irqsave(&pmu->lock, irq_flags);
 
     /* Stop event if running */
     if (hwc->idx >= 0) {
+        pmu_debug("del: Stopping simulation event slot %d\n", hwc->idx);
         pmu->events[hwc->idx].active = false;
 
         /* Update final count */
         if (flags & PERF_EF_UPDATE) {
+            pmu_debug("del: Reading final count for simulation event (PERF_EF_UPDATE flag set)\n");
             pmu_stub_read(event);
         }
 
@@ -279,14 +367,19 @@ static void pmu_stub_del(struct perf_event *event, int flags)
         hwc->idx = -1;
 
         pmu->num_events--;
+        pmu_debug("del: Freed simulation event slot, remaining events=%d\n", pmu->num_events);
 
         /* Stop timer if no more events */
         if (pmu->num_events == 0) {
             hrtimer_cancel(&pmu->timer);
+            pmu_debug("del: Stopped simulation timer (no more events)\n");
         }
+    } else {
+        pmu_debug("del: Simulation event has no valid slot (hwc->idx=%d)\n", hwc->idx);
     }
 
     spin_unlock_irqrestore(&pmu->lock, irq_flags);
+    pmu_debug("del: Successfully removed simulation event config=0x%llx\n", event->attr.config);
 }
 
 /* PMU callback: Start event */
@@ -296,19 +389,48 @@ static void pmu_stub_start(struct perf_event *event, int flags)
     struct hw_perf_event *hwc = &event->hw;
     unsigned long irq_flags;
 
-    pmu_debug("start: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
+    pmu_info("start: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%llx\n",
+             event->attr.config, flags, hwc->config_base);
 
+    /* Check if this is an AQL hardware event */
+    if (hwc->config_base != 0) {
+        pmu_debug("start: Starting AQL hardware event\n");
+        /* Reset counter if requested */
+        if (flags & PERF_EF_RELOAD) {
+            pmu_debug("start: Resetting counter (PERF_EF_RELOAD flag set)\n");
+            local64_set(&event->count, 0);
+        }
+
+        if (aql_pmu_event_start(event) == 0) {
+            hwc->state = 0;
+            pmu_debug("start: Started AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        } else {
+            pmu_err("start: Failed to start AQL hardware event config=0x%llx\n", event->attr.config);
+            hwc->state = PERF_HES_STOPPED;
+        }
+        return;
+    }
+
+    pmu_debug("start: Starting simulation event\n");
+
+    /* Simulation event handling */
     spin_lock_irqsave(&pmu->lock, irq_flags);
 
     if (hwc->idx >= 0 && hwc->idx < PMU_STUB_MAX_EVENTS) {
+        pmu_debug("start: Activating simulation event slot %d\n", hwc->idx);
         pmu->events[hwc->idx].active = true;
         hwc->state = 0;
 
         /* Reset counter if requested */
         if (flags & PERF_EF_RELOAD) {
+            pmu_debug("start: Resetting simulation counter (PERF_EF_RELOAD flag set)\n");
             local64_set(&event->count, 0);
             pmu->events[hwc->idx].prev_count = 0;
         }
+        pmu_debug("start: Successfully started simulation event config=0x%llx, slot=%d\n",
+                  event->attr.config, hwc->idx);
+    } else {
+        pmu_debug("start: Invalid simulation event slot (hwc->idx=%d)\n", hwc->idx);
     }
 
     spin_unlock_irqrestore(&pmu->lock, irq_flags);
@@ -321,18 +443,46 @@ static void pmu_stub_stop(struct perf_event *event, int flags)
     struct hw_perf_event *hwc = &event->hw;
     unsigned long irq_flags;
 
-    pmu_debug("stop: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
+    pmu_info("stop: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%llx\n",
+             event->attr.config, flags, hwc->config_base);
 
+    /* Check if this is an AQL hardware event */
+    if (hwc->config_base != 0) {
+        pmu_debug("stop: Stopping AQL hardware event\n");
+        /* Update count if requested */
+        if (flags & PERF_EF_UPDATE) {
+            pmu_debug("stop: Reading final count (PERF_EF_UPDATE flag set)\n");
+            pmu_stub_read(event);
+        }
+
+        if (aql_pmu_event_stop(event) == 0) {
+            hwc->state = PERF_HES_STOPPED;
+            pmu_debug("stop: Stopped AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        } else {
+            pmu_err("stop: Failed to stop AQL hardware event config=0x%llx\n", event->attr.config);
+        }
+        return;
+    }
+
+    pmu_debug("stop: Stopping simulation event\n");
+
+    /* Simulation event handling */
     spin_lock_irqsave(&pmu->lock, irq_flags);
 
     if (hwc->idx >= 0 && hwc->idx < PMU_STUB_MAX_EVENTS) {
+        pmu_debug("stop: Deactivating simulation event slot %d\n", hwc->idx);
         pmu->events[hwc->idx].active = false;
         hwc->state = PERF_HES_STOPPED;
 
         /* Update count if requested */
         if (flags & PERF_EF_UPDATE) {
+            pmu_debug("stop: Reading final count for simulation event (PERF_EF_UPDATE flag set)\n");
             pmu_stub_read(event);
         }
+        pmu_debug("stop: Successfully stopped simulation event config=0x%llx, slot=%d\n",
+                  event->attr.config, hwc->idx);
+    } else {
+        pmu_debug("stop: Invalid simulation event slot (hwc->idx=%d)\n", hwc->idx);
     }
 
     spin_unlock_irqrestore(&pmu->lock, irq_flags);
@@ -341,10 +491,22 @@ static void pmu_stub_stop(struct perf_event *event, int flags)
 /* PMU callback: Read event counter */
 static void pmu_stub_read(struct perf_event *event)
 {
-    pmu_debug("read: config=0x%llx, count=%llu\n",
-              event->attr.config, (unsigned long long)local64_read(&event->count));
+    struct hw_perf_event *hwc = &event->hw;
 
-    /* Counter value is already updated in timer handler */
+    pmu_info("read: ENTRY - config=0x%llx, count=%llu, hwc->config_base=0x%llx\n",
+             event->attr.config, (unsigned long long)local64_read(&event->count), hwc->config_base);
+
+    /* Check if this is an AQL hardware event */
+    if (hwc->config_base != 0) {
+        pmu_debug("read: Reading AQL hardware counter\n");
+        uint64_t counter_value = aql_pmu_event_read(event);
+        local64_set(&event->count, counter_value);
+        pmu_debug("read: Read AQL hardware counter value: %llu\n", counter_value);
+        return;
+    }
+
+    pmu_debug("read: Reading simulation event counter (already updated by timer)\n");
+    /* Simulation events - counter value is already updated in timer handler */
     /* This could be enhanced to read from hardware registers in a real driver */
 }
 
@@ -367,12 +529,18 @@ static int __init pmu_stub_init(void)
     pmu->num_events = 0;
 
     /* Initialize counters */
-    atomic64_set(&pmu->counter_cycles, 0);
-    atomic64_set(&pmu->counter_instructions, 0);
-    atomic64_set(&pmu->counter_cache_misses, 0);
-    atomic64_set(&pmu->counter_bandwidth, 0);
+    atomic64_set(&pmu->counter_sq_waves, 0);
+    atomic64_set(&pmu->counter_sq_instructions, 0);
+    atomic64_set(&pmu->counter_ta_busy, 0);
     atomic64_set(&pmu->total_events, 0);
     atomic64_set(&pmu->total_samples, 0);
+    atomic64_set(&pmu->hardware_events, 0);
+    atomic64_set(&pmu->simulation_events, 0);
+
+    /* Initialize AQL hardware integration */
+    mutex_init(&pmu->aql_mutex);
+    pmu->aql_available = false;
+    pmu->prefer_hardware = true;  /* Prefer hardware over simulation by default */
 
     /* Initialize timer */
     hrtimer_setup(&pmu->timer, pmu_stub_timer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -381,7 +549,7 @@ static int __init pmu_stub_init(void)
     /* Set up PMU structure */
     pmu->pmu = (struct pmu) {
         .name           = PMU_NAME,
-        .task_ctx_nr    = perf_invalid_context,
+        .task_ctx_nr    = -1,
         .event_init     = pmu_stub_event_init,
         .add            = pmu_stub_add,
         .del            = pmu_stub_del,
@@ -389,7 +557,7 @@ static int __init pmu_stub_init(void)
         .stop           = pmu_stub_stop,
         .read           = pmu_stub_read,
         .attr_groups    = pmu_stub_attr_groups,
-        .capabilities   = PERF_PMU_CAP_NO_INTERRUPT | PERF_PMU_CAP_NO_EXCLUDE,
+        .capabilities   = PERF_PMU_CAP_NO_INTERRUPT,
     };
 
     /* Register PMU with perf subsystem */
@@ -401,6 +569,17 @@ static int __init pmu_stub_init(void)
     }
 
     pmu_stub_instance = pmu;
+
+    /* Initialize AQL PMU integration */
+    ret = aql_pmu_init();
+    if (ret == 0) {
+        pmu->aql_available = true;
+        pmu_info("AQL hardware acceleration enabled\n");
+    } else {
+        pmu_info("AQL hardware acceleration not available: %d (using simulation only)\n", ret);
+        pmu->aql_available = false;
+        pmu->prefer_hardware = false;
+    }
 
     pmu_info("PMU Stub module loaded successfully\n");
     pmu_info("Events available under: /sys/bus/event_source/devices/%s/\n", PMU_NAME);
@@ -427,6 +606,12 @@ static void __exit pmu_stub_exit(void)
     pmu_info("Unloading PMU Stub module\n");
 
     if (pmu) {
+        /* Cleanup AQL integration first */
+        if (pmu->aql_available) {
+            aql_pmu_cleanup();
+            pmu_info("AQL hardware acceleration disabled\n");
+        }
+
         /* Cancel timer */
         hrtimer_cancel(&pmu->timer);
 
@@ -436,6 +621,10 @@ static void __exit pmu_stub_exit(void)
         /* Print statistics */
         pmu_info("Total events created: %lld\n",
                  atomic64_read(&pmu->total_events));
+        pmu_info("Hardware events: %lld\n",
+                 atomic64_read(&pmu->hardware_events));
+        pmu_info("Simulation events: %lld\n",
+                 atomic64_read(&pmu->simulation_events));
         pmu_info("Total samples: %lld\n",
                  atomic64_read(&pmu->total_samples));
 
