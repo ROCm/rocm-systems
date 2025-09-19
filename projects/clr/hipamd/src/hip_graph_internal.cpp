@@ -561,27 +561,23 @@ hipError_t Graph::UpdateStreams(hip::Stream* launch_stream,
                                 const std::vector<hip::Stream*>& parallel_streams) {
   // Current stream is the default in the assignment
   streams_.push_back(launch_stream);
-  int* unique_stream_ids = new int[GPU_MAX_HW_QUEUES]();
-  if (unique_stream_ids == nullptr) {
-    LogError("Stream id array allocation is nullptr!");
-    return hipErrorOutOfMemory;
-  }
+  std::unordered_map<int, int> unique_stream_ids;
   unique_stream_ids[launch_stream->getQueueID()] = 1;
   std::vector<hip::Stream*> collided_streams;
   // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
   for (uint32_t i = 0; i < parallel_streams.size(); i++) {
-    if (unique_stream_ids[parallel_streams[i]->getQueueID()] == 0) {
+    auto qid = parallel_streams[i]->getQueueID();
+    if (unique_stream_ids[qid] == 0) {
       streams_.push_back(parallel_streams[i]);
     } else {
       collided_streams.push_back(parallel_streams[i]);
     }
-    unique_stream_ids[parallel_streams[i]->getQueueID()]++;
+    unique_stream_ids[qid]++;
   }
   // Assign the remaining streams for execution.
   for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
     streams_.push_back(collided_streams[j]);
   }
-  delete[] unique_stream_ids;
   return hipSuccess;
 }
 
