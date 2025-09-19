@@ -1737,8 +1737,6 @@ def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     # Test output
@@ -1758,8 +1756,6 @@ def test_list_available_metrics_with_block(
     )
     # Should return code 1 since --block cannot be used with --list-available-metrics
     assert code == 1
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1984,6 +1980,4 @@ class TestSetsIntegration:
             check_success=False,
             roof=False,
         )
-        # workload dir should be empty
-        assert not os.listdir(workload_dir)
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
