@@ -124,5 +124,3 @@ jobs:
           tags: |
             rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=systems-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
-          cache-to: type=gha,mode=max,scope=systems-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
