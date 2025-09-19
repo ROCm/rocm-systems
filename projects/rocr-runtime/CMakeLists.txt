@@ -60,6 +60,13 @@ if (NOT DEFINED BUILD_ROCR)
   set(BUILD_ROCR ON)
 endif()
 
+find_package(NUMA)
+if(NUMA_FOUND)
+  set(NUMA "${NUMA_LIBRARIES}")
+else()
+  find_library(NUMA NAMES numa REQUIRED)
+endif()
+
 function(add_rocm_subdir subdir subdir_assigns)
     message("add_rocm_subdir() -- " ${subdir})
     # message("  subdir_assigns before:" ${subdir_assigns} "EOM")
