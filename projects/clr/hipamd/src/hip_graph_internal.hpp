@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -245,15 +245,22 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t GetKerArgSize() const { return alignedKernArgSize_; }
   size_t GetKernargSegmentByteSize() const { return kernargSegmentByteSize_; }
   size_t GetKernargSegmentAlignment() const { return kernargSegmentAlignment_; }
-  hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr) {
+
+  //! Capture packets and accumulate them into a batch if provided
+  hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
+                                  std::vector<uint8_t*>* batchPackets = nullptr,
+                                  std::vector<std::string>* batchKernelNames = nullptr) {
     auto capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
     hipError_t status = CreateCommand(capture_stream);
     if (status != hipSuccess) {
       return status;
     }
 
+    // Release last created packet memory before they are overwritten with new packets
     std::for_each(gpuPackets_.begin(), gpuPackets_.end(), [](auto p) { delete[] p; });
+    // Clear the pointer array
     gpuPackets_.clear();
+
     for (auto& command : commands_) {
       command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_);
       // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
@@ -261,6 +268,15 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       command->submit(*(command->queue())->vdev());
       command->release();
     }
+
+    // Accumulate packets directly into the batch (only if batch vectors are provided)
+    if (batchPackets != nullptr && batchKernelNames != nullptr) {
+      for (auto& packet : gpuPackets_) {
+        batchPackets->push_back(packet);
+        batchKernelNames->push_back(capturedKernelName_);
+      }
+    }
+
     // Commands are captured and released. Clear them from the object.
     commands_.clear();
 
@@ -802,6 +818,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   ~GraphExec() {
     for (auto stream : parallel_streams_) {
       if (stream != nullptr) {
+        stream->finish();
         constexpr bool kForceDestroy = true;
         hip::Stream::Destroy(stream, kForceDestroy);
       }
@@ -814,6 +831,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     if (instantiateDeviceId_ != -1) {
       static_cast<ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
     }
+
+    packetBatches_.clear();
+    nodeCaptureStatus_.clear();
   }
 
   Node GetClonedNode(Node node) {
@@ -849,7 +869,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
   static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
-  hipError_t AllocKernelArgForGraphNode();
+  hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph);
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
@@ -863,6 +883,23 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   int instantiateDeviceId_ = -1;
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
+
+  //! Structure for batch dispatch optimization - packets and kernel names in aligned memory
+  struct PacketBatch {
+    std::vector<uint8_t*> packets;
+    std::vector<std::string> kernelNames;
+    size_t capturedNodeCount;  // Number of consecutive captured nodes in this batch
+
+    PacketBatch() : capturedNodeCount(0) {}
+    PacketBatch(std::vector<uint8_t*>&& p, std::vector<std::string>&& k, size_t nodeCount)
+      : packets(std::move(p)), kernelNames(std::move(k)), capturedNodeCount(nodeCount) {}
+  };
+
+  //! Batches of accumulated packets and kernel names for batch dispatch optimization
+  //! Each batch contains packets from consecutive captured nodes
+  std::vector<PacketBatch> packetBatches_;
+  //! Track which nodes were successfully captured (true) vs need individual execution (false)
+  std::vector<bool> nodeCaptureStatus_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
@@ -1205,6 +1242,9 @@ class GraphKernelNode : public GraphNode {
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
+    if (!isEnabled_) {
+      return hipSuccess;
+    }
     hipFunction_t func = getFunc(kernelParams_, dev_id_);
     if (!func) {
       return hipErrorInvalidDeviceFunction;
@@ -1432,8 +1472,9 @@ class GraphMemcpyNode : public GraphNode {
   GraphNode* clone() const override { return new GraphMemcpyNode(*this); }
 
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
-    if ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
-        IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr)) {
+    if (!isEnabled_ ||
+        ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
+         IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr))) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -1444,6 +1485,7 @@ class GraphMemcpyNode : public GraphNode {
     amd::Command* command;
     status = ihipMemcpy3DCommand(command, &copyParams_, stream);
     commands_.emplace_back(command);
+
     return status;
   }
 
@@ -1635,7 +1677,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   GraphNode* clone() const override { return new GraphMemcpyNode1D(*this); }
 
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
-    if ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_)) {
+    if (!isEnabled_ ||
+        ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_))) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -2574,9 +2617,9 @@ class GraphDrvMemcpyNode : public GraphNode {
   GraphNode* clone() const override { return new GraphDrvMemcpyNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
-    if (copyParams_.srcMemoryType == hipMemoryTypeHost &&
-        copyParams_.dstMemoryType == hipMemoryTypeHost &&
-        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost)) {
+    if (!isEnabled_ || (copyParams_.srcMemoryType == hipMemoryTypeHost &&
+                        copyParams_.dstMemoryType == hipMemoryTypeHost &&
+                        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost))) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);

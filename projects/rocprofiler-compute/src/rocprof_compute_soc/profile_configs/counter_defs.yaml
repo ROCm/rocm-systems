@@ -6667,7 +6667,7 @@ rocprofiler-sdk:
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_LEVEL,sum)
   - name: TCC_EA0_RDREQ_sum
-    description: Number of TCC/EA read requests (either 32-byte or 64-byte) Sum over TCC instances.
+    description: Number of TCC/EA read requests (either 32-byte or 64-byte or 128-byte) Sum over TCC instances.
     properties: []
     definitions:
     - architectures:

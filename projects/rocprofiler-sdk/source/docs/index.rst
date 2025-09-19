@@ -44,6 +44,7 @@ The documentation is structured as follows:
 
     * :doc:`Tool library <api-reference/tool_library>`
     * :ref:`runtime-intercept-tables`
+    * :doc:`Process attachment <api-reference/process_attachment>`
     * :doc:`Buffered services <api-reference/buffered_services>`
     * :doc:`Callback services <api-reference/callback_services>`
     * :doc:`Counter collection services <api-reference/counter_collection_services>`
