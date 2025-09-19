@@ -112,7 +112,7 @@ bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) co
 }
 
 InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
-    : QueueProxy(std::move(queue)),
+    : QueueWrapper(std::move(queue)),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       next_packet_(0),

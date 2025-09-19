@@ -141,65 +141,10 @@ class QueueWrapper : public Queue {
   }
 };
 
-// @brief Generic container for a proxy queue.
-// Presents an proxy packet buffer and doorbell signal for an underlying Queue.  Write index
-// operations act on the proxy buffer while all other operations pass through to the underlying
-// queue.
-class QueueProxy : public QueueWrapper {
- public:
-  explicit QueueProxy(std::unique_ptr<Queue> queue) : QueueWrapper(std::move(queue)) {}
-
-  uint64_t LoadReadIndexAcquire() override {
-    return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_acquire);
-  }
-  uint64_t LoadReadIndexRelaxed() override {
-    return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_relaxed);
-  }
-  void StoreReadIndexRelaxed(uint64_t value) override { assert(false); }
-  void StoreReadIndexRelease(uint64_t value) override { assert(false); }
-
-  uint64_t LoadWriteIndexRelaxed() override {
-    return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_relaxed);
-  }
-  uint64_t LoadWriteIndexAcquire() override {
-    return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_acquire);
-  }
-  void StoreWriteIndexRelaxed(uint64_t value) override {
-    atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
-  }
-  void StoreWriteIndexRelease(uint64_t value) override {
-    atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
-  }
-  uint64_t CasWriteIndexAcqRel(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acq_rel);
-  }
-  uint64_t CasWriteIndexAcquire(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acquire);
-  }
-  uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_relaxed);
-  }
-  uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_release);
-  }
-  uint64_t AddWriteIndexAcqRel(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acq_rel);
-  }
-  uint64_t AddWriteIndexAcquire(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acquire);
-  }
-  uint64_t AddWriteIndexRelaxed(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
-  }
-  uint64_t AddWriteIndexRelease(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
-  }
-};
-
 // @brief Provides packet intercept and rewrite capability for a queue.
 // Host-side dispatches are processed during doorbell ring.
 // Device-side dispatches are processed as an asynchronous signal event.
-class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSignal {
+class InterceptQueue : public QueueWrapper, private LocalSignal, public DoorbellSignal {
  public:
   explicit InterceptQueue(std::unique_ptr<Queue> queue);
   ~InterceptQueue();
