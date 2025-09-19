@@ -107,6 +107,9 @@ jobs:
   rocprofiler-systems-ci-gfx:
     needs: prepare_matrix_ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     strategy:
       fail-fast: false
