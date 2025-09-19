@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -43,9 +43,12 @@
 #include "core/inc/thunk_loader.h"
 #include "core/inc/runtime.h"
 
-#include <dlfcn.h>
+#include <core/util/os.h>
 #include <iostream>
+#if defined(__linux__)
+#include <dlfcn.h>
 #include <fcntl.h>
+#endif
 
 namespace rocr {
 namespace core {
@@ -57,6 +60,7 @@ namespace core {
       return "libdtif.so";
     }
 
+#if defined(__linux__)
     if (core::Runtime::runtime_singleton_->flag().enable_dxg_detection()) {
       int fd = open("/dev/dxg", O_RDWR);
       if (fd >= 0) {
@@ -65,6 +69,9 @@ namespace core {
         return "librocdxg.so";
       }
     }
+#else
+    is_dxg_ = true;
+#endif
 
     return "";
   }
@@ -74,10 +81,10 @@ namespace core {
       library_name(whoami()),
       is_loaded_(false) {
     if (!library_name.empty()) {
-      dlerror(); // Clear any existing error messages
-      thunk_handle = dlopen(library_name.c_str(), RTLD_LAZY);
+      rocr::os::DlError();  // Clear any existing error messages
+      thunk_handle = rocr::os::LoadLib(library_name.c_str());
       if (thunk_handle == NULL) {
-        fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(), dlerror());
+        fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(), rocr::os::DlError());
       } else {
         debug_print("Load %s successully!\n", library_name.c_str());
       }
@@ -88,8 +95,8 @@ namespace core {
   ThunkLoader::~ThunkLoader() {
     if (IsSharedLibraryLoaded()
       && (thunk_handle != NULL)) {
-        if (dlclose(thunk_handle) != 0) {
-          fprintf(stderr, "Cannot unload %s, failed:%s\n", library_name.c_str(), dlerror());
+        if (!rocr::os::CloseLib(thunk_handle)) {
+          fprintf(stderr, "Cannot unload %s, failed:%s\n", library_name.c_str(), rocr::os::DlError());
         } else {
           debug_print("Unload %s successully!\n", library_name.c_str());
         }
@@ -98,6 +105,7 @@ namespace core {
 
   void ThunkLoader::LoadThunkApiTable() {
     if (IsSharedLibraryLoaded()) {
+#if defined(__linux__)
       dlerror(); // Clear any existing error messages
 
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)dlsym(thunk_handle, "hsaKmtOpenKFD");
@@ -402,12 +410,12 @@ namespace core {
 
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)dlsym(thunk_handle, "drmCommandWriteRead");
       if (DRM_PFN(drmCommandWriteRead) == NULL) goto ERROR;
-
       debug_print("Load all DTIF APIs OK!\n");
       return;
 
 ERROR:
       fprintf(stderr, "dlsym failed: %s\n", dlerror());
+#endif
     } else {
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&hsaKmtOpenKFD);
       HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)(&hsaKmtCloseKFD);
@@ -499,6 +507,9 @@ ERROR:
       HSAKMT_PFN(hsaKmtPcSamplingStart) = (HSAKMT_DEF(hsaKmtPcSamplingStart)*)(&hsaKmtPcSamplingStart);
       HSAKMT_PFN(hsaKmtPcSamplingStop) = (HSAKMT_DEF(hsaKmtPcSamplingStop)*)(&hsaKmtPcSamplingStop);
       HSAKMT_PFN(hsaKmtPcSamplingSupport) = (HSAKMT_DEF(hsaKmtPcSamplingSupport)*)(&hsaKmtPcSamplingSupport);
+#if defined(_WIN32)
+      HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)(&hsaKmtQueueRingDoorbell);
+#endif
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
@@ -509,7 +520,9 @@ ERROR:
       DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&amdgpu_bo_export);
       DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)(&amdgpu_bo_import);
       DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)(&amdgpu_bo_va_op);
+#if defined(__linux__)
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
+#endif
     }
   }
 
@@ -517,7 +530,8 @@ ERROR:
     if (!IsDTIF())
       return true;
 
-    DtifCreateFunc* pfnDtifCreate = (DtifCreateFunc*)dlsym(thunk_handle, "DtifCreate");
+    DtifCreateFunc* pfnDtifCreate =
+        (DtifCreateFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifCreate");
     if (pfnDtifCreate != NULL) {
       if (pfnDtifCreate("HSA") != NULL) {
         debug_print("DtifCreate OK!\n");
@@ -537,7 +551,8 @@ ERROR:
     if (thunk_handle == NULL)
       return false;
 
-    DtifDestroyFunc* pfnDtifDestroy = (DtifDestroyFunc*)dlsym(thunk_handle, "DtifDestroy");
+    DtifDestroyFunc* pfnDtifDestroy =
+        (DtifDestroyFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifDestroy");
     if (pfnDtifDestroy != NULL) {
       pfnDtifDestroy();
       debug_print("DtifDestroy OK!\n");
