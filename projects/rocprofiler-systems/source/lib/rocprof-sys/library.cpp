@@ -762,20 +762,6 @@ rocprofsys_finalize_hidden(void)
     {
         set_state(State::Finalized);
 
-        if(get_use_sampling())
-        {
-            sampling::block_samples();
-            tim::signals::block_signals(get_sampling_signals(),
-                                        tim::signals::sigmask_scope::process);
-            push_enable_sampling_on_child_threads(false);
-            set_sampling_on_all_future_threads(false);
-            ROCPROFSYS_VERBOSE_F(1, "Shutting down sampling for child process...\n");
-            sampling::shutdown();
-            ROCPROFSYS_VERBOSE_F(
-                1, "Post-processing the sampling backtraces for child process...\n");
-            sampling::post_process();
-        }
-
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
         if(get_use_rocm())
