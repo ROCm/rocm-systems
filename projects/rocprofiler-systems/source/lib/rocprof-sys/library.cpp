@@ -45,6 +45,7 @@
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cache_utility.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
@@ -773,8 +774,9 @@ rocprofsys_finalize_hidden(void)
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
-        _manager.get_metadata_registry().save_to_file(trace_cache::metadata_filepath,
-                                                      _agents);
+        const auto metadata_filepath =
+            trace_cache::get_metadata_filepath(get_root_process_id(), getpid());
+        _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
 
         std::quick_exit(EXIT_SUCCESS);
         return;
