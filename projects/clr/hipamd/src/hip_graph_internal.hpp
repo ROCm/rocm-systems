@@ -1241,6 +1241,9 @@ class GraphKernelNode : public GraphNode {
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
+    if (!isEnabled_) {
+      return hipSuccess;
+    }
     hipFunction_t func = getFunc(kernelParams_, dev_id_);
     if (!func) {
       return hipErrorInvalidDeviceFunction;
@@ -1468,8 +1471,9 @@ class GraphMemcpyNode : public GraphNode {
   GraphNode* clone() const override { return new GraphMemcpyNode(*this); }
 
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
-    if ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
-        IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr)) {
+    if (!isEnabled_ ||
+        ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
+         IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr))) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -1480,6 +1484,7 @@ class GraphMemcpyNode : public GraphNode {
     amd::Command* command;
     status = ihipMemcpy3DCommand(command, &copyParams_, stream);
     commands_.emplace_back(command);
+
     return status;
   }
 
@@ -1671,7 +1676,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   GraphNode* clone() const override { return new GraphMemcpyNode1D(*this); }
 
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
-    if ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_)) {
+    if (!isEnabled_ ||
+        ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_))) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -2610,9 +2616,9 @@ class GraphDrvMemcpyNode : public GraphNode {
   GraphNode* clone() const override { return new GraphDrvMemcpyNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
-    if (copyParams_.srcMemoryType == hipMemoryTypeHost &&
-        copyParams_.dstMemoryType == hipMemoryTypeHost &&
-        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost)) {
+    if (!isEnabled_ || (copyParams_.srcMemoryType == hipMemoryTypeHost &&
+                        copyParams_.dstMemoryType == hipMemoryTypeHost &&
+                        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost))) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);

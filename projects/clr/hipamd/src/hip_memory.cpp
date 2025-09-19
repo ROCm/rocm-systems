@@ -1795,7 +1795,7 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
   } else {
     amd::Command::EventWaitList waitList;
     auto* pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
-    if (stream != pStream) {
+    if (stream->DeviceId() != srcMemory->getUserData().deviceId) {
       amd::Command* cmd = pStream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);

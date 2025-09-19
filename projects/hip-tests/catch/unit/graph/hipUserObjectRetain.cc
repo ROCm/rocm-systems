@@ -44,5 +44,9 @@ TEST_CASE("Unit_hipUserObjectRetain_Negative") {
   SECTION("Pass initialRefcount as 0") {
     HIP_CHECK_ERROR(hipUserObjectRetain(hObject, 0), hipErrorInvalidValue);
   }
-  SECTION("Pass initialRefcount as INT_MAX") { HIP_CHECK(hipUserObjectRetain(hObject, INT_MAX)); }
+  SECTION("Pass initialRefcount as INT_MAX") {
+    HIP_CHECK(hipUserObjectRetain(hObject, INT_MAX));
+    HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX));
+  }
+  HIP_CHECK(hipUserObjectRelease(hObject, 1));
 }
