@@ -644,6 +644,21 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
 }
 #endif
 // clang-format on
+
+std::string
+get_args_string(const function_args_t& args)
+{
+    std::string args_str;
+    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
+        const auto*       delimiter = ";;";
+        std::stringstream ss;
+        ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
+           << delimiter << arg.arg_value << delimiter;
+        args_str.append(ss.str());
+    });
+    return args_str;
+}
+
 template <typename CategoryT>
 void
 tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,
@@ -854,16 +869,7 @@ tool_tracing_callback_stop(
     {
         cache_category<CategoryT>();
         cache_add_thread_info(record.thread_id);
-        std::string args_str;
-
-        std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
-            const auto*       delimiter = ";;";
-            std::stringstream ss;
-            ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
-               << delimiter << arg.arg_value << delimiter;
-            args_str.append(ss.str());
-        });
-
+        std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack->to_string(), args_str,
                      trait::name<CategoryT>::value);
     }
@@ -960,20 +966,6 @@ get_ompt_parallel_cb_storage()
     return _v;
 }
 
-std::string
-ompt_get_args_string(const function_args_t& args)
-{
-    std::string args_str;
-    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
-        const auto*       delimiter = ";;";
-        std::stringstream ss;
-        ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
-           << delimiter << arg.arg_value << delimiter;
-        args_str.append(ss.str());
-    });
-    return args_str;
-}
-
 // Treat events with no start/end as instant
 void
 ompt_cache_orphan_event(
@@ -984,7 +976,7 @@ ompt_cache_orphan_event(
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(stored_data.record.thread_id);
     cache_region(&stored_data.record, stored_data._beg_ts, stored_data._beg_ts,
-                 call_stack->to_string(), ompt_get_args_string(stored_data.args),
+                 call_stack->to_string(), get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
 
@@ -1023,7 +1015,7 @@ ompt_pop_standard_callback(
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
     cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
-                 ompt_get_args_string(stored_data.args),
+                 get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
 
@@ -1068,7 +1060,7 @@ ompt_pop_lock_callback(const rocprofiler_callback_tracing_record_t&             
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
     cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
-                 ompt_get_args_string(stored_data.args),
+                 get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
 
@@ -1116,7 +1108,7 @@ ompt_pop_parallel_callback(
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
     cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
-                 ompt_get_args_string(stored_data.args),
+                 get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
 
@@ -1154,7 +1146,7 @@ ompt_cache_instant_event(
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
     cache_region(&record, _instant_ts, _instant_ts, call_stack->to_string(),
-                 ompt_get_args_string(args), trait::name<category::rocm_ompt_api>::value);
+                 get_args_string(args), trait::name<category::rocm_ompt_api>::value);
 }
 
 // To handle events without finalization, perfetto push must occur in start
