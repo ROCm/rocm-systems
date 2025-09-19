@@ -1451,40 +1451,38 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         const auto is_target = is_targeted_kernel(kernel_id, kernel_iteration);
-        // Reset counter if kernel ID and iteration range matches
-        if(is_target || isprofiling)
-        {
-            captured_ids.wlock(
-                [](std::unordered_set<rocprofiler_dispatch_id_t>& _data,
-                   const rocprofiler_dispatch_id_t                _dispatch_id,
-                   const bool                                     _is_target,
-                   const uint64_t                                 _consecutive_kernels) {
-                    // Reset consecutive kernel count and start context if not already started
-                    if(_is_target)
-                    {
-                        num_consecutive_kernels = 0;
-                        if(!isprofiling.load())
-                        {
-                            ROCPROFILER_CALL(rocprofiler_start_context(att_device_context),
-                                             "context start");
-                            isprofiling.store(true);
-                        }
-                    }
-                    const auto local_count = num_consecutive_kernels++;
-                    if(isprofiling && local_count < _consecutive_kernels)
-                    {
-                        // Keep track of launched dispatch ids
-                        _data.emplace(_dispatch_id);
-                        // Store lowest dispatch id for shader callback function
-                        if(att_consecutive_kernel_dispatch_id.load() > _dispatch_id)
-                            att_consecutive_kernel_dispatch_id.store(_dispatch_id);
-                    }
-                    if(local_count >= _consecutive_kernels) stop_profiling = true;
-                },
-                dispatch_id,
-                is_target,
-                consecutive_kernels);
-        }
+        // Return if kernel is not targeted and we are not profiling currently
+        if(!is_target && !isprofiling.load()) return;
+
+        captured_ids.wlock(
+            [](std::unordered_set<rocprofiler_dispatch_id_t>& _data,
+               const rocprofiler_dispatch_id_t                _dispatch_id,
+               const bool                                     _is_target,
+               const uint64_t                                 _consecutive_kernels) {
+                // Reset consecutive kernel count and start context if not already started
+                if(_is_target) num_consecutive_kernels = 0;
+                // Start context if target and not started already
+                if(_is_target && !isprofiling.load())
+                {
+                    ROCPROFILER_CALL(rocprofiler_start_context(att_device_context),
+                                     "context start");
+                    isprofiling.store(true);
+                }
+                const auto local_count = num_consecutive_kernels++;
+                if(isprofiling && local_count < _consecutive_kernels)
+                {
+                    // Keep track of launched dispatch ids
+                    _data.emplace(_dispatch_id);
+                    // Store lowest dispatch id for shader callback function
+                    if(att_consecutive_kernel_dispatch_id.load() > _dispatch_id)
+                        att_consecutive_kernel_dispatch_id.store(_dispatch_id);
+                }
+                if(local_count >= _consecutive_kernels) stop_profiling = true;
+            },
+            dispatch_id,
+            is_target,
+            consecutive_kernels);
+
         return;
     }
 
