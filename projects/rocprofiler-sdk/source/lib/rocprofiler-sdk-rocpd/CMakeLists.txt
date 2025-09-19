@@ -12,7 +12,7 @@ foreach(_NAMESPACE rocprofiler-sdk rocprofiler-sdk-rocpd)
     endforeach()
 endforeach()
 
-target_sources(rocprofiler-sdk-rocpd-shared-library PRIVATE rocpd.cpp sql.cpp)
+target_sources(rocprofiler-sdk-rocpd-shared-library PRIVATE format.hpp rocpd.cpp sql.cpp)
 
 target_include_directories(
     rocprofiler-sdk-rocpd-shared-library
@@ -26,6 +26,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-yaml-cpp
             rocprofiler-sdk::rocprofiler-sdk-dl)
 
 set_target_properties(
