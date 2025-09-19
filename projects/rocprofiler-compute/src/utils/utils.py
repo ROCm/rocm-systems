@@ -326,10 +326,13 @@ def capture_subprocess_output(
         )
     )
 
+    # Create callback function for process output
     buf = io.StringIO()
 
     def handle_output(stream: io.TextIOWrapper, _mask) -> None:
         try:
+            # Because the process' output is line buffered, there's only ever one
+            # line to read when this function is called
             line = stream.readline()
             if not line:
                 return
@@ -340,8 +343,10 @@ def capture_subprocess_output(
                 else:
                     console_log(line.strip())
         except UnicodeDecodeError:
+            # Skip this line
             pass
 
+    # Register callback for an "available for read" event from subprocess' stdout stream
     selector = selectors.DefaultSelector()
     if process.stdout is not None:
         selector.register(process.stdout, selectors.EVENT_READ, handle_output)
@@ -377,6 +382,7 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
+    # Loop until subprocess is terminated
     while process.poll() is None:
         # Wait for events and handle them with their registered callbacks
         events = selector.select()
@@ -385,10 +391,14 @@ def capture_subprocess_output(
             callback(key.fileobj, mask)
 
     input_thread.join(timeout=1)
+
+    # Get process return code
     return_code = process.wait()
     selector.close()
 
     success = return_code == 0
+
+    # Store buffered output
     output = buf.getvalue()
     buf.close()
 
@@ -721,14 +731,14 @@ def parse_text(text_file: str) -> list[str]:
 
 
 def run_prof(
-    fname,
-    profiler_options,
-    workload_dir,
-    mspec,
-    loglevel,
-    format_rocprof_output,
-    retain_rocpd_output=False,
-):
+    fname: str,
+    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+    workload_dir: str,
+    mspec: Any,  # noqa: ANN401
+    loglevel: int,
+    format_rocprof_output: str,
+    retain_rocpd_output: bool = False,
+) -> None:
     fpath = Path(fname)
     fbase = fpath.stem
     console_debug(f"pmc file: {fpath.name}")

@@ -467,14 +467,14 @@ class RocProfCompute_Base:
 
             console_log("profiling", f"Current input file: {fname}")
 
-            options = self.get_profiler_options(fname, self._soc)
-            if (
-                self.__profiler == "rocprofv1"
-                or self.__profiler == "rocprofv2"
-                or self.__profiler == "rocprofv3"
-                or self.__profiler == "rocprofiler-sdk"
+            if self.__profiler in (
+                "rocprofv1",
+                "rocprofv2",
+                "rocprofv3",
+                "rocprofiler-sdk",
             ):
                 options = self.get_profiler_options(str(fname), self._soc)
+                start_time = time.time()
 
                 # Only 1-run case is permitted for attach/detach
                 if (isinstance(options, list) and "--pid" in options) or (
@@ -486,7 +486,6 @@ class RocProfCompute_Base:
                             f'Cannot attach process for profiling as the requsted performance counters excceed the collection capacity of single pass counter collection. The current setup of requested counter blocks needs {total_runs} number of passes. Please use "--block" or "--set" to adjust or reduce the requested performance metrics!'
                         )
 
-                start_run_prof = time.time()
                 run_prof(
                     fname=str(fname),
                     profiler_options=options,
@@ -497,7 +496,7 @@ class RocProfCompute_Base:
                     retain_rocpd_output=args.retain_rocpd_output,
                 )
                 end_time = time.time()
-                duration = end_time - start_run_prof
+                duration = end_time - start_time
                 total_profiling_time += duration
 
                 console_debug(

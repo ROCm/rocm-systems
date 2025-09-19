@@ -61,6 +61,7 @@ config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["app_occupancy"] = ["./tests/occupancy"]
+config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
