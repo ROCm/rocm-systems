@@ -111,7 +111,7 @@ public:
   void set_mark (epoch_t mark) { m_mark = mark; }
 
   /* Return the address of the memory holding the queue packets.  */
-  host_address_t address () const;
+  std::variant<host_address_t, agent_address_t> address () const;
 
   /* Return the size of the memory holding the queue packets.  */
   amd_dbgapi_size_t size () const;

@@ -467,29 +467,40 @@ compute_queue_t::queue_state_changed ()
       break;
 
     case state_t::suspended:
-      /* Discard the previously cached wave saved state lines.  The saved state
-         areas may be mapped to a different address in this new context wave
-         save.  */
-      agent ().memory_cache ().discard (
-        m_os_queue_info.ctx_save_restore_address,
-        xcc_count * m_os_queue_info.ctx_save_restore_area_size);
+      {
+        /* Discard the previously cached wave saved state lines.  The saved
+           state areas may be mapped to a different address in this new context
+           wave save.  */
+        agent ().memory_cache ().discard (
+          m_os_queue_info.ctx_save_restore_address,
+          xcc_count * m_os_queue_info.ctx_save_restore_area_size);
 
-      refresh_scratch_on_suspend ();
+        refresh_scratch_on_suspend ();
 
-      /* Read the queue's write_packet_id and read_packet_id.  */
+        auto read_memory = [this] (auto &&address, auto *buffer)
+        {
+          if (std::holds_alternative<host_address_t> (address))
+            this->process ().read_host_memory (
+              std::get<host_address_t> (address), buffer);
+          else if (std::holds_alternative<agent_address_t> (address))
+            this->agent ().read_agent_memory (
+              std::get<agent_address_t> (address), buffer);
+          else
+            dbgapi_assert (false);
+        };
 
-      if (m_os_queue_info.write_pointer_address != 0)
-        process ().read_host_memory (m_os_queue_info.write_pointer_address,
-                                     &m_write_packet_id.emplace ());
+        if (m_os_queue_info.read_pointer_address.has_value ())
+          read_memory (*m_os_queue_info.read_pointer_address,
+                       &m_read_packet_id.emplace ());
+        if (m_os_queue_info.write_pointer_address.has_value ())
+          read_memory (*m_os_queue_info.write_pointer_address,
+                       &m_write_packet_id.emplace ());
 
-      if (m_os_queue_info.read_pointer_address != 0)
-        process ().read_host_memory (m_os_queue_info.read_pointer_address,
-                                     &m_read_packet_id.emplace ());
-
-      /* Iterate the control stack and update/create waves that were saved in
-         the last context wave save.  Waves that are no longer present will be
-         destroyed.  */
-      update_waves ();
+        /* Iterate the control stack and update/create waves that were saved in
+           the last context wave save.  Waves that are no longer present will
+           be destroyed.  */
+        update_waves ();
+      }
       break;
 
     case state_t::invalid:
@@ -616,8 +627,9 @@ aql_queue_t::aql_dispatch_t::aql_dispatch_t (
   amd_dbgapi_os_queue_packet_id_t os_queue_packet_id)
   : dispatch_t (dispatch_id, queue, os_queue_packet_id)
 {
+  dbgapi_assert (std::holds_alternative<host_address_t> (queue.address ()));
   amd_dbgapi_global_address_t packet_address
-    = queue.address ()
+    = std::get<host_address_t> (queue.address ())
       + (os_queue_packet_id * aql_packet_size) % queue.size ();
 
   /* Read the dispatch packet and kernel descriptor.  */
@@ -825,8 +837,10 @@ aql_queue_t::get_os_queue_packet_id (
     fatal_error ("dispatch_packet_index %#" PRIx64 " is out of bounds in %s",
                  dispatch_packet_id.value (), to_cstring (id ()));
 
+  dbgapi_assert (std::holds_alternative<host_address_t> (address ()));
   amd_dbgapi_global_address_t packet_address
-    = address () + (dispatch_packet_id.value () * packet_size ());
+    = std::get<host_address_t> (address ())
+      + (dispatch_packet_id.value () * packet_size ());
 
   /* Calculate the monotonic dispatch id for this packet.  It is
        between read_packet_id and write_packet_id.  */
@@ -838,7 +852,8 @@ aql_queue_t::get_os_queue_packet_id (
   dbgapi_assert (m_read_packet_id && m_write_packet_id);
 
   amd_dbgapi_os_queue_packet_id_t os_queue_packet_id
-    = (packet_address - address ()) / aql_packet_size
+    = (packet_address - std::get<host_address_t> (address ()))
+        / aql_packet_size
       + (*m_read_packet_id / ring_size) * ring_size;
 
   if (os_queue_packet_id < *m_read_packet_id
@@ -884,16 +899,21 @@ aql_queue_t::refresh_scratch_on_suspend ()
      it.  We cannot cache this value as the runtime may change the
      allocation dynamically.  */
 
+  dbgapi_assert (m_os_queue_info.read_pointer_address.has_value ()
+                 && std::holds_alternative<host_address_t> (
+                   *m_os_queue_info.read_pointer_address));
+
   process ().read_host_memory (
-    m_os_queue_info.read_pointer_address
+    std::get<host_address_t> (*m_os_queue_info.read_pointer_address)
       + offsetof (amd_queue_t, scratch_backing_memory_location)
       - offsetof (amd_queue_t, read_dispatch_id),
     &m_scratch_backing_memory_address);
 
-  process ().read_host_memory (m_os_queue_info.read_pointer_address
-                                 + offsetof (amd_queue_t, compute_tmpring_size)
-                                 - offsetof (amd_queue_t, read_dispatch_id),
-                               &m_compute_tmpring_size);
+  process ().read_host_memory (
+    std::get<host_address_t> (*m_os_queue_info.read_pointer_address)
+      + offsetof (amd_queue_t, compute_tmpring_size)
+      - offsetof (amd_queue_t, read_dispatch_id),
+    &m_compute_tmpring_size);
 }
 
 std::pair<agent_address_t /* address */, amd_dbgapi_size_t /* size */>
@@ -913,14 +933,11 @@ aql_queue_t::active_packets_info (
   size_t *packets_byte_size_p) const
 {
   dbgapi_assert (is_suspended ());
+  dbgapi_assert (m_read_packet_id.has_value ());
+  dbgapi_assert (m_write_packet_id.has_value ());
 
-  amd_dbgapi_os_queue_packet_id_t read_packet_id;
-  process ().read_host_memory (m_os_queue_info.read_pointer_address,
-                               &read_packet_id);
-
-  amd_dbgapi_os_queue_packet_id_t write_packet_id;
-  process ().read_host_memory (m_os_queue_info.write_pointer_address,
-                               &write_packet_id);
+  amd_dbgapi_os_queue_packet_id_t read_packet_id = m_read_packet_id.value ();
+  amd_dbgapi_os_queue_packet_id_t write_packet_id = m_write_packet_id.value ();
 
   if (read_packet_id > write_packet_id)
     fatal_error ("corrupted read/write packet ids");
@@ -953,24 +970,26 @@ aql_queue_t::active_packets_bytes (
 
   const uint64_t id_mask = size () / aql_packet_size - 1;
 
+  dbgapi_assert (std::holds_alternative<host_address_t> (address ()));
+  const host_address_t queue_address = std::get<host_address_t> (address ());
   host_address_t read_packet_ptr
-    = address () + (read_packet_id & id_mask) * aql_packet_size;
+    = queue_address + (read_packet_id & id_mask) * aql_packet_size;
   host_address_t write_packet_ptr
-    = address () + (write_packet_id & id_mask) * aql_packet_size;
+    = queue_address + (write_packet_id & id_mask) * aql_packet_size;
 
   if (read_packet_ptr < write_packet_ptr)
     process ().read_host_memory (read_packet_ptr, memory, packets_byte_size);
 
   else if (read_packet_ptr > write_packet_ptr)
     {
-      size_t first_part_size = address () + size () - read_packet_ptr;
+      size_t first_part_size = queue_address + size () - read_packet_ptr;
 
       process ().read_host_memory (read_packet_ptr, memory, first_part_size);
 
-      size_t second_part_size = write_packet_ptr - address ();
+      size_t second_part_size = write_packet_ptr - queue_address;
 
       process ().read_host_memory (
-        address (), static_cast<char *> (memory) + first_part_size,
+        queue_address, static_cast<char *> (memory) + first_part_size,
         second_part_size);
     }
 }
@@ -1116,7 +1135,7 @@ queue_t::set_state (state_t state)
     log_info ("invalidated %s", to_cstring (id ()));
 }
 
-host_address_t
+std::variant<host_address_t, agent_address_t>
 queue_t::address () const
 {
   return m_os_queue_info.ring_base_address;
@@ -1167,7 +1186,9 @@ queue_t::get_info (amd_dbgapi_queue_info_t query, size_t value_size,
       }
 
     case AMD_DBGAPI_QUEUE_INFO_ADDRESS:
-      utils::get_info (value_size, value, address ());
+      utils::get_info (value_size, value,
+                       std::visit ([] (auto v) -> amd_dbgapi_global_address_t
+                                   { return v; }, address ()));
       return;
 
     case AMD_DBGAPI_QUEUE_INFO_SIZE:

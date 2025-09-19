@@ -1926,8 +1926,7 @@ kmd_driver_t::queue_snapshot (os_queue_snapshot_entry_t *snapshots,
 
           queue.read_pointer_address = read_pointer_address;
           queue.write_pointer_address
-            = queue.read_pointer_address
-              + offsetof (amd_queue_t, write_dispatch_id)
+            = read_pointer_address + offsetof (amd_queue_t, write_dispatch_id)
               - offsetof (amd_queue_t, read_dispatch_id);
 
           uint32_t hsa_queue_base_offset;
@@ -1941,9 +1940,8 @@ kmd_driver_t::queue_snapshot (os_queue_snapshot_entry_t *snapshots,
           read_host_memory (read_pointer_address - hsa_queue_base_offset,
                             &hsa_queue);
 
-          queue.ring_base_address
-            = reinterpret_cast<amd_dbgapi_global_address_t> (
-              hsa_queue.base_address);
+          queue.ring_base_address = static_cast<host_address_t> (
+            reinterpret_cast<uint64_t> (hsa_queue.base_address));
           queue.ring_size
             = static_cast<amd_dbgapi_size_t> (hsa_queue.size << 6);
         }
@@ -1951,11 +1949,13 @@ kmd_driver_t::queue_snapshot (os_queue_snapshot_entry_t *snapshots,
         {
           queue.queue_type = os_queue_type (snap.queueType);
           queue.ring_base_address
-            = static_cast<host_address_t> (snap.ringBufferAddress);
-          queue.write_pointer_address
-            = static_cast<host_address_t> (snap.writePtrAddress);
-          queue.read_pointer_address
-            = static_cast<host_address_t> (snap.readPtrAddress);
+            = static_cast<agent_address_t> (snap.ringBufferAddress);
+          if (snap.writePtrAddress != 0)
+            queue.write_pointer_address
+              = static_cast<agent_address_t> (snap.writePtrAddress);
+          if (snap.readPtrAddress != 0)
+            queue.read_pointer_address
+              = static_cast<agent_address_t> (snap.readPtrAddress);
           queue.ring_size = static_cast<amd_dbgapi_size_t> (snap.ringSize);
           queue.compute_tmpring_size = snap.computeTmpRingSize;
         }

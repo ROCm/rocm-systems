@@ -34,6 +34,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace amd::dbgapi
 {
@@ -407,10 +408,12 @@ struct os_queue_snapshot_entry_t
   os_agent_id_t gpu_id;
   os_queue_type_t queue_type{ os_queue_type_t::unknown };
   os_exception_mask_t exception_status;
-  host_address_t ring_base_address;
+  std::variant<host_address_t, agent_address_t> ring_base_address;
   amd_dbgapi_size_t ring_size;
-  host_address_t write_pointer_address;
-  host_address_t read_pointer_address;
+  std::optional<std::variant<host_address_t, agent_address_t>>
+    write_pointer_address;
+  std::optional<std::variant<host_address_t, agent_address_t>>
+    read_pointer_address;
   agent_address_t ctx_save_restore_address;
   amd_dbgapi_size_t ctx_save_restore_area_size;
   std::optional<uint32_t> compute_tmpring_size;
