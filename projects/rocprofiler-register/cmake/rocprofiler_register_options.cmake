@@ -39,6 +39,10 @@ rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_FMT "Build FMT" ON)
 rocprofiler_register_add_option(
     ROCPROFILER_REGISTER_DEP_ROCMCORE "DEB and RPM package depend on rocm-core package"
     ${ROCM_DEP_ROCMCORE})
+rocprofiler_register_add_option(
+    ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT
+    "Enable attachment by default, instead of requiring an environment variable when the application starts"
+    OFF)
 
 # In the future, we will do this even with clang-tidy enabled
 if(ROCPROFILER_REGISTER_BUILD_CI

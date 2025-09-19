@@ -30,7 +30,8 @@ install(
 install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}
-    COMPONENT tests)
+    COMPONENT tests
+    USE_SOURCE_PERMISSIONS)
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/requirements.txt
