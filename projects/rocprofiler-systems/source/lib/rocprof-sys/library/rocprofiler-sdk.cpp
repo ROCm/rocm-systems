@@ -1369,7 +1369,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_start(record, user_data, ts);
-                if(get_use_rocpd()) ompt_push_standard_callback(record, ts);
+                ompt_push_standard_callback(record, ts);
                 break;
             }
             case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
@@ -1453,7 +1453,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
-                if(get_use_rocpd()) ompt_pop_standard_callback(record, ts, _bt_data);
+                ompt_pop_standard_callback(record, ts, _bt_data);
                 break;
             }
             case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
@@ -1549,20 +1549,19 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     case ROCPROFILER_OMPT_ID_parallel_begin:
                         ompt_tracing_callback_start(record, user_data, ts);
-                        if(get_use_rocpd()) ompt_push_parallel_callback(record, ts);
+                        ompt_push_parallel_callback(record, ts);
                         break;
                     case ROCPROFILER_OMPT_ID_parallel_end:
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
-                        if(get_use_rocpd())
-                            ompt_pop_parallel_callback(record, ts, _bt_data);
+                        ompt_pop_parallel_callback(record, ts, _bt_data);
                         break;
                     case ROCPROFILER_OMPT_ID_lock_init:
                         ompt_tracing_callback_start(record, user_data, ts);
-                        if(get_use_rocpd()) ompt_push_lock_callback(record, ts);
+                        ompt_push_lock_callback(record, ts);
                         break;
                     case ROCPROFILER_OMPT_ID_lock_destroy:
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
-                        if(get_use_rocpd()) ompt_pop_lock_callback(record, ts, _bt_data);
+                        ompt_pop_lock_callback(record, ts, _bt_data);
                         break;
                     // Although this has endpoint arg, treat it as instant event
                     case ROCPROFILER_OMPT_ID_nest_lock:
