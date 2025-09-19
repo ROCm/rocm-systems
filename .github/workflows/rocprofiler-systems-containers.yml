@@ -172,6 +172,12 @@ jobs:
           test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
       
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}
+
       - name: Build CI GFX Container (Does not Push on PR)
         uses: docker/build-push-action@v6
         with:
@@ -189,6 +195,7 @@ jobs:
             BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
             rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:systems-ci-${{ matrix.gpu }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=systems-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
           cache-to: type=gha,mode=max,scope=systems-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
 
