@@ -20,8 +20,9 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
 ##############################################################################
+
+from pathlib import Path
 from typing import Any, Optional
 
 from textual import on
@@ -87,7 +88,7 @@ class MenuBar(Container):
 
         def on_recent_selected(selected_dir: Optional[str]) -> None:
             if selected_dir:
-                self.parent_main_view.selected_path = selected_dir
+                self.parent_main_view.selected_path = Path(selected_dir)
                 self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
                 self.parent_main_view.run_analysis()
 
