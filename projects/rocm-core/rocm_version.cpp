@@ -1,3 +1,9 @@
+/* 
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ 
+SPDX-License-Identifier: MIT 
+*/
+
 #include "rocm_version.h"
 #include <string.h>
 #include <stdlib.h>
@@ -48,9 +54,7 @@ static VerErrors getBuildInfo( char* InfoString, int len ) {
 
 	NULL_CHECK(InfoString);
 #if defined(ROCM_BUILD_INFO)
-
-	strcpy(InfoString,ROCM_BUILD_INFO);
-	InfoString[len]='\0';
+	snprintf(InfoString, len, "%s", ROCM_BUILD_INFO);
 #else
 	return VerValuesNotDefined;
 #endif //end defination checker

@@ -18,7 +18,7 @@ THE SOFTWARE.
 */
 #include <hip/hip_runtime.h>
 
-__global__ void kerAdd(int *in_a, int *in_b, int *out_c, int nelem) {
+__global__ void kerAdd(int* in_a, int* in_b, int* out_c, int nelem) {
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id >= nelem) {
     return;

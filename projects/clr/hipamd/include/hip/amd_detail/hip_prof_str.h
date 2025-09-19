@@ -455,7 +455,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipGetDriverEntryPoint = 435,
   HIP_API_ID_hipMemPrefetchAsync_v2 = 436,
   HIP_API_ID_hipMemAdvise_v2 = 437,
-  HIP_API_ID_LAST = 437,
+  HIP_API_ID_hipStreamGetId = 438,
+  HIP_API_ID_LAST = 438,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -884,6 +885,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipStreamGetCaptureInfo_v2: return "hipStreamGetCaptureInfo_v2";
     case HIP_API_ID_hipStreamGetDevice: return "hipStreamGetDevice";
     case HIP_API_ID_hipStreamGetFlags: return "hipStreamGetFlags";
+    case HIP_API_ID_hipStreamGetId: return "hipStreamGetId";
     case HIP_API_ID_hipStreamGetPriority: return "hipStreamGetPriority";
     case HIP_API_ID_hipStreamIsCapturing: return "hipStreamIsCapturing";
     case HIP_API_ID_hipStreamQuery: return "hipStreamQuery";
@@ -1316,6 +1318,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipStreamGetCaptureInfo_v2", name) == 0) return HIP_API_ID_hipStreamGetCaptureInfo_v2;
   if (strcmp("hipStreamGetDevice", name) == 0) return HIP_API_ID_hipStreamGetDevice;
   if (strcmp("hipStreamGetFlags", name) == 0) return HIP_API_ID_hipStreamGetFlags;
+  if (strcmp("hipStreamGetId", name) == 0) return HIP_API_ID_hipStreamGetId;
   if (strcmp("hipStreamGetPriority", name) == 0) return HIP_API_ID_hipStreamGetPriority;
   if (strcmp("hipStreamIsCapturing", name) == 0) return HIP_API_ID_hipStreamIsCapturing;
   if (strcmp("hipStreamQuery", name) == 0) return HIP_API_ID_hipStreamQuery;
@@ -3720,6 +3723,11 @@ typedef struct hip_api_data_s {
       unsigned int* flags;
       unsigned int flags__val;
     } hipStreamGetFlags;
+    struct {
+      hipStream_t stream;
+      unsigned long long* streamId;
+      unsigned long long streamId__val;
+    } hipStreamGetId;
     struct {
       hipStream_t stream;
       int* priority;
@@ -6327,6 +6335,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamGetFlags.stream = (hipStream_t)stream; \
   cb_data.args.hipStreamGetFlags.flags = (unsigned int*)flags; \
 };
+// hipStreamGetId[('hipStream_t', 'stream'), ('unsigned long long*', 'streamId')]
+#define INIT_hipStreamGetId_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamGetId.stream = (hipStream_t)stream; \
+  cb_data.args.hipStreamGetId.streamId = (unsigned long long*)streamId; \
+};
 // hipStreamGetPriority[('hipStream_t', 'stream'), ('int*', 'priority')]
 #define INIT_hipStreamGetPriority_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipStreamGetPriority.stream = (hipStream_t)stream; \
@@ -8120,6 +8133,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipStreamGetFlags[('hipStream_t', 'stream'), ('unsigned int*', 'flags')]
     case HIP_API_ID_hipStreamGetFlags:
       if (data->args.hipStreamGetFlags.flags) data->args.hipStreamGetFlags.flags__val = *(data->args.hipStreamGetFlags.flags);
+      break;
+// hipStreamGetId[('hipStream_t', 'stream'), ('unsigned long long*', 'streamId')]
+    case HIP_API_ID_hipStreamGetId:
+      if (data->args.hipStreamGetId.streamId) data->args.hipStreamGetId.streamId__val = *(data->args.hipStreamGetId.streamId);
       break;
 // hipStreamGetPriority[('hipStream_t', 'stream'), ('int*', 'priority')]
     case HIP_API_ID_hipStreamGetPriority:
@@ -11431,6 +11448,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetFlags.stream);
       if (data->args.hipStreamGetFlags.flags == NULL) oss << ", flags=NULL";
       else { oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetFlags.flags__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipStreamGetId:
+      oss << "hipStreamGetId(";
+      oss << "stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetId.stream);
+      if (data->args.hipStreamGetId.streamId == NULL) oss << ", streamId=NULL";
+      else { oss << ", streamId="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetId.streamId__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipStreamGetPriority:

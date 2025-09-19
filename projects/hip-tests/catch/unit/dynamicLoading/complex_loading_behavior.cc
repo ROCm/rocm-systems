@@ -18,7 +18,7 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <dlfcn.h>
- 
+
 /**
 * @addtogroup hipLaunchKernelGGL hipLaunchCooperativeKernel
 * @{
@@ -87,11 +87,10 @@ static bool launch_local_kernel() {
 
   const unsigned blocks = 512;
   const unsigned threadsPerBlock = 256;
-  hipLaunchKernelGGL(vector_add, dim3(blocks), dim3(threadsPerBlock),
-                     0, 0, C_d, A_d, B_d, N);
+  hipLaunchKernelGGL(vector_add, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, B_d, N);
   HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
-  for (size_t i=0; i < N ; i++) {
+  for (size_t i = 0; i < N; i++) {
     if (C_h[i] != (A_h[i] + B_h[i])) {
       testResult = false;
       break;
@@ -126,7 +125,7 @@ static bool launch_dynamically_loaded_kernel() {
     return testResult;
   }
 
-  int(*fp)() = reinterpret_cast<int(*)()>(sym);
+  int (*fp)() = reinterpret_cast<int (*)()>(sym);
   ret = fp();
 
   if (ret == 0) {
@@ -147,6 +146,6 @@ TEST_CASE("Unit_dynamic_loading_device_kernels_from_library") {
 }
 
 /**
-* End doxygen group DynamicLoading.
-* @}
-*/
+ * End doxygen group DynamicLoading.
+ * @}
+ */

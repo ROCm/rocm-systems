@@ -147,7 +147,8 @@ def test_L1_cache_counters(
     base = Path(test_utils.get_output_dir())
 
     for app_name in app_names:
-        workload_dir = str(base / app_name)
+        workload_dir = f"{base}/{app_name}"
+        workload_dir_output = f"{base}_{app_name}"
 
         # 1. profile the app
         return_code = binary_handler_profile_rocprof_compute(
@@ -167,15 +168,17 @@ def test_L1_cache_counters(
             workload_dir,
             "-b",
             "16.3",
-            "--save-dfs",
-            workload_dir,
+            "--output-format",
+            "csv",
+            "--output-name",
+            workload_dir_output,
         ])
         assert return_code == 0
 
         # 3. save results in local
 
         # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir + "/16.3_vL1D_cache_access_metrics.csv"
+        csv_path = workload_dir_output + "/16.3_vL1D_cache_access_metrics.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:
@@ -185,6 +188,7 @@ def test_L1_cache_counters(
 
         # 4. clean local output
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir_output)
     test_utils.clean_output_dir(config["cleanup"], base)
 
     # 5. check results are expected

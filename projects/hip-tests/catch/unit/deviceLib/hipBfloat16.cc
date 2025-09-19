@@ -40,7 +40,7 @@ __host__ __device__ bool testRelativeAccuracy(float a, hip_bfloat16 b) {
   }
   return false;
 }
-__host__ __device__ bool testOperations(const float &fa, const float &fb) {
+__host__ __device__ bool testOperations(const float& fa, const float& fb) {
   bool testPass = true;
   hip_bfloat16 bf_a(fa);
   hip_bfloat16 bf_b(fb);
@@ -85,11 +85,11 @@ __host__ __device__ bool testOperations(const float &fa, const float &fb) {
   }
   return testPass;
 }
-__global__ void testOperationsGPU(float* d_a, float* d_b, bool *testPass) {
+__global__ void testOperationsGPU(float* d_a, float* d_b, bool* testPass) {
   int id = threadIdx.x;
   if (id > SIZE) return;
-  float &a = d_a[id];
-  float &b = d_b[id];
+  float& a = d_a[id];
+  float& b = d_b[id];
   *testPass = testOperations(a, b);
 }
 TEST_CASE("Unit_hipBfloat16") {

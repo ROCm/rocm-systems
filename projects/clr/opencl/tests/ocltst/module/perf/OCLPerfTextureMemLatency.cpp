@@ -29,10 +29,10 @@
 
 static const unsigned int NUM_SIZES = 13;
 // 2k up to 64MB
-static const cl_uint2 Dims[NUM_SIZES] = {
-    {{32, 16}},    {{32, 32}},     {{64, 32}},    {{64, 64}},   {{128, 64}},
-    {{128, 128}},  {{256, 128}},   {{256, 256}},  {{512, 256}}, {{512, 512}},
-    {{1024, 512}}, {{1024, 1024}}, {{2048, 1024}}};
+static const cl_uint2 Dims[NUM_SIZES] = {{{32, 16}},    {{32, 32}},   {{64, 32}},    {{64, 64}},
+                                         {{128, 64}},   {{128, 128}}, {{256, 128}},  {{256, 256}},
+                                         {{512, 256}},  {{512, 512}}, {{1024, 512}}, {{1024, 1024}},
+                                         {{2048, 1024}}};
 // Quiet pesky warnings
 #ifdef WIN_OS
 #define SNPRINTF sprintf_s
@@ -103,9 +103,8 @@ void OCLPerfTextureMemLatency::genShader() {
       "}\n";
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 OCLPerfTextureMemLatency::OCLPerfTextureMemLatency() {
   _numSubTests = NUM_SIZES;
@@ -118,11 +117,11 @@ void OCLPerfTextureMemLatency::setData(cl_mem buffer, unsigned int val) {
   size_t origin[3] = {0, 0, 0};
   size_t region[3] = {width_, height_, 1};
 
-  void *ptr = _wrapper->clEnqueueMapImage(
-      cmd_queue_, buffer, true, CL_MAP_WRITE, origin, region, &image_row_pitch,
-      &image_slice_pitch, 0, NULL, NULL, &error_);
+  void* ptr =
+      _wrapper->clEnqueueMapImage(cmd_queue_, buffer, true, CL_MAP_WRITE, origin, region,
+                                  &image_row_pitch, &image_slice_pitch, 0, NULL, NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapImage failed.");
-  unsigned int *data = (unsigned int *)ptr;
+  unsigned int* data = (unsigned int*)ptr;
   unsigned int nextOffset = 0;
   for (unsigned int i = 0; i < bufSizeDW_; i++) {
     unsigned int offset = ((1024 + 17) * (i + 1)) % bufSizeDW_;
@@ -132,36 +131,32 @@ void OCLPerfTextureMemLatency::setData(cl_mem buffer, unsigned int val) {
     unsigned int newx, newy;
     newx = nextOffset % width_;
     newy = nextOffset / width_;
-    data[newy * image_row_pitch / sizeof(unsigned int) + newx] =
-        (y << 16) | (x & 0xffff);
+    data[newy * image_row_pitch / sizeof(unsigned int) + newx] = (y << 16) | (x & 0xffff);
     nextOffset = offset;
   }
-  error_ =
-      _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, ptr, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, ptr, 0, NULL, NULL);
   clFinish(cmd_queue_);
 }
 
 void OCLPerfTextureMemLatency::checkData(cl_mem buffer) {
-  void *ptr =
-      _wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, true, CL_MAP_READ, 0,
-                                   sizeof(cl_uint), 0, NULL, NULL, &error_);
+  void* ptr = _wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, true, CL_MAP_READ, 0,
+                                           sizeof(cl_uint), 0, NULL, NULL, &error_);
 
-  unsigned int *data = (unsigned int *)ptr;
+  unsigned int* data = (unsigned int*)ptr;
   if (data[0] != 0) {
     printf("OutData= 0x%08x\n", data[0]);
     CHECK_RESULT_NO_RETURN(data[0] != 0, "Data validation failed!\n");
   }
-  error_ =
-      _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, ptr, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, ptr, 0, NULL, NULL);
   clFinish(cmd_queue_);
 }
 
-void OCLPerfTextureMemLatency::open(unsigned int test, char *units,
-                                    double &conversion, unsigned int deviceId) {
+void OCLPerfTextureMemLatency::open(unsigned int test, char* units, double& conversion,
+                                    unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -180,19 +175,17 @@ void OCLPerfTextureMemLatency::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -216,51 +209,45 @@ void OCLPerfTextureMemLatency::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   device = devices[0];
 
   free(devices);
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
   cl_image_format format = {CL_RGBA, CL_UNSIGNED_INT8};
-  inBuffer_ = _wrapper->clCreateImage2D(context_, CL_MEM_READ_ONLY, &format,
-                                        width_, height_, 0, NULL, &error_);
+  inBuffer_ = _wrapper->clCreateImage2D(context_, CL_MEM_READ_ONLY, &format, width_, height_, 0,
+                                        NULL, &error_);
   CHECK_RESULT(inBuffer_ == 0, "clCreateImage(inBuffer) failed");
 
-  outBuffer_ =
-      _wrapper->clCreateBuffer(context_, 0, sizeof(cl_uint), NULL, &error_);
+  outBuffer_ = _wrapper->clCreateBuffer(context_, 0, sizeof(cl_uint), NULL, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
   genShader();
-  char *tmp = (char *)shader_.c_str();
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&tmp, NULL, &error_);
+  char* tmp = (char*)shader_.c_str();
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
   std::string args;
   args.clear();
 
-  error_ =
-      _wrapper->clBuildProgram(program_, 1, &device, args.c_str(), NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &device, args.c_str(), NULL, NULL);
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -271,40 +258,28 @@ void OCLPerfTextureMemLatency::open(unsigned int test, char *units,
   kernel2_ = _wrapper->clCreateKernel(program_, "Overhead", &error_);
   CHECK_RESULT(kernel_ == 0, "clCreateKernel(Overhead) failed");
 
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void *)&inBuffer_);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void *)&outBuffer_);
-  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint),
-                                    (void *)&bufSizeDW_);
-  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_uint),
-                                    (void *)&bufSizeDW_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&inBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&outBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void*)&bufSizeDW_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_uint), (void*)&bufSizeDW_);
   cl_uint4 zero;
   zero.s[0] = 0;
   zero.s[1] = 0;
   zero.s[2] = 0;
   zero.s[3] = 0;
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_uint4), (void *)&zero);
+  error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_uint4), (void*)&zero);
   int bMem = 1;
-  error_ = _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_int), (void *)&bMem);
+  error_ = _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_int), (void*)&bMem);
   repeats_ = std::max((maxSize_ >> 2) / bufSizeDW_, 1u);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 6, sizeof(cl_uint), (void *)&repeats_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 6, sizeof(cl_uint), (void*)&repeats_);
 
-  error_ =
-      _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem), (void *)&inBuffer_);
-  error_ = _wrapper->clSetKernelArg(kernel2_, 1, sizeof(cl_mem),
-                                    (void *)&outBuffer_);
-  error_ = _wrapper->clSetKernelArg(kernel2_, 2, sizeof(cl_uint),
-                                    (void *)&bufSizeDW_);
-  error_ = _wrapper->clSetKernelArg(kernel2_, 3, sizeof(cl_uint),
-                                    (void *)&bufSizeDW_);
-  error_ =
-      _wrapper->clSetKernelArg(kernel2_, 4, sizeof(cl_uint4), (void *)&zero);
-  error_ = _wrapper->clSetKernelArg(kernel2_, 5, sizeof(cl_int), (void *)&bMem);
-  error_ =
-      _wrapper->clSetKernelArg(kernel2_, 6, sizeof(cl_uint), (void *)&repeats_);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem), (void*)&inBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 1, sizeof(cl_mem), (void*)&outBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 2, sizeof(cl_uint), (void*)&bufSizeDW_);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 3, sizeof(cl_uint), (void*)&bufSizeDW_);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 4, sizeof(cl_uint4), (void*)&zero);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 5, sizeof(cl_int), (void*)&bMem);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 6, sizeof(cl_uint), (void*)&repeats_);
 
   setData(inBuffer_, (int)1.0f);
 }
@@ -318,15 +293,13 @@ void OCLPerfTextureMemLatency::run(void) {
 
   // Warm-up
   unsigned int warmup = 128;
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void *)&warmup);
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void*)&warmup);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
-  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint),
-                                    (void *)&bufSizeDW_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void*)&bufSizeDW_);
   _wrapper->clFinish(cmd_queue_);
 
   CPerfCounter timer, timer2;
@@ -334,9 +307,9 @@ void OCLPerfTextureMemLatency::run(void) {
   timer.Reset();
   timer.Start();
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
 
@@ -349,9 +322,9 @@ void OCLPerfTextureMemLatency::run(void) {
   timer2.Reset();
   timer2.Start();
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, kernel2_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel2_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
 
@@ -365,8 +338,7 @@ void OCLPerfTextureMemLatency::run(void) {
 
   _perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), "%8d reads, %5d repeats (ns)", bufSizeDW_,
-           repeats_);
+  SNPRINTF(buf, sizeof(buf), "%8d reads, %5d repeats (ns)", bufSizeDW_, repeats_);
   testDescString = buf;
 }
 
@@ -375,13 +347,11 @@ unsigned int OCLPerfTextureMemLatency::close(void) {
 
   if (inBuffer_) {
     error_ = _wrapper->clReleaseMemObject(inBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(inBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(inBuffer_) failed");
   }
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (kernel_) {
     error_ = _wrapper->clReleaseKernel(kernel_);
@@ -397,8 +367,7 @@ unsigned int OCLPerfTextureMemLatency::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

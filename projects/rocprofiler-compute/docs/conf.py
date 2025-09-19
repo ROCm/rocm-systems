@@ -60,7 +60,7 @@ exclude_patterns = ["archive", "*/includes"]
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
 
-with open("data/metrics_description.yaml", "r") as f:
+with open("data/metrics_description.yaml") as f:
     metrics_data = yaml.safe_load(f)
 jinja_contexts = {
     "wavefront-launch-stats": {
@@ -213,4 +213,4 @@ extlinks = {
 }
 
 # Uncomment if facing rate limit exceed issue with local build
-external_projects_remote_repository = ""
+# external_projects_remote_repository = ""

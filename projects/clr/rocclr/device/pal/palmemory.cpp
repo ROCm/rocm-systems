@@ -96,7 +96,8 @@ static HANDLE getSharedHandle(IUnknown* pIface) {
 }
 #endif  //_WIN32
 
-bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params, bool forceLinear) {
+bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params,
+                    bool forceLinear) {
   bool result;
   uint allocAttempt = 0;
   // Reset the flag in case we reallocate the heap in local/remote
@@ -206,12 +207,8 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
       memRef()->gpu_ = params->gpu_;
     }
     if (memRef() != nullptr) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
-              "Alloc: %zx bytes, ptr[%llx-%llx], obj[%llx-%llx]",
-              size(),
-              vmAddress(),
-              vmAddress() + size(),
-              iMem()->Desc().gpuVirtAddr,
+      ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "Alloc: %zx bytes, ptr[%llx-%llx], obj[%llx-%llx]",
+              size(), vmAddress(), vmAddress() + size(), iMem()->Desc().gpuVirtAddr,
               iMem()->Desc().gpuVirtAddr + iMem()->Desc().size);
     }
   }
@@ -360,74 +357,75 @@ bool Memory::createInterop() {
     }
   } else
 #endif  //_WIN32
-  if (ext_memory != nullptr) {
-    createParams = &vkRes;
-    vkRes.owner_ = owner();
-    memType = Resource::VkInterop;
-    vkRes.handle_ = ext_memory->Handle();
-    vkRes.name_ = ext_memory->Name();
-    vkRes.type_ = Resource::InteropTypeless;
-    vkRes.nt_handle_ =
-      ((ext_memory->Type() != amd::ExternalMemory::HandleType::OpaqueFd) &&
-       (ext_memory->Type() != amd::ExternalMemory::HandleType::OpaqueWin32Kmt) &&
-       (ext_memory->Type() != amd::ExternalMemory::HandleType::D3D11ResourceKmt)) ? true : false;
-  }
-
-  else if (glObject != nullptr) {
-    createParams = &oglRes;
-
-    oglRes.owner_ = owner();
-
-    memType = Resource::OGLInterop;
-
-    // Fill the interop creation parameters
-    oglRes.handle_ = static_cast<uint>(glObject->getGLName());
-
-    // Find OGL object type
-    switch (glObject->getCLGLObjectType()) {
-      case CL_GL_OBJECT_BUFFER:
-        oglRes.type_ = Resource::InteropVertexBuffer;
-        break;
-      case CL_GL_OBJECT_TEXTURE_BUFFER:
-      case CL_GL_OBJECT_TEXTURE1D:
-      case CL_GL_OBJECT_TEXTURE1D_ARRAY:
-      case CL_GL_OBJECT_TEXTURE2D:
-      case CL_GL_OBJECT_TEXTURE2D_ARRAY:
-      case CL_GL_OBJECT_TEXTURE3D:
-        oglRes.type_ = Resource::InteropTexture;
-        if (GL_TEXTURE_CUBE_MAP == glObject->getGLTarget()) {
-          switch (glObject->getCubemapFace()) {
-            case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
-            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
-            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
-            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
-            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
-            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
-              oglRes.type_ = Resource::InteropTextureViewCube;
-              oglRes.layer_ = glObject->getCubemapFace() - GL_TEXTURE_CUBE_MAP_POSITIVE_X;
-              oglRes.mipLevel_ = glObject->getGLMipLevel();
-              break;
-            default:
-              break;
-          }
-        } else if (glObject->getGLMipLevel() != 0) {
-          oglRes.type_ = Resource::InteropTextureViewLevel;
-          oglRes.layer_ = 0;
-          oglRes.mipLevel_ = glObject->getGLMipLevel();
-        }
-        break;
-      case CL_GL_OBJECT_RENDERBUFFER:
-        oglRes.type_ = Resource::InteropRenderBuffer;
-        break;
-      default:
-        return false;
-        break;
+    if (ext_memory != nullptr) {
+      createParams = &vkRes;
+      vkRes.owner_ = owner();
+      memType = Resource::VkInterop;
+      vkRes.handle_ = ext_memory->Handle();
+      vkRes.name_ = ext_memory->Name();
+      vkRes.type_ = Resource::InteropTypeless;
+      vkRes.nt_handle_ = ((ext_memory->Type() != amd::ExternalMemory::HandleType::OpaqueFd) &&
+                          (ext_memory->Type() != amd::ExternalMemory::HandleType::OpaqueWin32Kmt) &&
+                          (ext_memory->Type() != amd::ExternalMemory::HandleType::D3D11ResourceKmt))
+                             ? true
+                             : false;
     }
 
-    oglRes.glPlatformContext_ = owner()->getContext().info().hCtx_;
-  } else {
-    return false;
-  }
+    else if (glObject != nullptr) {
+      createParams = &oglRes;
+
+      oglRes.owner_ = owner();
+
+      memType = Resource::OGLInterop;
+
+      // Fill the interop creation parameters
+      oglRes.handle_ = static_cast<uint>(glObject->getGLName());
+
+      // Find OGL object type
+      switch (glObject->getCLGLObjectType()) {
+        case CL_GL_OBJECT_BUFFER:
+          oglRes.type_ = Resource::InteropVertexBuffer;
+          break;
+        case CL_GL_OBJECT_TEXTURE_BUFFER:
+        case CL_GL_OBJECT_TEXTURE1D:
+        case CL_GL_OBJECT_TEXTURE1D_ARRAY:
+        case CL_GL_OBJECT_TEXTURE2D:
+        case CL_GL_OBJECT_TEXTURE2D_ARRAY:
+        case CL_GL_OBJECT_TEXTURE3D:
+          oglRes.type_ = Resource::InteropTexture;
+          if (GL_TEXTURE_CUBE_MAP == glObject->getGLTarget()) {
+            switch (glObject->getCubemapFace()) {
+              case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+              case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+              case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+              case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+              case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+              case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+                oglRes.type_ = Resource::InteropTextureViewCube;
+                oglRes.layer_ = glObject->getCubemapFace() - GL_TEXTURE_CUBE_MAP_POSITIVE_X;
+                oglRes.mipLevel_ = glObject->getGLMipLevel();
+                break;
+              default:
+                break;
+            }
+          } else if (glObject->getGLMipLevel() != 0) {
+            oglRes.type_ = Resource::InteropTextureViewLevel;
+            oglRes.layer_ = 0;
+            oglRes.mipLevel_ = glObject->getGLMipLevel();
+          }
+          break;
+        case CL_GL_OBJECT_RENDERBUFFER:
+          oglRes.type_ = Resource::InteropRenderBuffer;
+          break;
+        default:
+          return false;
+          break;
+      }
+
+      oglRes.glPlatformContext_ = owner()->getContext().info().hCtx_;
+    } else {
+      return false;
+    }
 
   // Create memory object
   if (!create(memType, createParams)) {
@@ -440,8 +438,8 @@ bool Memory::createInterop() {
 Memory::~Memory() {
   if (memRef() != nullptr) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "Free-: %8llx bytes, VM[%10llx, %10llx]",
-      iMem()->Desc().size, iMem()->Desc().gpuVirtAddr,
-      iMem()->Desc().gpuVirtAddr + iMem()->Desc().size);
+            iMem()->Desc().size, iMem()->Desc().gpuVirtAddr,
+            iMem()->Desc().gpuVirtAddr + iMem()->Desc().size);
   }
   // Clean VA cache
   dev().removeVACache(this);
@@ -676,9 +674,8 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
         result = bltMgr.copyBuffer(*this, *pinnedMemory_, origin, origin, region, Entire);
       } else {
         amd::Image& image = static_cast<amd::Image&>(*owner());
-        result = bltMgr.copyImageToBuffer(*this, *pinnedMemory_, origin, origin,
-                                          image.getRegion(), Entire, image.getRowPitch(),
-                                          image.getSlicePitch());
+        result = bltMgr.copyImageToBuffer(*this, *pinnedMemory_, origin, origin, image.getRegion(),
+                                          Entire, image.getRowPitch(), image.getSlicePitch());
       }
     }
 
@@ -805,7 +802,8 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   }
   // If resource is a persistent allocation, we can use it directly
   else if (((isPersistentDirectMap(mapFlags & CL_MAP_WRITE) && (getMapCount() == 0)) ||
-           isPersistentMapped()) && (owner()->getSvmPtr() == nullptr)) {
+            isPersistentMapped()) &&
+           (owner()->getSvmPtr() == nullptr)) {
     if (nullptr == map(nullptr)) {
       LogError("Could not map target persistent resource");
       decIndMapCount();
@@ -1082,7 +1080,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
   //! because CAL volume map doesn't work properly.
   //! @todo arrays can be added for persistent lock with some CAL changes
   else if ((isPersistentDirectMap(mapFlags & CL_MAP_WRITE) && (getMapCount() == 0)) ||
-          isPersistentMapped()) {
+           isPersistentMapped()) {
     if (nullptr == map(nullptr)) {
       useRemoteResource = true;
       LogError("Could not map target persistent resource, try remote resource");

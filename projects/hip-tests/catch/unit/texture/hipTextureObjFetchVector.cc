@@ -25,8 +25,7 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-template <typename T>
-__global__ void tex1dKernelFetch(T *val, hipTextureObject_t obj, int N) {
+template <typename T> __global__ void tex1dKernelFetch(T* val, hipTextureObject_t obj, int N) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int k = blockIdx.x * blockDim.x + threadIdx.x;
   if (k < N) {
@@ -35,38 +34,29 @@ __global__ void tex1dKernelFetch(T *val, hipTextureObject_t obj, int N) {
 #endif
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 1>::type* = nullptr>
-static inline void printVector(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 1>::type* = nullptr>
+static inline void printVector(T& val) {
   using B = decltype(T::x);
-  constexpr bool isChar = std::is_same<B, char>::value
-      || std::is_same<B, unsigned char>::value;
+  constexpr bool isChar = std::is_same<B, char>::value || std::is_same<B, unsigned char>::value;
   std::cout << "(";
   std::cout << (isChar ? static_cast<int>(val.x) : val.x);
   std::cout << ")";
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 2>::type* = nullptr>
-static inline void printVector(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 2>::type* = nullptr>
+static inline void printVector(T& val) {
   using B = decltype(T::x);
-  constexpr bool isChar = std::is_same<B, char>::value
-      || std::is_same<B, unsigned char>::value;
+  constexpr bool isChar = std::is_same<B, char>::value || std::is_same<B, unsigned char>::value;
   std::cout << "(";
   std::cout << (isChar ? static_cast<int>(val.x) : val.x);
   std::cout << ", " << (isChar ? static_cast<int>(val.y) : val.y);
   std::cout << ")";
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-static inline void printVector(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+static inline void printVector(T& val) {
   using B = decltype(T::x);
-  constexpr bool isChar = std::is_same<B, char>::value
-      || std::is_same<B, unsigned char>::value;
+  constexpr bool isChar = std::is_same<B, char>::value || std::is_same<B, unsigned char>::value;
   std::cout << "(";
   std::cout << (isChar ? static_cast<int>(val.x) : val.x);
   std::cout << ", " << (isChar ? static_cast<int>(val.y) : val.y);
@@ -75,16 +65,15 @@ static inline void printVector(T &val) {
   std::cout << ")";
 }
 
-template<typename T>
-bool runTest() {
+template <typename T> bool runTest() {
   const int N = 1024;
   bool testResult = true;
   // Allocating the required buffer on gpu device
   T *texBuf, *texBufOut;
   T val[N], output[N];
-  auto err = hipGetLastError(); // Clear err due to negative tests
+  auto err = hipGetLastError();  // Clear err due to negative tests
   memset(output, 0, sizeof(output));
-  std::srand(std::time(nullptr)); // use current time as seed for random generator
+  std::srand(std::time(nullptr));  // use current time as seed for random generator
 
   for (int i = 0; i < N; i++) {
     initVal<T>(val[i]);
@@ -114,9 +103,8 @@ bool runTest() {
   dim3 dimBlock(64, 1, 1);
   dim3 dimGrid((N + dimBlock.x - 1) / dimBlock.x, 1, 1);
 
-  hipLaunchKernelGGL(tex1dKernelFetch<T>, dimGrid, dimBlock, 0, 0, texBufOut,
-                     texObj, N);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex1dKernelFetch<T>, dimGrid, dimBlock, 0, 0, texBufOut, texObj, N);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(T), hipMemcpyDeviceToHost));

@@ -1,6 +1,6 @@
 /*
 Copyright © Advanced Micro Devices, Inc., or its affiliates.
- 
+
 SPDX-License-Identifier: MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

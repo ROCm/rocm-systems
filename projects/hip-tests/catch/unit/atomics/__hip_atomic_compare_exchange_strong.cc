@@ -129,6 +129,6 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

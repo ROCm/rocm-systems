@@ -22,7 +22,7 @@ TEST_CASE("Unit_hiprtc_includepath") {
 
   string saxpy = "";
   {
-    fstream f("saxpy.h" , std::ios::in);
+    fstream f("saxpy.h", std::ios::in);
     if (f.is_open()) {
       size_t sizeFile;
       f.seekg(0, fstream::end);
@@ -31,16 +31,15 @@ TEST_CASE("Unit_hiprtc_includepath") {
       saxpy.resize(size, ' ');
       f.read(&saxpy[0], size);
       f.close();
-   }
-   else {
+    } else {
       FAIL("Failed to open saxpy.h. Please ensure the file exists and is accessible.");
-   }
- }
+    }
+  }
 
   hiprtcProgram prog;
-  hiprtcCreateProgram(&prog,         // prog
-                      saxpy.c_str(), // buffer
-                      "saxpy.cu",    // name
+  hiprtcCreateProgram(&prog,          // prog
+                      saxpy.c_str(),  // buffer
+                      "saxpy.cu",     // name
                       0, nullptr, nullptr);
 
   hipDeviceProp_t props;
@@ -49,14 +48,12 @@ TEST_CASE("Unit_hiprtc_includepath") {
 #ifdef __HIP_PLATFORM_AMD__
   string sarg = string("--gpu-architecture=") + props.gcnArchName;
 #else
-  string sarg = string("--gpu-architecture=compute_")
-    + to_string(props.major) + to_string(props.minor);
+  string sarg =
+      string("--gpu-architecture=compute_") + to_string(props.major) + to_string(props.minor);
 #endif
   // Need to find the header files from the include path
   // It is set to headers in the current directory here
-  const char* options[] = {
-      sarg.c_str(), "-I./headers"
-  };
+  const char* options[] = {sarg.c_str(), "-I./headers"};
 
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, options)};
   size_t logSize;
@@ -113,7 +110,8 @@ TEST_CASE("Unit_hiprtc_includepath") {
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
 
-  HIP_CHECK(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1, 0, nullptr, nullptr,
+                                  config));
 
   HIP_CHECK(hipMemcpy(hOut.get(), dOut, bufferSize, hipMemcpyDeviceToHost));
 

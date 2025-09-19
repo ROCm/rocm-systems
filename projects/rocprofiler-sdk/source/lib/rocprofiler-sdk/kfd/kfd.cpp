@@ -1498,6 +1498,7 @@ get_ids(int kind, std::index_sequence<Kind, Kinds...>)
         return get_ids(kind, std::index_sequence<Kinds...>{});
 
     ROCP_CI_LOG(WARNING) << fmt::format("KFD events get_ids: Unknown Kind {}", kind);
+    return {};
 }
 
 }  // namespace

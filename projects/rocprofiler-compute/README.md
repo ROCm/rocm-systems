@@ -1,9 +1,3 @@
-[![Ubuntu 22.04](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml)
-[![RHEL 8](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml)
-[![Instinct](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml)
-[![Docs](https://github.com/ROCm/rocprofiler-compute/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/rocprofiler-compute/)
-[![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
-
 # ROCm Compute Profiler
 
 ## General
@@ -22,7 +16,7 @@ feedback from the community. Please see the
 [CONTRIBUTING.md](CONTRIBUTING.md) file for additional details on our
 contribution process.
 
-* Licensing information can be found in the [LICENSE](LICENSE) file.
+* Licensing information can be found in the [LICENSE](LICENSE.md) file.
 
 ## Development
 
@@ -62,14 +56,16 @@ NOTE: This Dockerfile uses `ubuntu 22.04` as the base operating system image
 
 To create a standalone binary, run the following commands:
 * `cd docker`
+* `docker compose -f docker-compose.standalone.yml build`
 * `docker compose -f docker-compose.standalone.yml up --force-recreate -d && docker attach docker-standalone-1`
 
 You should find the rocprof-compute.bin standalone binary inside the `build` folder in the root directory of the project.
 
 To build the binary we follow these steps:
-* Use RHEL 8 image used to build ROCm as the base image
-* Install python3.8
-* Install dependencies for runtime and for making standalone binary
+* Use RHEL 8.10 docker image as the base image
+* Install python3.9
+* Install runtime dependencies
+* Install dependencies for building standalone binary
 * Call the make target which uses Nuitka to build the standalone binary
 
 NOTE: Since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than 2.28.
