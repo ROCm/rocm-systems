@@ -40,6 +40,7 @@
 #include "lib/output/output_stream.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/timestamps.hpp"
+#include "rocprofiler-sdk-rocpd/types.h"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -212,7 +213,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS)
         .value("data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS)
         .value("summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS)
-        .value("marker_views", ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS);
+        .value("rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA);
 
     py::enum_<rocpd_sql_options_t>(pyrocpd, "sql_option", "Load schema options")
         .value("none", ROCPD_SQL_OPTIONS_NONE)
@@ -324,6 +325,30 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("uuid", &rocpd::jinja_variables::uuid)
         .def_readwrite("guid", &rocpd::jinja_variables::guid);
 
+    py::class_<rocpd_version_triplet_t>(pyrocpd, "schema_version", "Schema version triplet")
+        .def(py::init<>([]() {
+            return rocpd_version_triplet_t{0, 0, 0};
+        }))
+        .def(py::init<>([](uint32_t major, uint32_t minor, uint32_t patch) {
+            return rocpd_version_triplet_t{major, minor, patch};
+        }))
+        .def(py::init<>([](const std::string& verstr) {
+            auto parts = std::vector<std::string>{};
+            parts.reserve(3);
+            for(const auto& part : rocprofiler::sdk::parse::tokenize(verstr, "."))
+                parts.emplace_back(part);
+
+            auto version = rocpd_version_triplet_t{0, 0, 0};
+            if(!parts.empty()) version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
+            if(parts.size() > 1) version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
+            if(parts.size() > 2) version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
+
+            return version;
+        }))
+        .def_readwrite("major", &rocpd_version_triplet_t::major)
+        .def_readwrite("minor", &rocpd_version_triplet_t::minor)
+        .def_readwrite("patch", &rocpd_version_triplet_t::patch);
+
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
         .def(py::init<rocpd::RocpdImportData>())
@@ -335,16 +360,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 [](rocpd_sql_engine_t            engine,
                    rocpd_sql_schema_kind_t       kind,
                    rocpd_sql_options_t           options,
+                   rocpd_version_triplet_t       schema_version,
                    const rocpd::jinja_variables& variables) {
                     auto _callback = [](rocpd_sql_engine_t                        _engine,
                                         rocpd_sql_schema_kind_t                   _kind,
                                         rocpd_sql_options_t                       _options,
+                                        rocpd_version_triplet_t                   _schema_version,
                                         const rocpd_sql_schema_jinja_variables_t* _variables,
                                         const char*                               _schema_path,
                                         const char*                               _schema_content,
                                         void* _user_data) -> void {
                         rocprofiler::common::consume_args(
-                            _engine, _kind, _options, _variables, _schema_path);
+                            _engine, _kind, _options, _schema_version, _variables, _schema_path);
                         auto* _data = static_cast<std::string*>(_user_data);
                         if(_data && _schema_content) *_data = std::string{_schema_content};
                     };
@@ -370,6 +397,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     ROCPD_CHECK(rocpd_sql_load_schema(engine,
                                                       kind,
                                                       options,
+                                                      schema_version,
                                                       &_rocpd_variables,
                                                       _callback,
                                                       _hints.data(),

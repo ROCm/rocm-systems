@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.1
+-- RocPD schema version 3.0.0
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "type" TEXT CHECK ("type" IN ('CPU', 'GPU', 'NIC')),
+        "type" TEXT CHECK ("type" IN ('CPU', 'GPU')),
         "absolute_index" INTEGER,
         "logical_index" INTEGER,
         "type_index" INTEGER,
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
         "agent_id" INTEGER,
-        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU', 'NIC')),
+        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU')),
         "event_code" INT,
         "instance_id" INTEGER,
         "name" TEXT NOT NULL,

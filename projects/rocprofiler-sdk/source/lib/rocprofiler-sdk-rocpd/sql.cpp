@@ -22,6 +22,8 @@
 
 #define _GNU_SOURCE 1
 
+#include "format.hpp"
+
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -37,8 +39,17 @@
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <yaml-cpp/exceptions.h>
+#include <yaml-cpp/node/convert.h>
+#include <yaml-cpp/node/detail/impl.h>
+#include <yaml-cpp/node/impl.h>
+#include <yaml-cpp/node/iterator.h>
+#include <yaml-cpp/node/node.h>
+#include <yaml-cpp/node/parse.h>
+#include <yaml-cpp/parser.h>
 
 #include <dlfcn.h>
+#include <cstddef>
 #include <initializer_list>
 #include <unordered_map>
 
@@ -103,15 +114,44 @@ replace_all(std::string val, Tp from, std::string_view to)
     }
     return val;
 }
+
+rocpd_version_triplet_t
+get_version_triplet(std::string_view version_str)
+{
+    auto parts = std::vector<std::string>{};
+    parts.reserve(3);
+    for(const auto& part : rocprofiler::sdk::parse::tokenize(version_str, "."))
+        parts.emplace_back(part);
+
+    auto version = rocpd_version_triplet_t{0, 0, 0};
+    if(!parts.empty()) version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
+    if(parts.size() > 1) version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
+    if(parts.size() > 2) version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
+
+    return version;
+}
 }  // namespace
 }  // namespace sql
 }  // namespace rocpd
+
+bool
+operator==(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return std::tie(lhs.major, lhs.minor, lhs.patch) == std::tie(rhs.major, rhs.minor, rhs.patch);
+}
+
+bool
+operator<(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return std::tie(lhs.major, lhs.minor, lhs.patch) < std::tie(rhs.major, rhs.minor, rhs.patch);
+}
 
 extern "C" {
 rocpd_status_t
 rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
                       rocpd_sql_schema_kind_t                   kind,
                       rocpd_sql_options_t                       options,
+                      rocpd_version_triplet_t                   schema_version,
                       const rocpd_sql_schema_jinja_variables_t* variables,
                       rocpd_sql_load_schema_cb_t                callback,
                       const char**                              schema_path_hints,
@@ -133,14 +173,19 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         }
     }
 
-    const auto kind_file_names = std::unordered_map<rocpd_sql_schema_kind_t, std::string_view>{
-        {ROCPD_SQL_SCHEMA_ROCPD_TABLES, "rocpd_tables.sql"},
-        {ROCPD_SQL_SCHEMA_ROCPD_INDEXES, "rocpd_indexes.sql"},
-        {ROCPD_SQL_SCHEMA_ROCPD_VIEWS, "rocpd_views.sql"},
-        {ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, "data_views.sql"},
-        {ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, "summary_views.sql"},
-        {ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS, "marker_views.sql"},
+    const auto yaml_kind_keys = std::unordered_map<std::string_view, rocpd_sql_schema_kind_t>{
+        {"rocpd_tables", ROCPD_SQL_SCHEMA_ROCPD_TABLES},
+        {"rocpd_indexes", ROCPD_SQL_SCHEMA_ROCPD_INDEXES},
+        {"rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS},
+        {"rocpd_data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS},
+        {"rocpd_summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS},
+        {"rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA},
     };
+
+    using kind_filename_map_t = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
+    using version_file_map_t  = std::unordered_map<std::string, kind_filename_map_t>;
+
+    auto version_file_map = version_file_map_t{};
 
     const auto _lib_schema_path = rocpd::sql::get_install_path();
     const auto _env_schema_path = rocprofiler::common::get_env("ROCPD_SCHEMA_PATH", "");
@@ -152,6 +197,49 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
             : std::string{};
     const auto _schema_paths =
         fmt::format("{}:{}:{}", _usr_schema_path, _env_schema_path, _lib_schema_path);
+
+    auto _schema_versions_file = std::optional<std::string>{};
+    for(const auto& itr : rocprofiler::sdk::parse::tokenize(_schema_paths, ":"))
+    {
+        auto _fpath = fs::path{itr} / "versions.yml";
+        ROCP_TRACE << fmt::format("[rocprofiler-sdk-rocpd] Loading versions.yml: '{}'",
+                                  _fpath.string());
+        if(fs::exists(_fpath))
+        {
+            ROCP_INFO << fmt::format("[rocprofiler-sdk-rocpd] Found schema versions file: '{}'",
+                                     _fpath.string());
+            _schema_versions_file = _fpath;
+            break;
+        }
+    }
+
+    auto latest_version = rocpd_version_triplet_t{0, 0, 0};
+    if(_schema_versions_file)
+    {
+        auto versioning_contents = std::stringstream{};
+        ROCP_INFO << "Loading Schema Config: " << *_schema_versions_file;
+        auto ifs = std::ifstream{*_schema_versions_file};
+        versioning_contents << ifs.rdbuf();
+        auto yaml = YAML::Load(versioning_contents.str());
+        for(auto itr : yaml["rocprofiler-sdk-rocpd"]["rocpd_schemas"])
+        {
+            auto version = itr["version"].as<std::string>();
+            for(auto fitr : yaml_kind_keys)
+            {
+                if(itr[fitr.first])
+                {
+                    version_file_map[version][fitr.second] = itr[fitr.first].as<std::string>();
+
+                    latest_version =
+                        std::max(latest_version, rocpd::sql::get_version_triplet(version));
+                }
+            }
+        }
+    }
+
+    if(schema_version == rocpd_version_triplet_t{0, 0, 0}) schema_version = latest_version;
+
+    const auto kind_file_names = version_file_map[fmt::format("{}", schema_version)];
 
     if(kind_file_names.count(kind) == 0) return ROCPD_STATUS_ERROR_SQL_INVALID_SCHEMA_KIND;
 
@@ -192,16 +280,11 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
             _contents = fmt::format("PRAGMA foreign_keys = ON;\n\n{}", _contents);
     }
 
-    auto _substitutions = std::vector<std::pair<std::string_view, std::string>>{};
-
-    using jinja_init_list_t = std::initializer_list<std::pair<std::string_view, const char*>>;
-
     if(variables != nullptr)
     {
-        if(variables->size == 0)
-        {
-            return ROCPD_STATUS_ERROR_SQL_INVALID_SCHEMA_KIND;
-        }
+        using jinja_init_list_t = std::initializer_list<std::pair<std::string_view, const char*>>;
+
+        if(variables->size == 0) return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
 
         // {{uuid}} is used in table names and require special handling
         if(const auto* value = variables->uuid; value != nullptr)
@@ -219,9 +302,20 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
             _contents = rocpd::sql::replace_all(_contents, "{{uuid}}", _value);
         }
 
+        const auto _schema_version = fmt::format("{}", schema_version);
+        const auto _schema_major   = fmt::format("{}", schema_version.major);
+        const auto _schema_minor   = fmt::format("{}", schema_version.minor);
+        const auto _schema_patch   = fmt::format("{}", schema_version.patch);
+
         // make substitutions for remaining variables which do not require special handling like
         // {{uuid}}
-        for(auto [key, value] : jinja_init_list_t{{"{{guid}}", variables->guid}})
+        for(auto [key, value] : jinja_init_list_t{
+                {"{{guid}}", variables->guid},
+                {"{{schema_version}}", _schema_version.c_str()},
+                {"{{schema_major}}", _schema_major.c_str()},
+                {"{{schema_minor}}", _schema_minor.c_str()},
+                {"{{schema_patch}}", _schema_patch.c_str()},
+            })
         {
             if(value != nullptr)
             {
@@ -240,7 +334,14 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         cb_schema_contents = rocprofiler::common::get_string_entry(cb_schema_contents)->c_str();
     }
 
-    callback(engine, kind, options, variables, cb_schema_path, cb_schema_contents, user_data);
+    callback(engine,
+             kind,
+             options,
+             schema_version,
+             variables,
+             cb_schema_path,
+             cb_schema_contents,
+             user_data);
 
     return ROCPD_STATUS_SUCCESS;
 }

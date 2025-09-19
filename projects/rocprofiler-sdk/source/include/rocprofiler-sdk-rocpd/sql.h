@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk-rocpd/types.h>
 
 #include <stdint.h>
+#include <cstdint>
 
 ROCPD_EXTERN_C_INIT
 
@@ -57,7 +58,7 @@ typedef enum ROCPD_EXPERIMENTAL rocpd_sql_schema_kind_t
     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     ROCPD_SQL_SCHEMA_LAST,
 } rocpd_sql_schema_kind_t;
 
@@ -105,6 +106,7 @@ ROCPD_EXPERIMENTAL typedef void (*rocpd_sql_load_schema_cb_t)(
     rocpd_sql_engine_t                        engine,
     rocpd_sql_schema_kind_t                   kind,
     rocpd_sql_options_t                       options,
+    rocpd_version_triplet_t                   schema_version,
     const rocpd_sql_schema_jinja_variables_t* variables,
     const char*                               schema_path,
     const char*                               schema_content,
@@ -140,11 +142,12 @@ ROCPD_EXPERIMENTAL rocpd_status_t
 rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
                       rocpd_sql_schema_kind_t                   kind,
                       rocpd_sql_options_t                       options,
+                      rocpd_version_triplet_t                   schema_version,
                       const rocpd_sql_schema_jinja_variables_t* variables,
                       rocpd_sql_load_schema_cb_t                callback,
                       const char**                              schema_path_hints,
                       uint64_t                                  num_schema_path_hints,
-                      void* user_data) ROCPD_API ROCPD_NONNULL(5);
+                      void* user_data) ROCPD_API ROCPD_NONNULL(6);
 
 /** @} */
 
