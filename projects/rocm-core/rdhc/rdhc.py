@@ -793,58 +793,96 @@ class ROCMHealthCheck:
         warnings = 0
         errors = 0
 
-        # 1. Check kernel parameters
-        # Check numa_balancing
+        # 1. Check kernel parameters using data-driven approach
         self.logger.info("----Checking kernel parameters...")
-        self.logger.info("------Checking numa_balancing setting...")
-        try:
-            numa_balancing = None
-            if os.path.exists('/proc/sys/kernel/numa_balancing'):
-                with open('/proc/sys/kernel/numa_balancing', 'r') as f:
-                    numa_balancing = f.read().strip()
 
-            if numa_balancing is not None and numa_balancing != '0':
-                self.logger.error("!!! numa_balancing is not disabled. For optimal performance, set numa_balancing=0")
-                errors += 1
-        except Exception as e:
-            self.logger.warning(f"!!! Error checking numa_balancing: {str(e)}")
-            warnings += 1
+        # Define kernel parameter checks
+        kernel_param_checks = [
+            {
+                "name": "numa_balancing",
+                "description": "numa_balancing setting",
+                "file_path": "/proc/sys/kernel/numa_balancing",
+                "expected_value": "0",
+                "check_type": "file_content",  # file_content or cmdline_param
+                "error_message": "numa_balancing is not disabled. For optimal performance, set numa_balancing=0",
+                "warning_message": None,
+                "is_error": True  # True for error, False for warning
+            },
+            {
+                "name": "amd_iommu",
+                "description": "amd_iommu & iommu settings",
+                "file_path": "/proc/cmdline",
+                "expected_value": "amd_iommu=on",
+                "check_type": "cmdline_param",
+                "error_message": "amd_iommu=on is not set in kernel parameters",
+                "warning_message": None,
+                "is_error": True
+            },
+            {
+                "name": "iommu",
+                "description": "amd_iommu & iommu settings",
+                "file_path": "/proc/cmdline",
+                "expected_value": "iommu=pt",
+                "check_type": "cmdline_param",
+                "error_message": "iommu=pt is not set in kernel parameters",
+                "warning_message": None,
+                "is_error": True
+            },
+            {
+                "name": "pci_realloc",
+                "description": "pci=realloc=off settings",
+                "file_path": "/proc/cmdline",
+                "expected_value": "pci=realloc=off",
+                "check_type": "cmdline_param",
+                "error_message": "pci=realloc=off is not set in kernel parameters",
+                "warning_message": None,
+                "is_error": True
+            },
+            {
+                "name": "cwsr_enable",
+                "description": "Compute Wavefront Save and Restore [CWSR] settings",
+                "file_path": "/sys/module/amdgpu/parameters/cwsr_enable",
+                "expected_value": "0",
+                "check_type": "file_content",
+                "error_message": None,
+                "warning_message": "amdgpu.cwsr_enable is set, should be 0 for optimal performance",
+                "is_error": False
+            }
+        ]
 
-        # Check amd_iommu and iommu settings in kernel parameters
-        self.logger.info("------Checking amd_iommu & iommu settings...")
-        try:
-            cmdline = None
-            if os.path.exists('/proc/cmdline'):
-                with open('/proc/cmdline', 'r') as f:
-                    cmdline = f.read().strip()
+        # Process each kernel parameter check
+        for check in kernel_param_checks:
+            self.logger.info(f"------Checking {check['description']}...")
+            try:
+                actual_value = None
 
-            if cmdline is not None:
-                if 'amd_iommu=on' not in cmdline:
-                    errors += 1
-                    self.logger.error("!!! amd_iommu=on is not set in kernel parameters")
-                if 'iommu=pt' not in cmdline:
-                    errors += 1
-                    self.logger.error("!!! iommu=pt is not set in kernel parameters")
+                # Read the file if it exists
+                if os.path.exists(check['file_path']):
+                    with open(check['file_path'], 'r') as f:
+                        file_content = f.read().strip()
 
-        except Exception as e:
-            self.logger.warning(f"!!! Error checking kernel parameters: {str(e)}")
-            warnings += 1
+                    actual_value = file_content
 
-        # Check amdgpu.cwsr_enable - should be 0 for better performance
-        self.logger.info("------Checking Compute Wavefront Save and Restore [CWSR] settings...")
-        try:
-            cwsr_enable = None
-            cwsr_path = '/sys/module/amdgpu/parameters/cwsr_enable'
-            if os.path.exists(cwsr_path):
-                with open(cwsr_path, 'r') as f:
-                    cwsr_enable = f.read().strip()
+                # Evaluate the check
+                check_passed = False
+                if actual_value is not None:
+                    if check['check_type'] == 'file_content':
+                        check_passed = (actual_value == check['expected_value'])
+                    elif check['check_type'] == 'cmdline_param':
+                        check_passed = (check['expected_value'] in actual_value)
 
-            if cwsr_enable is not None and cwsr_enable != '0':
-                self.logger.warning(f"!!! amdgpu.cwsr_enable is set to {cwsr_enable}, should be 0 for optimal performance")
+                # Handle failed checks
+                if not check_passed:
+                    if check['is_error'] and check['error_message']:
+                        self.logger.error(f"!!! {check['error_message']}")
+                        errors += 1
+                    elif not check['is_error'] and check['warning_message']:
+                        self.logger.warning(f"!!! {check['warning_message']}")
+                        warnings += 1
+
+            except Exception as e:
+                self.logger.warning(f"!!! Error checking {check['name']}: {str(e)}")
                 warnings += 1
-        except Exception as e:
-            self.logger.warning(f"!!! Error checking amdgpu.cwsr_enable: {str(e)}")
-            warnings += 1
 
         # 2. Check Large BAR is enabled - should be enabled for better performance
         self.logger.info("----Checking Large BAR setting...")
