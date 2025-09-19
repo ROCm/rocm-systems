@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 // 
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 // 
 // Developed by:
 // 
@@ -47,6 +47,133 @@
 */
 #ifndef HSA_RUNTIME_CORE_UTIL_ATOMIC_HELPERS_H_
 #define HSA_RUNTIME_CORE_UTIL_ATOMIC_HELPERS_H_
+
+#if defined(_WIN32)
+#define WIN32_NO_STATUS
+#include <Windows.h>
+#undef WIN32_NO_STATUS
+
+template <class T>
+void __atomic_load(const T* object, typename std::remove_volatile<T>::type* ret, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    *ret = InterlockedOr64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      0);
+  } else {
+    *ret = InterlockedOr(
+      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      0);
+  }
+}
+
+template <class T>
+void __atomic_store(const T* object, typename std::remove_volatile<T>::type* val, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    InterlockedExchange64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      *val);
+  } else {
+    InterlockedExchange(
+      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      *val);
+  }
+}
+
+template <class T>
+typename std::remove_volatile<T>::type __atomic_fetch_or(
+    const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    return InterlockedOr64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  } else {
+    return InterlockedOr(
+      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  }
+}
+
+template <class T>
+typename std::remove_volatile<T>::type __atomic_fetch_and(
+    const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    return InterlockedAnd64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  } else {
+    return InterlockedAnd(
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        val);
+  }
+}
+
+template <class T>
+typename std::remove_volatile<T>::type __atomic_fetch_xor(
+    const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    return InterlockedXor64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  } else {
+    return InterlockedXor(
+      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  }
+}
+
+template <class T>
+typename std::remove_volatile<T>::type __atomic_fetch_add(
+    const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    return InterlockedExchangeAdd64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  } else {
+    return InterlockedExchangeAdd(
+      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val);
+  }
+}
+
+template <class T>
+typename std::remove_volatile<T>::type __atomic_fetch_sub(
+    const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  if constexpr (sizeof(T) == 8) {
+    return InterlockedExchangeAdd64(
+      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val * (-1));
+  } else {
+    return InterlockedExchangeAdd(
+      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      val * (-1));
+  }
+}
+
+template <class T>
+void __atomic_compare_exchange(
+    T* object, typename std::remove_volatile<T>::type* expected,
+    typename std::remove_volatile<T>::type* val, int arg0, int arg1, int arg2) {
+  if constexpr (sizeof(T) == 8) {
+    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object),
+      *val, *expected);
+  } else {
+    InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object),
+      *val, *expected);
+  }
+}
+
+template <class T>
+void __atomic_exchange(T* object, typename std::remove_volatile<T>::type* val,
+                       typename std::remove_volatile<T>::type* ret, int arg0) {
+  if constexpr (sizeof(T) == 8) {
+    *ret = InterlockedExchange64(reinterpret_cast<volatile LONG64*>(object), *val);
+  } else {
+    *ret = InterlockedExchange(reinterpret_cast<volatile LONG*>(object), *val);
+  }
+}
+
+#define __ATOMIC_RELAXED 0
+#endif
 
 #include <atomic>
 
@@ -145,14 +272,18 @@ static __forceinline void Fence(std::memory_order order=std::memory_order_seq_cs
 
 template <class T>
 static __forceinline void BasicCheck(const T* ptr) {
+#if defined(__linux__)
   constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
   static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
+#endif
 };
 
 template <class T>
 static __forceinline void BasicCheck(const volatile T* ptr) {
+#if defined(__linux__)
   constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
   static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
+#endif
 };
 
 /// @brief: Load value of type T atomically with specified memory order.
