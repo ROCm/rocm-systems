@@ -177,7 +177,7 @@ jobs:
         with:
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           build-args: |
             DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
             VERSION=${{ matrix.system.version }}
@@ -188,9 +188,9 @@ jobs:
             ELFUTILS_DOWNLOAD_VERSION=0.188
             BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
-            rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:ci-${{ matrix.gpu }}
-          cache-from: type=gha,scope=rocprofiler-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
-          cache-to: type=gha,mode=max,scope=rocprofiler-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
+            rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:systems-ci-${{ matrix.gpu }}
+          cache-from: type=gha,scope=systems-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
+          cache-to: type=gha,mode=max,scope=systems-ci-${{ matrix.system.distro }}-${{ matrix.system.version }}-${{ matrix.gpu }}
 
   prepare_matrix_release:
     if: github.repository == 'ROCm/rocm-systems'
