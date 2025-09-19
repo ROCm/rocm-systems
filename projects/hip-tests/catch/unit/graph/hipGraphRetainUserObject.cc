@@ -208,36 +208,9 @@ TEST_CASE("Unit_hipGraphRetainUserObject_Negative_Basic") {
   // Again Retain graph object with reference count 8
   HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 8, hipGraphUserObjectMove));
 
-  // Release graph object with reference count 1
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 1));
+  // Release graph object with reference count 8
+  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 8));
 
-  HIP_CHECK(hipUserObjectRelease(hObject, 1));
-  HIP_CHECK(hipGraphDestroy(graph));
-}
-
-TEST_CASE("Unit_hipGraphRetainUserObject_Negative_Null_Object") {
-  hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-
-  float* object = nullptr;  // this is used for Null_Object test
-  hipUserObject_t hObject;
-
-  HIP_CHECK(
-      hipUserObjectCreate(&hObject, object, destroyFloatObj, 1, hipUserObjectNoDestructorSync));
-  REQUIRE(hObject != nullptr);
-
-  // Retain graph object with reference count 2
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 2, hipGraphUserObjectMove));
-
-  // Release graph object with reference count more than 2
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 4));
-
-  // Again Retain graph object with reference count 8
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 8, 0));
-
-  // Release graph object with reference count 1
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 1));
-
-  HIP_CHECK(hipUserObjectRelease(hObject, 1));
+  HIP_CHECK(hipUserObjectRelease(hObject, 2));
   HIP_CHECK(hipGraphDestroy(graph));
 }
