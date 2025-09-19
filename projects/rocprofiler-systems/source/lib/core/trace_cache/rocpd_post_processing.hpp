@@ -35,9 +35,8 @@ namespace trace_cache
 class rocpd_post_processing
 {
 public:
-    rocpd_post_processing(const std::shared_ptr<metadata_registry>& metadata,
-                          const std::shared_ptr<agent_manager>&     agent_mngr,
-                          const std::string&                        _database_tag);
+    rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr,
+                          const std::string& _database_tag);
 
     void register_parser_callback(storage_parser& parser);
     void post_process_metadata();
@@ -62,8 +61,8 @@ private:
     postprocessing_callback get_cpu_freq_sample_callback() const;
     postprocessing_callback get_backtrace_sample_callback() const;
 
-    std::shared_ptr<metadata_registry>     m_metadata;
-    std::shared_ptr<agent_manager>         m_agent_manager;
+    metadata_registry&                     m_metadata;
+    agent_manager&                         m_agent_manager;
     std::shared_ptr<rocpd::data_processor> m_data_processor;
 };
 

@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 
@@ -44,6 +45,12 @@ storage_parser::register_type_callback(
     const std::function<void(const storage_parsed_type_base&)>& callback)
 {
     m_callbacks[type].push_back(callback);
+}
+
+void
+storage_parser::register_on_finished_callback(const std::function<void()>& callback)
+{
+    m_on_finished_callback = callback;
 }
 
 void
@@ -243,7 +250,7 @@ storage_parser::consume_storage()
                      m_filename.c_str());
     std::remove(m_filename.c_str());
 
-    m_on_finished_callback();
+    std::invoke(m_on_finished_callback);
 }
 
 void
