@@ -947,6 +947,7 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       info->agentBaseAddress = const_cast<void*>(ptr);
       info->hostBaseAddress = const_cast<void*>(ptr);
       info->sizeInBytes = mappedHandleIt->second.size;
+      info->registered = true;
       info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
 
       if (alloc && num_agents_accessible && accessible) {
@@ -977,6 +978,7 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
     info->agentBaseAddress = NULL;
     info->hostBaseAddress = addressHandle->os_addr;
     info->sizeInBytes = addressHandle->size;
+    info->registered = addressHandle->registered;
     info->agentOwner = {};
 
     if (num_agents_accessible) {
@@ -1024,14 +1026,31 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
-      memcpy(info, &retInfo, retInfo.size);
-      return HSA_STATUS_SUCCESS;
+      /*
+       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
+       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
+       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
+       * and provide additional information from hsaKmtQueryPointerInfo.
+       */
+      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+        memcpy(info, &retInfo, retInfo.size);
+        return HSA_STATUS_SUCCESS;
+      }
     }
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
     auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
     if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
+         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
+         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
+         * were previously filled with VMemoryPtrInfo.
+         */
+        memcpy(info, &retInfo, retInfo.size);
+        return HSA_STATUS_SUCCESS;
+      }
       retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
       memcpy(info, &retInfo, retInfo.size);
       return HSA_STATUS_SUCCESS;
@@ -1047,6 +1066,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     retInfo.agentBaseAddress = reinterpret_cast<void*>(thunkInfo.GPUAddress);
     retInfo.hostBaseAddress = thunkInfo.CPUAddress;
     retInfo.sizeInBytes = thunkInfo.SizeInBytes;
+    retInfo.registered = true;
     retInfo.userData = thunkInfo.UserData;
     retInfo.global_flags = thunkInfo.MemFlags.ui32.CoarseGrain
         ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED

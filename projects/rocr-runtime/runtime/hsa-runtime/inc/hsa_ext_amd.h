@@ -63,9 +63,10 @@
  * - 1.10 - hsa_amd_vmem_address_reserve: HSA_AMD_VMEM_ADDRESS_NO_REGISTER
  * - 1.11 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_CLOCK_COUNTERS
  * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
+ * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 12
+#define HSA_AMD_INTERFACE_VERSION_MINOR 13
 
 #ifdef __cplusplus
 extern "C" {
@@ -2421,6 +2422,13 @@ typedef struct hsa_amd_pointer_info_s {
   meaningful if the type of the allocation is HSA_EXT_POINTER_TYPE_UNKNOWN.
   */
   uint32_t global_flags;
+
+  /*
+  Set to true if this allocation was registered with the underlying driver
+  This field is not meaningful if the type of the allocation is
+  HSA_EXT_POINTER_TYPE_UNKNOWN.
+  */
+  bool registered;
 } hsa_amd_pointer_info_t;
 
 /**
