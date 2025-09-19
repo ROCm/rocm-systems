@@ -15,7 +15,7 @@ Prerequisites
 
 To install RDC from source, ensure that your system meets the following requirements:
 
-- **Supported platforms:** AMD ROCm-supported platform. See the `list of supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
+- **Supported platforms:** See the `list of ROCm-supported operating systems and GPUs <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
 
 - **Dependencies:**
 
