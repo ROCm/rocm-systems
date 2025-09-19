@@ -33,7 +33,7 @@ get_agent_manager_instance()
 {
     static agent_manager _instance;
     return _instance;
-};
+}
 
 agent_manager::agent_manager(std::vector<std::shared_ptr<agent>> agents)
 : _agents(std::move(agents))

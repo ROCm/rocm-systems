@@ -31,6 +31,7 @@
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
 #include <iterator>
+#include <memory>
 #include <vector>
 
 namespace rocprofsys
@@ -141,9 +142,7 @@ cache_manager::post_process_bulk()
 
         rocpd_threads.emplace_back([this]() {
             rocpd_post_processing _post_processing(
-                std::make_shared<metadata_registry>(&m_metadata),
-                std::make_shared<agent_manager>(&get_agent_manager_instance()),
-                std::to_string(getpid()));
+                m_metadata, get_agent_manager_instance(), std::to_string(getpid()));
             storage_parser _parser(buffered_storage_filename);
             _post_processing.register_parser_callback(_parser);
             _post_processing.post_process_metadata();
@@ -159,9 +158,11 @@ cache_manager::post_process_bulk()
                                      "file: %s and from metadata file: %s\n",
                                      pid, files.buff_storage.c_str(),
                                      files.metadata.c_str());
+
                     std::vector<std::shared_ptr<agent>> _agents;
-                    auto metadata = std::make_shared<metadata_registry>();
-                    auto res      = metadata->load_from_file(files.metadata, _agents);
+                    metadata_registry                   _metadata;
+
+                    auto res = _metadata.load_from_file(files.metadata, _agents);
                     if(!res)
                     {
                         ROCPROFSYS_WARNING(0, "Load from file for metadata failed: %s\n",
@@ -169,10 +170,10 @@ cache_manager::post_process_bulk()
                         return;
                     }
 
-                    rocpd_post_processing _post_processing(
-                        metadata, std::make_shared<agent_manager>(_agents),
-                        std::to_string(pid));
-                    storage_parser _parser(files.buff_storage);
+                    agent_manager         _agent_manager{ _agents };
+                    rocpd_post_processing _post_processing(_metadata, _agent_manager,
+                                                           std::to_string(pid));
+                    storage_parser        _parser(files.buff_storage);
                     _post_processing.register_parser_callback(_parser);
                     _post_processing.post_process_metadata();
                     _parser.consume_storage();
