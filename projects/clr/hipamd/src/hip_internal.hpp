@@ -256,7 +256,7 @@ const char* ihipGetErrorName(hipError_t hip_error);
              reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus() ==                         \
                  hipStreamCaptureStatusInvalidated) {                                              \
     return hipErrorStreamCaptureInvalidated;                                                       \
-  } else {                                                                                         \
+  } else if (stream == nullptr || stream == hipStreamLegacy) {                                     \
     CHECK_STREAM_CAPTURING()                                                                       \
   }
 
