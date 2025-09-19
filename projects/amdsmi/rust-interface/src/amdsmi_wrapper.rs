@@ -292,8 +292,20 @@ impl AmdsmiTemperatureTypeT {
         AmdsmiTemperatureTypeT::AmdsmiTemperatureTypeHotspot;
 }
 impl AmdsmiTemperatureTypeT {
+    pub const AmdsmiTemperatureTypeGpuboardNodeRetimerX: AmdsmiTemperatureTypeT =
+        AmdsmiTemperatureTypeT::AmdsmiTemperatureTypeGpuboardNodeFirst;
+}
+impl AmdsmiTemperatureTypeT {
+    pub const AmdsmiTemperatureTypeGpuboardVddcrVdd0: AmdsmiTemperatureTypeT =
+        AmdsmiTemperatureTypeT::AmdsmiTemperatureTypeGpuboardVrFirst;
+}
+impl AmdsmiTemperatureTypeT {
+    pub const AmdsmiTemperatureTypeBaseboardUbbFpga: AmdsmiTemperatureTypeT =
+        AmdsmiTemperatureTypeT::AmdsmiTemperatureTypeBaseboardFirst;
+}
+impl AmdsmiTemperatureTypeT {
     pub const AmdsmiTemperatureTypeMax: AmdsmiTemperatureTypeT =
-        AmdsmiTemperatureTypeT::AmdsmiTemperatureTypePlx;
+        AmdsmiTemperatureTypeT::AmdsmiTemperatureTypeBaseboardLast;
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -306,6 +318,51 @@ pub enum AmdsmiTemperatureTypeT {
     AmdsmiTemperatureTypeHbm2 = 5,
     AmdsmiTemperatureTypeHbm3 = 6,
     AmdsmiTemperatureTypePlx = 7,
+    AmdsmiTemperatureTypeGpuboardNodeFirst = 100,
+    AmdsmiTemperatureTypeGpuboardNodeOamXIbc = 101,
+    AmdsmiTemperatureTypeGpuboardNodeOamXIbc2 = 102,
+    AmdsmiTemperatureTypeGpuboardNodeOamXVdd18Vr = 103,
+    AmdsmiTemperatureTypeGpuboardNodeOamX04HbmBVr = 104,
+    AmdsmiTemperatureTypeGpuboardNodeOamX04HbmDVr = 105,
+    AmdsmiTemperatureTypeGpuboardNodeLast = 149,
+    AmdsmiTemperatureTypeGpuboardVrFirst = 150,
+    AmdsmiTemperatureTypeGpuboardVddcrVdd1 = 151,
+    AmdsmiTemperatureTypeGpuboardVddcrVdd2 = 152,
+    AmdsmiTemperatureTypeGpuboardVddcrVdd3 = 153,
+    AmdsmiTemperatureTypeGpuboardVddcrSocA = 154,
+    AmdsmiTemperatureTypeGpuboardVddcrSocC = 155,
+    AmdsmiTemperatureTypeGpuboardVddcrSocioA = 156,
+    AmdsmiTemperatureTypeGpuboardVddcrSocioC = 157,
+    AmdsmiTemperatureTypeGpuboardVdd085Hbm = 158,
+    AmdsmiTemperatureTypeGpuboardVddcr11HbmB = 159,
+    AmdsmiTemperatureTypeGpuboardVddcr11HbmD = 160,
+    AmdsmiTemperatureTypeGpuboardVddUsr = 161,
+    AmdsmiTemperatureTypeGpuboardVddio11E32 = 162,
+    AmdsmiTemperatureTypeGpuboardVrLast = 199,
+    AmdsmiTemperatureTypeBaseboardFirst = 200,
+    AmdsmiTemperatureTypeBaseboardUbbFront = 201,
+    AmdsmiTemperatureTypeBaseboardUbbBack = 202,
+    AmdsmiTemperatureTypeBaseboardUbbOam7 = 203,
+    AmdsmiTemperatureTypeBaseboardUbbIbc = 204,
+    AmdsmiTemperatureTypeBaseboardUbbUfpga = 205,
+    AmdsmiTemperatureTypeBaseboardUbbOam1 = 206,
+    AmdsmiTemperatureTypeBaseboardOam01Hsc = 207,
+    AmdsmiTemperatureTypeBaseboardOam23Hsc = 208,
+    AmdsmiTemperatureTypeBaseboardOam45Hsc = 209,
+    AmdsmiTemperatureTypeBaseboardOam67Hsc = 210,
+    AmdsmiTemperatureTypeBaseboardUbbFpga0v72Vr = 211,
+    AmdsmiTemperatureTypeBaseboardUbbFpga3v3Vr = 212,
+    AmdsmiTemperatureTypeBaseboardRetimer01231v2Vr = 213,
+    AmdsmiTemperatureTypeBaseboardRetimer45671v2Vr = 214,
+    AmdsmiTemperatureTypeBaseboardRetimer010v9Vr = 215,
+    AmdsmiTemperatureTypeBaseboardRetimer450v9Vr = 216,
+    AmdsmiTemperatureTypeBaseboardRetimer230v9Vr = 217,
+    AmdsmiTemperatureTypeBaseboardRetimer670v9Vr = 218,
+    AmdsmiTemperatureTypeBaseboardOam01233v3Vr = 219,
+    AmdsmiTemperatureTypeBaseboardOam45673v3Vr = 220,
+    AmdsmiTemperatureTypeBaseboardIbcHsc = 221,
+    AmdsmiTemperatureTypeBaseboardIbc = 222,
+    AmdsmiTemperatureTypeBaseboardLast = 249,
 }
 impl AmdsmiFwBlockT {
     pub const AmdsmiFwIdFirst: AmdsmiFwBlockT = AmdsmiFwBlockT::AmdsmiFwIdSmu;
@@ -2697,12 +2754,12 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiTopologyNearestT {
     pub count: u32,
-    pub processor_list: [AmdsmiProcessorHandle; 32usize],
-    pub reserved: [u64; 15usize],
+    pub processor_list: [AmdsmiProcessorHandle; 256usize],
+    pub reserved: [u64; 14usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiTopologyNearestT"][::std::mem::size_of::<AmdsmiTopologyNearestT>() - 384usize];
+    ["Size of AmdsmiTopologyNearestT"][::std::mem::size_of::<AmdsmiTopologyNearestT>() - 2168usize];
     ["Alignment of AmdsmiTopologyNearestT"]
         [::std::mem::align_of::<AmdsmiTopologyNearestT>() - 8usize];
     ["Offset of field: AmdsmiTopologyNearestT::count"]
@@ -2710,7 +2767,7 @@ const _: () = {
     ["Offset of field: AmdsmiTopologyNearestT::processor_list"]
         [::std::mem::offset_of!(AmdsmiTopologyNearestT, processor_list) - 8usize];
     ["Offset of field: AmdsmiTopologyNearestT::reserved"]
-        [::std::mem::offset_of!(AmdsmiTopologyNearestT, reserved) - 264usize];
+        [::std::mem::offset_of!(AmdsmiTopologyNearestT, reserved) - 2056usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -3812,4 +3869,7 @@ extern "C" {
         max_processes: *mut u32,
         list: *mut AmdsmiProcInfoT,
     ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_gpu_driver_reload() -> AmdsmiStatusT;
 }

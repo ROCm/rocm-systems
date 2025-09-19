@@ -2978,29 +2978,30 @@ pub fn amdsmi_set_gpu_od_volt_info(
 pub fn amdsmi_get_gpu_od_volt_curve_regions(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<Vec<AmdsmiFreqVoltRegionT>> {
-    let mut num_regions: u32 = 0;
+    // First call to get the number of regions
+    let mut num_regions = MaybeUninit::<u32>::uninit();
 
     // First call to get the number of regions
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_od_volt_curve_regions(
         processor_handle,
-        &mut num_regions,
-        null_mut()
+        num_regions.as_mut_ptr(),
+        std::ptr::null_mut()
     ));
 
-    if num_regions == 0 {
-        return Ok(Vec::new());
-    }
+    let num_regions = unsafe { num_regions.assume_init() };
 
-    // Allocate buffer and make second call
-    let mut buffer = Vec::with_capacity(num_regions as usize);
-    unsafe {
-        buffer.set_len(num_regions as usize);
-    }
+    // Allocate a vector with the capacity of num_regions
+    let mut buffer: Vec<AmdsmiFreqVoltRegionT> = Vec::with_capacity(num_regions as usize);
+
+    // Second call to get the actual data
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_od_volt_curve_regions(
         processor_handle,
-        &mut num_regions,
+        &mut (num_regions as u32),
         buffer.as_mut_ptr()
     ));
+
+    // Set the length of the vector to num_regions
+    unsafe { buffer.set_len(num_regions as usize) };
 
     Ok(buffer)
 }
