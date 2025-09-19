@@ -2528,7 +2528,7 @@ void Device::svmFree(void* ptr) const {
 void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   constexpr bool kForceAlloc = true;
-  amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, kParent, kForceAlloc);
+  amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, -1, kParent, kForceAlloc);
   assert(mem != nullptr);
   return mem->getSvmPtr();
 }
@@ -2549,7 +2549,8 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
-bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) {
+bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                          VmmLocationType access_location) {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
   if (amd_mem_obj == nullptr) {
     // If the amd_mem_obj is null, the check if this is a valid va_addr, but not-mapped,

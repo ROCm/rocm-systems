@@ -526,7 +526,7 @@ bool Device::ValidateVirtualAddressRange(amd::Memory* vaddr_base_obj, amd::Memor
 
 //==================================================================================================
 amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vptr, size_t size,
-                                         int deviceId, bool parent, bool kForceAlloc) {
+                                         int deviceId, int locationType, bool parent, bool kForceAlloc) {
   amd::Memory* vaddr_base_obj = nullptr;
   amd::Memory* vaddr_sub_obj = nullptr;
   constexpr bool kSysMemAlloc = false;
@@ -572,6 +572,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     }
 
     vaddr_sub_obj->getUserData().deviceId = deviceId;
+    vaddr_sub_obj->getUserData().locationType = locationType;
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");

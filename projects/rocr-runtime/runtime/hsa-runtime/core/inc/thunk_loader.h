@@ -44,7 +44,11 @@
 #define HSA_RUNTIME_CORE_INC_THUNK_LOADER_H
 
 #include <string>
+#if defined(__linux__)
 #include <amdgpu.h>
+#else
+#include "hsakmt/drm/amdgpu.h"
+#endif
 #include "hsakmt/hsakmttypes.h"
 
 class DtifPlatform;

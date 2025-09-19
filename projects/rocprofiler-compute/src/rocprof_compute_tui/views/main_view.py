@@ -29,14 +29,15 @@ Contains the main view layout and organization for the application.
 """
 
 from pathlib import Path
+from typing import Any, Optional
 
 from textual import on, work
+from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from rocprof_compute_tui.analysis_tui import tui_analysis
-from rocprof_compute_tui.config import DEFAULT_START_PATH
 from rocprof_compute_tui.utils.tui_utils import Logger, LogLevel
 from rocprof_compute_tui.widgets.center_panel.center_area import CenterPanel
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import MenuBar
@@ -48,21 +49,20 @@ from utils import file_io
 class MainView(Horizontal):
     """Main view layout for the application."""
 
-    selected_path = reactive(None)
-    kernel_to_df_dict = reactive({})
-    top_kernel_to_df_list = reactive([])
+    selected_path: reactive[Optional[Path]] = reactive(None)
+    kernel_to_df_dict: reactive[dict[str, dict[str, Any]]] = reactive({})
+    top_kernel_to_df_list: reactive[list[dict[str, Any]]] = reactive([])
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(id="main-container")
-        self.start_path = Path(DEFAULT_START_PATH) if DEFAULT_START_PATH else Path.cwd()
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
 
-    def flush(self):
+    def flush(self) -> None:
         """Required for stdout compatibility."""
         pass
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         self.logger.info("Composing main view layout", update_ui=False)
         yield MenuBar()
 
@@ -87,25 +87,31 @@ class MainView(Horizontal):
             yield RightPanel()
 
     @on(DataTable.CellSelected)
-    def on_data_table_cell_selected(self, event):
+    def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
         table = event.data_table
         row_idx = event.coordinate.row
 
         visible_data = table.get_row_at(row_idx)
-        description = (
-            table._df.iloc[row_idx].get("Description", "No description")
-            if hasattr(table, "_df")
-            else "N/A"
-        )
+        description = self._get_row_description(table, row_idx)
 
-        self.metric_description.text = (
-            f"Selected Metric ID: {visible_data[0]}\n"
-            f"Selected Metric: {visible_data[1]}\n"
-            f"Description: {description}"
-        )
+        if self.metric_description is not None:
+            self.metric_description.text = (
+                f"Selected Metric ID: {visible_data[0]}\n"
+                f"Selected Metric: {visible_data[1]}\n"
+                f"Description: {description}"
+            )
+
+    def _get_row_description(self, table: DataTable, row_idx: int) -> str:
+        """Get description for a table row with safe attribute access."""
+        try:
+            if hasattr(table, "_df") and table._df is not None:
+                return str(table._df.iloc[row_idx].get("Description", "No description"))
+        except (IndexError, AttributeError, KeyError):
+            pass
+        return "N/A"
 
     @work(thread=True)
-    def run_analysis(self):
+    def run_analysis(self) -> None:
         self.kernel_to_df_dict = {}
         self.top_kernel_to_df_list = []
 
@@ -125,16 +131,16 @@ class MainView(Horizontal):
 
             # 1. Create and TUI analyzer
             analyzer = tui_analysis(
-                self.app.args, self.app.supported_archs, self.selected_path
+                self.app.args, self.app.supported_archs, str(self.selected_path)
             )
             analyzer.sanitize()
 
             # 2. Load and process system info and Configure SoC
-            sysinfo_path = Path(self.selected_path) / "sysinfo.csv"
+            sysinfo_path = self.selected_path / "sysinfo.csv"
             if not sysinfo_path.exists():
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
 
-            sys_info = file_io.load_sys_info(sysinfo_path).iloc[0].to_dict()
+            sys_info = file_io.load_sys_info(str(sysinfo_path)).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
             analyzer.set_soc(self.app.soc)
 
@@ -158,12 +164,12 @@ class MainView(Horizontal):
             self.logger.error(f"{error_msg}\n{traceback.format_exc()}")
             self._update_kernel_view(error_msg, LogLevel.ERROR)
 
-    def _update_kernel_view(self, message, log_level):
+    def _update_kernel_view(self, message: str, log_level: LogLevel) -> None:
         self.app.call_from_thread(
             lambda: self.query_one("#kernel-view").update_view(message, log_level)
         )
 
-    def refresh_results(self):
+    def refresh_results(self) -> None:
         kernel_view = self.query_one("#kernel-view")
         if kernel_view:
             kernel_view.update_results(
@@ -173,7 +179,7 @@ class MainView(Horizontal):
         else:
             self.logger.error("Kernel view not found or no data available")
 
-    def refresh_view(self):
+    def refresh_view(self) -> None:
         if self.kernel_to_df_dict and self.top_kernel_to_df_list:
             self.refresh_results()
         else:

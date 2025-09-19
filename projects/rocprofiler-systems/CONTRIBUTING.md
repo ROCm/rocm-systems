@@ -99,7 +99,7 @@ Please see the [pre-commit documentation](https://pre-commit.com/#quick-start) f
 
 ## Code License ##
 
-All code contributed to this project will be licensed under the license identified in the [License](LICENSE). Your contribution will be accepted under the same license.
+All code contributed to this project will be licensed under the license identified in the [License](LICENSE.md). Your contribution will be accepted under the same license.
 
 ## References ##
 
