@@ -1476,7 +1476,7 @@ write_rocpd(
                         std::get<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>(
                             itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.timestamp;
@@ -1502,7 +1502,7 @@ write_rocpd(
                         std::get<rocprofiler_buffer_tracing_kfd_event_page_fault_record_t>(
                             itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.timestamp;
@@ -1520,7 +1520,7 @@ write_rocpd(
                     const auto& record =
                         std::get<rocprofiler_buffer_tracing_kfd_event_queue_record_t>(itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.timestamp;
@@ -1538,7 +1538,7 @@ write_rocpd(
                         std::get<rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t>(
                             itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.timestamp;
@@ -1559,7 +1559,7 @@ write_rocpd(
                         std::get<rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t>(
                             itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.timestamp;
@@ -1575,7 +1575,7 @@ write_rocpd(
                     const auto& record =
                         std::get<rocprofiler_buffer_tracing_kfd_page_migrate_record_t>(itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.start_timestamp;
@@ -1600,7 +1600,7 @@ write_rocpd(
                     const auto& record =
                         std::get<rocprofiler_buffer_tracing_kfd_page_fault_record_t>(itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.start_timestamp;
@@ -1618,7 +1618,7 @@ write_rocpd(
                     const auto& record =
                         std::get<rocprofiler_buffer_tracing_kfd_queue_record_t>(itr.record);
 
-                    data.kind  = ROCPROFILER_BUFFER_TRACING_KFD_QUEUE;
+                    data.kind  = record.kind;
                     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
                     data.tid   = record.pid;  // KFD attributes all events to the lead thread
                     data.start = record.start_timestamp;
