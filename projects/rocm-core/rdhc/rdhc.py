@@ -697,7 +697,8 @@ class ROCMHealthCheck:
 
         # Log any warnings about libraries linked outside of ROCm library path
         if wrong_path_warnings:
-            self.logger.warning(f"!!! Found rocm library path outside of ROCm lib PATH: \n{json.dumps(wrong_path_warnings, indent=2)}")
+            self.logger.warning(f"!!! Found {len(wrong_path_warnings)} warnings : rocm library path linked to outside of ROCm lib PATH. \n")
+            self.logger.debug(f"!!! : \n{json.dumps(wrong_path_warnings, indent=2)}")
 
         # If there are any missing dependencies, log them and return failure
         if missing_deps:
@@ -705,7 +706,7 @@ class ROCMHealthCheck:
             return TestStatus.FAIL.value, f"Found library dependency issues."
 
         if wrong_path_warnings:
-            return TestStatus.PASS.value, "Path warnings are found. But all library dependencies are satisfied."
+            return TestStatus.PASS.value, f"{len(wrong_path_warnings)} Path warnings are found. But all library dependencies are satisfied."
         else:
             return TestStatus.PASS.value, "All library dependencies are satisfied."
 
@@ -732,13 +733,13 @@ class ROCMHealthCheck:
                 rplib = os.path.realpath(lib)
 
                 if not os.path.exists(rplib):
-                    self.logger.warning(f"!!! Library symlink {lib} points to a non-existent file <{rplib}>.")
+                    self.logger.debug(f"!!! Library symlink {lib} points to a non-existent file <{rplib}>.")
                     continue
 
                 # Check if the symlink is within the ROCm library path
                 if not (rplib.startswith(real_rocm_lib_path) or rplib.startswith(rocm_lib_path)):
                     wrong_path_warnings[lib] = f"Library symlink pointing to ->{rplib} ; outside of ROCm library path {rocm_lib_path}."
-                    self.logger.warning(f"!!! Library symlink {lib}->{rplib} ; pointing outside of ROCm library path {rocm_lib_path}.")
+                    self.logger.debug(f"!!! Library symlink {lib}->{rplib} ; pointing outside of ROCm library path {rocm_lib_path}.")
                 continue
 
             stdout, stderr, ret_code = run_command(f"ldd {lib}", shell=True)
@@ -775,7 +776,7 @@ class ROCMHealthCheck:
                             # If the dependency path is not within the ROCm library path, raise a warning
                             # Check if dep_lib_path starts with rocm_lib_path(/opt/rocm/lib/) or real_rocm_lib_path(/opt/rocm-7.0.0/lib/) without symlink.
                             if not (dep_lib_path.startswith(rocm_lib_path) or dep_lib_path.startswith(real_rocm_lib_path)):
-                                self.logger.warning(f"!!! Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}.")
+                                # self.logger.debug(f"!!! Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}.")
                                 path_warnings.append(f"Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}.")
 
             if missing:
