@@ -2078,6 +2078,7 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGetDriverEntryPoint_spt_fn, 492);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchAsync_v2_fn, 493);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemAdvise_v2_fn, 494);
 HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetId_fn, 495);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadData_fn, 496);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadFromFile_fn, 497);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryUnload_fn, 498);
