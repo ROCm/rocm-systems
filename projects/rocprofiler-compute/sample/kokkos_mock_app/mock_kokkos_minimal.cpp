@@ -20,7 +20,8 @@ int main(int argc, char** argv) {
     std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
 
     {
-        int N = 1024;
+        // Use a larger N for meaningful roofline data, but not too large
+        int N = 1000000;
         Kokkos::View<int*> data("data", N);
 
         Kokkos::parallel_for("FillData", N, KOKKOS_LAMBDA(const int i) {
@@ -33,7 +34,7 @@ int main(int argc, char** argv) {
         }, sum);
 
         std::cout << "Sum of squares from 0 to " << N-1 << " is " << sum << std::endl;
-    } // <-- All Kokkos Views destroyed here
+    } // All Kokkos Views destroyed here
 
     Kokkos::finalize();
     return 0;
