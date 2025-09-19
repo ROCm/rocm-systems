@@ -27,6 +27,13 @@ THE SOFTWARE.
 #endif
 
 /**
+ * Kernel to fill value for each element in the given array
+ */
+static __global__ void fillDataKernel(int *arr, int value) {
+  arr[threadIdx.x] = value;
+}
+
+/**
  * Kernel to copy data from source array to destination array
  */
 static __global__ void copyDataKernel(int *dstArr, int *srcArr) {
@@ -80,9 +87,10 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
-  std::fill_n(memPtr, N, value);
 
   SECTION("With Device") {
+    std::fill_n(memPtr, N, value);
+
     for (int deviceId : supportedDevices) {
       HIP_CHECK(hipSetDevice(deviceId));
 
@@ -114,6 +122,9 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
   }
 
   SECTION("With Host") {
+    fillDataKernel<<<1, N>>>(memPtr, value);
+    HIP_CHECK(hipDeviceSynchronize());
+
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
 
@@ -128,6 +139,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
   }
 
   HIP_CHECK(hipFree(memPtr));
+  // Reset to default device
+  HIP_CHECK(hipSetDevice(0));
 }
 
 /**
@@ -164,7 +177,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
-  std::fill_n(memPtr, N, value);
+  fillDataKernel<<<1, N>>>(memPtr, value);
+  HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("With Host NUMA") {
     for (int node = 0; node <= maxNode; ++node) {
@@ -198,6 +212,8 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   }
 
   HIP_CHECK(hipFree(memPtr));
+  // Reset to default device
+  HIP_CHECK(hipSetDevice(0));
 }
 #endif
 
@@ -275,4 +291,6 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
   }
 
   HIP_CHECK(hipFree(memPtr));
+  // Reset to default device
+  HIP_CHECK(hipSetDevice(0));
 }

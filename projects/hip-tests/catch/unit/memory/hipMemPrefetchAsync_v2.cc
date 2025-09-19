@@ -90,10 +90,10 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
-  std::fill_n(memPtr, N, value);
 
   SECTION("With Device") {
     int currentValue = value;
+    std::fill_n(memPtr, N, value);
 
     for (int deviceId : supportedDevices) {
       HIP_CHECK(hipSetDevice(deviceId));
@@ -137,6 +137,9 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
   }
 
   SECTION("With Host") {
+    fillDataKernel<<<1, N>>>(memPtr, value);
+    HIP_CHECK(hipDeviceSynchronize());
+
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
 
@@ -149,17 +152,20 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
       REQUIRE(memPtr[i] == value);
     }
 
-    std::fill_n(memPtr, N, value + 2);
+    constexpr int newValue = 20;
+    std::fill_n(memPtr, N, newValue);
 
     for (int i = 0; i < N; i++) {
-      INFO("At index " << i << " Expected value = " << (value + 2)
+      INFO("At index " << i << " Expected value = " << newValue
                        << " Got value = " << memPtr[i]);
-      REQUIRE(memPtr[i] == value + 2);
+      REQUIRE(memPtr[i] == newValue);
     }
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
+  // Reset to default device
+  HIP_CHECK(hipSetDevice(0));
 }
 
 /**
@@ -199,7 +205,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
-  std::fill_n(memPtr, N, value);
+  fillDataKernel<<<1, N>>>(memPtr, value);
+  HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("With Host NUMA") {
     hipMemLocation location;
@@ -250,12 +257,13 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
       REQUIRE(memPtr[i] == value);
     }
 
-    std::fill_n(memPtr, N, value + 1);
+    constexpr int newValue = 20;
+    std::fill_n(memPtr, N, newValue);
 
     for (int i = 0; i < N; i++) {
-      INFO("At index " << i << " Expected value = " << (value + 1)
+      INFO("At index " << i << " Expected value = " << newValue
                        << " Got value = " << memPtr[i]);
-      REQUIRE(memPtr[i] == value + 1);
+      REQUIRE(memPtr[i] == newValue);
     }
 
     // determine current CPU’s NUMA node
@@ -273,6 +281,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
+  // Reset to default device
+  HIP_CHECK(hipSetDevice(0));
 }
 #endif
 
@@ -342,4 +352,6 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
+  // Reset to default device
+  HIP_CHECK(hipSetDevice(0));
 }
