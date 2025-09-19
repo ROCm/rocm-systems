@@ -482,6 +482,7 @@ public:
 
   /// @brief Finds the handle of executable to which @p device_address
   /// belongs. Return NULL handle if device address is invalid.
+  #undef FindExecutable
   virtual hsa_executable_t FindExecutable(uint64_t device_address) = 0;
 
   /// @brief Returns host address given @p device_address. If @p device_address

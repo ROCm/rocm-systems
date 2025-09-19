@@ -60,6 +60,12 @@ class dotdict(dict):
                     [dotdict(i) if isinstance(i, (dict)) else i for i in v],
                 )
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+
 
 def patch_message(msg, *args):
     msg = textwrap.dedent(msg)
@@ -72,14 +78,14 @@ def patch_message(msg, *args):
 
 def fatal_error(msg, *args, exit_code=1):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Fatal error: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
 
 
 def warning(msg, *args):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Warning: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
 
 
@@ -223,6 +229,11 @@ def parse_arguments(args=None):
 For MPI applications (or other job launchers such as SLURM), place rocprofv3 inside the job launcher:
 
     $ mpirun -n 4 rocprofv3 --hip-trace -- ./mympiapp
+
+For attachment profiling of running processes:
+
+    $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
+    $ rocprofv3 --attach 1234 --attach-duration 10 --hsa-trace
 
 """
 
@@ -725,13 +736,19 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         metavar="KB",
     )
 
-    reserved_options = parser.add_argument_group("Reserved options")
-    reserved_options.add_argument(
+    advanced_options.add_argument(
         "-p",
         "--pid",
-        help=argparse.SUPPRESS,
-        type=str,
-        nargs="+",
+        "--attach",
+        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        type=int,
+        default=None,
+    )
+
+    advanced_options.add_argument(
+        "--attach-duration-msec",
+        help="""When --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach.""",
+        type=int,
         default=None,
     )
 
@@ -940,18 +957,27 @@ def patch_args(data):
     return data
 
 
-def get_args(cmd_args, inp_args):
+def get_args(cmd_args, inp_args, filter=[]):
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
-                f"{name} is of type {type(var).__name__}, expected {type(type_id).__name__}"
+                f"{name} is of type {type(var).__name__}, expected {type_id.__name__}"
             )
 
-    ensure_type("cmd_args", cmd_args, argparse.Namespace)
-    ensure_type("inp_args", inp_args, dotdict)
+    if isinstance(cmd_args, argparse.Namespace):
+        ensure_type("cmd_args", cmd_args, argparse.Namespace)
+        ensure_type("inp_args", inp_args, dotdict)
 
-    cmd_keys = list(cmd_args.__dict__.keys())
-    inp_keys = list(inp_args.keys())
+        cmd_keys = list(cmd_args.__dict__.keys())
+        inp_keys = list(inp_args.keys())
+
+    else:
+        ensure_type("cmd_args", cmd_args, dotdict)
+        ensure_type("inp_args", inp_args, dotdict)
+
+        cmd_keys = list(cmd_args.keys())
+        inp_keys = list(inp_args.keys())
+
     data = {}
 
     def get_attr(key):
@@ -967,9 +993,30 @@ def get_args(cmd_args, inp_args):
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            raise RuntimeError(
-                f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
-            )
+            should_raise = True
+            if filter:
+                is_filtered = False
+                for fitr in filter:
+                    import re
+
+                    if re.match(fitr, itr):
+                        is_filtered = True
+                        break
+
+                if not is_filtered:
+                    warning(
+                        f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
+                    )
+                    should_raise = False
+
+            # should raise error if not in filter list
+            if should_raise:
+                raise RuntimeError(
+                    f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+                )
+            else:
+                # has preference towards command line args
+                data[itr] = get_attr(itr)
         else:
             data[itr] = get_attr(itr)
 
@@ -981,13 +1028,6 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
-
-    if args.pid is not None:
-        fatal_error(
-            """The -p shorthand option for --collection-period is now an upper-case -P
-                    In the future, rocprofv3 plans to support debugger-like process attachment and -p
-                    is de-facto standard shorthand option for this feature"""
-        )
 
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
@@ -1075,6 +1115,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-attach.so"
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
@@ -1083,6 +1124,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1090,8 +1132,9 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
-    update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
-    update_env("LD_PRELOAD", ":".join(append_preload), append=True)
+    if not args.pid:
+        update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
+        update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
     update_env(
         "ROCP_TOOL_LIBRARIES",
@@ -1298,6 +1341,13 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
+    if args.pid:
+        update_env(
+            "ROCPROF_ATTACH_TOOL_LIBRARY",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
+            overwrite_if_true=True,
+        )
+
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -1429,6 +1479,16 @@ def run(app_args, args, **kwargs):
                 [sys.executable, path, "info", "--pc-sampling"],
                 env=app_env,
             )
+
+    elif args.pid:
+        update_env("ROCPROF_ATTACH_PID", args.pid)
+        if args.attach_duration_msec is not None:
+            update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-attach")
+        if app_args:
+            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+        else:
+            app_args = [sys.executable, path]
 
     elif not app_args and not args.echo:
         log_config(app_env)
@@ -1673,6 +1733,39 @@ def main(argv=None):
 
     if len(inp_args) == 1:
         args = get_args(cmd_args, inp_args[0])
+
+        if args.pid:
+            import pickle
+
+            if args.collection_period:
+                fatal_error("--collection-period is not compatible with attach mode")
+
+            fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
+            if os.path.exists(fname):
+                # load the configuration from the previous attachment
+                with open(fname, "rb") as ifs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Loading attach configuration from {fname}...")
+                    prev_args = pickle.load(ifs)
+
+                args = get_args(
+                    args,
+                    dotdict(prev_args),
+                    filter=[
+                        ".*_trace",
+                        "^pc_sampling_.*$",
+                        "^att_.*$",
+                        "^(pmc|pmc_groups|output_config|extra_counters)$",
+                        "^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    ],
+                )
+
+            # write the configuration for future attachments
+            with open(fname, "wb") as ofs:
+                if args.log_level in ("config", "info", "trace"):
+                    print(f"Saving attach configuration to {fname}...")
+                pickle.dump(args, ofs)
+
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1

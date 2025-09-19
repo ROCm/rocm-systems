@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ hsa_status_t UriLocator::createUriRangeTable() {
   auto execCb = [](hsa_executable_t exec, void* data) -> hsa_status_t {
     int execState = 0;
     hsa_status_t status;
-    status = hsa_executable_get_info(exec, HSA_EXECUTABLE_INFO_STATE, &execState);
+    status = Hsa::executable_get_info(exec, HSA_EXECUTABLE_INFO_STATE, &execState);
     if (status != HSA_STATUS_SUCCESS) return status;
     if (execState != HSA_EXECUTABLE_STATE_FROZEN) return status;
 
@@ -146,8 +146,8 @@ UriLocator::UriInfo UriLocator::lookUpUri(uint64_t device_pc) {
 
   if (!init_) {
     hsa_status_t result;
-    result = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(fn_table_),
-                                                  &fn_table_);
+    result = Hsa::system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(fn_table_),
+                                                   &fn_table_);
     if (result != HSA_STATUS_SUCCESS) return errorstate;
     result = createUriRangeTable();
     if (result != HSA_STATUS_SUCCESS) {
