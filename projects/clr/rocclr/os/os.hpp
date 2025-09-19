@@ -52,7 +52,6 @@ class Thread;  // For Os::createOsThread()
 
 class Os : AllStatic {
  public:
-
 // File Desc abstraction between OS
 #if defined(_WIN32)
   typedef void* FileDesc;
@@ -285,6 +284,9 @@ class Os : AllStatic {
   //! Deletes file
   static int unlink(const std::string& path);
 
+  //! Removes the shared memory object name
+  static int shm_unlink(const std::string& path);
+
   // Library routines:
   //
   typedef bool (*SymbolCallback)(std::string, const void*, void*);
@@ -329,8 +331,14 @@ class Os : AllStatic {
   //! Return the current process id
   static int getProcessId();
 
-  // Prints the location of the currently loaded library (shared object or DLL)
+  //! Prints the location of the currently loaded library (shared object or DLL)
   static void PrintLibraryLocation();
+
+  //! Checks if a core dump must be generated (rocgdb detection). Returns false in Windows
+  static bool DumpCoreFile();
+
+  //! Demangle a C++ name. The function will return the same name if couldn't demangle
+  static void CxaDemangle(const std::string& name, std::string* demangle);
 };
 
 /*@}*/
@@ -364,7 +372,7 @@ ALWAYSINLINE address Os::currentStackPtr() {
 #else
       ""
 #endif
-          );
+  );
 #else   // !__GNUC__
   __asm mov value, esp;
 #endif  // !__GNUC__
@@ -463,7 +471,7 @@ inline void Os::ThreadAffinityMask::clear(uint cpu) {
 
 inline bool Os::ThreadAffinityMask::isSet(uint cpu) const {
   return (KAFFINITY)0 !=
-      (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
+         (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
 }
 
 inline bool Os::ThreadAffinityMask::isEmpty() const {

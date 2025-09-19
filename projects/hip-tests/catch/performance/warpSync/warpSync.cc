@@ -33,73 +33,49 @@ THE SOFTWARE.
 #include <map>
 
 /**
-* @addtogroup __reduce_op_sync __reduce_op_sync
-* @{
-* @ingroup WarpSyncPerformance
-* __reduce_op_sync(MaskT mask, T val)
-* Reduces the val as per the lanes described in mask and calculates the
-* aggregated result
-*/
+ * @addtogroup __reduce_op_sync __reduce_op_sync
+ * @{
+ * @ingroup WarpSyncPerformance
+ * __reduce_op_sync(MaskT mask, T val)
+ * Reduces the val as per the lanes described in mask and calculates the
+ * aggregated result
+ */
 
 static constexpr int kBlockDim = 1024;
 
-template <class T>
-struct AtomicAddOp {
-  __device__ T operator()(T* lhs, const T& rhs)
-  {
-    return atomicAdd(lhs, rhs);
-  }
+template <class T> struct AtomicAddOp {
+  __device__ T operator()(T* lhs, const T& rhs) { return atomicAdd(lhs, rhs); }
 };
 
-template <class T>
-struct AtomicMinOp {
-  __device__ T operator()(T* lhs, const T& rhs)
-  {
-    return atomicMin(lhs, rhs);
-  }
+template <class T> struct AtomicMinOp {
+  __device__ T operator()(T* lhs, const T& rhs) { return atomicMin(lhs, rhs); }
 };
 
-template <class T>
-struct AtomicMaxOp {
-  __device__ T operator()(T* lhs, const T& rhs)
-  {
-    return atomicMax(lhs, rhs);
-  }
+template <class T> struct AtomicMaxOp {
+  __device__ T operator()(T* lhs, const T& rhs) { return atomicMax(lhs, rhs); }
 };
 
-template <class T>
-struct AtomicAndOp {
-  __device__ T operator()(T* lhs, const T& rhs)
-  {
-    return atomicAnd(lhs, rhs);
-  }
+template <class T> struct AtomicAndOp {
+  __device__ T operator()(T* lhs, const T& rhs) { return atomicAnd(lhs, rhs); }
 };
 
-template <class T>
-struct AtomicOrOp {
-  __device__ T operator()(T* lhs, const T& rhs)
-  {
-    return atomicOr(lhs, rhs);
-  }
+template <class T> struct AtomicOrOp {
+  __device__ T operator()(T* lhs, const T& rhs) { return atomicOr(lhs, rhs); }
 };
 
-template <class T>
-struct AtomicXorOp {
-  __device__ T operator()(T* lhs, const T& rhs)
-  {
-    return atomicXor(lhs, rhs);
-  }
+template <class T> struct AtomicXorOp {
+  __device__ T operator()(T* lhs, const T& rhs) { return atomicXor(lhs, rhs); }
 };
 
 // uses atomics to reduce the whole warp; depending on the mask our reduce should be faster
 // @output   to store the result, one per warp
 // @numItems must be a multiple of warpSize
 template <class T, template <typename> class Op>
-__global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ input, unsigned long long mask)
-{
+__global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ input,
+                                 unsigned long long mask) {
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   extern __shared__ uint8_t shared_mem[];
-  T* result = reinterpret_cast<T*>(shared_mem); // one per warp
+  T* result = reinterpret_cast<T*>(shared_mem);  // one per warp
   Op<T> op;
   int numWarp = threadIdx.x / warpSize;
 
@@ -115,18 +91,16 @@ __global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ i
 
   __syncthreads();
 
-  if (mask & (1ul << __ockl_lane_u32()))
-    op(&result[numWarp], input[idx]);
+  if (mask & (1ul << __ockl_lane_u32())) op(&result[numWarp], input[idx]);
 
   __syncthreads();
 
-  if (__ockl_lane_u32() == 0)
-    output[idx / warpSize] = result[numWarp];
+  if (__ockl_lane_u32() == 0) output[idx / warpSize] = result[numWarp];
 }
 
-template <class T, template<typename> class Op>
-__global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input, unsigned long long mask)
-{
+template <class T, template <typename> class Op>
+__global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input,
+                             unsigned long long mask) {
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   T result;
 
@@ -146,18 +120,16 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
     else
       static_assert(std::is_void<T>::value, "Unsupported operator");
 
-    if (__ockl_activelane_u32() == 0)
-      output[idx / warpSize] = result;
+    if (__ockl_activelane_u32() == 0) output[idx / warpSize] = result;
   }
 }
 
-template <class T, template <typename> class Op>
-class AtomicBenchmark : public Benchmark<AtomicBenchmark<T, Op>> {
-public:
-  void operator()(T* output, const T* input, int numItems, unsigned long long mask)
-  {
-    dim3 blockDim = { kBlockDim };
-    dim3 gridDim = { static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x))) };
+template <class T, template <typename> class Op> class AtomicBenchmark
+    : public Benchmark<AtomicBenchmark<T, Op>> {
+ public:
+  void operator()(T* output, const T* input, int numItems, unsigned long long mask) {
+    dim3 blockDim = {kBlockDim};
+    dim3 gridDim = {static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x)))};
 
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, 0));
@@ -185,13 +157,12 @@ public:
   }
 };
 
-template <class T, template <typename> class Op>
-class ReduceSyncBenchmark : public Benchmark<ReduceSyncBenchmark<T, Op>> {
-public:
-  void operator()(T* output, T* input, int numItems, unsigned long long mask)
-  {
-    dim3 blockDim = { kBlockDim };
-    dim3 gridDim = { static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x))) };
+template <class T, template <typename> class Op> class ReduceSyncBenchmark
+    : public Benchmark<ReduceSyncBenchmark<T, Op>> {
+ public:
+  void operator()(T* output, T* input, int numItems, unsigned long long mask) {
+    dim3 blockDim = {kBlockDim};
+    dim3 gridDim = {static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x)))};
 
 
     TIMED_SECTION(kTimerTypeEvent) {
@@ -202,8 +173,7 @@ public:
 };
 
 template <class T, template <typename> class Op>
-void checkResults(T* d_atomicsResult, T* d_reduceResult, size_t numBytes, unsigned long long mask)
-{
+void checkResults(T* d_atomicsResult, T* d_reduceResult, size_t numBytes, unsigned long long mask) {
   using namespace Catch::Matchers;
   LinearAllocGuard<T> outputAtomic(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> outputReduce(LinearAllocs::malloc, numBytes);
@@ -229,47 +199,38 @@ void checkResults(T* d_atomicsResult, T* d_reduceResult, size_t numBytes, unsign
   }
 }
 
-template <class T, template <typename> class Op>
-struct IsLogicalOp {
+template <class T, template <typename> class Op> struct IsLogicalOp {
   static constexpr bool value = false;
 };
 
-template <class T>
-struct IsLogicalOp<T, std::logical_and> {
+template <class T> struct IsLogicalOp<T, std::logical_and> {
   static constexpr bool value = true;
 };
 
-template <class T>
-struct IsLogicalOp<T, std::logical_or> {
+template <class T> struct IsLogicalOp<T, std::logical_or> {
   static constexpr bool value = true;
 };
 
-template <class T>
-struct IsLogicalOp<T, XorOp> {
+template <class T> struct IsLogicalOp<T, XorOp> {
   static constexpr bool value = true;
 };
 
 // Neither long long or fp16 have atomic operations. In those cases
 // we only benchmark reduce sync operations, we cannot compare with native atomics
-template <class T>
-struct HasAtomicOps {
+template <class T> struct HasAtomicOps {
   static constexpr bool value = true;
 };
 
-template <>
-struct HasAtomicOps<half> {
+template <> struct HasAtomicOps<half> {
   static constexpr bool value = false;
 };
 
-template <>
-struct HasAtomicOps<long long> {
+template <> struct HasAtomicOps<long long> {
   static constexpr bool value = false;
 };
 
-template <class T, template <typename> class Op>
-struct ReduceBenchmark {
-  void Run()
-  {
+template <class T, template <typename> class Op> struct ReduceBenchmark {
+  void Run() {
     static constexpr int numMasks = 6;
     using distribution = typename DistributionType<T>::type;
     ReduceSyncBenchmark<T, Op> benchmarkReduce;
@@ -287,27 +248,27 @@ struct ReduceBenchmark {
     distribution dist;
     int halfWaveSize = wavefrontSize / 2;
     unsigned long long halfBitsOn = (1ul << (wavefrontSize / 2)) - 1;
-    unsigned long long fullMask = -1ul,
-                       halfHighBitsOn = halfBitsOn << halfWaveSize,
+    unsigned long long fullMask = -1ul, halfHighBitsOn = halfBitsOn << halfWaveSize,
                        high16BitsOn = halfBitsOn << (wavefrontSize - 16),
                        high8BitsOn = halfBitsOn << (wavefrontSize - 8),
-                       high4BitsOn = halfBitsOn << (wavefrontSize - 4),
-                       allButOne = -1 & ~1;
+                       high4BitsOn = halfBitsOn << (wavefrontSize - 4), allButOne = -1 & ~1;
     const char* typeStr = typeToString<T>();
     const char* opStr = opToString<T, Op>();
     std::map<std::string, unsigned long long> masks;
-    std::pair<std::string, unsigned long long> masksPairs[] = { { "full mask", fullMask },
-                                                                { "high order 32 bits on", halfHighBitsOn },
-                                                                { "high order 16 bits on", high16BitsOn },
-                                                                { "high order 8 bits on", high8BitsOn },
-                                                                { "high order 4 bits on", high4BitsOn },
-                                                                { "all but one", allButOne } };
+    std::pair<std::string, unsigned long long> masksPairs[] = {
+        {"full mask", fullMask},
+        {"high order 32 bits on", halfHighBitsOn},
+        {"high order 16 bits on", high16BitsOn},
+        {"high order 8 bits on", high8BitsOn},
+        {"high order 4 bits on", high4BitsOn},
+        {"all but one", allButOne}};
     int pos = 0, numMask = 0;
 
     for (auto& mask : masksPairs) {
       // don't use 'halfHighBitsOn' on warp size 32; it's the same as high16BitsOn
       if (wavefrontSize != 32 || mask.second != halfHighBitsOn) {
-        masks.emplace(std::to_string(numMask) + " - " + mask.first, wavefrontSize == 64? mask.second : mask.second & 0xFFFFFFFF);
+        masks.emplace(std::to_string(numMask) + " - " + mask.first,
+                      wavefrontSize == 64 ? mask.second : mask.second & 0xFFFFFFFF);
         numMask++;
       }
     }
@@ -315,8 +276,7 @@ struct ReduceBenchmark {
     // avoid generating values different than 1 or 0 for logical operators;
     // otherwise the atomic version of the kernels would produce different results as
     // atomicAnd/Or() are bitwise operations, not logical
-    if constexpr (IsLogicalOp<T, Op>::value)
-      dist = distribution(0, 1);
+    if constexpr (IsLogicalOp<T, Op>::value) dist = distribution(0, 1);
 
     for (int i = 0; i < numItems; i++) {
       input.ptr()[i] = dist(gen);
@@ -356,7 +316,8 @@ struct ReduceBenchmark {
       printf("Checking results...\n");
 
       for (const auto& mask : masks) {
-        checkResults<T, Op>(d_outputsAtomic[pos].ptr(), d_outputsReduce[pos].ptr(), outputNumBytes, mask.second);
+        checkResults<T, Op>(d_outputsAtomic[pos].ptr(), d_outputsReduce[pos].ptr(), outputNumBytes,
+                            mask.second);
         pos++;
       }
     }
@@ -370,31 +331,36 @@ TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Add", "", int, unsigned int, unsigne
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Min", "", int, unsigned int, unsigned long long, long long, float, half, double) {
+TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Min", "", int, unsigned int, unsigned long long,
+                   long long, float, half, double) {
   ReduceBenchmark<TestType, MinOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Max", "", int, unsigned int, unsigned long long, long long, float, half, double) {
+TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Max", "", int, unsigned int, unsigned long long,
+                   long long, float, half, double) {
   ReduceBenchmark<TestType, MaxOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_And", "", int, unsigned int, unsigned long long, long long) {
+TEMPLATE_TEST_CASE("Performance_Reduce_Sync_And", "", int, unsigned int, unsigned long long,
+                   long long) {
   ReduceBenchmark<TestType, std::logical_and> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Or", "", int, unsigned int, unsigned long long, long long) {
+TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Or", "", int, unsigned int, unsigned long long,
+                   long long) {
   ReduceBenchmark<TestType, std::logical_or> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Xor", "", int, unsigned int, unsigned long long, long long) {
+TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Xor", "", int, unsigned int, unsigned long long,
+                   long long) {
   ReduceBenchmark<TestType, XorOp> benchmark;
 
   benchmark.Run();

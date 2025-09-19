@@ -36,6 +36,10 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
+#if HT_LINUX
+#include <sys/resource.h>
+#endif
+
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()
 #else
@@ -43,6 +47,26 @@ THE SOFTWARE.
 #endif
 
 #define HIP_PRINT_STATUS(status) INFO(hipGetErrorName(status) << " at line: " << __LINE__);
+
+#define CHAR_BUF_SIZE 512
+
+#define CONSOLE_PRINT(fmt, ...)                                                                    \
+  do {                                                                                             \
+    std::printf(fmt "\n", ##__VA_ARGS__);                                                          \
+  } while (0)
+
+// DEBUG_PRINT: If ENABLE_DEBUG is defined, prints immediately to console.
+// Otherwise, uses Catch2 INFO() - debug messages will only appear if the test fails.
+#if defined(ENABLE_DEBUG)
+#define DEBUG_PRINT(fmt, ...) CONSOLE_PRINT("[DEBUG]: " fmt, ##__VA_ARGS__)
+#else
+#define DEBUG_PRINT(fmt, ...)                                                                      \
+  do {                                                                                             \
+    char buf[CHAR_BUF_SIZE];                                                                       \
+    std::snprintf(buf, CHAR_BUF_SIZE, "[INFO]: " fmt, ##__VA_ARGS__);                              \
+    INFO(buf);                                                                                     \
+  } while (0)
+#endif
 
 // Not thread-safe
 #define HIP_CHECK(error)                                                                           \
@@ -314,13 +338,12 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
-inline bool isPcieAtomicsSupported() {
-  int pcieAtomics = 1;
+inline bool isPcieAtomicSupported() {
+  int pcieAtomic = 1;
   int device;
   HIP_CHECK(hipGetDevice(&device));
-  HIPCHECK(hipDeviceGetAttribute(&pcieAtomics, hipDeviceAttributeHostNativeAtomicSupported,
-           device));
-  return pcieAtomics != 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, device));
+  return pcieAtomic;
 }
 
 inline bool isP2PSupported(int& d1, int& d2) {
@@ -529,12 +552,11 @@ class BlockingContext {
     return;                                                                                        \
   }
 
-// This must be called in host-device memory conherency tests
-#define CHECK_PCIE_ATOMICS_SUPPORT                                                                 \
-  if (!HipTest::isPcieAtomicsSupported()) {                                                        \
-    INFO("Pcie atomics is not support on the device. Skipped.");                                   \
+#define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \
+  if (!HipTest::isPcieAtomicSupported()) {                                                        \
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");                         \
     return;                                                                                        \
-  }
+  }   
 
 #define CHECK_P2P_SUPPORT                                                                          \
   int d1, d2;                                                                                      \
@@ -616,3 +638,29 @@ class BlockingContext {
     }                                                                                              \
     HIP_CHECK(hipStreamDestroy(stream));                                                           \
   }
+
+// Manage core dumps in specific tests which require it disabled (e.g., hipGetLastErrorOnAbort.cc)
+#if HT_LINUX
+#define DISABLE_CORE_DUMPS()                                                                       \
+  struct rlimit core_limit;                                                                        \
+  bool rlimit_saved = false;                                                                       \
+  if (getrlimit(RLIMIT_CORE, &core_limit) == 0) {                                                  \
+    if (core_limit.rlim_cur != 0) {                                                                \
+      struct rlimit new_limit;                                                                     \
+      new_limit.rlim_cur = 0;                                                                      \
+      new_limit.rlim_max = core_limit.rlim_max;                                                    \
+      if (setrlimit(RLIMIT_CORE, &new_limit) == 0) {                                               \
+        rlimit_saved = true;                                                                       \
+      }                                                                                            \
+    }                                                                                              \
+  }
+
+#define RESTORE_CORE_DUMPS()                                                                       \
+  if (rlimit_saved) {                                                                              \
+    setrlimit(RLIMIT_CORE, &core_limit);                                                           \
+    rlimit_saved = false;                                                                          \
+  }
+#else
+#define DISABLE_CORE_DUMPS()
+#define RESTORE_CORE_DUMPS()
+#endif

@@ -22,22 +22,21 @@ THE SOFTWARE.
 #include <vector>
 #include <hip_test_common.hh>
 
-static constexpr auto kernel_src {
-  R"_KERN_EMBED_(
+static constexpr auto kernel_src{
+    R"_KERN_EMBED_(
     extern "C" __global__ void kernel_func(float* f)
     {
       f[0] = 1.0;
     }
-  )_KERN_EMBED_"
-};
+  )_KERN_EMBED_"};
 
 
 TEST_CASE("Unit_hipStreamCaptureRtc") {
-  hipStream_t    stream     = nullptr;
-  hipGraph_t     graph      = nullptr;
+  hipStream_t stream = nullptr;
+  hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
 
-  float  data_h = 0.0;
+  float data_h = 0.0;
   float* data_d = nullptr;
 
   // Init data
@@ -46,8 +45,9 @@ TEST_CASE("Unit_hipStreamCaptureRtc") {
 
   // Compile kernel
   std::vector<char> code;
-  hiprtcProgram     prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, kernel_src, "hipStreamCaptureRtc.cu", 0, nullptr, nullptr));
+  hiprtcProgram prog;
+  HIPRTC_CHECK(
+      hiprtcCreateProgram(&prog, kernel_src, "hipStreamCaptureRtc.cu", 0, nullptr, nullptr));
 
   hipDeviceProp_t props;
   int device = 0;
@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipStreamCaptureRtc") {
   std::string sarg = std::string("--fmad=false");
 #endif
 
-  std::vector<const char*> options = { sarg.c_str() };
+  std::vector<const char*> options = {sarg.c_str()};
 
   auto compileResult = hiprtcCompileProgram(prog, options.size(), options.data());
   if (compileResult != HIPRTC_SUCCESS) {
@@ -83,7 +83,7 @@ TEST_CASE("Unit_hipStreamCaptureRtc") {
   HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 
-  hipModule_t   module = nullptr;
+  hipModule_t module = nullptr;
   hipFunction_t kernel = nullptr;
 #if HT_NVIDIA
   HIPCHECK(hipInit(0));
@@ -100,9 +100,9 @@ TEST_CASE("Unit_hipStreamCaptureRtc") {
   HIPCHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 
   // Launch kernel
-  auto  size = sizeof(float*);
-  void *config[] = { HIP_LAUNCH_PARAM_BUFFER_POINTER, &data_d,
-      HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END };
+  auto size = sizeof(float*);
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &data_d, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
   HIPCHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, config));
   HIPCHECK(hipStreamEndCapture(stream, &graph));
 

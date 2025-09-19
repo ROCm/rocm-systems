@@ -66,128 +66,128 @@ struct KernelParameterDescriptor {
     HiddenQueuePtr = 29,
     HiddenDynamicLdsSize = 30,
     HiddenLast = 31,
-    MaxSize    = 32,
+    MaxSize = 32,
   };
   clk_value_type_t type_;  //!< The parameter's type
   size_t offset_;          //!< Its offset in the parameter's stack
   size_t size_;            //!< Its size in bytes
   union InfoData {
     struct {
-      uint32_t oclObject_ : 6;    //!< OCL object type
-      uint32_t readOnly_ : 1;     //!< OCL object is read only, applied to memory only
-      uint32_t rawPointer_ : 1;   //!< Arguments have a raw GPU VA
-      uint32_t defined_ : 1;      //!< The argument was defined by the app
-      uint32_t hidden_ : 1;       //!< It's a hidden argument
-      uint32_t shared_ : 1;       //!< Dynamic shared memory
-      uint32_t isReadOnlyByCompiler : 1; //!< Compiler determine it is read only
-      uint32_t arrayIndex_ : 20;  //!< Index in the objects array or LDS alignment
+      uint32_t oclObject_ : 6;            //!< OCL object type
+      uint32_t readOnly_ : 1;             //!< OCL object is read only, applied to memory only
+      uint32_t rawPointer_ : 1;           //!< Arguments have a raw GPU VA
+      uint32_t defined_ : 1;              //!< The argument was defined by the app
+      uint32_t hidden_ : 1;               //!< It's a hidden argument
+      uint32_t shared_ : 1;               //!< Dynamic shared memory
+      uint32_t isReadOnlyByCompiler : 1;  //!< Compiler determine it is read only
+      uint32_t arrayIndex_ : 20;          //!< Index in the objects array or LDS alignment
     };
     uint32_t allValues_;
     InfoData() : allValues_(0) {}
   } info_;
 
   cl_kernel_arg_address_qualifier addressQualifier_ =
-      CL_KERNEL_ARG_ADDRESS_PRIVATE;                  //!< Argument's address qualifier
+      CL_KERNEL_ARG_ADDRESS_PRIVATE;  //!< Argument's address qualifier
   cl_kernel_arg_access_qualifier accessQualifier_ =
-      CL_KERNEL_ARG_ACCESS_NONE;                      //!< Argument's access qualifier
-  cl_kernel_arg_type_qualifier typeQualifier_;        //!< Argument's type qualifier
+      CL_KERNEL_ARG_ACCESS_NONE;                //!< Argument's access qualifier
+  cl_kernel_arg_type_qualifier typeQualifier_;  //!< Argument's type qualifier
 
   std::string name_;      //!< The parameter's name in the source
   std::string typeName_;  //!< Argument's type name
   uint32_t alignment_;    //!< Argument's alignment
 };
-}
+}  // namespace amd
 
 #if defined(USE_COMGR_LIBRARY)
 //! Runtime handle structure for device enqueue
 struct RuntimeHandle {
-  uint64_t kernel_handle;             //!< Pointer to amd_kernel_code_s or kernel_descriptor_t
-  uint32_t private_segment_size;      //!< From PRIVATE_SEGMENT_FIXED_SIZE
-  uint32_t group_segment_size;        //!< From GROUP_SEGMENT_FIXED_SIZE
+  uint64_t kernel_handle;         //!< Pointer to amd_kernel_code_s or kernel_descriptor_t
+  uint32_t private_segment_size;  //!< From PRIVATE_SEGMENT_FIXED_SIZE
+  uint32_t group_segment_size;    //!< From GROUP_SEGMENT_FIXED_SIZE
 };
 
 #include "amd_comgr/amd_comgr.h"
 
 //  for Code Object V3
 enum class ArgField : uint8_t {
-  Name          = 0,
-  TypeName      = 1,
-  Size          = 2,
-  Align         = 3,
-  ValueKind     = 4,
-  PointeeAlign  = 5,
+  Name = 0,
+  TypeName = 1,
+  Size = 2,
+  Align = 3,
+  ValueKind = 4,
+  PointeeAlign = 5,
   AddrSpaceQual = 6,
-  AccQual       = 7,
+  AccQual = 7,
   ActualAccQual = 8,
-  IsConst       = 9,
-  IsRestrict    = 10,
-  IsVolatile    = 11,
-  IsPipe        = 12,
-  Offset        = 13,
-  MaxSize       = 14
+  IsConst = 9,
+  IsRestrict = 10,
+  IsVolatile = 11,
+  IsPipe = 12,
+  Offset = 13,
+  MaxSize = 14
 };
 
 enum class AttrField : uint8_t {
-  ReqdWorkGroupSize  = 0,
+  ReqdWorkGroupSize = 0,
   WorkGroupSizeHint = 1,
-  VecTypeHint       = 2,
-  RuntimeHandle     = 3,
-  MaxSize           = 4,
+  VecTypeHint = 2,
+  RuntimeHandle = 3,
+  MaxSize = 4,
 };
 
 enum class CodePropField : uint8_t {
-  KernargSegmentSize      = 0,
-  GroupSegmentFixedSize   = 1,
+  KernargSegmentSize = 0,
+  GroupSegmentFixedSize = 1,
   PrivateSegmentFixedSize = 2,
-  KernargSegmentAlign     = 3,
-  WavefrontSize           = 4,
-  NumSGPRs                = 5,
-  NumVGPRs                = 6,
-  MaxFlatWorkGroupSize    = 7,
-  IsDynamicCallStack      = 8,
-  IsXNACKEnabled          = 9,
-  NumSpilledSGPRs         = 10,
-  NumSpilledVGPRs         = 11,
-  MaxSize                 = 12,
+  KernargSegmentAlign = 3,
+  WavefrontSize = 4,
+  NumSGPRs = 5,
+  NumVGPRs = 6,
+  MaxFlatWorkGroupSize = 7,
+  IsDynamicCallStack = 8,
+  IsXNACKEnabled = 9,
+  NumSpilledSGPRs = 10,
+  NumSpilledVGPRs = 11,
+  MaxSize = 12,
 };
 
 //  for Code Object V3
 enum class KernelField : uint8_t {
-  SymbolName              = 0,
-  ReqdWorkGroupSize       = 1,
-  WorkGroupSizeHint       = 2,
-  VecTypeHint             = 3,
-  DeviceEnqueueSymbol     = 4,
-  KernargSegmentSize      = 5,
-  GroupSegmentFixedSize   = 6,
+  SymbolName = 0,
+  ReqdWorkGroupSize = 1,
+  WorkGroupSizeHint = 2,
+  VecTypeHint = 3,
+  DeviceEnqueueSymbol = 4,
+  KernargSegmentSize = 5,
+  GroupSegmentFixedSize = 6,
   PrivateSegmentFixedSize = 7,
-  KernargSegmentAlign     = 8,
-  WavefrontSize           = 9,
-  NumSGPRs                = 10,
-  NumVGPRs                = 11,
-  MaxFlatWorkGroupSize    = 12,
-  NumSpilledSGPRs         = 13,
-  NumSpilledVGPRs         = 14,
-  Kind                    = 15,
-  WgpMode                 = 16,
-  UniformWrokGroupSize    = 17,
-  MaxSize                 = 18
+  KernargSegmentAlign = 8,
+  WavefrontSize = 9,
+  NumSGPRs = 10,
+  NumVGPRs = 11,
+  MaxFlatWorkGroupSize = 12,
+  NumSpilledSGPRs = 13,
+  NumSpilledVGPRs = 14,
+  Kind = 15,
+  WgpMode = 16,
+  UniformWrokGroupSize = 17,
+  MaxSize = 18
 };
 
 #endif  // defined(USE_COMGR_LIBRARY)
 
 namespace amd {
-  namespace hsa {
-    namespace loader {
-      class Symbol;
-    }  // loader
-    namespace code {
-      namespace Kernel {
-        class Metadata;
-      }  // Kernel
-    }  // code
-  }  // hsa
-}  // amd
+namespace hsa {
+namespace loader {
+class Symbol;
+}  // namespace loader
+namespace code {
+namespace Kernel {
+class Metadata;
+}  // namespace Kernel
+}  // namespace code
+}  // namespace hsa
+}  // namespace amd
 
 namespace amd::device {
 
@@ -206,33 +206,33 @@ class Kernel : public amd::HeapObject {
 
   //! \struct The device kernel workgroup info structure
   struct WorkGroupInfo : public amd::EmbeddedObject {
-    size_t size_;                     //!< kernel workgroup size
-    size_t compileSize_[3];           //!< kernel compiled workgroup size
-    uint64_t localMemSize_;           //!< amount of used local memory
-    size_t preferredSizeMultiple_;    //!< preferred multiple for launch
-    uint64_t privateMemSize_;         //!< amount of used private memory
-    size_t scratchRegs_;              //!< amount of used scratch registers
-    size_t wavefrontPerSIMD_;         //!< number of wavefronts per SIMD
-    size_t wavefrontSize_;            //!< number of threads per wavefront
-    size_t availableGPRs_;            //!< GPRs available to the program
-    size_t usedGPRs_;                 //!< GPRs used by the program
-    size_t availableSGPRs_;           //!< SGPRs available to the program
-    size_t usedSGPRs_;                //!< SGPRs used by the program
-    size_t availableVGPRs_;           //!< VGPRs addressable to the program per thread in DWORDs
-    size_t usedVGPRs_;                //!< VGPRs used by the program per thread in DWORDs
-    size_t availableLDSSize_;         //!< available LDS size
-    size_t usedLDSSize_;              //!< used LDS size
-    size_t availableStackSize_;       //!< available stack size
-    size_t usedStackSize_;            //!< used stack size
-    size_t compileSizeHint_[3];       //!< kernel compiled workgroup size hint
-    size_t wavesPerSimdHint_;         //!< waves per simd hit
-    size_t constMemSize_;             //!< size of user-allocated constant memory
+    size_t size_;                   //!< kernel workgroup size
+    size_t compileSize_[3];         //!< kernel compiled workgroup size
+    uint64_t localMemSize_;         //!< amount of used local memory
+    size_t preferredSizeMultiple_;  //!< preferred multiple for launch
+    uint64_t privateMemSize_;       //!< amount of used private memory
+    size_t scratchRegs_;            //!< amount of used scratch registers
+    size_t wavefrontPerSIMD_;       //!< number of wavefronts per SIMD
+    size_t wavefrontSize_;          //!< number of threads per wavefront
+    size_t availableGPRs_;          //!< GPRs available to the program
+    size_t usedGPRs_;               //!< GPRs used by the program
+    size_t availableSGPRs_;         //!< SGPRs available to the program
+    size_t usedSGPRs_;              //!< SGPRs used by the program
+    size_t availableVGPRs_;         //!< VGPRs addressable to the program per thread in DWORDs
+    size_t usedVGPRs_;              //!< VGPRs used by the program per thread in DWORDs
+    size_t availableLDSSize_;       //!< available LDS size
+    size_t usedLDSSize_;            //!< used LDS size
+    size_t availableStackSize_;     //!< available stack size
+    size_t usedStackSize_;          //!< used stack size
+    size_t compileSizeHint_[3];     //!< kernel compiled workgroup size hint
+    size_t wavesPerSimdHint_;       //!< waves per simd hit
+    size_t constMemSize_;           //!< size of user-allocated constant memory
     size_t maxDynamicSharedSizeBytes_;
     std::string compileVecTypeHint_;  //!< kernel compiled vector type hint
 
-    int maxOccupancyPerCu_;           //!< Max occupancy per compute unit in threads
-    bool isWGPMode_;                  //!< kernel compiled in WGP/cumode
-    bool uniformWorkGroupSize_;       //!< uniform work group size option
+    int maxOccupancyPerCu_;      //!< Max occupancy per compute unit in threads
+    bool isWGPMode_;             //!< kernel compiled in WGP/cumode
+    bool uniformWorkGroupSize_;  //!< uniform work group size option
   };
 
   //! Default constructor
@@ -253,9 +253,7 @@ class Kernel : public amd::HeapObject {
   const std::string& name() const { return name_; }
 
   //! Initializes the kernel parameters for the abstraction layer
-  bool createSignature(
-    const parameters_t& params, uint32_t numParameters,
-    uint32_t version);
+  bool createSignature(const parameters_t& params, uint32_t numParameters, uint32_t version);
 
   void setUniformWorkGroupSize(bool u) { workGroupInfo_.uniformWorkGroupSize_ = u; }
 
@@ -323,10 +321,9 @@ class Kernel : public amd::HeapObject {
   const std::vector<PrintfInfo>& printfInfo() const { return printf_; }
 
   //! Finds local workgroup size
-  void FindLocalWorkSize(
-    size_t workDim,                   //!< Work dimension
-    const amd::NDRange& gblWorkSize,  //!< Global work size
-    amd::NDRange& lclWorkSize         //!< Calculated local work size
+  void FindLocalWorkSize(size_t workDim,                   //!< Work dimension
+                         const amd::NDRange& gblWorkSize,  //!< Global work size
+                         amd::NDRange& lclWorkSize         //!< Calculated local work size
   ) const;
 
   const uint64_t KernelCodeHandle() const { return kernelCodeHandle_; }
@@ -351,9 +348,7 @@ class Kernel : public amd::HeapObject {
     kind_ = (kind == "init") ? Init : ((kind == "fini") ? Fini : Normal);
   }
 
-  void SetWGPMode(bool wgpMode) {
-    workGroupInfo_.isWGPMode_ = wgpMode;
-  }
+  void SetWGPMode(bool wgpMode) { workGroupInfo_.isWGPMode_ = wgpMode; }
 
   bool isInitKernel() const { return kind_ == Init; }
 
@@ -367,9 +362,6 @@ class Kernel : public amd::HeapObject {
   //! Retrieve kernel attribute and code properties metadata
   bool GetAttrCodePropMetadata();
 
-  //! Retrieve the available SGPRs and VGPRs
-  bool SetAvailableSgprVgpr();
-
   //! Retrieve the printf string metadata
   bool GetPrintfStr(std::vector<std::string>* printfStr);
 
@@ -382,40 +374,38 @@ class Kernel : public amd::HeapObject {
   void InitPrintf(const std::vector<std::string>& printfInfoStrings);
 #endif
 #if defined(WITH_COMPILER_LIB)
-  void InitParameters(
-    const aclArgData* aclArg,   //!< List of ACL arguments
-    uint32_t argBufferSize
-  );
+  void InitParameters(const aclArgData* aclArg,  //!< List of ACL arguments
+                      uint32_t argBufferSize);
   //! Initializes HSAIL Printf metadata and info
   void InitPrintf(const aclPrintfFmt* aclPrintf);
 #endif
   //! Returns program associated with this kernel
   const Program& prog() const { return prog_; }
 
-  const amd::Device& dev_;          //!< GPU device object
-  std::string name_;                //!< kernel name
-  const Program& prog_;             //!< Reference to the parent program
-  std::string symbolName_;          //!< kernel symbol name
-  WorkGroupInfo workGroupInfo_;     //!< device kernel info structure
-  amd::KernelSignature* signature_; //!< kernel signature
-  std::string buildLog_;            //!< build log
-  std::vector<PrintfInfo> printf_;  //!< Format strings for GPU printf support
-  std::string runtimeHandle_;       //!< Runtime handle for context loader
+  const amd::Device& dev_;           //!< GPU device object
+  std::string name_;                 //!< kernel name
+  const Program& prog_;              //!< Reference to the parent program
+  std::string symbolName_;           //!< kernel symbol name
+  WorkGroupInfo workGroupInfo_;      //!< device kernel info structure
+  amd::KernelSignature* signature_;  //!< kernel signature
+  std::string buildLog_;             //!< build log
+  std::vector<PrintfInfo> printf_;   //!< Format strings for GPU printf support
+  std::string runtimeHandle_;        //!< Runtime handle for context loader
 
-  uint64_t kernelCodeHandle_ = 0;   //!< Kernel code handle (aka amd_kernel_code_t)
+  uint64_t kernelCodeHandle_ = 0;  //!< Kernel code handle (aka amd_kernel_code_t)
   uint32_t workgroupGroupSegmentByteSize_ = 0;
   uint32_t workitemPrivateSegmentByteSize_ = 0;
-  uint32_t kernargSegmentByteSize_ = 0;   //!< Size of kernel argument buffer
+  uint32_t kernargSegmentByteSize_ = 0;  //!< Size of kernel argument buffer
   uint32_t kernargSegmentAlignment_ = 0;
   bool kernelHasDynamicCallStack_ = 0;
 
   union Flags {
     struct {
-      uint imageEna_ : 1;           //!< Kernel uses images
-      uint imageWriteEna_ : 1;      //!< Kernel uses image writes
-      uint dynamicParallelism_ : 1; //!< Dynamic parallelism enabled
-      uint internalKernel_ : 1;     //!< True: internal kernel
-      uint hsa_ : 1;                //!< HSA kernel
+      uint imageEna_ : 1;            //!< Kernel uses images
+      uint imageWriteEna_ : 1;       //!< Kernel uses image writes
+      uint dynamicParallelism_ : 1;  //!< Dynamic parallelism enabled
+      uint internalKernel_ : 1;      //!< True: internal kernel
+      uint hsa_ : 1;                 //!< HSA kernel
     };
     uint value_;
     Flags() : value_(0) {}
@@ -431,16 +421,12 @@ class Kernel : public amd::HeapObject {
 
   std::unordered_map<size_t, size_t> patchReferences_;  //!< Patch table for references
 
-  enum KernelKind{
-    Normal = 0,
-    Init   = 1,
-    Fini   = 2
-  };
+  enum KernelKind { Normal = 0, Init = 1, Fini = 2 };
 
   KernelKind kind_{Normal};  //!< Kernel kind, is normal unless specified otherwise
 };
 
 #if defined(USE_COMGR_LIBRARY)
 amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str);
-#endif // defined(USE_COMGR_LIBRARY)
-} // namespace amd::device
+#endif  // defined(USE_COMGR_LIBRARY)
+}  // namespace amd::device

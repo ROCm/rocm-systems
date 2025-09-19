@@ -71,19 +71,19 @@ int roundUp( int numToRound, int multiple)
 
 // memory operations
 const LARGE_INT numKernelTypes = 2;
-static const char *kernelType[numKernelTypes] = {"MatMul", "Madds"};
+static const char* kernelType[numKernelTypes] = {"MatMul", "Madds"};
 
 // source/read memory locations
 const LARGE_INT numMemPaths = 2;
-static const char *memPath[numMemPaths] = {"Host", "Device"};
+static const char* memPath[numMemPaths] = {"Host", "Device"};
 
 // buffer size
 const LARGE_INT numNumElements = 12;  // 15;
 static const LARGE_INT numElements[numNumElements] = {
     4,       16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304,
     16777216  //,
-    // 67108864,
-    // 268435456
+              // 67108864,
+              // 268435456
 };
 
 // flops/byte
@@ -250,9 +250,8 @@ void OCLPerfKernelThroughput::genShaderMadds() {
   EXIT("genShaderMadds");
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 /*******************************************************************************
  * Constructor
@@ -264,26 +263,25 @@ OCLPerfKernelThroughput::OCLPerfKernelThroughput() {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   context_ = 0;
 
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
     // Get last for default
     platform = platforms[numPlatforms - 1];
     for (unsigned i = 0; i < numPlatforms; ++i) {
       char pbuf[100];
-      error_ = _wrapper->clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR,
-                                           sizeof(pbuf), pbuf, NULL);
+      error_ =
+          _wrapper->clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf, NULL);
       num_devices = 0;
       /* Get the number of requested devices */
-      error_ =
-          _wrapper->clGetDeviceIDs(platforms[i], type_, 0, NULL, &num_devices);
+      error_ = _wrapper->clGetDeviceIDs(platforms[i], type_, 0, NULL, &num_devices);
       // Runtime returns an error when no GPU devices are present
       // instead of just returning 0 devices
       // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -302,12 +300,11 @@ OCLPerfKernelThroughput::OCLPerfKernelThroughput() {
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
@@ -315,11 +312,9 @@ OCLPerfKernelThroughput::OCLPerfKernelThroughput() {
 
   // get gpu speed
   error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_CLOCK_FREQUENCY,
-                                     sizeof(maxClockFrequency_),
-                                     &maxClockFrequency_, NULL);
+                                     sizeof(maxClockFrequency_), &maxClockFrequency_, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS,
-                                     sizeof(maxComputeUnits_),
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(maxComputeUnits_),
                                      &maxComputeUnits_, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (maxComputeUnits_ > 8) {
@@ -331,14 +326,12 @@ OCLPerfKernelThroughput::OCLPerfKernelThroughput() {
   // printf("Subtests: %i\n", _numSubTests);
 
   // create context
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   char charbuf[1024];
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024,
-                                     charbuf, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024, charbuf, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   if (context_) {
@@ -347,8 +340,7 @@ OCLPerfKernelThroughput::OCLPerfKernelThroughput() {
   }
 
   cl_uint tmp;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS,
-                                     sizeof(tmp), &tmp, NULL);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(tmp), &tmp, NULL);
   CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   // printf("NumComputeUnits: %u\n", tmp);
   maxComputeUnits_ = static_cast<LARGE_INT>(tmp);
@@ -361,14 +353,13 @@ OCLPerfKernelThroughput::~OCLPerfKernelThroughput() {}
 /*******************************************************************************
  * Open - initializes test, compile GPU kernel
  ******************************************************************************/
-void OCLPerfKernelThroughput::open(unsigned int test, char *units,
-                                   double &conversion, unsigned int deviceId) {
+void OCLPerfKernelThroughput::open(unsigned int test, char* units, double& conversion,
+                                   unsigned int deviceId) {
   ENTER("open");
   /***********************************************************
    * select subtest
    **********************************************************/
-  int testIdx =
-      test + numKernelTypes * numMemPaths * numNumElements * numWorkSizes;
+  int testIdx = test + numKernelTypes * numMemPaths * numNumElements * numWorkSizes;
   memPathIdx_ = testIdx % numMemPaths;
   testIdx /= numMemPaths;
   numElementsIdx_ = testIdx % numNumElements;
@@ -390,8 +381,8 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
       genShaderMatrixMultiply();
       work_dim_ = 2;
       global_work_size_ = new size_t[work_dim_];
-      global_work_size_[0] = ((matrixDim1_ - 1) / 16 + 1) *
-                             16;  // matrixDim1_ < 16 ? 16 : matrixDim1_;
+      global_work_size_[0] =
+          ((matrixDim1_ - 1) / 16 + 1) * 16;  // matrixDim1_ < 16 ? 16 : matrixDim1_;
       global_work_size_[1] = global_work_size_[0];
       local_work_size_ = new size_t[work_dim_];
       local_work_size_[0] = 16;
@@ -406,12 +397,9 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
               matrixDim2_
               );
       */
-      input1BufferSize_ =
-          static_cast<size_t>(matrixDim1_ * matrixDim2_ * sizeof(float));
-      input2BufferSize_ =
-          static_cast<size_t>(matrixDim2_ * matrixDim1_ * sizeof(float));
-      output1BufferSize_ =
-          static_cast<size_t>(matrixDim1_ * matrixDim1_ * sizeof(float));
+      input1BufferSize_ = static_cast<size_t>(matrixDim1_ * matrixDim2_ * sizeof(float));
+      input2BufferSize_ = static_cast<size_t>(matrixDim2_ * matrixDim1_ * sizeof(float));
+      output1BufferSize_ = static_cast<size_t>(matrixDim1_ * matrixDim1_ * sizeof(float));
       _reqDataSize = (1.0 * matrixDim1_ * matrixDim2_ * sizeof(float)) +
                      (1.0 * matrixDim2_ * matrixDim1_ * sizeof(float)) +
                      (1.0 * matrixDim1_ * matrixDim1_ * sizeof(float));
@@ -420,18 +408,15 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
       flopsPerByte_ = (int)workSize[workSizeIdx_];  // for kernelType == 0
       genShaderMadds();
       numWorkGroupsPerComputeUnit_ = 32;  // TODO
-      numThreads_ =
-          numWorkGroupsPerComputeUnit_ * maxComputeUnits_ * WORK_GROUP_SIZE;
+      numThreads_ = numWorkGroupsPerComputeUnit_ * maxComputeUnits_ * WORK_GROUP_SIZE;
       work_dim_ = 1;
       global_work_size_ = new size_t[work_dim_];
       local_work_size_ = new size_t[work_dim_];
       global_work_size_[0] = numThreads_;
       local_work_size_[0] = WORK_GROUP_SIZE;
-      input1BufferSize_ =
-          static_cast<size_t>(numElements[numElementsIdx_] * sizeof(float4));
+      input1BufferSize_ = static_cast<size_t>(numElements[numElementsIdx_] * sizeof(float4));
       input2BufferSize_ = 0;
-      output1BufferSize_ =
-          static_cast<size_t>(numElements[numElementsIdx_] * sizeof(float4));
+      output1BufferSize_ = static_cast<size_t>(numElements[numElementsIdx_] * sizeof(float4));
       _reqDataSize = 2.0 * numElements[numElementsIdx_] * sizeof(float4);
       break;
   }
@@ -450,7 +435,7 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0;
@@ -469,19 +454,17 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present
     // instead of just returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -493,33 +476,28 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /*
    * Get the requested device
    */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   device = devices[0];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
-  cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device,
-                                              CL_QUEUE_PROFILING_ENABLE, NULL);
+  cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, CL_QUEUE_PROFILING_ENABLE, NULL);
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
   // Global memory size
   cl_ulong _maxMemoryAllocationSize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE,
-                                     sizeof(cl_ulong),
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong),
                                      &_maxMemoryAllocationSize, NULL);
-  CHECK_RESULT(error_ != CL_SUCCESS,
-               "clGetDeviceIDs(CL_DEVICE_GLOBAL_MEM_SIZE) failed");
+  CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs(CL_DEVICE_GLOBAL_MEM_SIZE) failed");
 #if 0
     printf("Buffer Sizes: %i %i %i = %f\n",
             input1BufferSize_,
@@ -534,21 +512,18 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
   }
 
   // create kernel
-  char *tmp = (char *)shader_.c_str();
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&tmp, NULL, &error_);
+  char* tmp = (char*)shader_.c_str();
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
   std::string args;
   args.clear();
-  error_ =
-      _wrapper->clBuildProgram(program_, 1, &device, args.c_str(), NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &device, args.c_str(), NULL, NULL);
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
     CHECK_RESULT(0, "clBuildProgram failed");
   }
@@ -568,32 +543,32 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
       // allocate "device" memory
       inputBufferFlags = CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR;
       outputBufferFlags = CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR;
-      input1Buffer_ = _wrapper->clCreateBuffer(
-          context_, inputBufferFlags, input1BufferSize_, NULL, &error_);
+      input1Buffer_ =
+          _wrapper->clCreateBuffer(context_, inputBufferFlags, input1BufferSize_, NULL, &error_);
       CHECK_RESULT(input1Buffer_ == 0, "clCreateBuffer Input failed");
       if (input1Buffer_ == 0) printf("Error: %i\n", error_);
       if (input2BufferSize_) {
-        input2Buffer_ = _wrapper->clCreateBuffer(
-            context_, inputBufferFlags, input2BufferSize_, NULL, &error_);
+        input2Buffer_ =
+            _wrapper->clCreateBuffer(context_, inputBufferFlags, input2BufferSize_, NULL, &error_);
         CHECK_RESULT(input2Buffer_ == 0, "clCreateBuffer Input failed");
       }
-      output1Buffer_ = _wrapper->clCreateBuffer(
-          context_, outputBufferFlags, output1BufferSize_, NULL, &error_);
+      output1Buffer_ =
+          _wrapper->clCreateBuffer(context_, outputBufferFlags, output1BufferSize_, NULL, &error_);
       CHECK_RESULT(output1Buffer_ == 0, "clCreateBuffer Input failed");
       if (output1Buffer_ == 0) printf("Error: %i\n", error_);
 
       // map host memory
-      input1Ptr_ = (float *)_wrapper->clEnqueueMapBuffer(
-          cmd_queue_, input1Buffer_, true, CL_MAP_WRITE, 0, input1BufferSize_,
-          0, NULL, NULL, &error_);
+      input1Ptr_ =
+          (float*)_wrapper->clEnqueueMapBuffer(cmd_queue_, input1Buffer_, true, CL_MAP_WRITE, 0,
+                                               input1BufferSize_, 0, NULL, NULL, &error_);
       if (input2BufferSize_) {
-        input2Ptr_ = (float *)_wrapper->clEnqueueMapBuffer(
-            cmd_queue_, input2Buffer_, true, CL_MAP_WRITE, 0, input2BufferSize_,
-            0, NULL, NULL, &error_);
+        input2Ptr_ =
+            (float*)_wrapper->clEnqueueMapBuffer(cmd_queue_, input2Buffer_, true, CL_MAP_WRITE, 0,
+                                                 input2BufferSize_, 0, NULL, NULL, &error_);
       }
-      output1Ptr_ = (float *)_wrapper->clEnqueueMapBuffer(
-          cmd_queue_, output1Buffer_, true, CL_MAP_READ, 0, output1BufferSize_,
-          0, NULL, NULL, &error_);
+      output1Ptr_ =
+          (float*)_wrapper->clEnqueueMapBuffer(cmd_queue_, output1Buffer_, true, CL_MAP_READ, 0,
+                                               output1BufferSize_, 0, NULL, NULL, &error_);
       _wrapper->clFinish(cmd_queue_);
       break;
 
@@ -602,16 +577,16 @@ void OCLPerfKernelThroughput::open(unsigned int test, char *units,
       // allocate device memory
       inputBufferFlags = CL_MEM_READ_WRITE;
       outputBufferFlags = CL_MEM_READ_WRITE;
-      input1Buffer_ = _wrapper->clCreateBuffer(
-          context_, inputBufferFlags, input1BufferSize_, NULL, &error_);
+      input1Buffer_ =
+          _wrapper->clCreateBuffer(context_, inputBufferFlags, input1BufferSize_, NULL, &error_);
       CHECK_RESULT(input1Buffer_ == 0, "clCreateBuffer Input failed");
       if (input2BufferSize_) {
-        input2Buffer_ = _wrapper->clCreateBuffer(
-            context_, inputBufferFlags, input2BufferSize_, NULL, &error_);
+        input2Buffer_ =
+            _wrapper->clCreateBuffer(context_, inputBufferFlags, input2BufferSize_, NULL, &error_);
         CHECK_RESULT(input2Buffer_ == 0, "clCreateBuffer Input failed");
       }
-      output1Buffer_ = _wrapper->clCreateBuffer(
-          context_, outputBufferFlags, output1BufferSize_, NULL, &error_);
+      output1Buffer_ =
+          _wrapper->clCreateBuffer(context_, outputBufferFlags, output1BufferSize_, NULL, &error_);
       CHECK_RESULT(output1Buffer_ == 0, "clCreateBuffer Input failed");
       // printf("\tDone Allocating Device Memory\n");
 
@@ -682,22 +657,19 @@ void OCLPerfKernelThroughput::run(void) {
 #if 1
     switch (kernelTypeIdx_) {
       case 0:  // Matrix Multiply
-        error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(output1Buffer_),
-                                          (void *)&output1Buffer_);
+        error_ =
+            _wrapper->clSetKernelArg(kernel_, 0, sizeof(output1Buffer_), (void*)&output1Buffer_);
         CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
-        error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(input1Buffer_),
-                                          (void *)&input1Buffer_);
+        error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(input1Buffer_), (void*)&input1Buffer_);
         CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
-        error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(input2Buffer_),
-                                          (void *)&input2Buffer_);
+        error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(input2Buffer_), (void*)&input2Buffer_);
         CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
         break;
       case 1:  // Flops/Byte
-        error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(input1Buffer_),
-                                          (void *)&input1Buffer_);
+        error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(input1Buffer_), (void*)&input1Buffer_);
         CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
-        error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(output1Buffer_),
-                                          (void *)&output1Buffer_);
+        error_ =
+            _wrapper->clSetKernelArg(kernel_, 1, sizeof(output1Buffer_), (void*)&output1Buffer_);
         CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
         break;
     }
@@ -722,14 +694,14 @@ void OCLPerfKernelThroughput::run(void) {
       flopCount = (2.0 * matrixDim1_ * matrixDim1_ * matrixDim2_);
       // printf("FlopCount = 2*%i*%i*%i=%f\n",
       // matrixDim1_,matrixDim1_,matrixDim2_,flopCount);
-      bandwidth_ = (float)(1.f * _reqDataSize / 1024.f / 1024.f / 1024.f) *
-                   1000000.f / avgKernelTime_;  // GB/s
+      bandwidth_ = (float)(1.f * _reqDataSize / 1024.f / 1024.f / 1024.f) * 1000000.f /
+                   avgKernelTime_;  // GB/s
       gflops_ = (float)(1000000.f * flopCount / avgKernelTime_ / 1000000000.0);
       break;
     case 1:  // Madds
       flopCount = _reqDataSize * flopsPerByte_;
-      bandwidth_ = (float)(1.f * _reqDataSize / 1024.f / 1024.f / 1024.f) *
-                   1000000.f / avgKernelTime_;  // GB/s
+      bandwidth_ = (float)(1.f * _reqDataSize / 1024.f / 1024.f / 1024.f) * 1000000.f /
+                   avgKernelTime_;  // GB/s
       gflops_ = bandwidth_ * flopsPerByte_;
       break;
   }
@@ -742,16 +714,15 @@ void OCLPerfKernelThroughput::run(void) {
   // here print out details
   char buf[512];
   int bytesWritten;
-  bytesWritten = SNPRINTF(
-      buf, sizeof(buf),
-      "Kernel:%7s; "
-      "Work:%4i; "
-      "Buff:%11.0f; "
-      "Path:%7s; "
-      "%10.5e GB/s; "
-      "%10.5e GFlop/s; ",
-      kernelType[kernelTypeIdx_], static_cast<int>(workSize[workSizeIdx_]),
-      _reqDataSize, memPath[memPathIdx_], bandwidth_, gflops_);
+  bytesWritten = SNPRINTF(buf, sizeof(buf),
+                          "Kernel:%7s; "
+                          "Work:%4i; "
+                          "Buff:%11.0f; "
+                          "Path:%7s; "
+                          "%10.5e GB/s; "
+                          "%10.5e GFlop/s; ",
+                          kernelType[kernelTypeIdx_], static_cast<int>(workSize[workSizeIdx_]),
+                          _reqDataSize, memPath[memPathIdx_], bandwidth_, gflops_);
   testDescString = buf;
   _perfInfo = avgKernelTime_;
   if (!_dataSizeTooBig) checkData();
@@ -780,13 +751,12 @@ void OCLPerfKernelThroughput::launchKernel(void) {
       // printf("devBuffer: %i\n", input1Buffer_);
       // printf("hstBuffer: %p\n", input1Ptr_);
       // printf("bufSize:   %i\n", input1BufferSize_);
-      error_ = _wrapper->clEnqueueWriteBuffer(
-          cmd_queue_, input1Buffer_, true, 0, input1BufferSize_,
-          (const void *)input1Ptr_, 0, NULL, NULL);
+      error_ = _wrapper->clEnqueueWriteBuffer(cmd_queue_, input1Buffer_, true, 0, input1BufferSize_,
+                                              (const void*)input1Ptr_, 0, NULL, NULL);
       if (input2BufferSize_) {
-        error_ = _wrapper->clEnqueueWriteBuffer(
-            cmd_queue_, input2Buffer_, true, 0, input2BufferSize_,
-            (const void *)input2Ptr_, 0, NULL, NULL);
+        error_ =
+            _wrapper->clEnqueueWriteBuffer(cmd_queue_, input2Buffer_, true, 0, input2BufferSize_,
+                                           (const void*)input2Ptr_, 0, NULL, NULL);
       }
       // printf("Error: %i\n", error_);
       std::fflush(stdout);
@@ -817,9 +787,9 @@ void OCLPerfKernelThroughput::launchKernel(void) {
   /***********************************************************
    * Launch Kernel
    **********************************************************/
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, kernel_, work_dim_, NULL, (const size_t *)global_work_size_,
-      (const size_t *)local_work_size_, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, work_dim_, NULL,
+                                            (const size_t*)global_work_size_,
+                                            (const size_t*)local_work_size_, 0, NULL, NULL);
   // printf("Error: %i\n", error_);
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   _wrapper->clFinish(cmd_queue_);
@@ -845,9 +815,8 @@ void OCLPerfKernelThroughput::launchKernel(void) {
       //        (void *)input1Ptr_, 0, NULL, NULL );
       // CHECK_RESULT(error_ != CL_SUCCESS, "clWriteBuffer failed");
       // printf("VAL0 %p
-      error_ = _wrapper->clEnqueueReadBuffer(
-          cmd_queue_, output1Buffer_, true, 0, output1BufferSize_,
-          (void *)output1Ptr_, 0, NULL, NULL);
+      error_ = _wrapper->clEnqueueReadBuffer(cmd_queue_, output1Buffer_, true, 0,
+                                             output1BufferSize_, (void*)output1Ptr_, 0, NULL, NULL);
       // printf("Error: %i\n", error_);
       CHECK_RESULT(error_ != CL_SUCCESS, "clWriteBuffer failed");
       break;
@@ -912,36 +881,30 @@ unsigned int OCLPerfKernelThroughput::close(void) {
     case 0:  // zero copy
       // unmap ptr
       if (input1Ptr_) {
-        error_ = /*_wrapper->*/ clEnqueueUnmapMemObject(
-            cmd_queue_, input1Buffer_, input1Ptr_, 0, NULL, NULL);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clEnqueueUnmapMemObject(input_) failed");
+        error_ = /*_wrapper->*/ clEnqueueUnmapMemObject(cmd_queue_, input1Buffer_, input1Ptr_, 0,
+                                                        NULL, NULL);
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clEnqueueUnmapMemObject(input_) failed");
         _wrapper->clFinish(cmd_queue_);
         error_ = _wrapper->clReleaseMemObject(input1Buffer_);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clReleaseMemObject(input1Buffer_) failed");
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(input1Buffer_) failed");
         input1Buffer_ = 0;
       }
       if (input2Ptr_) {
-        error_ = /*_wrapper->*/ clEnqueueUnmapMemObject(
-            cmd_queue_, input2Buffer_, input2Ptr_, 0, NULL, NULL);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clEnqueueUnmapMemObject(input_) failed");
+        error_ = /*_wrapper->*/ clEnqueueUnmapMemObject(cmd_queue_, input2Buffer_, input2Ptr_, 0,
+                                                        NULL, NULL);
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clEnqueueUnmapMemObject(input_) failed");
         _wrapper->clFinish(cmd_queue_);
         error_ = _wrapper->clReleaseMemObject(input2Buffer_);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clReleaseMemObject(input2Buffer_) failed");
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(input2Buffer_) failed");
         input2Buffer_ = 0;
       }
       if (output1Ptr_) {
-        error_ = /*_wrapper->*/ clEnqueueUnmapMemObject(
-            cmd_queue_, output1Buffer_, output1Ptr_, 0, NULL, NULL);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clEnqueueUnmapMemObject(output_) failed");
+        error_ = /*_wrapper->*/ clEnqueueUnmapMemObject(cmd_queue_, output1Buffer_, output1Ptr_, 0,
+                                                        NULL, NULL);
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clEnqueueUnmapMemObject(output_) failed");
         _wrapper->clFinish(cmd_queue_);
         error_ = _wrapper->clReleaseMemObject(output1Buffer_);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clReleaseMemObject(input1Buffer_) failed");
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(input1Buffer_) failed");
         output1Buffer_ = 0;
       }
       break;
@@ -949,20 +912,17 @@ unsigned int OCLPerfKernelThroughput::close(void) {
       // release object
       if (input1Buffer_) {
         error_ = _wrapper->clReleaseMemObject(input1Buffer_);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clReleaseMemObject(input1Buffer_) failed");
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(input1Buffer_) failed");
         input1Buffer_ = 0;
       }
       if (input2Buffer_) {
         error_ = _wrapper->clReleaseMemObject(input2Buffer_);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clReleaseMemObject(input2Buffer_) failed");
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(input2Buffer_) failed");
         input2Buffer_ = 0;
       }
       if (output1Buffer_) {
         error_ = _wrapper->clReleaseMemObject(output1Buffer_);
-        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                               "clReleaseMemObject(input1Buffer_) failed");
+        CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(input1Buffer_) failed");
         output1Buffer_ = 0;
       }
       if (input1Ptr_) {
@@ -992,8 +952,7 @@ unsigned int OCLPerfKernelThroughput::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
     cmd_queue_ = 0;
   }
   if (context_) {

@@ -22,7 +22,7 @@ THE SOFTWARE.
 #include <hip_array_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_texture_helper.hh>
-//#define DEBUG_DATA
+// #define DEBUG_DATA
 
 template <typename TestType>
 __global__ void simpleKernelLayered2DArray(hipTextureObject_t tex, TestType* outputData,
@@ -58,11 +58,10 @@ __global__ void simpleKernelLayered2DArray(hipTextureObject_t tex, TestType* out
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray", "",
-    char, unsigned char, short, ushort, int, uint, float,
-    char1, uchar1, short1, ushort1, int1, uint1, float1,
-    char2, uchar2, short2, ushort2, int2, uint2, float2,
-    char4, uchar4, short4, ushort4, int4, uint4, float4) {
+TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray", "", char,
+                   unsigned char, short, ushort, int, uint, float, char1, uchar1, short1, ushort1,
+                   int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
+                   uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
 #if __HIP_NO_IMAGE_SUPPORT
@@ -88,8 +87,8 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
   // Allocate array and copy image data
   channelDesc = hipCreateChannelDesc<TestType>();
   hipArray_t arr;
-  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc,
-               make_hipExtent(width, height, num_layers), hipArrayLayered));
+  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, num_layers),
+                             hipArrayLayered));
   hipMemcpy3DParms myparms{};
   SECTION("hipMemcpy3D whole layers") {
     myparms.srcPos = make_hipPos(0, 0, 0);
@@ -109,7 +108,7 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
       // Copy buffer layer to image layer
       memset(hLayerData, 0, layerSize);
       memset(&myparms, 0, sizeof(myparms));
-      //myparms.srcPos = make_hipPos(layerSize * layer, 0, 0);
+      // myparms.srcPos = make_hipPos(layerSize * layer, 0, 0);
       myparms.srcPos = make_hipPos(0, 0, layer);
       myparms.dstPos = make_hipPos(0, 0, layer);
       myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(TestType), width, height);
@@ -131,8 +130,8 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
       // Compare layer
 #ifdef DEBUG_DATA
       for (unsigned int i = 0; i < width * height; i++) {
-        fprintf(stderr, "%4u: %u: %s -- %s\n", layer, i, getString(hData[layer * width * height + i]),
-                getString(hLayerData[i]));
+        fprintf(stderr, "%4u: %u: %s -- %s\n", layer, i,
+                getString(hData[layer * width * height + i]), getString(hLayerData[i]));
       }
 #endif
       REQUIRE(HipTest::checkArray(hData + layer * width * height, hLayerData, width, height, 1));
@@ -161,7 +160,7 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
   HIP_CHECK(hipMalloc(&dData, size));
 
   dim3 dimBlock(32, 32);
-  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y -1)/ dimBlock.y);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y);
   for (unsigned int layer = 0; layer < num_layers; layer++) {
     hipLaunchKernelGGL(simpleKernelLayered2DArray<TestType>, dimGrid, dimBlock, 0, 0, tex, dData,
                        width, height, layer);
@@ -170,9 +169,9 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
   HIP_CHECK(hipDeviceSynchronize());
 
   // Allocate mem for the result on host side
-  TestType *hOutputData = reinterpret_cast<TestType*>(malloc(size));
+  TestType* hOutputData = reinterpret_cast<TestType*>(malloc(size));
   REQUIRE(hOutputData != nullptr);
-  memset(hOutputData, 0,  size);
+  memset(hOutputData, 0, size);
 
   // Copy result from device to host
   HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
@@ -210,11 +209,10 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray", "",
-    char, unsigned char, short, ushort, int, uint, float,
-    char1, uchar1, short1, ushort1, int1, uint1, float1,
-    char2, uchar2, short2, ushort2, int2, uint2, float2,
-    char4, uchar4, short4, ushort4, int4, uint4, float4) {
+TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray", "", char,
+                   unsigned char, short, ushort, int, uint, float, char1, uchar1, short1, ushort1,
+                   int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
+                   uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
 #if __HIP_NO_IMAGE_SUPPORT
@@ -287,8 +285,8 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray
       myparms.extent = make_hipExtent(width, height, 1);
       myparms.kind = hipMemcpyDeviceToDevice;
       HIP_CHECK(hipMemcpy3D(&myparms));
-      HIP_CHECK(hipMemcpy(hLayerData, dData1 + layer * width * height, layerSize,
-                          hipMemcpyDeviceToHost));
+      HIP_CHECK(
+          hipMemcpy(hLayerData, dData1 + layer * width * height, layerSize, hipMemcpyDeviceToHost));
       // Compare layer
 #ifdef DEBUG_DATA
       for (unsigned int i = 0; i < width * height; i++) {

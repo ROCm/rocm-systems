@@ -835,12 +835,14 @@ hsa_status_t hsa_amd_agent_iterate_memory_pools(
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
+#if defined(__linux__)
   case core::Agent::kAmdAieDevice:
     return reinterpret_cast<const AMD::AieAgent *>(agent)->VisitRegion(
         false,
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
+#endif
   case core::Agent::kAmdGpuDevice:
     return reinterpret_cast<const AMD::GpuAgentInt *>(agent)->VisitRegion(
         false,
@@ -880,6 +882,9 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
 
   if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
     alloc_flag |= core::MemoryRegion::AllocateExecutable;
+
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
 
 #ifdef SANITIZER_AMDGPU
   if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)

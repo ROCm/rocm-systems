@@ -407,6 +407,7 @@ class streamMemAllocTest {
                         dim3(THREADS_PER_BLOCK), 0, stream,
                         static_cast<const int*>(A_d),
                         static_cast<const int*>(B_d), C_d, size);
+    HIP_CHECK(hipGetLastError());
   }
   // Transfer data from device to host asynchronously.
   void transferFromMempool(hipStream_t stream) {
@@ -635,9 +636,7 @@ public:
     // Construct client address to send this SHareable handle to
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    char temp[10];
-    sprintf(temp, "%u", process);
-    strcpy(cliaddr.sun_path, temp);
+    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
 
     // Send corresponding shareable handle to the client
     int sendfd = (int)shareableHdl;

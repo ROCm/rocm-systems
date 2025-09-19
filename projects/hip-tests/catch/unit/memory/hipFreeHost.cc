@@ -35,9 +35,7 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
-  SECTION("Nullptr") {
-    HIP_CHECK(hipFreeHost(nullptr));
-  }
+  SECTION("Nullptr") { HIP_CHECK(hipFreeHost(nullptr)); }
 
   SECTION("Invalid ptr") {
     void* invalid_ptr;
@@ -105,4 +103,17 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
     t.join();
   }
   HIP_CHECK_THREAD_FINALIZE();
+}
+
+TEST_CASE("Unit_hipFreeHost_Capture") {
+  void* ptr = nullptr;
+  constexpr size_t kPtrSize = 1024;
+
+  HIP_CHECK(hipHostMalloc(&ptr, kPtrSize));
+
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipFreeHost(ptr), capture_error);
+  END_CAPTURE_SYNC(capture_error);
 }

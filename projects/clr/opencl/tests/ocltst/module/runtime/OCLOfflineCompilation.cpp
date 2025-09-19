@@ -30,8 +30,8 @@
 #include "cl_kernel_info_amd.h"
 
 typedef CL_API_ENTRY cl_int(CL_API_CALL* clGetKernelInfoAMD_fn)(
-    cl_kernel kernel, cl_device_id device, cl_kernel_info_amd param_name,
-    size_t param_value_size, void* param_value, size_t* param_value_size_ret);
+    cl_kernel kernel, cl_device_id device, cl_kernel_info_amd param_name, size_t param_value_size,
+    void* param_value, size_t* param_value_size_ret);
 
 clGetKernelInfoAMD_fn clGetKernelInfoAMDp;
 
@@ -61,8 +61,8 @@ OCLOfflineCompilation::OCLOfflineCompilation() { _numSubTests = 1; }
 
 OCLOfflineCompilation::~OCLOfflineCompilation() {}
 
-void OCLOfflineCompilation::open(unsigned int test, char* units,
-                                 double& conversion, unsigned int deviceId) {
+void OCLOfflineCompilation::open(unsigned int test, char* units, double& conversion,
+                                 unsigned int deviceId) {
   size_t nDevices = 0;
   cl_device_id* devices = NULL;
 
@@ -72,9 +72,8 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
   _wrapper->clReleaseContext(context_);
 
   cl_context_properties cprops[5];
-  clGetKernelInfoAMDp =
-      (clGetKernelInfoAMD_fn)clGetExtensionFunctionAddressForPlatform(
-          platform_, "clGetKernelInfoAMD");
+  clGetKernelInfoAMDp = (clGetKernelInfoAMD_fn)clGetExtensionFunctionAddressForPlatform(
+      platform_, "clGetKernelInfoAMD");
   if (clGetKernelInfoAMDp == NULL) {
     testDescString = "clGetKernelInfoAMD not found!\n";
     return;
@@ -90,15 +89,13 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
   cprops[4] = (cl_context_properties)0;  // end of options list marker
 
   // Create a context with all of the available devices.
-  context_ = _wrapper->clCreateContextFromType(cprops, CL_DEVICE_TYPE_GPU, NULL,
-                                               NULL, &error_);
+  context_ = _wrapper->clCreateContextFromType(cprops, CL_DEVICE_TYPE_GPU, NULL, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateContextFromType()  failed");
 
   size_t deviceListSize = 0;
-  error_ = _wrapper->clGetContextInfo(context_, CL_CONTEXT_NUM_DEVICES,
-                                      sizeof(size_t), &deviceListSize, NULL);
-  CHECK_RESULT(((error_ != CL_SUCCESS) || (deviceListSize == 0)),
-               "clGetContextInfo()  failed");
+  error_ = _wrapper->clGetContextInfo(context_, CL_CONTEXT_NUM_DEVICES, sizeof(size_t),
+                                      &deviceListSize, NULL);
+  CHECK_RESULT(((error_ != CL_SUCCESS) || (deviceListSize == 0)), "clGetContextInfo()  failed");
 
   devices = (cl_device_id*)malloc(sizeof(cl_device_id) * deviceListSize);
   CHECK_RESULT((devices == NULL), "clGetContextInfo()  failed");
@@ -106,8 +103,7 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
   memset(devices, 0, deviceListSize);
 
   error_ = _wrapper->clGetContextInfo(context_, CL_CONTEXT_DEVICES,
-                                      sizeof(cl_device_id) * deviceListSize,
-                                      devices, &nDevices);
+                                      sizeof(cl_device_id) * deviceListSize, devices, &nDevices);
   CHECK_RESULT((error_ != CL_SUCCESS), "clGetContextInfo()  failed");
 
   for (unsigned version = 1; version <= 2; ++version) {
@@ -128,20 +124,18 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
         return;
     }
 
-    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel,
-                                                   NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
     for (unsigned int i = 0; i < deviceListSize; ++i) {
       char name[128];
       char strVersion[128];
-      _wrapper->clGetDeviceInfo(devices[i], CL_DEVICE_NAME, sizeof(name), name,
-                                NULL);
+      _wrapper->clGetDeviceInfo(devices[i], CL_DEVICE_NAME, sizeof(name), name, NULL);
       if (strstr(name, "-generic") != NULL) {
-        continue; // Skip generic target because it needs code object version 6
+        continue;  // Skip generic target because it needs code object version 6
       }
-      error_ = _wrapper->clGetDeviceInfo(devices[i], CL_DEVICE_VERSION,
-                                         sizeof(strVersion), strVersion, 0);
+      error_ = _wrapper->clGetDeviceInfo(devices[i], CL_DEVICE_VERSION, sizeof(strVersion),
+                                         strVersion, 0);
       CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
       if (version == 2 && strVersion[7] < '2') {
@@ -152,19 +146,18 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
       // the gfx10+ subdevices
       cl_uint gfxip_major = 0;
       cl_uint gfxip_minor = 0;
-      clGetDeviceInfo(devices[i], CL_DEVICE_GFXIP_MAJOR_AMD,
-                      sizeof(gfxip_major), &gfxip_major, NULL);
-      clGetDeviceInfo(devices[i], CL_DEVICE_GFXIP_MINOR_AMD,
-                      sizeof(gfxip_minor), &gfxip_minor, NULL);
+      clGetDeviceInfo(devices[i], CL_DEVICE_GFXIP_MAJOR_AMD, sizeof(gfxip_major), &gfxip_major,
+                      NULL);
+      clGetDeviceInfo(devices[i], CL_DEVICE_GFXIP_MINOR_AMD, sizeof(gfxip_minor), &gfxip_minor,
+                      NULL);
 
       printf("Building on %s, OpenCL version %s, (options '%s')\n", name,
              (version == 2 ? "2.0" : "1.2"), options.c_str());
-      error_ = _wrapper->clBuildProgram(program_, 1, &devices[i],
-                                        options.c_str(), NULL, NULL);
+      error_ = _wrapper->clBuildProgram(program_, 1, &devices[i], options.c_str(), NULL, NULL);
       if (error_ != CL_SUCCESS) {
         char programLog[1024];
-        _wrapper->clGetProgramBuildInfo(
-            program_, devices[i], CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+        _wrapper->clGetProgramBuildInfo(program_, devices[i], CL_PROGRAM_BUILD_LOG, 1024,
+                                        programLog, 0);
         printf("\n%s\n", programLog);
         fflush(stdout);
         break;
@@ -173,22 +166,20 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
       CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed");
 
       size_t usedVGPRs = 0;
-      error_ =
-          clGetKernelInfoAMDp(kernel_, devices[i], CL_KERNELINFO_USED_VGPRS,
-                              sizeof(usedVGPRs), &usedVGPRs, NULL);
-      CHECK_RESULT(((error_ != CL_SUCCESS) || (usedVGPRs == 0)),
-                   "clGetKernelInfoAMD() failed");
+      error_ = clGetKernelInfoAMDp(kernel_, devices[i], CL_KERNELINFO_USED_VGPRS, sizeof(usedVGPRs),
+                                   &usedVGPRs, NULL);
+      CHECK_RESULT(((error_ != CL_SUCCESS) || (usedVGPRs == 0)), "clGetKernelInfoAMD() failed");
 
       _wrapper->clReleaseKernel(kernel_);
       kernel_ = nullptr;
 
       size_t binSize;
-      error_ = _wrapper->clGetProgramInfo(program_, CL_PROGRAM_BINARY_SIZES,
-                                          sizeof(size_t), &binSize, NULL);
+      error_ = _wrapper->clGetProgramInfo(program_, CL_PROGRAM_BINARY_SIZES, sizeof(size_t),
+                                          &binSize, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clGetProgramInfo() failed");
       char* binary = new char[binSize];
-      error_ = _wrapper->clGetProgramInfo(program_, CL_PROGRAM_BINARIES,
-                                          sizeof(char*), &binary, NULL);
+      error_ =
+          _wrapper->clGetProgramInfo(program_, CL_PROGRAM_BINARIES, sizeof(char*), &binary, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clGetProgramInfo() failed");
       delete[] binary;
     }
@@ -200,8 +191,7 @@ void OCLOfflineCompilation::open(unsigned int test, char* units,
   free(devices);
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLOfflineCompilation::run(void) {}

@@ -113,12 +113,11 @@ void ReportActivity(const amd::Command& command) {
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {
-      record.begin_ns = command.profilingInfo().start_;
-      record.end_ns = command.profilingInfo().end_;
-      function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
+    record.begin_ns = command.profilingInfo().start_;
+    record.end_ns = command.profilingInfo().end_;
+    function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
   }
 }
-
 
 
 #define CASE_STRING(X, C)                                                                          \

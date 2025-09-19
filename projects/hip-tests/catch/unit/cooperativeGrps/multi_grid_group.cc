@@ -650,6 +650,6 @@ TEST_CASE("Unit_Multi_Grid_Group_Positive_Sync") {
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

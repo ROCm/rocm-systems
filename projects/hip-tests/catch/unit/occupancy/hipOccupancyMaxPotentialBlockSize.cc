@@ -38,7 +38,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters") {
   });
 
 #if HT_AMD
-#if 0 // EXSWHTEC-219
+#if 0  // EXSWHTEC-219
   SECTION("Kernel function is NULL") {
     int blockSize = 0;
     int gridSize = 0;

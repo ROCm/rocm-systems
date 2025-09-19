@@ -90,6 +90,6 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

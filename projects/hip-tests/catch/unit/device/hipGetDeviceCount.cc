@@ -97,6 +97,6 @@ TEST_CASE("Print_Out_Device_Count") {
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

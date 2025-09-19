@@ -187,6 +187,6 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Add
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

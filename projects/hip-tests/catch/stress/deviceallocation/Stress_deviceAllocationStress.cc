@@ -21,9 +21,9 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <unistd.h>
 // Size Macros
-#define MEMORY_CHUNK_SIZE (1024*1024)
-#define MEMORY_CHUNK_SIZE_ODD (1025*1025)
-#define MAXIMUM_CHUNKS (256*1024)
+#define MEMORY_CHUNK_SIZE (1024 * 1024)
+#define MEMORY_CHUNK_SIZE_ODD (1025 * 1025)
+#define MAXIMUM_CHUNKS (256 * 1024)
 // Subtest Macros
 #define NO_ALLOCATION_ONHOST 0
 #define ALLOCATE_ONHOST_HIPMALLOCMANAGED 1
@@ -57,14 +57,12 @@ __device__ static int* dev_common_ptr;
  * This kernel checks kernel allocation of size more than available
  * memory.
  */
-static __global__ void kerTestDynamicAllocNeg(int test_type,
-                                           size_t perThreadSize,
-                                           int *ret) {
+static __global__ void kerTestDynamicAllocNeg(int test_type, size_t perThreadSize, int* ret) {
   // Allocate
   char* ptr = nullptr;
   printf("Memory to allocate in GPU = %zu \n", perThreadSize);
   if (test_type == TEST_MALLOC_FREE) {
-    ptr = reinterpret_cast<char*> (malloc(perThreadSize));
+    ptr = reinterpret_cast<char*>(malloc(perThreadSize));
   } else {
     ptr = new char[perThreadSize];
   }
@@ -87,9 +85,8 @@ static __global__ void kerTestDynamicAllocNeg(int test_type,
 /**
  * This kernel allocates memory till nullptr is returned.
  */
-static __global__ void kerAllocTillExhaust(int test_type,
-                        size_t *total_allocated_mem,
-                        size_t mem_chunk_size) {
+static __global__ void kerAllocTillExhaust(int test_type, size_t* total_allocated_mem,
+                                           size_t mem_chunk_size) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate memory in thread 0 of block 0
   if (0 == myId) {
@@ -99,16 +96,14 @@ static __global__ void kerAllocTillExhaust(int test_type,
     int idx = 0;
     if (test_type == TEST_MALLOC_FREE) {
       do {
-        dev_mem_glob[idx] =
-        reinterpret_cast<char*> (malloc(mem_chunk_size));
+        dev_mem_glob[idx] = reinterpret_cast<char*>(malloc(mem_chunk_size));
         if (idx >= MAXIMUM_CHUNKS) {
           break;
         }
       } while (dev_mem_glob[idx++] != nullptr);
     } else {
       do {
-        dev_mem_glob[idx] =
-        reinterpret_cast<char*> (new char[mem_chunk_size]);
+        dev_mem_glob[idx] = reinterpret_cast<char*>(new char[mem_chunk_size]);
         if (idx >= MAXIMUM_CHUNKS) {
           break;
         }
@@ -116,8 +111,7 @@ static __global__ void kerAllocTillExhaust(int test_type,
     }
     idx = 0;
     *total_allocated_mem = 0;
-    while ((dev_mem_glob[idx] != nullptr) &&
-           (idx < MAXIMUM_CHUNKS)) {
+    while ((dev_mem_glob[idx] != nullptr) && (idx < MAXIMUM_CHUNKS)) {
       *total_allocated_mem = *total_allocated_mem + mem_chunk_size;
       idx++;
     }
@@ -155,18 +149,15 @@ static __global__ void kerFreeAll(int test_type) {
  * access this memory in all threads of the block. The memory is
  * finally deleted in last thread of each block.
  */
-static __global__ void kerBlockLevelMemoryAllocation(int *outputBuf,
-                                                     int test_type) {
+static __global__ void kerBlockLevelMemoryAllocation(int* outputBuf, int test_type) {
   int myThreadId = threadIdx.x, lastThreadId = (blockDim.x - 1);
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate memory in thread 0
   if (0 == myThreadId) {
     if (test_type == TEST_MALLOC_FREE) {
-      dev_mem[blockIdx.x] =
-      reinterpret_cast<int*> (malloc(blockDim.x*sizeof(int)));
+      dev_mem[blockIdx.x] = reinterpret_cast<int*>(malloc(blockDim.x * sizeof(int)));
     } else {
-      dev_mem[blockIdx.x] =
-      reinterpret_cast<int*> (new int[blockDim.x]);
+      dev_mem[blockIdx.x] = reinterpret_cast<int*>(new int[blockDim.x]);
     }
   }
   // All threads wait at this barrier
@@ -176,7 +167,7 @@ static __global__ void kerBlockLevelMemoryAllocation(int *outputBuf,
     printf("Device Allocation Failed in thread = %d \n", myId);
     return;
   }
-  int *ptr = reinterpret_cast<int*> (dev_mem[blockIdx.x]);
+  int* ptr = reinterpret_cast<int*>(dev_mem[blockIdx.x]);
   // Copy to buffer
   ptr[myThreadId] = myId;
   // All threads wait
@@ -202,11 +193,9 @@ static __global__ void kerAlloc(int test_type) {
   // Allocate memory in thread 0 of block 0
   if (0 == myId) {
     if (test_type == TEST_MALLOC_FREE) {
-      dev_common_ptr =
-      reinterpret_cast<int*> (malloc(blockDim.x*gridDim.x*sizeof(int)));
+      dev_common_ptr = reinterpret_cast<int*>(malloc(blockDim.x * gridDim.x * sizeof(int)));
     } else {
-      dev_common_ptr =
-      reinterpret_cast<int*> (new int[blockDim.x*gridDim.x]);
+      dev_common_ptr = reinterpret_cast<int*>(new int[blockDim.x * gridDim.x]);
     }
   }
 }
@@ -229,7 +218,7 @@ static __global__ void kerWrite() {
  * This kernel copies the contents of memory allocated in <kerAlloc>
  * to host and deletes the memory from thread 0.
  */
-static __global__ void kerFree(int *outputBuf, int test_type) {
+static __global__ void kerFree(int* outputBuf, int test_type) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Check allocated memory in all threads in block before access
   if (dev_common_ptr == nullptr) {
@@ -237,7 +226,7 @@ static __global__ void kerFree(int *outputBuf, int test_type) {
     return;
   }
   if (0 == myId) {
-    for (size_t idx = 0; idx < (blockDim.x*gridDim.x); idx++) {
+    for (size_t idx = 0; idx < (blockDim.x * gridDim.x); idx++) {
       outputBuf[idx] = dev_common_ptr[idx];
     }
     if (test_type == TEST_MALLOC_FREE) {
@@ -254,8 +243,7 @@ static __global__ void kerFree(int *outputBuf, int test_type) {
  * kerFreeAll<<<>>> to test memory allocation till all device
  * memory is exhausted.
  */
-static bool TestAllocationOfAllAvailableMemory(int test_type,
-                            int category, size_t mem_chunk_size) {
+static bool TestAllocationOfAllAvailableMemory(int test_type, int category, size_t mem_chunk_size) {
   size_t avail1 = 0, avail2 = 0, tot = 0;
   constexpr size_t host_alloc = 2147483648;  // 2 GB
   HIP_CHECK(hipMemGetInfo(&avail1, &tot));
@@ -263,12 +251,11 @@ static bool TestAllocationOfAllAvailableMemory(int test_type,
   HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, avail1));
 #endif
   size_t *tot_alloc_mem_d = nullptr, *tot_alloc_mem_h = nullptr;
-  tot_alloc_mem_h =
-  reinterpret_cast<size_t*> (malloc(sizeof(size_t)));
+  tot_alloc_mem_h = reinterpret_cast<size_t*>(malloc(sizeof(size_t)));
   REQUIRE(nullptr != tot_alloc_mem_h);
   HIP_CHECK(hipMalloc(&tot_alloc_mem_d, sizeof(size_t)));
   REQUIRE(nullptr != tot_alloc_mem_d);
-  char *devptrHost = nullptr;
+  char* devptrHost = nullptr;
   if (category == ALLOCATE_ONHOST_HIPMALLOCMANAGED) {
     HIP_CHECK(hipMallocManaged(&devptrHost, host_alloc));
   } else if (category == ALLOCATE_ONHOST_HIPMALLOC) {
@@ -278,12 +265,10 @@ static bool TestAllocationOfAllAvailableMemory(int test_type,
   INFO("Total available memory " << tot);
   INFO("Available memory before allocation " << avail1);
   // Launch Test Kernel
-  kerAllocTillExhaust<<<1, 1>>>(test_type, tot_alloc_mem_d,
-                                mem_chunk_size);
+  kerAllocTillExhaust<<<1, 1>>>(test_type, tot_alloc_mem_d, mem_chunk_size);
   HIP_CHECK(hipDeviceSynchronize());
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(tot_alloc_mem_h, tot_alloc_mem_d,
-                      sizeof(size_t), hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(tot_alloc_mem_h, tot_alloc_mem_d, sizeof(size_t), hipMemcpyDefault));
   HIP_CHECK(hipMemGetInfo(&avail2, &tot));
   kerFreeAll<<<1, 1>>>(test_type);
   HIP_CHECK(hipDeviceSynchronize());
@@ -312,11 +297,10 @@ static bool TestAllocationOfAllAvailableMemory(int test_type,
  * Local function: Launch kerBlockLevelMemoryAllocation<<<>>>
  * in a loop to stress test allocation and deallocation.
  */
-static bool TestMemoryAllocationInLoop(int test_type,
-                                       bool isMultikernel = false) {
+static bool TestMemoryAllocationInLoop(int test_type, bool isMultikernel = false) {
   int *outputVec_d{nullptr}, *outputVec_h{nullptr};
   int arraysize = (BLOCKSIZE * GRIDSIZE);
-  outputVec_h = reinterpret_cast<int*> (malloc(sizeof(int) * arraysize));
+  outputVec_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(outputVec_h != nullptr);
   HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)));
   bool bPassed = true;
@@ -333,13 +317,11 @@ static bool TestMemoryAllocationInLoop(int test_type,
       kerWrite<<<GRIDSIZE, BLOCKSIZE>>>();
       kerFree<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type);
     } else {
-      kerBlockLevelMemoryAllocation<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d,
-                                                   test_type);
+      kerBlockLevelMemoryAllocation<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type);
     }
     HIP_CHECK(hipDeviceSynchronize());
     // Copy to host buffer
-    HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize,
-                        hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault));
     bPassed = true;
     for (int idx = 0; idx < arraysize; idx++) {
       if (outputVec_h[idx] != idx) {
@@ -359,32 +341,32 @@ static bool TestMemoryAllocationInLoop(int test_type,
  * Scenario: Test malloc till nullptr is returned using even chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_Even") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE,
-                NO_ALLOCATION_ONHOST, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
  * Scenario: Test malloc till nullptr is returned using odd chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_Odd") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE,
-                NO_ALLOCATION_ONHOST, MEMORY_CHUNK_SIZE_ODD));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE_ODD));
 }
 
 /**
  * Scenario: Test new till nullptr is returned using even chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_new_Even") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE,
-                NO_ALLOCATION_ONHOST, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
  * Scenario: Test new till nullptr is returned using odd chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_new_Odd") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE,
-                NO_ALLOCATION_ONHOST, MEMORY_CHUNK_SIZE_ODD));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE_ODD));
 }
 
 /**
@@ -393,8 +375,8 @@ TEST_CASE("Stress_deviceAllocation_new_Odd") {
  * from host.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_hipmallocmanaged") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE,
-                ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(
+                      TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -403,8 +385,8 @@ TEST_CASE("Stress_deviceAllocation_malloc_hipmallocmanaged") {
  * from host.
  */
 TEST_CASE("Stress_deviceAllocation_new_hipmallocmanaged") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE,
-                ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(
+                      TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -412,8 +394,8 @@ TEST_CASE("Stress_deviceAllocation_new_hipmallocmanaged") {
  * is returned. Device memory is also allocated using hipmalloc from host.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_hipmalloc") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE,
-                ALLOCATE_ONHOST_HIPMALLOC, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOC,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -421,8 +403,8 @@ TEST_CASE("Stress_deviceAllocation_malloc_hipmalloc") {
  * is returned. Device memory is also allocated using hipmalloc from host.
  */
 TEST_CASE("Stress_deviceAllocation_new_hipmalloc") {
-  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE,
-                ALLOCATE_ONHOST_HIPMALLOC, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOC,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -434,7 +416,7 @@ TEST_CASE("Stress_deviceAllocation_Negative") {
   size_t avail = 0, tot = 0;
   HIP_CHECK(hipMemGetInfo(&avail, &tot));
   printf("Available Memory in GPU = %zu \n", avail);
-  ret_h = reinterpret_cast<int*> (malloc(sizeof(int)));
+  ret_h = reinterpret_cast<int*>(malloc(sizeof(int)));
   REQUIRE(ret_h != nullptr);
   HIP_CHECK(hipMalloc(&ret_d, (sizeof(int))));
   SECTION("Test allocation with malloc") {

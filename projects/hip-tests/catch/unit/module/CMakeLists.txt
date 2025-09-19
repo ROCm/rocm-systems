@@ -85,8 +85,13 @@ if(HIP_PLATFORM MATCHES "amd")
 set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
-    hipHccModuleLaunchKernel.cc
-    hipGetProcAddressModuleApis.cc)
+    hipHccModuleLaunchKernel.cc)
+
+if(BUILD_SHARED_LIBS)
+  set(TEST_SRC
+      ${TEST_SRC}
+      hipGetProcAddressModuleApis.cc)
+endif()
 
 add_custom_target(empty_module.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}

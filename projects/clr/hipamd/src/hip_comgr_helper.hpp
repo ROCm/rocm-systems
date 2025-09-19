@@ -80,72 +80,49 @@ const std::map<std::string, std::string>& GenericTargetMapping();
 // Both targets should not have any feature.
 bool IsCompatibleWithGenericTarget(const std::string& coTarget, const std::string& agentTarget);
 }  // namespace helpers
-
+/**
+ * HIPRTC linker options
+ */
 struct LinkArguments {
-  unsigned int max_registers_;
-  unsigned int threads_per_block_;
-  float wall_time_;
-  size_t info_log_size_;
-  char* info_log_;
-  size_t error_log_size_;
-  char* error_log_;
-  unsigned int optimization_level_;
-  unsigned int target_from_hip_context_;
-  unsigned int jit_target_;
-  unsigned int fallback_strategy_;
-  int generate_debug_info_;
-  long log_verbose_;
-  int generate_line_info_;
-  unsigned int cache_mode_;
-  bool sm3x_opt_;
-  bool fast_compile_;
-  const char** global_symbol_names_;
-  void** global_symbol_addresses_;
-  unsigned int global_symbol_count_;
-  int lto_;
-  int ftz_;
-  int prec_div_;
-  int prec_sqrt_;
-  int fma_;
-  int pic_;
-  int min_cta_per_sm_;
-  int max_threads_per_block_;
-  int override_directive_values_;
-  const char** linker_ir2isa_args_;
-  size_t linker_ir2isa_args_count_;
-
-  LinkArguments()
-      : max_registers_{0},
-        threads_per_block_{0},
-        wall_time_{0.0f},
-        info_log_size_{0},
-        info_log_{nullptr},
-        error_log_size_{0},
-        error_log_{nullptr},
-        optimization_level_{3},
-        target_from_hip_context_{0},
-        jit_target_{0},
-        fallback_strategy_{0},
-        generate_debug_info_{0},
-        log_verbose_{0},
-        generate_line_info_{0},
-        cache_mode_{0},
-        sm3x_opt_{false},
-        fast_compile_{false},
-        global_symbol_names_{nullptr},
-        global_symbol_addresses_{nullptr},
-        global_symbol_count_{0},
-        lto_{0},
-        ftz_{0},
-        prec_div_{1},
-        prec_sqrt_{1},
-        fma_{1},
-        pic_{0},
-        min_cta_per_sm_{0},
-        max_threads_per_block_{0},
-        override_directive_values_{0},
-        linker_ir2isa_args_{nullptr},
-        linker_ir2isa_args_count_{0} {}
+  uint64_t max_registers_ = 0;                    ///< Maximum registers that a thread may a use
+  uint64_t threads_per_block_ = 0;                ///< Minimum No. of threads per block
+  float wall_time_ = 0.0f;                        ///< Value for total wall clock time
+  char* info_log_ = nullptr;                      ///< Pointer to a buffer to print log information
+  uint64_t info_log_size_ = 0;                    ///< Size of the buffer in bytes for logged info
+  char* error_log_ = nullptr;                     ///< Pointer to a buffer to print log errors
+  uint64_t error_log_size_ = 0;                   ///< Size of the buffer in bytes for logged errors
+  uint64_t optimization_level_ = 3;               ///< Value of the optimization level for generated code
+                                                  ///< acceptable options -O0, -O1, -O2, -O3
+  uint64_t target_from_hip_context_ = 0;          ///< Determines the target, based on the current context
+  uint64_t jit_target_= 0;                        ///< CUDA Only JIT target
+  uint64_t fallback_strategy_ = 0;                ///< CUDA Only Choice of fallback strategy
+  uint32_t generate_debug_info_ = 0;              ///< Create debug information in output -g, if set
+  uint64_t log_verbose_ = 0;                      ///< Generate verbose log messages
+  uint32_t generate_line_info_ = 0;               ///< Generate line number information
+  uint64_t cache_mode_ = 0;                       ///< CUDA Only Enables caching explicitly
+  bool sm3x_opt_ = false;                         ///< CUDA Only New SM3X option
+  bool fast_compile_ = false;                     ///< CUDA Only Set fast compile
+  const char** global_symbol_names_ = nullptr;    ///< Array of device symbol names to be relocated
+                                                  ///< to the host
+  void** global_symbol_addresses_ = nullptr;      ///< Array of host addresses to be relocated to the
+                                                  ///< device
+  uint64_t global_symbol_count_ = 0;              ///< Number of symbol count
+  int32_t lto_ = 0;                               ///< Enable link time optimization for device code
+  int32_t ftz_ = 0;                               ///< Set single-precision denormals
+  int32_t prec_div_ = 1;                          ///< Set single-precision floating-point division
+                                                  ///< and reciprocals
+  int32_t prec_sqrt_ = 1;                         ///< Set single-precision floating-point square root
+  int32_t fma_ = 1;                               ///< Enable floating-point multiplies and
+                                                  ///< adds/subtracts operations
+  int32_t pic_ = 0;                               ///< Generates Position Independent code
+  int32_t min_cta_per_sm_ = 0;                    ///< Hints to JIT compiler the minimum number of
+                                                  ///< CTAs from kernel's grid to be mapped to SM
+  int32_t max_threads_per_block_ = 0;             ///< Maximum number of threads in a thread block
+  int32_t override_directive_values_ = 0;         ///< Override Directive values
+  const char** linker_ir2isa_args_ = nullptr;     ///< Hip Only Linker options to be passed on
+                                                  ///< to compiler
+  uint64_t linker_ir2isa_args_count_ = 0;         ///< Hip Only Count of linker options to be passed
+                                                  ///< on to compiler
 };
 
 class RTCProgram {
@@ -179,7 +156,7 @@ class LinkProgram : public RTCProgram {
   amd_comgr_data_kind_t data_kind_;
   amd_comgr_data_kind_t GetCOMGRDataKind(hipJitInputType input_type);
 
-  // Linker Argumenets at hipLinkCreate
+  // Linker Arguments at hipLinkCreate
   LinkArguments link_args_;
 
   // Spirv is bundled

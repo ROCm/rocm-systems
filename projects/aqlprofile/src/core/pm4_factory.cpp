@@ -62,6 +62,9 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   int_agent_info.bdf_id = agent_info->location_id;
 
   auto len = strlen(agent_info->agent_gfxip);
+  memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
+  memcpy(int_agent_info.name, agent_info->agent_gfxip,
+         (len >= sizeof(int_agent_info.name) ? sizeof(int_agent_info.name) - 1 : len));
   memset(int_agent_info.gfxip, 0, sizeof(int_agent_info.gfxip));
   memcpy(int_agent_info.gfxip, agent_info->agent_gfxip,
          (len >= sizeof(int_agent_info.gfxip) ? sizeof(int_agent_info.gfxip) - 1 : len));

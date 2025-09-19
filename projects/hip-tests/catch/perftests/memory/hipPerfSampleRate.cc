@@ -19,66 +19,68 @@
 
 
 /**
-* @addtogroup hipMemcpyKernel hipMemcpyKernel
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyKernel hipMemcpyKernel
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
+ * Copies data between host and device.
+ */
 
 #include <hip_test_common.hh>
-
+// #define ENABLE_DEBUG 1
 #define NUM_TYPES 3
 std::vector<std::string> types = {"float", "float2", "float4"};
 std::vector<unsigned int> typeSizes = {4, 8, 16};
 
 #define NUM_SIZES 12
-std::vector<unsigned int> sizes = {1,  2,   4,   8,   16,   32,
-                                   64, 128, 256, 512, 1024, 2048};
+std::vector<unsigned int> sizes = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048};
 
 #define NUM_BUFS 6
 #define MAX_BUFS (1 << (NUM_BUFS - 1))
 
 #ifdef __HIP_PLATFORM_NVIDIA__
-__host__ __device__ void operator+=(float2 &a, float2 b) {  //NOLINT
-  a.x += b.x; a.y += b.y;
+__host__ __device__ void operator+=(float2& a, float2 b) {  // NOLINT
+  a.x += b.x;
+  a.y += b.y;
 }
 
-__host__ __device__ void operator+=(float4 &a, float4 b) {  //NOLINT
-  a.x += b.x; a.y += b.y; a.z += b.z; a.w += b.w;
+__host__ __device__ void operator+=(float4& a, float4 b) {  // NOLINT
+  a.x += b.x;
+  a.y += b.y;
+  a.z += b.z;
+  a.w += b.w;
 }
 #endif
 
-template <typename T>
-__global__ void sampleRate(T * outBuffer, unsigned int inBufSize,
-                           unsigned int writeIt, T **inBuffer, int numBufs) {
+template <typename T> __global__ void sampleRate(T* outBuffer, unsigned int inBufSize,
+                                                 unsigned int writeIt, T** inBuffer, int numBufs) {
   uint gid = (blockIdx.x * blockDim.x + threadIdx.x);
   uint inputIdx = gid % inBufSize;
 
   T tmp;
   memset(&tmp, 0, sizeof(T));
   for (int i = 0; i < numBufs; i++) {
-    tmp += *(*(inBuffer+i)+inputIdx);
+    tmp += *(*(inBuffer + i) + inputIdx);
   }
 
-  if (writeIt*(unsigned int)tmp.x) {
+  if (writeIt * (unsigned int)tmp.x) {
     outBuffer[gid] = tmp;
   }
 }
 
-template <typename T>
-__global__ void sampleRateFloat(T * outBuffer, unsigned int inBufSize,
-                          unsigned int writeIt, T ** inBuffer, int numBufs) {
+template <typename T> __global__ void sampleRateFloat(T* outBuffer, unsigned int inBufSize,
+                                                      unsigned int writeIt, T** inBuffer,
+                                                      int numBufs) {
   uint gid = (blockIdx.x * blockDim.x + threadIdx.x);
   uint inputIdx = gid % inBufSize;
 
   T tmp = (T)0.0f;
 
   for (int i = 0; i < numBufs; i++) {
-    tmp += *((*inBuffer+i)+inputIdx);
+    tmp += *((*inBuffer + i) + inputIdx);
   }
 
-  if (writeIt*(unsigned int)tmp) {
+  if (writeIt * (unsigned int)tmp) {
     outBuffer[gid] = tmp;
   }
 }
@@ -93,26 +95,23 @@ class hipPerfSampleRate {
   void close(void);
 
   // array of funtion pointers
-  typedef void (hipPerfSampleRate::*funPtr)(void * outBuffer, unsigned int
-                inBufSize, unsigned int writeIt, void **inBuffer, int numBufs,
-                int grids, int blocks);
+  typedef void (hipPerfSampleRate::*funPtr)(void* outBuffer, unsigned int inBufSize,
+                                            unsigned int writeIt, void** inBuffer, int numBufs,
+                                            int grids, int blocks);
 
   // Wrappers
-  void float_kernel(void * outBuffer, unsigned int inBufSize,
-                    unsigned int writeIt, void **inBuffer, int numBufs,
-                    int grids, int blocks);
+  void float_kernel(void* outBuffer, unsigned int inBufSize, unsigned int writeIt, void** inBuffer,
+                    int numBufs, int grids, int blocks);
 
-  void float2_kernel(void * outBuffer, unsigned int inBufSize,
-                     unsigned int writeIt, void **inBuffer, int numBufs,
-                     int grids, int blocks);
+  void float2_kernel(void* outBuffer, unsigned int inBufSize, unsigned int writeIt, void** inBuffer,
+                     int numBufs, int grids, int blocks);
 
-  void float4_kernel(void * outBuffer, unsigned int inBufSize,
-                     unsigned int writeIt, void **inBuffer, int numBufs,
-                     int grids, int blocks);
+  void float4_kernel(void* outBuffer, unsigned int inBufSize, unsigned int writeIt, void** inBuffer,
+                     int numBufs, int grids, int blocks);
 
  private:
-  void setData(void *ptr, unsigned int value);
-  void checkData(uint *ptr);
+  void setData(void* ptr, unsigned int value);
+  void checkData(uint* ptr);
 
   unsigned int width_;
   unsigned int bufSize_;
@@ -139,41 +138,36 @@ bool hipPerfSampleRate::open(void) {
   hipDeviceProp_t props;
   HIP_CHECK(hipSetDevice(deviceId));
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
-  INFO("info: running on bus " << "0x" << props.pciBusID << " " <<
-       props.name << " with " << props.multiProcessorCount <<
-       " CUs" << " and device id: " << deviceId << "\n");
+  CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
+                props.name, props.multiProcessorCount, deviceId);
   numCUs = props.multiProcessorCount;
   return true;
 }
 
 // Wrappers for the kernel launches
-void hipPerfSampleRate::float_kernel(void * outBuffer, unsigned int inBufSize,
-                        unsigned int writeIt, void **inBuffer, int numBufs,
-                        int grids, int blocks) {
-  hipLaunchKernelGGL(sampleRateFloat<float>, dim3(grids, grids, grids),
-            dim3(blocks), 0, 0, reinterpret_cast<float*>(outBuffer),
-            inBufSize, writeIt, reinterpret_cast<float**>(inBuffer), numBufs);
+void hipPerfSampleRate::float_kernel(void* outBuffer, unsigned int inBufSize, unsigned int writeIt,
+                                     void** inBuffer, int numBufs, int grids, int blocks) {
+  hipLaunchKernelGGL(sampleRateFloat<float>, dim3(grids, grids, grids), dim3(blocks), 0, 0,
+                     reinterpret_cast<float*>(outBuffer), inBufSize, writeIt,
+                     reinterpret_cast<float**>(inBuffer), numBufs);
 }
 
-void hipPerfSampleRate::float2_kernel(void * outBuffer, unsigned int inBufSize,
-                        unsigned int writeIt, void **inBuffer, int grids,
-                        int blocks, int numBufs) {
-  hipLaunchKernelGGL(sampleRate<float2>, dim3(grids, grids, grids),
-            dim3(blocks), 0, 0, reinterpret_cast<float2 *>(outBuffer),
-            inBufSize, writeIt, reinterpret_cast<float2 **>(inBuffer), numBufs);
+void hipPerfSampleRate::float2_kernel(void* outBuffer, unsigned int inBufSize, unsigned int writeIt,
+                                      void** inBuffer, int grids, int blocks, int numBufs) {
+  hipLaunchKernelGGL(sampleRate<float2>, dim3(grids, grids, grids), dim3(blocks), 0, 0,
+                     reinterpret_cast<float2*>(outBuffer), inBufSize, writeIt,
+                     reinterpret_cast<float2**>(inBuffer), numBufs);
 }
 
-void hipPerfSampleRate::float4_kernel(void * outBuffer, unsigned int inBufSize,
-                        unsigned int writeIt, void **inBuffer, int grids,
-                        int blocks, int numBufs) {
-  hipLaunchKernelGGL(sampleRate<float4>, dim3(grids, grids, grids),
-            dim3(blocks), 0, 0, reinterpret_cast<float4 *>(outBuffer),
-            inBufSize, writeIt, reinterpret_cast<float4 **>(inBuffer), numBufs);
+void hipPerfSampleRate::float4_kernel(void* outBuffer, unsigned int inBufSize, unsigned int writeIt,
+                                      void** inBuffer, int grids, int blocks, int numBufs) {
+  hipLaunchKernelGGL(sampleRate<float4>, dim3(grids, grids, grids), dim3(blocks), 0, 0,
+                     reinterpret_cast<float4*>(outBuffer), inBufSize, writeIt,
+                     reinterpret_cast<float4**>(inBuffer), numBufs);
 }
 
 void hipPerfSampleRate::run(unsigned int test) {
-  funPtr p[] = {&hipPerfSampleRate::float_kernel,
-                &hipPerfSampleRate::float2_kernel,
+  funPtr p[] = {&hipPerfSampleRate::float_kernel, &hipPerfSampleRate::float2_kernel,
                 &hipPerfSampleRate::float4_kernel};
 
   // We compute a square domain
@@ -182,35 +176,30 @@ void hipPerfSampleRate::run(unsigned int test) {
   bufSize_ = width_ * width_ * typeSizes[typeIdx_];
   numBufs_ = (1 << (test / (NUM_SIZES * NUM_TYPES)));
 
-  void ** dPtr;
-  void *  hOutPtr;
-  void *  dOutPtr;
-  void ** hInPtr = new void *[numBufs_];
-  void ** dInPtr = new void *[numBufs_];
+  void** dPtr;
+  void* hOutPtr;
+  void* dOutPtr;
+  void** hInPtr = new void*[numBufs_];
+  void** dInPtr = new void*[numBufs_];
 
-  outBufSize_ =
-      sizes[NUM_SIZES - 1] * sizes[NUM_SIZES - 1] * typeSizes[NUM_TYPES - 1];
+  outBufSize_ = sizes[NUM_SIZES - 1] * sizes[NUM_SIZES - 1] * typeSizes[NUM_TYPES - 1];
 
   // Allocate memory on the host and device
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void **>(&hOutPtr), outBufSize_,
-                          hipHostMallocDefault));
-  setData(reinterpret_cast<void *>(hOutPtr), 0xdeadbeef);
-  HIP_CHECK(hipMalloc(reinterpret_cast<uint **>(&dOutPtr), outBufSize_));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hOutPtr), outBufSize_, hipHostMallocDefault));
+  setData(reinterpret_cast<void*>(hOutPtr), 0xdeadbeef);
+  HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dOutPtr), outBufSize_));
 
   // Allocate 2D array in Device
-  HIP_CHECK(hipMalloc(reinterpret_cast<void **>(&dPtr),
-                      numBufs_* sizeof(void *)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dPtr), numBufs_ * sizeof(void*)));
 
   for (uint i = 0; i < numBufs_; i++) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void **>(&hInPtr[i]), bufSize_,
-                            hipHostMallocDefault));
-    HIP_CHECK(hipMalloc(reinterpret_cast<uint **>(&dInPtr[i]), bufSize_));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hInPtr[i]), bufSize_, hipHostMallocDefault));
+    HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dInPtr[i]), bufSize_));
     setData(hInPtr[i], 0x3f800000);
   }
 
   // Populate array of pointers with array addresses
-  HIP_CHECK(hipMemcpy(dPtr, dInPtr, numBufs_* sizeof(void *),
-                      hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dPtr, dInPtr, numBufs_ * sizeof(void*), hipMemcpyHostToDevice));
 
   // Copy memory from host to device
   for (uint i = 0; i < numBufs_; i++) {
@@ -241,20 +230,19 @@ void hipPerfSampleRate::run(unsigned int test) {
   // Time the kernel execution
   auto all_start = std::chrono::steady_clock::now();
   for (uint i = 0; i < maxIter; i++) {
-        (this->*p[idx]) (reinterpret_cast<void *>(dOutPtr), sizeDW, writeIt,
-                         dPtr, numBufs_, grids, blocks);
+    (this->*p[idx])(reinterpret_cast<void*>(dOutPtr), sizeDW, writeIt, dPtr, numBufs_, grids,
+                    blocks);
   }
 
   HIP_CHECK(hipDeviceSynchronize());
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
-  double perf = (static_cast<double>(outBufSize_ * numBufs_ *
-                 maxIter * (1e-09))) / all_kernel_time.count();
+  double perf =
+      (static_cast<double>(outBufSize_ * numBufs_ * maxIter * (1e-09))) / all_kernel_time.count();
 
-  INFO("Domain " << sizes[NUM_SIZES - 1] << "x"<< sizes[NUM_SIZES - 1]
-        << " bufs " << numBufs_ << " " << types[typeIdx_] << " " << width_
-        << "x" <<width_<< " (GB/s) " << perf << "\n");
+  CONSOLE_PRINT("Domain %u x %u bufs %u %s %u x %u (GB/s) %f\n", sizes[NUM_SIZES - 1],
+                sizes[NUM_SIZES - 1], numBufs_, types[typeIdx_].c_str(), width_, width_, perf);
 
   HIP_CHECK(hipFree(dOutPtr));
 
@@ -265,52 +253,51 @@ void hipPerfSampleRate::run(unsigned int test) {
   }
   HIP_CHECK(hipHostFree(hOutPtr));
   HIP_CHECK(hipFree(dPtr));
-  delete [] hInPtr;
-  delete [] dInPtr;
+  delete[] hInPtr;
+  delete[] dInPtr;
 }
 
 
-void hipPerfSampleRate::setData(void *ptr, unsigned int value) {
-  unsigned int *ptr2 = (unsigned int *)ptr;
+void hipPerfSampleRate::setData(void* ptr, unsigned int value) {
+  unsigned int* ptr2 = (unsigned int*)ptr;
   for (unsigned int i = 0; i < bufSize_ / sizeof(unsigned int); i++) {
     ptr2[i] = value;
   }
 }
 
 
-void hipPerfSampleRate::checkData(uint *ptr) {
+void hipPerfSampleRate::checkData(uint* ptr) {
   for (unsigned int i = 0; i < outBufSize_ / sizeof(float); i++) {
     if (ptr[i] != static_cast<float>(numBufs_)) {
-      INFO("Data validation failed at "<< i << " Got "<< ptr[i]
-           << ", expected " << (float)numBufs_ << "\n");
+      DEBUG_PRINT("Data validation failed at %u Got %u, expected %f\n", i, ptr[i], (float)numBufs_);
       REQUIRE(false);
     }
   }
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfSampleRate status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfSampleRate.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfSampleRate status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfSampleRate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfSampleRate_test") {
   hipPerfSampleRate sampleTypes;
 
   REQUIRE(true == sampleTypes.open());
 
-  for (unsigned int testCase = 0; testCase < 216 ; testCase+=36) {
+  for (unsigned int testCase = 0; testCase < 216; testCase += 36) {
     sampleTypes.run(testCase);
   }
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

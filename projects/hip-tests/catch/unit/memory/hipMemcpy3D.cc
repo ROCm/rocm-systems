@@ -41,9 +41,7 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_Basic") {
     SECTION("Peer access disabled") {
       Memcpy3DDeviceToDeviceShell<async, false>(Memcpy3DWrapper<>);
     }
-    SECTION("Peer access enabled") {
-      Memcpy3DDeviceToDeviceShell<async, true>(Memcpy3DWrapper<>);
-    }
+    SECTION("Peer access enabled") { Memcpy3DDeviceToDeviceShell<async, true>(Memcpy3DWrapper<>); }
   }
 
   SECTION("Host to Device") { Memcpy3DHostToDeviceShell<async>(Memcpy3DWrapper<>); }
@@ -62,9 +60,7 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_Synchronization_Behavior") {
 
   SECTION("Device to Pinned Host") { Memcpy3DDtoHPinnedSyncBehavior(Memcpy3DWrapper<>, true); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<>, true); }
-#endif
 }
 
 TEST_CASE("Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior") {
@@ -75,8 +71,9 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior") {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  auto parms = GetMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
-                                make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
+  auto parms =
+      GetMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
+                       make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
 
   b_context.block_stream();
   REQUIRE(b_context.is_blocked());

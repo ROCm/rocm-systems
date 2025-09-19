@@ -18,19 +18,19 @@
  */
 
 /**
-* @addtogroup hipMemcpyKernel hipMemcpyKernel
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyKernel hipMemcpyKernel
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
+ * Copies data between host and device.
+ */
 
 #include <hip_test_common.hh>
-
+// #define ENABLE_DEBUG 1
 #define sharedMemSize1 2048
 #define sharedMemSize2 256
 
-__global__ void sharedMemReadSpeed1(float *outBuf, ulong N) {
+__global__ void sharedMemReadSpeed1(float* outBuf, ulong N) {
   size_t gid = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t lid = threadIdx.x;
   __shared__ float local[sharedMemSize1];
@@ -84,7 +84,7 @@ __global__ void sharedMemReadSpeed1(float *outBuf, ulong N) {
   }
 }
 
-__global__ void sharedMemReadSpeed2(float *outBuf, ulong N) {
+__global__ void sharedMemReadSpeed2(float* outBuf, ulong N) {
   size_t gid = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t lid = threadIdx.x;
   __shared__ float local[sharedMemSize2];
@@ -116,8 +116,8 @@ __global__ void sharedMemReadSpeed2(float *outBuf, ulong N) {
 }
 
 static bool hipPerfSharedMemReadSpeed_test() {
-  float *dDst;
-  float *hDst;
+  float* dDst;
+  float* hDst;
   hipStream_t stream;
   constexpr uint numSizes = 4;
   constexpr uint Sizes[numSizes] = {262144, 1048576, 4194304, 16777216};
@@ -132,8 +132,8 @@ static bool hipPerfSharedMemReadSpeed_test() {
   HIP_CHECK(hipSetDevice(device));
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  INFO("info: running on bus " << "0x" << props.pciBusID << " " << props.name
-       << " with " << props.multiProcessorCount << " CUs \n");
+  CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs\n", props.pciBusID, props.name,
+                props.multiProcessorCount);
 
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -149,8 +149,8 @@ static bool hipPerfSharedMemReadSpeed_test() {
     HIP_CHECK(hipMalloc(&dDst, nBytes));
     HIP_CHECK(hipMemcpy(dDst, hDst, nBytes, hipMemcpyHostToDevice));
 
-    hipLaunchKernelGGL(sharedMemReadSpeed1, dim3(blocks),
-                       dim3(threadsPerBlock), 0, stream, dDst, N);
+    hipLaunchKernelGGL(sharedMemReadSpeed1, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
+                       N);
     HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -160,8 +160,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
         tmp = 0;
       }
       if (hDst[i] != tmp) {
-        INFO("info: Data validation failed for warm up run! \n");
-        INFO("info: expected " << tmp << " got " << hDst[i] << " \n");
+        DEBUG_PRINT("Data validation failed for warm up run! expected %d got %f\n", tmp, hDst[i]);
         return false;
       }
       tmp += threadsPerBlock / 2;
@@ -169,8 +168,8 @@ static bool hipPerfSharedMemReadSpeed_test() {
 
     auto all_start = std::chrono::steady_clock::now();
     for (int i = 0; i < nIter; i++) {
-      hipLaunchKernelGGL(sharedMemReadSpeed1, dim3(blocks),
-                         dim3(threadsPerBlock), 0, stream, dDst, N);
+      hipLaunchKernelGGL(sharedMemReadSpeed1, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
+                         N);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -178,15 +177,14 @@ static bool hipPerfSharedMemReadSpeed_test() {
     std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
     // read speed in GB/s
-    double perf = (static_cast<double>(blocks * threadsPerBlock)
-                   * (numReads1 * sizeof(float) + sharedMemSizeBytes1 / 64)
-                   * nIter * (1e-09)) / all_kernel_time.count();
+    double perf = (static_cast<double>(blocks * threadsPerBlock) *
+                   (numReads1 * sizeof(float) + sharedMemSizeBytes1 / 64) * nIter * (1e-09)) /
+                  all_kernel_time.count();
 
-    INFO("info: read speed = " << std::setw(8) << perf << " GB/s for " <<
-          sharedMemSizeBytes1 / 1024 << " KB shared memory with " <<
-          std::setw(8) << blocks * threadsPerBlock << " threads, "
-          << std::setw(4) << numReads1 <<
-          " reads in sharedMemReadSpeed1 kernel \n");
+    CONSOLE_PRINT(
+        "info: read speed = %.2f GB/s for %d KB shared memory with %d threads, %d reads in "
+        "sharedMemReadSpeed1 kernel\n",
+        perf, sharedMemSizeBytes1 / 1024, blocks * threadsPerBlock, numReads1);
 
     delete[] hDst;
     HIP_CHECK(hipFree(dDst));
@@ -204,15 +202,15 @@ static bool hipPerfSharedMemReadSpeed_test() {
     HIP_CHECK(hipMalloc(&dDst, nBytes));
     HIP_CHECK(hipMemcpy(dDst, hDst, nBytes, hipMemcpyHostToDevice));
 
-    hipLaunchKernelGGL(sharedMemReadSpeed2, dim3(blocks),
-                       dim3(threadsPerBlock), 0, stream, dDst, N);
+    hipLaunchKernelGGL(sharedMemReadSpeed2, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
+                       N);
     HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
 
     auto all_start = std::chrono::steady_clock::now();
     for (int i = 0; i < nIter; i++) {
-      hipLaunchKernelGGL(sharedMemReadSpeed2, dim3(blocks),
-                         dim3(threadsPerBlock), 0, stream, dDst, N);
+      hipLaunchKernelGGL(sharedMemReadSpeed2, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
+                         N);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -220,15 +218,14 @@ static bool hipPerfSharedMemReadSpeed_test() {
     std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
     // read speed in GB/s
-    double perf = (static_cast<double>(blocks * threadsPerBlock)
-                   * (numReads2 * sizeof(float) + sharedMemSizeBytes2 / 64)
-                   * nIter * (1e-09)) / all_kernel_time.count();
+    double perf = (static_cast<double>(blocks * threadsPerBlock) *
+                   (numReads2 * sizeof(float) + sharedMemSizeBytes2 / 64) * nIter * (1e-09)) /
+                  all_kernel_time.count();
 
-    INFO("info: read speed = " << std::setw(8) << perf << " GB/s for "
-         << sharedMemSizeBytes2 / 1024 << " KB shared memory with "
-         << std::setw(8) << blocks * threadsPerBlock << " threads, "
-         << std::setw(4) << numReads2 <<
-         " reads in sharedMemReadSpeed2 kernel \n");
+    CONSOLE_PRINT(
+        "info: read speed = %.2f GB/s for %d KB shared memory with %d threads, %d reads in "
+        "sharedMemReadSpeed2 kernel\n",
+        perf, sharedMemSizeBytes2 / 1024, blocks * threadsPerBlock, numReads2);
 
     delete[] hDst;
     HIP_CHECK(hipFree(dDst));
@@ -238,30 +235,31 @@ static bool hipPerfSharedMemReadSpeed_test() {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfSharedMemReadSpeed status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfSharedMemReadSpeed.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfSharedMemReadSpeed status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfSharedMemReadSpeed.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfSharedMemReadSpeed_test") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED("Skipped testcase hipPerfSharedMemReadSpeed as"
-            "there is no device to test.\n");
+    SUCCEED(
+        "Skipped testcase hipPerfSharedMemReadSpeed as"
+        "there is no device to test.\n");
   } else {
     REQUIRE(true == hipPerfSharedMemReadSpeed_test());
   }
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

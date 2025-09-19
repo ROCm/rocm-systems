@@ -33,9 +33,8 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-template <typename T>
-__global__ void surf3DKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width,
-                              int height, int depth) {
+template <typename T> __global__ void surf3DKernelR(hipSurfaceObject_t surfaceObject, T* outputData,
+                                                    int width, int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -46,9 +45,8 @@ __global__ void surf3DKernelR(hipSurfaceObject_t surfaceObject, T* outputData, i
 #endif
 }
 
-template <typename T>
-__global__ void surf3DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width, int height,
-                              int depth) {
+template <typename T> __global__ void surf3DKernelW(hipSurfaceObject_t surfaceObject, T* inputData,
+                                                    int width, int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,9 +57,9 @@ __global__ void surf3DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, in
 #endif
 }
 
-template <typename T>
-__global__ void surf3DKernelRW(hipSurfaceObject_t surfaceObject, hipSurfaceObject_t outputSurfObj,
-                               int width, int height, int depth) {
+template <typename T> __global__ void surf3DKernelRW(hipSurfaceObject_t surfaceObject,
+                                                     hipSurfaceObject_t outputSurfObj, int width,
+                                                     int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -402,6 +400,6 @@ TEMPLATE_TEST_CASE("Unit_surf3D_Positive_ReadWrite", "", char, uchar, short, ush
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

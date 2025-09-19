@@ -46,7 +46,7 @@ class DmaBlitManager : public device::HostBlitManager {
   //! Constructor
   DmaBlitManager(VirtualGPU& gpu,       //!< Virtual GPU to be used for blits
                  Setup setup = Setup()  //!< Specifies HW accelerated blits
-                 );
+  );
 
   //! Destructor
   virtual ~DmaBlitManager() {}
@@ -55,163 +55,156 @@ class DmaBlitManager : public device::HostBlitManager {
   virtual bool create(amd::Device& device) { return true; }
 
   //! Copies a buffer object to system memory
-  virtual bool readBuffer(device::Memory& srcMemory,   //!< Source memory object
-                          void* dstHost,               //!< Destination host memory
-                          const amd::Coord3D& origin,  //!< Source origin
-                          const amd::Coord3D& size,    //!< Size of the copy region
-                          bool entire = false,         //!< Entire buffer will be updated
-                          amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()//!< Memory copy MetaData
-                          ) const;
+  virtual bool readBuffer(
+      device::Memory& srcMemory,                            //!< Source memory object
+      void* dstHost,                                        //!< Destination host memory
+      const amd::Coord3D& origin,                           //!< Source origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to system memory
-  virtual bool readBufferRect(device::Memory& srcMemory,        //!< Source memory object
-                              void* dstHost,                    //!< Destinaiton host memory
-                              const amd::BufferRect& bufRect,   //!< Source rectangle
-                              const amd::BufferRect& hostRect,  //!< Destination rectangle
-                              const amd::Coord3D& size,         //!< Size of the copy region
-                              bool entire = false,              //!< Entire buffer will be updated
-                              amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()          //!< Memory copy MetaData
-                              ) const;
+  virtual bool readBufferRect(
+      device::Memory& srcMemory,                            //!< Source memory object
+      void* dstHost,                                        //!< Destinaiton host memory
+      const amd::BufferRect& bufRect,                       //!< Source rectangle
+      const amd::BufferRect& hostRect,                      //!< Destination rectangle
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to system memory
-  virtual bool readImage(device::Memory& srcMemory,   //!< Source memory object
-                         void* dstHost,               //!< Destination host memory
-                         const amd::Coord3D& origin,  //!< Source origin
-                         const amd::Coord3D& size,    //!< Size of the copy region
-                         size_t rowPitch,             //!< Row pitch for host memory
-                         size_t slicePitch,           //!< Slice pitch for host memory
-                         bool entire = false,         //!< Entire buffer will be updated
-                         amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()//!< Memory copy MetaData
-                         ) const;
+  virtual bool readImage(
+      device::Memory& srcMemory,                            //!< Source memory object
+      void* dstHost,                                        //!< Destination host memory
+      const amd::Coord3D& origin,                           //!< Source origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      size_t rowPitch,                                      //!< Row pitch for host memory
+      size_t slicePitch,                                    //!< Slice pitch for host memory
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies system memory to a buffer object
-  virtual bool writeBuffer(const void* srcHost,         //!< Source host memory
-                           device::Memory& dstMemory,   //!< Destination memory object
-                           const amd::Coord3D& origin,  //!< Destination origin
-                           const amd::Coord3D& size,    //!< Size of the copy region
-                           bool entire = false,         //!< Entire buffer will be updated
-                           amd::CopyMetadata copyMetadata =
-                                     amd::CopyMetadata()//!< Memory copy MetaData
-                           ) const;
+  virtual bool writeBuffer(
+      const void* srcHost,                                  //!< Source host memory
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& origin,                           //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies system memory to a buffer object
-  virtual bool writeBufferRect(const void* srcHost,              //!< Source host memory
-                               device::Memory& dstMemory,        //!< Destination memory object
-                               const amd::BufferRect& hostRect,  //!< Destination rectangle
-                               const amd::BufferRect& bufRect,   //!< Source rectangle
-                               const amd::Coord3D& size,         //!< Size of the copy region
-                               bool entire = false,              //!< Entire buffer will be updated
-                               amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()          //!< Memory copy MetaData
-                               ) const;
+  virtual bool writeBufferRect(
+      const void* srcHost,                                  //!< Source host memory
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::BufferRect& hostRect,                      //!< Destination rectangle
+      const amd::BufferRect& bufRect,                       //!< Source rectangle
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies system memory to an image object
-  virtual bool writeImage(const void* srcHost,         //!< Source host memory
-                          device::Memory& dstMemory,   //!< Destination memory object
-                          const amd::Coord3D& origin,  //!< Destination origin
-                          const amd::Coord3D& size,    //!< Size of the copy region
-                          size_t rowPitch,             //!< Row pitch for host memory
-                          size_t slicePitch,           //!< Slice pitch for host memory
-                          bool entire = false,         //!< Entire buffer will be updated
-                          amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()//!< Memory copy MetaData
-                          ) const;
+  virtual bool writeImage(
+      const void* srcHost,                                  //!< Source host memory
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& origin,                           //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      size_t rowPitch,                                      //!< Row pitch for host memory
+      size_t slicePitch,                                    //!< Slice pitch for host memory
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to another buffer object
-  virtual bool copyBuffer(device::Memory& srcMemory,      //!< Source memory object
-                          device::Memory& dstMemory,      //!< Destination memory object
-                          const amd::Coord3D& srcOrigin,  //!< Source origin
-                          const amd::Coord3D& dstOrigin,  //!< Destination origin
-                          const amd::Coord3D& size,       //!< Size of the copy region
-                          bool entire = false,             //!< Entire buffer will be updated
-                          amd::CopyMetadata copyMetadata =
-                                       amd::CopyMetadata() //!< Memory copy MetaData
-                          ) const;
+  virtual bool copyBuffer(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to another buffer object
-  virtual bool copyBufferRect(device::Memory& srcMemory,       //!< Source memory object
-                              device::Memory& dstMemory,       //!< Destination memory object
-                              const amd::BufferRect& srcRect,  //!< Source rectangle
-                              const amd::BufferRect& dstRect,  //!< Destination rectangle
-                              const amd::Coord3D& size,        //!< Size of the copy region
-                              bool entire = false,             //!< Entire buffer will be updated
-                              amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()         //!< Memory copy MetaData
-                              ) const;
+  virtual bool copyBufferRect(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::BufferRect& srcRect,                       //!< Source rectangle
+      const amd::BufferRect& dstRect,                       //!< Destination rectangle
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to a buffer object
-  virtual bool copyImageToBuffer(device::Memory& srcMemory,      //!< Source memory object
-                                 device::Memory& dstMemory,      //!< Destination memory object
-                                 const amd::Coord3D& srcOrigin,  //!< Source origin
-                                 const amd::Coord3D& dstOrigin,  //!< Destination origin
-                                 const amd::Coord3D& size,       //!< Size of the copy region
-                                 bool entire = false,            //!< Entire buffer will be updated
-                                 size_t rowPitch = 0,            //!< Pitch for buffer
-                                 size_t slicePitch = 0,          //!< Slice for buffer
-                                 amd::CopyMetadata copyMetadata =
-                                          amd::CopyMetadata()    //!< Memory copy MetaData
-                                 ) const;
+  virtual bool copyImageToBuffer(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      size_t rowPitch = 0,                                  //!< Pitch for buffer
+      size_t slicePitch = 0,                                //!< Slice for buffer
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to an image object
-  virtual bool copyBufferToImage(device::Memory& srcMemory,      //!< Source memory object
-                                 device::Memory& dstMemory,      //!< Destination memory object
-                                 const amd::Coord3D& srcOrigin,  //!< Source origin
-                                 const amd::Coord3D& dstOrigin,  //!< Destination origin
-                                 const amd::Coord3D& size,       //!< Size of the copy region
-                                 bool entire = false,            //!< Entire buffer will be updated
-                                 size_t rowPitch = 0,            //!< Pitch for buffer
-                                 size_t slicePitch = 0,           //!< Slice for buffer
-                                 amd::CopyMetadata copyMetadata =
-                                       amd::CopyMetadata() //!< Memory copy MetaData
-                                 ) const;
+  virtual bool copyBufferToImage(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      size_t rowPitch = 0,                                  //!< Pitch for buffer
+      size_t slicePitch = 0,                                //!< Slice for buffer
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to another image object
-  virtual bool copyImage(device::Memory& srcMemory,      //!< Source memory object
-                         device::Memory& dstMemory,      //!< Destination memory object
-                         const amd::Coord3D& srcOrigin,  //!< Source origin
-                         const amd::Coord3D& dstOrigin,  //!< Destination origin
-                         const amd::Coord3D& size,       //!< Size of the copy region
-                         bool entire = false,             //!< Entire buffer will be updated
-                         amd::CopyMetadata copyMetadata =
-                                       amd::CopyMetadata() //!< Memory copy MetaData
-                         ) const;
+  virtual bool copyImage(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Stream memory write operation - Write a 'value' at 'memory'.
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
-                              uint64_t value,
-                              size_t offset,
-                              size_t sizeBytes) const {
+                              uint64_t value, size_t offset, size_t sizeBytes) const {
     assert(!"Unimplemented");
     return false;
   }
 
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(device::Memory& memory,  //!< Memory to compare the 'value' against
-                             uint64_t value,
-                             size_t offset,
-                             size_t sizeBytes,
-                             uint64_t flags,
+                             uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
                              uint64_t mask) const {
     assert(!"Unimplemented");
     return false;
   }
 
-  virtual bool initHeap(device::Memory* heap_to_initialize,
-                        device::Memory* initial_blocks,
-                        uint heap_size,
-                        uint number_of_initial_blocks) const {
+  virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
+                        uint heap_size, uint number_of_initial_blocks) const {
     assert(!"Unimplemented");
     return false;
   }
 
  protected:
-  struct BufferState{
-    address buffer_;         //!< Staging Buffer or Pinned Host Mem Address
-    amd::Memory* pinnedMem_; //!< Pinned Memory
-    size_t copySize_;        //!< last copy size
+  struct BufferState {
+    address buffer_;          //!< Staging Buffer or Pinned Host Mem Address
+    amd::Memory* pinnedMem_;  //!< Pinned Memory
+    size_t copySize_;         //!< last copy size
   };
   //! Synchronizes the blit operations if necessary
   inline void synchronize() const;
@@ -228,7 +221,7 @@ class DmaBlitManager : public device::HostBlitManager {
   amd::Memory* pinHostMemory(const void* hostMem,  //!< Host memory pointer
                              size_t pinSize,       //!< Host memory size
                              size_t& partial       //!< Extra offset for memory alignment
-                             ) const;
+  ) const;
 
   //! Assits in transferring data from Host to Local or vice versa
   //! taking into account the Hsail profile supported by Hsa Agent
@@ -236,38 +229,38 @@ class DmaBlitManager : public device::HostBlitManager {
                const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
                amd::CopyMetadata& copyMetadata) const;
 
-  inline bool rocrCopyBuffer(address dst, hsa_agent_t& dstAgent,
-                             const_address src, hsa_agent_t& srcAgent, size_t size,
+  inline bool rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
+                             hsa_agent_t& srcAgent, size_t size,
                              amd::CopyMetadata& copyMetadata) const;
 
   // Get Pinned Host Memory or Staging Buffer
-  void getBuffer(const_address hostMem,         //!< Host Mem Address
+  void getBuffer(const_address hostMem,  //!< Host Mem Address
                  size_t size,            //!< Transfer Size
                  bool enablePin,         //!< True when Pinning is enabled
                  bool first_tx,          //!< True for first copy
-                 BufferState &buffer     //!< State of Buffer
-                ) const;
+                 BufferState& buffer     //!< State of Buffer
+  ) const;
 
   // Release Pinned host memory
-  void releaseBuffer(BufferState &buff //!< True if last copy used Pinned resource
-                    ) const;
+  void releaseBuffer(BufferState& buff  //!< True if last copy used Pinned resource
+  ) const;
 
-  bool hsaCopyStagedOrPinned(const_address hostSrc,             //!< Src buffer address
-                             address hostDst,                   //!< Dst Buffer address
-                             size_t size,                       //!< Size in bytes
-                             bool hostToDev,                    //!< True for H2D copy
-                             amd::CopyMetadata& copyMetadata,   //!< copy MetaData
-                             bool enPinning = false             //!< True if pinning required
-                            ) const;
+  bool hsaCopyStagedOrPinned(const_address hostSrc,            //!< Src buffer address
+                             address hostDst,                  //!< Dst Buffer address
+                             size_t size,                      //!< Size in bytes
+                             bool hostToDev,                   //!< True for H2D copy
+                             amd::CopyMetadata& copyMetadata,  //!< copy MetaData
+                             bool enPinning = false            //!< True if pinning required
+  ) const;
 
-  const size_t PinXferSize;                   //!< Copy size for Pinned Copy
-  const size_t MinSizeForPinnedXfer;          //!< Mininum copy size for Pinned Copy
-  const size_t StagingXferSize;               //!< Copy size for Staging Buffer Copy
+  const size_t PinXferSize;           //!< Copy size for Pinned Copy
+  const size_t MinSizeForPinnedXfer;  //!< Mininum copy size for Pinned Copy
+  const size_t StagingXferSize;       //!< Copy size for Staging Buffer Copy
 
-  bool completeOperation_;                    //!< DMA blit manager must complete operation
-  amd::Context* context_;                     //!< A dummy context
-  uint32_t sdmaEngineReadMask_;               //!< SDMA Engine Read Mask
-  uint32_t sdmaEngineWriteMask_;              //!< SDMA Engine Write Mask
+  bool completeOperation_;        //!< DMA blit manager must complete operation
+  amd::Context* context_;         //!< A dummy context
+  uint32_t sdmaEngineReadMask_;   //!< SDMA Engine Read Mask
+  uint32_t sdmaEngineWriteMask_;  //!< SDMA Engine Write Mask
 
  private:
   //! Disable copy constructor
@@ -305,7 +298,7 @@ class KernelBlitManager : public DmaBlitManager {
   //! Constructor
   KernelBlitManager(VirtualGPU& gpu,       //!< Virtual GPU to be used for blits
                     Setup setup = Setup()  //!< Specifies HW accelerated blits
-                    );
+  );
 
   //! Destructor
   virtual ~KernelBlitManager();
@@ -314,172 +307,172 @@ class KernelBlitManager : public DmaBlitManager {
   virtual bool create(amd::Device& device);
 
   //! Copies a buffer object to another buffer object
-  virtual bool copyBufferRect(device::Memory& srcMemory,         //!< Source memory object
-                              device::Memory& dstMemory,         //!< Destination memory object
-                              const amd::BufferRect& srcRectIn,  //!< Source rectangle
-                              const amd::BufferRect& dstRectIn,  //!< Destination rectangle
-                              const amd::Coord3D& sizeIn,        //!< Size of the copy region
-                              bool entire = false,               //!< Entire buffer will be updated
-                              amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()         //!< Memory copy MetaData
-                              ) const;
+  virtual bool copyBufferRect(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::BufferRect& srcRectIn,                     //!< Source rectangle
+      const amd::BufferRect& dstRectIn,                     //!< Destination rectangle
+      const amd::Coord3D& sizeIn,                           //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to system memory
-  virtual bool readBuffer(device::Memory& srcMemory,   //!< Source memory object
-                          void* dstHost,               //!< Destination host memory
-                          const amd::Coord3D& origin,  //!< Source origin
-                          const amd::Coord3D& size,    //!< Size of the copy region
-                          bool entire = false,         //!< Entire buffer will be updated
-                          amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()//!< Memory copy MetaData
-                          ) const;
+  virtual bool readBuffer(
+      device::Memory& srcMemory,                            //!< Source memory object
+      void* dstHost,                                        //!< Destination host memory
+      const amd::Coord3D& origin,                           //!< Source origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to system memory
-  virtual bool readBufferRect(device::Memory& srcMemory,        //!< Source memory object
-                              void* dstHost,                    //!< Destinaiton host memory
-                              const amd::BufferRect& bufRect,   //!< Source rectangle
-                              const amd::BufferRect& hostRect,  //!< Destination rectangle
-                              const amd::Coord3D& size,         //!< Size of the copy region
-                              bool entire = false,              //!< Entire buffer will be updated
-                              amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()         //!< Memory copy MetaData
-                              ) const;
+  virtual bool readBufferRect(
+      device::Memory& srcMemory,                            //!< Source memory object
+      void* dstHost,                                        //!< Destinaiton host memory
+      const amd::BufferRect& bufRect,                       //!< Source rectangle
+      const amd::BufferRect& hostRect,                      //!< Destination rectangle
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies system memory to a buffer object
-  virtual bool writeBuffer(const void* srcHost,         //!< Source host memory
-                           device::Memory& dstMemory,   //!< Destination memory object
-                           const amd::Coord3D& origin,  //!< Destination origin
-                           const amd::Coord3D& size,    //!< Size of the copy region
-                           bool entire = false,          //!< Entire buffer will be updated
-                           amd::CopyMetadata copyMetadata =
-                                     amd::CopyMetadata()//!< Memory copy MetaData
-                           ) const;
+  virtual bool writeBuffer(
+      const void* srcHost,                                  //!< Source host memory
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& origin,                           //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies system memory to a buffer object
-  virtual bool writeBufferRect(const void* srcHost,              //!< Source host memory
-                               device::Memory& dstMemory,        //!< Destination memory object
-                               const amd::BufferRect& hostRect,  //!< Destination rectangle
-                               const amd::BufferRect& bufRect,   //!< Source rectangle
-                               const amd::Coord3D& size,         //!< Size of the copy region
-                               bool entire = false,              //!< Entire buffer will be updated
-                               amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()          //!< Memory copy MetaData
-                               ) const;
+  virtual bool writeBufferRect(
+      const void* srcHost,                                  //!< Source host memory
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::BufferRect& hostRect,                      //!< Destination rectangle
+      const amd::BufferRect& bufRect,                       //!< Source rectangle
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to an image object
-  virtual bool copyBuffer(device::Memory& srcMemory,      //!< Source memory object
-                          device::Memory& dstMemory,      //!< Destination memory object
-                          const amd::Coord3D& srcOrigin,  //!< Source origin
-                          const amd::Coord3D& dstOrigin,  //!< Destination origin
-                          const amd::Coord3D& size,       //!< Size of the copy region
-                          bool entire = false,            //!< Entire buffer will be updated
-                          amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()   //!< Memory copy MetaData
-                          ) const;
+  virtual bool copyBuffer(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies a buffer object to an image object
-  virtual bool copyBufferToImage(device::Memory& srcMemory,      //!< Source memory object
-                                 device::Memory& dstMemory,      //!< Destination memory object
-                                 const amd::Coord3D& srcOrigin,  //!< Source origin
-                                 const amd::Coord3D& dstOrigin,  //!< Destination origin
-                                 const amd::Coord3D& size,       //!< Size of the copy region
-                                 bool entire = false,            //!< Entire buffer will be updated
-                                 size_t rowPitch = 0,            //!< Pitch for buffer
-                                 size_t slicePitch = 0,           //!< Slice for buffer
-                                 amd::CopyMetadata copyMetadata =
-                                           amd::CopyMetadata()    //!< Memory copy MetaData
-                                 ) const;
+  virtual bool copyBufferToImage(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      size_t rowPitch = 0,                                  //!< Pitch for buffer
+      size_t slicePitch = 0,                                //!< Slice for buffer
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to a buffer object
-  virtual bool copyImageToBuffer(device::Memory& srcMemory,      //!< Source memory object
-                                 device::Memory& dstMemory,      //!< Destination memory object
-                                 const amd::Coord3D& srcOrigin,  //!< Source origin
-                                 const amd::Coord3D& dstOrigin,  //!< Destination origin
-                                 const amd::Coord3D& size,       //!< Size of the copy region
-                                 bool entire = false,            //!< Entire buffer will be updated
-                                 size_t rowPitch = 0,            //!< Pitch for buffer
-                                 size_t slicePitch = 0,          //!< Slice for buffer
-                                 amd::CopyMetadata copyMetadata =
-                                           amd::CopyMetadata()   //!< Memory copy MetaData
-                                 ) const;
+  virtual bool copyImageToBuffer(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      size_t rowPitch = 0,                                  //!< Pitch for buffer
+      size_t slicePitch = 0,                                //!< Slice for buffer
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to another image object
-  virtual bool copyImage(device::Memory& srcMemory,      //!< Source memory object
-                         device::Memory& dstMemory,      //!< Destination memory object
-                         const amd::Coord3D& srcOrigin,  //!< Source origin
-                         const amd::Coord3D& dstOrigin,  //!< Destination origin
-                         const amd::Coord3D& size,       //!< Size of the copy region
-                         bool entire = false,            //!< Entire buffer will be updated
-                         amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()   //!< Memory copy MetaData
-                         ) const;
+  virtual bool copyImage(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to system memory
-  virtual bool readImage(device::Memory& srcMemory,   //!< Source memory object
-                         void* dstHost,               //!< Destination host memory
-                         const amd::Coord3D& origin,  //!< Source origin
-                         const amd::Coord3D& size,    //!< Size of the copy region
-                         size_t rowPitch,             //!< Row pitch for host memory
-                         size_t slicePitch,           //!< Slice pitch for host memory
-                         bool entire = false,         //!< Entire buffer will be updated
-                         amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()//!< Memory copy MetaData
-                         ) const;
+  virtual bool readImage(
+      device::Memory& srcMemory,                            //!< Source memory object
+      void* dstHost,                                        //!< Destination host memory
+      const amd::Coord3D& origin,                           //!< Source origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      size_t rowPitch,                                      //!< Row pitch for host memory
+      size_t slicePitch,                                    //!< Slice pitch for host memory
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies system memory to an image object
-  virtual bool writeImage(const void* srcHost,         //!< Source host memory
-                          device::Memory& dstMemory,   //!< Destination memory object
-                          const amd::Coord3D& origin,  //!< Destination origin
-                          const amd::Coord3D& size,    //!< Size of the copy region
-                          size_t rowPitch,             //!< Row pitch for host memory
-                          size_t slicePitch,           //!< Slice pitch for host memory
-                          bool entire = false,         //!< Entire buffer will be updated
-                          amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()//!< Memory copy MetaData
-                          ) const;
-
-  //! Fills a buffer memory with a pattern data
-  virtual bool fillBuffer(device::Memory& memory,      //!< Memory object to fill with pattern
-                          const void* pattern,         //!< Pattern data
-                          size_t patternSize,          //!< Pattern size
-                          const amd::Coord3D& surface, //!< Whole Surface of mem object.
-                          const amd::Coord3D& origin,  //!< Destination origin
-                          const amd::Coord3D& size,    //!< Size of the fill region
-                          bool entire = false,         //!< Entire buffer will be updated
-                          bool forceBlit = false       //!< Force GPU Blit for fill
+  virtual bool writeImage(
+      const void* srcHost,                                  //!< Source host memory
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& origin,                           //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      size_t rowPitch,                                      //!< Row pitch for host memory
+      size_t slicePitch,                                    //!< Slice pitch for host memory
+      bool entire = false,                                  //!< Entire buffer will be updated
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const;
 
   //! Fills a buffer memory with a pattern data
-  virtual bool fillBuffer1D(device::Memory& memory,      //!< Memory object to fill with pattern
-                            const void* pattern,         //!< Pattern data
-                            size_t patternSize,          //!< Pattern size
-                            const amd::Coord3D& surface, //!< Whole Surface of mem object.
-                            const amd::Coord3D& origin,  //!< Destination origin
-                            const amd::Coord3D& size,    //!< Size of the fill region
-                            bool entire = false,         //!< Entire buffer will be updated
-                            bool forceBlit = false       //!< Force GPU Blit for fill
+  virtual bool fillBuffer(device::Memory& memory,       //!< Memory object to fill with pattern
+                          const void* pattern,          //!< Pattern data
+                          size_t patternSize,           //!< Pattern size
+                          const amd::Coord3D& surface,  //!< Whole Surface of mem object.
+                          const amd::Coord3D& origin,   //!< Destination origin
+                          const amd::Coord3D& size,     //!< Size of the fill region
+                          bool entire = false,          //!< Entire buffer will be updated
+                          bool forceBlit = false        //!< Force GPU Blit for fill
   ) const;
 
   //! Fills a buffer memory with a pattern data
-  virtual bool fillBuffer2D(device::Memory& memory,      //!< Memory object to fill with pattern
-                            const void* pattern,         //!< Pattern data
-                            size_t patternSize,          //!< Pattern size
-                            const amd::Coord3D& surface, //!< Whole Surface of mem object.
-                            const amd::Coord3D& origin,  //!< Destination origin
-                            const amd::Coord3D& size,    //!< Size of the fill region
-                            bool entire = false,         //!< Entire buffer will be updated
-                            bool forceBlit = false       //!< Force GPU Blit for fill
+  virtual bool fillBuffer1D(device::Memory& memory,       //!< Memory object to fill with pattern
+                            const void* pattern,          //!< Pattern data
+                            size_t patternSize,           //!< Pattern size
+                            const amd::Coord3D& surface,  //!< Whole Surface of mem object.
+                            const amd::Coord3D& origin,   //!< Destination origin
+                            const amd::Coord3D& size,     //!< Size of the fill region
+                            bool entire = false,          //!< Entire buffer will be updated
+                            bool forceBlit = false        //!< Force GPU Blit for fill
   ) const;
 
-    //! Fills a buffer memory with a pattern data
-  virtual bool fillBuffer3D(device::Memory& memory,      //!< Memory object to fill with pattern
-                            const void* pattern,         //!< Pattern data
-                            size_t patternSize,          //!< Pattern size
-                            const amd::Coord3D& surface, //!< Whole Surface of mem object.
-                            const amd::Coord3D& origin,  //!< Destination origin
-                            const amd::Coord3D& size,    //!< Size of the fill region
-                            bool entire = false,         //!< Entire buffer will be updated
-                            bool forceBlit = false       //!< Force GPU Blit for fill
+  //! Fills a buffer memory with a pattern data
+  virtual bool fillBuffer2D(device::Memory& memory,       //!< Memory object to fill with pattern
+                            const void* pattern,          //!< Pattern data
+                            size_t patternSize,           //!< Pattern size
+                            const amd::Coord3D& surface,  //!< Whole Surface of mem object.
+                            const amd::Coord3D& origin,   //!< Destination origin
+                            const amd::Coord3D& size,     //!< Size of the fill region
+                            bool entire = false,          //!< Entire buffer will be updated
+                            bool forceBlit = false        //!< Force GPU Blit for fill
+  ) const;
+
+  //! Fills a buffer memory with a pattern data
+  virtual bool fillBuffer3D(device::Memory& memory,       //!< Memory object to fill with pattern
+                            const void* pattern,          //!< Pattern data
+                            size_t patternSize,           //!< Pattern size
+                            const amd::Coord3D& surface,  //!< Whole Surface of mem object.
+                            const amd::Coord3D& origin,   //!< Destination origin
+                            const amd::Coord3D& size,     //!< Size of the fill region
+                            bool entire = false,          //!< Entire buffer will be updated
+                            bool forceBlit = false        //!< Force GPU Blit for fill
   ) const;
 
 
@@ -489,44 +482,30 @@ class KernelBlitManager : public DmaBlitManager {
                          const amd::Coord3D& origin,  //!< Destination origin
                          const amd::Coord3D& size,    //!< Size of the copy region
                          bool entire = false          //!< Entire buffer will be updated
-                         ) const;
+  ) const;
 
-  bool runScheduler(uint64_t vqVM,
-                    amd::Memory* schedulerParam,
-                    hsa_queue_t* schedulerQueue,
-                    hsa_signal_t& schedulerSignal,
-                    uint threads);
+  bool runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue, uint threads, uint64_t aql_wrap);
 
   //! Runs a blit kernel for GWS init
-  bool RunGwsInit(uint32_t value             //!< Initial value for GWS resource
-                  ) const;
+  bool RunGwsInit(uint32_t value  //!< Initial value for GWS resource
+  ) const;
 
   //! Stream memory write operation - Write a 'value' at 'memory'.
-  virtual bool streamOpsWrite(device::Memory& memory, //!< Memory to write the 'value'
-                             uint64_t value,
-                             size_t offset,
-                             size_t sizeBytes
-  ) const;
+  virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
+                              uint64_t value, size_t offset, size_t sizeBytes) const;
 
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
-  virtual bool streamOpsWait(device::Memory& memory, //!< Memory contents to compare the 'value' against
-                             uint64_t value,
-                             size_t offset,
-                             size_t sizeBytes,
-                             uint64_t flags,
-                             uint64_t mask
-  ) const;
+  virtual bool streamOpsWait(
+      device::Memory& memory,  //!< Memory contents to compare the 'value' against
+      uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags, uint64_t mask) const;
 
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
   virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const;
 
   virtual amd::Monitor* lockXfer() const { return &lockXferOps_; }
 
-  virtual bool initHeap(device::Memory* heap_to_initialize,
-                        device::Memory* initial_blocks,
-                        uint heap_size,
-                        uint number_of_initial_blocks
-                        ) const;
+  virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
+                        uint heap_size, uint number_of_initial_blocks) const;
 
  private:
   static constexpr size_t MaxXferBuffers = 2;
@@ -534,61 +513,60 @@ class KernelBlitManager : public DmaBlitManager {
   static constexpr uint MaxNumIssuedTransfers = 3;
 
   //! Copies a buffer object to an image object
-  bool copyBufferToImageKernel(device::Memory& srcMemory,      //!< Source memory object
-                               device::Memory& dstMemory,      //!< Destination memory object
-                               const amd::Coord3D& srcOrigin,  //!< Source origin
-                               const amd::Coord3D& dstOrigin,  //!< Destination origin
-                               const amd::Coord3D& size,       //!< Size of the copy region
-                               bool entire = false,            //!< Entire buffer will be updated
-                               size_t rowPitch = 0,            //!< Pitch for buffer
-                               size_t slicePitch = 0,          //!< Slice for buffer
-                               amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()   //!< Memory copy MetaData
-                               ) const;
+  bool copyBufferToImageKernel(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      size_t rowPitch = 0,                                  //!< Pitch for buffer
+      size_t slicePitch = 0,                                //!< Slice for buffer
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Copies an image object to a buffer object
-  bool copyImageToBufferKernel(device::Memory& srcMemory,      //!< Source memory object
-                               device::Memory& dstMemory,      //!< Destination memory object
-                               const amd::Coord3D& srcOrigin,  //!< Source origin
-                               const amd::Coord3D& dstOrigin,  //!< Destination origin
-                               const amd::Coord3D& size,       //!< Size of the copy region
-                               bool entire = false,            //!< Entire buffer will be updated
-                               size_t rowPitch = 0,            //!< Pitch for buffer
-                               size_t slicePitch = 0,          //!< Slice for buffer
-                               amd::CopyMetadata copyMetadata =
-                                    amd::CopyMetadata()   //!< Memory copy MetaData
-                               ) const;
+  bool copyImageToBufferKernel(
+      device::Memory& srcMemory,                            //!< Source memory object
+      device::Memory& dstMemory,                            //!< Destination memory object
+      const amd::Coord3D& srcOrigin,                        //!< Source origin
+      const amd::Coord3D& dstOrigin,                        //!< Destination origin
+      const amd::Coord3D& size,                             //!< Size of the copy region
+      bool entire = false,                                  //!< Entire buffer will be updated
+      size_t rowPitch = 0,                                  //!< Pitch for buffer
+      size_t slicePitch = 0,                                //!< Slice for buffer
+      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
 
   //! Creates a program for all blit operations
   bool createProgram(Device& device  //!< Device object
-                     );
+  );
 
   //! Creates a view memory object
   Memory* createView(const Memory& parent,    //!< Parent memory object
                      cl_image_format format,  //!< The new format for a view
                      cl_mem_flags flags       //!< Memory flags
-                     ) const;
+  ) const;
 
   address captureArguments(const amd::Kernel* kernel) const;
   void releaseArguments(address args) const;
 
-  inline void setArgument(amd::Kernel* kernel, size_t index,
-                          size_t size, const void* value, size_t offset = 0,
-                          const device::Memory* dev_mem = nullptr,
+  inline void setArgument(amd::Kernel* kernel, size_t index, size_t size, const void* value,
+                          size_t offset = 0, const device::Memory* dev_mem = nullptr,
                           bool writeVAImmediate = false) const;
 
   static constexpr uint32_t kCBSize = 0x100;
-  static constexpr size_t   kCBAlignment = 0x100;
+  static constexpr size_t kCBAlignment = 0x100;
 
   inline uint32_t NumBlitKernels() {
     return (dev().info().imageSupport_) ? BlitTotal : BlitLinearTotal;
   }
 
   //! Copies a buffer using the shader path
-  bool shaderCopyBuffer(address dst, address src,
-                        const amd::Coord3D& dstOrigin, const amd::Coord3D& srcOrigin,
-                        const amd::Coord3D& size, bool entire, const uint32_t blitWg,
-                        amd::CopyMetadata copyMetadata, bool attachSignal = false) const;
+  bool shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
+                        const amd::Coord3D& srcOrigin, const amd::Coord3D& size, bool entire,
+                        const uint32_t blitWg, amd::CopyMetadata copyMetadata,
+                        bool attachSignal = false) const;
 
   //! Disable copy constructor
   KernelBlitManager(const KernelBlitManager&);
@@ -599,7 +577,7 @@ class KernelBlitManager : public DmaBlitManager {
   amd::Program* program_;             //!< GPU program object
   amd::Kernel* kernels_[BlitTotal];   //!< GPU kernels for blit
   size_t xferBufferSize_;             //!< Transfer buffer size
-  mutable amd::Monitor  lockXferOps_; //!< Lock transfer operation
+  mutable amd::Monitor lockXferOps_;  //!< Lock transfer operation
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
@@ -613,15 +591,16 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_copyImage1DA",      "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};
 
-inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index,
-                                           size_t size, const void* value, size_t offset,
-                                           const device::Memory* dev_mem, bool writeVAImmediate) const {
+inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,
+                                           const void* value, size_t offset,
+                                           const device::Memory* dev_mem,
+                                           bool writeVAImmediate) const {
   const amd::KernelParameterDescriptor& desc = kernel->signature().at(index);
 
   void* param = kernel->parameters().values() + desc.offset_;
   assert((desc.type_ == T_POINTER || value != NULL ||
-    (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL)) &&
-    "not a valid local mem arg");
+          (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL)) &&
+         "not a valid local mem arg");
 
   uint32_t uint32_value = 0;
   uint64_t uint64_value = 0;
@@ -630,24 +609,27 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index,
     if ((value == NULL) || (static_cast<const cl_mem*>(value) == NULL)) {
       LP64_SWITCH(uint32_value, uint64_value) = 0;
       reinterpret_cast<Memory**>(kernel->parameters().values() +
-        kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] = nullptr;
+                                 kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] =
+          nullptr;
     } else {
       if (!writeVAImmediate) {
         // convert cl_mem to amd::Memory*, return false if invalid.
         amd::Memory* mem = as_amd(*static_cast<const cl_mem*>(value));
 
-        reinterpret_cast<amd::Memory**>(kernel->parameters().values() +
-          kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] = mem;
+        reinterpret_cast<amd::Memory**>(
+            kernel->parameters().values() +
+            kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] = mem;
         if (dev_mem == nullptr) {
-          LP64_SWITCH(uint32_value, uint64_value) = static_cast<uintptr_t>(
-            mem->getDeviceMemory(dev())->virtualAddress()) + offset;
+          LP64_SWITCH(uint32_value, uint64_value) =
+              static_cast<uintptr_t>(mem->getDeviceMemory(dev())->virtualAddress()) + offset;
         } else {
-          LP64_SWITCH(uint32_value, uint64_value) = static_cast<uintptr_t>(
-            dev_mem->virtualAddress()) + offset;
+          LP64_SWITCH(uint32_value, uint64_value) =
+              static_cast<uintptr_t>(dev_mem->virtualAddress()) + offset;
         }
       } else {
-        reinterpret_cast<amd::Memory**>(kernel->parameters().values() +
-          kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] = nullptr;
+        reinterpret_cast<amd::Memory**>(
+            kernel->parameters().values() +
+            kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] = nullptr;
         uintptr_t addr = reinterpret_cast<uintptr_t>(value);
         LP64_SWITCH(uint32_value, uint64_value) = addr + offset;
       }
@@ -688,4 +670,5 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index,
 }
 
 
-/*@}*/} // namespace amd::roc
+/*@}*/  // namespace amd::roc
+}  // namespace amd::roc
