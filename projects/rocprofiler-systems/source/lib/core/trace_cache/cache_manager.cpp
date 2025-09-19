@@ -74,8 +74,8 @@ struct cache_files
 std::map<pid_t, cache_files>
 get_cache_files()
 {
-    auto root_pid  = get_root_process_id();
-    auto tmp_files = list_dir_files("/tmp/");
+    const auto root_pid  = get_root_process_id();
+    const auto tmp_files = list_dir_files("/tmp/");
 
     std::map<int, cache_files> cache_map{};
 
@@ -142,7 +142,8 @@ cache_manager::post_process_bulk()
             rocpd_threads.emplace_back([this]() {
                 rocpd_post_processing _post_processing(
                     m_metadata, get_agent_manager_instance(), std::to_string(getpid()));
-                storage_parser _parser(buffered_storage_filename);
+                storage_parser _parser(
+                    get_buffered_storage_filename(get_root_process_id(), getpid()));
                 _post_processing.register_parser_callback(_parser);
                 _post_processing.post_process_metadata();
                 _parser.consume_storage();
