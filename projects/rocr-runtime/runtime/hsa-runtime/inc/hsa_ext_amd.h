@@ -64,9 +64,10 @@
  * - 1.11 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_CLOCK_COUNTERS
  * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
+ * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 13
+#define HSA_AMD_INTERFACE_VERSION_MINOR 14
 
 #ifdef __cplusplus
 extern "C" {
@@ -3653,6 +3654,95 @@ typedef enum {
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
                                     void* value);
+
+typedef struct hsa_amd_ais_file_handle_s {
+  /*
+   * file handle for AIS read & write. Linux will use fd.
+   * pad is keep the size consistent accross different platforms.
+   */
+  union {
+    void*      handle;
+    int        fd;
+    uint8_t    pad[8];
+  };
+} hsa_amd_ais_file_handle_t;
+
+/**
+ * @brief Write data from device memory to a file
+ *
+ * Writes data from device memory buffer to a file at the specified offset.
+ * The device memory pointer must be accessible from the host and point to
+ * a valid allocation.
+ *
+ * EXPERIMENTAL: AIS read and write calls are currently in experimental phase and
+ *  APIs may be modified
+ *
+ * @param[in] handle Handle of the file to write to.
+ *
+ * @param[in] devicePtr Device memory buffer pointer containing data to write.
+ *
+ * @param[in] size Size in bytes of the data to write.
+ *
+ * @param[in] file_offset Offset in bytes into the file where data will be written.
+ *
+ * @param[in/out] size_copied Actual number of bytes copied
+ *
+ * @param[in/out] status Additional status if any
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p fd is invalid, @p devicePtr
+ * is NULL, or @p size is 0.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p devicePtr does not refer to
+ * a valid allocation.
+ *
+ * @retval ::HSA_STATUS_ERROR An error occurred during the write operation.
+ */
+hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                            uint64_t size, int64_t file_offset,
+                                            uint64_t *size_copied, int32_t *status);
+
+/**
+ * @brief Read data from a file to device memory
+ *
+ * Reads data from a file at the specified offset into a device memory buffer.
+ * The device memory pointer must be accessible from the host and point to
+ * a valid allocation.
+ *
+ * EXPERIMENTAL: AIS read and write calls are currently in experimental phase and
+ *  APIs may be modified
+ * @param[in] hanlde Handle of the file to read from.
+ *
+ * @param[in] devicePtr Device memory buffer pointer to store the read data.
+ *
+ * @param[in] size Size in bytes of the data to read.
+ *
+ * @param[in] file_offset Offset in bytes into the file where data will be read from.
+ *
+ * @param[in/out] size_copied Actual number of bytes copied
+ *
+ * @param[in/out] status Additional status if any
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p fd is invalid, @p devicePtr
+ * is NULL, or @p size is 0.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p devicePtr does not refer to
+ * a valid allocation.
+ *
+ * @retval ::HSA_STATUS_ERROR An error occurred during the read operation.
+ */
+hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                           uint64_t size, int64_t file_offset,
+                                           uint64_t *size_copied, int32_t *status);
 
 /**
  * @brief logging types

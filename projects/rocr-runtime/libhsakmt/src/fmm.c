@@ -3669,7 +3669,17 @@ int hsakmt_fmm_unmap_from_gpu(void *address)
 	return ret;
 }
 
-bool hsakmt_fmm_get_handle(void *address, uint64_t *handle)
+/*
+ * Get memory @handle [OUT] for a given @address [IN]
+ *  @size_offset [IN/OUT] If specified, then address can in fact be a range.
+ *  And size_offset [IN] is provided to validate that [offset of address] +
+ *  @size_offset [IN] is within the range of the object. If within range,
+ *  then @size_offset [OUT] is set to the offset of the address from the
+ *  base of the object.
+ *
+ * Returns true if the handle is found, false otherwise.
+ */
+bool hsakmt_fmm_get_handle(void *address, uint64_t *handle, uint64_t *size_offset)
 {
 	uint32_t i;
 	manageable_aperture_t *aperture;
@@ -3706,10 +3716,25 @@ bool hsakmt_fmm_get_handle(void *address, uint64_t *handle)
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	/* Find the object to retrieve the handle */
-	object = vm_find_object_by_address(aperture, address, 0);
+	if (!size_offset)
+		object = vm_find_object_by_address(aperture, address, 0);
+	else
+		object = vm_find_object_by_address_range(aperture, address);
 	if (object && handle) {
 		*handle = object->handles[0];
 		found = true;
+		if (size_offset) {
+			/* If size_offset is set, then validate if address + size
+			 * is within range. If within range then return offset
+			 * of the address from base */
+			HSAuint64 offset = VOID_PTRS_SUB(address, object->start);
+
+			if (offset + *size_offset > object->size)
+				found = false;
+			else
+				*size_offset = offset;
+
+		}
 	}
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
