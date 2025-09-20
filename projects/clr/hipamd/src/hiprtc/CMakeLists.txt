@@ -40,7 +40,7 @@ else()
 endif()
 
 set_target_properties(hiprtc PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -69,12 +69,6 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 target_sources(hiprtc PRIVATE hiprtc.cpp ../hip_comgr_helper.cpp hiprtcInternal.cpp)
-
-set_target_properties(hiprtc PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-  POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(hiprtc
   PRIVATE
@@ -201,7 +195,7 @@ add_custom_command(
 # Create hiprtc-builtins library.
 add_library(hiprtc-builtins ${HIPRTC_GEN_OBJ})
 set_target_properties(hiprtc-builtins PROPERTIES
-  CXX_STANDARD 14
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON

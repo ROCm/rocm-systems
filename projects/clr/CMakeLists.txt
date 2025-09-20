@@ -19,6 +19,37 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.16.8)
+
+# Use ROCM Clang to compile HIP sources
+if(NOT DEFINED CMAKE_CXX_COMPILER AND UNIX)
+    find_program(ClangC_EXECUTABLE NAMES clang
+        PATHS
+            /opt/rocm/lib/llvm/bin
+            ${ROCM_PATH}/lib/llvm/bin
+            ${HIP_CLANG_PATH}
+    )
+    find_program(ClangCC_EXECUTABLE NAMES clang++
+        PATHS
+            /opt/rocm/lib/llvm/bin
+            ${ROCM_PATH}/lib/llvm/bin
+            ${HIP_CLANG_PATH}
+    )
+    set(CMAKE_CXX_ABI_COMPILED OFF)
+    if(ClangC_EXECUTABLE AND ClangCC_EXECUTABLE)
+        set(CMAKE_C_COMPILER ${ClangC_EXECUTABLE})
+        set(CMAKE_CXX_COMPILER ${ClangCC_EXECUTABLE})
+    else()
+        message(FATAL_ERROR "CMAKE_CXX_COMPILER not set and ROCm Clang not found")
+    endif()
+
+    # Setup libc++ link
+    get_filename_component(COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(LIBCPP_DIR ${COMPILER_DIR}/../lib)
+    add_compile_options(-stdlib=libc++)
+    add_link_options(-stdlib=libc++ -lc++abi)
+    link_directories(${LIBCPP_DIR})
+endif()
+
 project(clr)
 
 ##########
