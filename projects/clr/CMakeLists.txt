@@ -44,10 +44,12 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND UNIX)
 
     # Setup libc++ link
     get_filename_component(COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set(LIBCPP_DIR ${COMPILER_DIR}/../lib)
+    set(LIBCPP_LINK_DIR ${COMPILER_DIR}/../lib)
+    set(LIBCPP_INCLUDE_DIR ${COMPILER_DIR}/../include/c++/v1)
+    include_directories(SYSTEM ${LIBCPP_INCLUDE_DIR})
     add_compile_options(-stdlib=libc++)
     add_link_options(-stdlib=libc++ -lc++abi)
-    link_directories(${LIBCPP_DIR})
+    link_directories(${LIBCPP_LINK_DIR})
 endif()
 
 project(clr)
