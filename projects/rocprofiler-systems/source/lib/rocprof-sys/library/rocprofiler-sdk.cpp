@@ -125,16 +125,10 @@ ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
     std::string_view _name =
         tool_data->callback_tracing_info.at(record.kind, record.operation);
 
-    // Forces omp_parallel begin and end to have same name, allowing perfetto track to
-    // connect
+    // Forces omp_parallel begin and end to have same name, allowing track to connect
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
        record.operation == ROCPROFILER_OMPT_ID_parallel_end)
         _name = "omp_parallel";
-    // Although not necessary to connect them, this forces a unified name instead of
-    // the whole track being named omp_lock_init
-    if(record.operation == ROCPROFILER_OMPT_ID_lock_init ||
-       record.operation == ROCPROFILER_OMPT_ID_lock_destroy)
-        _name = "omp_lock";
 
     return _name;
 }
@@ -951,14 +945,6 @@ get_ompt_standard_cb_storage()
 }
 
 auto&
-get_ompt_lock_cb_storage()
-{
-    // ompt_wait_id_t -> ompt_wait_id_t (cb definition)
-    static auto _v = std::unordered_map<ompt_wait_id_t, rocprofsys_ompt_data_storage_t>{};
-    return _v;
-}
-
-auto&
 get_ompt_parallel_cb_storage()
 {
     // uintptr_t -> codeptr_ra (cb definition)
@@ -1020,51 +1006,6 @@ ompt_pop_standard_callback(
 }
 
 void
-ompt_push_lock_callback(const rocprofiler_callback_tracing_record_t& record,
-                        const rocprofiler_timestamp_t&               _beg_ts)
-{
-    auto* payload_data =
-        static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
-    const ompt_wait_id_t wait_id_value = payload_data->args.lock_init.wait_id;
-
-    auto args = function_args_t{};
-    rocprofiler_iterate_callback_tracing_kind_operation_args(
-        record, iterate_args_callback, 1, &args);
-    get_ompt_lock_cb_storage().emplace(
-        wait_id_value, rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
-}
-
-void
-ompt_pop_lock_callback(const rocprofiler_callback_tracing_record_t&              record,
-                       const rocprofiler_timestamp_t&                            _end_ts,
-                       std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
-{
-    auto* payload_data =
-        static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
-    const ompt_wait_id_t wait_id_value = payload_data->args.lock_destroy.wait_id;
-
-    auto it = get_ompt_lock_cb_storage().find(wait_id_value);
-    if(it == get_ompt_lock_cb_storage().end())
-    {
-        auto args = function_args_t{};
-        rocprofiler_iterate_callback_tracing_kind_operation_args(
-            record, iterate_args_callback, 2, &args);
-        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
-                                _bt_data);
-        return;
-    }
-    auto stored_data = it->second;
-    get_ompt_lock_cb_storage().erase(it);
-    auto call_stack = get_backtrace(_bt_data);
-
-    cache_category<category::rocm_ompt_api>();
-    cache_add_thread_info(record.thread_id);
-    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
-                 get_args_string(stored_data.args),
-                 trait::name<category::rocm_ompt_api>::value);
-}
-
-void
 ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
                             const rocprofiler_timestamp_t&               _beg_ts)
 {
@@ -1118,11 +1059,6 @@ ompt_finalize_orphan_events()
     auto empty_call_stack =
         std::optional<std::vector<tim::unwind::processed_entry>>{ std::nullopt };
     for(const auto& [codeptr_ra, stored_data] : get_ompt_parallel_cb_storage())
-    {
-        ompt_cache_orphan_event(stored_data, empty_call_stack);
-    }
-
-    for(const auto& [wait_id, stored_data] : get_ompt_lock_cb_storage())
     {
         ompt_cache_orphan_event(stored_data, empty_call_stack);
     }
@@ -1548,13 +1484,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         ompt_pop_parallel_callback(record, ts, _bt_data);
                         break;
                     case ROCPROFILER_OMPT_ID_lock_init:
-                        ompt_tracing_callback_start(record, user_data, ts);
-                        ompt_push_lock_callback(record, ts);
-                        break;
                     case ROCPROFILER_OMPT_ID_lock_destroy:
-                        ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
-                        ompt_pop_lock_callback(record, ts, _bt_data);
-                        break;
                     // Although this has endpoint arg, treat it as instant event
                     case ROCPROFILER_OMPT_ID_nest_lock:
                     case ROCPROFILER_OMPT_ID_dispatch:
