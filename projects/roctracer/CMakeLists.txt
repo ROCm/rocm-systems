@@ -22,7 +22,10 @@
 
 cmake_minimum_required(VERSION 3.18.0)
 
+include( utils.cmake )
 set( CORE_TARGET "roctracer" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 project(roctracer VERSION 4.1.0)
 
 if(${ROCM_PATCH_VERSION})
@@ -185,16 +188,41 @@ endif()
 if(ENABLE_ASAN_PACKAGING)
   # ASAN Package requires asan component with only libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
-  set( COMP_TYPE "CORE_ASAN" )
+  set( COMP_TYPE "asan" )
 else()
   set(CPACK_COMPONENTS_ALL runtime dev tests)
-  set( COMP_TYPE "CORE_RUNTIME" )
+  set( COMP_TYPE "runtime" )
 endif()
 
 include(CPack)
 
 # Debian specific packaging configuration
 configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+
+message(STATUS "POTATO BUILD_ENABLE_LINTIAN_OVERRIDES: ${BUILD_ENABLE_LINTIAN_OVERRIDES}")
+message(STATUS "POTATO BUILD_DEBIAN_PKGING_FLAG: ${BUILD_DEBIAN_PKGING_FLAG}")
+message(STATUS "POTATO COMP_TYPE: ${COMP_TYPE}")
+message(STATUS "POTATO CMakelists.txt BUILD_SHARED_LIBS: ${BUILD_SHARED_LIBS}")
+
+# Custom installation for Debian Lintian File
+if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
+    set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
+    message(STATUS "POTATO inside Custom installation for Debian Lintian File")
+    if(COMP_TYPE)
+	message(STATUS "POTATO inside COMP_TYPE")
+	set( OVERRIDE_TEMP_INSTALL_LOC "/_CPack_Packages/Linux/DEB/${CORE_TARGET}-${CPACK_PACKAGE_VERSION}-Linux/${COMP_TYPE}" )
+    elseif(STATIC_COMP_TYPE)
+	    message(STATUS "POTATO inside STATIC_COMP_TYPE")    
+	set( OVERRIDE_TEMP_INSTALL_LOC "/_CPack_Packages/Linux/DEB/${CORE_TARGET}-${CPACK_PACKAGE_VERSION}-Linux/${STATIC_COMP_TYPE}" )
+    endif()
+    set(CPACK_INSTALL_COMMANDS
+	  "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+	  "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+	  )
+  message(STATUS "POTATO CMAKE_COMMAND: ${CMAKE_COMMAND}, CMAKE_BINARY_DIR: ${CMAKE_BINARY_DIR}, OVERRIDE_TEMP_INSTALL_LOC: ${OVERRIDE_TEMP_INSTALL_LOC}, DEB_OVERRIDES_INSTALL_PATH: ${DEB_OVERRIDES_INSTALL_PATH}")
+
+  message(STATUS "POTATO OVERRIDE_FILE: ${OVERRIDE_FILE}")
+endif()
 
 cpack_add_component(runtime
   DISPLAY_NAME "Runtime"
