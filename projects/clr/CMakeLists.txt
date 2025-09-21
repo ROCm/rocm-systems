@@ -43,6 +43,7 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND UNIX)
     endif()
 
     # Setup libc++ link
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
     get_filename_component(COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set(LIBCPP_LINK_DIR ${COMPILER_DIR}/../lib)
     set(LIBCPP_INCLUDE_DIR ${COMPILER_DIR}/../include/c++/v1)
