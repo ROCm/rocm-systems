@@ -278,6 +278,54 @@ metadata_registry::get_kernel_symbol_list() const
     return result;
 }
 
+metadata_registry::metadata_registry()
+{
+    auto                          items = m_callback_tracing_info.items();
+    std::vector<std::string_view> cat_backup;
+    std::vector<std::string_view> ompt_new_op_name;
+
+    cat_backup.reserve(items.size());
+    for(size_t i = 0; i < items.size(); i++)
+    {
+        const auto* category = items[i];
+        cat_backup.push_back(category->name);
+
+        if(category->value == ROCPROFILER_CALLBACK_TRACING_OMPT)
+        {
+            auto operations = category->items();
+            ompt_new_op_name.reserve(operations.size());
+
+            for(size_t j = 0; j < operations.size(); j++)
+            {
+                const auto& [op_idx, op_name_ptr] = operations[j];
+                ompt_new_op_name.push_back(*op_name_ptr);
+            }
+        }
+    }
+
+    // Override
+    ompt_new_op_name[static_cast<size_t>(ROCPROFILER_OMPT_ID_parallel_begin)] =
+        "omp_parallel";
+    ompt_new_op_name[static_cast<size_t>(ROCPROFILER_OMPT_ID_parallel_end)] =
+        "omp_parallel";
+
+    // Rewrite OMPT entry
+    for(size_t i = 0; i < static_cast<size_t>(ROCPROFILER_OMPT_ID_LAST); i++)
+    {
+        m_callback_tracing_info.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT,
+                                        static_cast<rocprofiler_ompt_operation_t>(i),
+                                        ompt_new_op_name[i].data());
+    }
+
+    // Add back all categories after OMPT entry
+    for(size_t i = static_cast<size_t>(ROCPROFILER_CALLBACK_TRACING_OMPT) + 1;
+        i < static_cast<size_t>(ROCPROFILER_CALLBACK_TRACING_LAST); i++)
+    {
+        auto enum_value = static_cast<rocprofiler_callback_tracing_kind_t>(i);
+        m_callback_tracing_info.emplace(enum_value, cat_backup[i].data());
+    }
+}
+
 rocprofiler::sdk::buffer_name_info_t<const char*>
 metadata_registry::get_buffer_name_info() const
 {

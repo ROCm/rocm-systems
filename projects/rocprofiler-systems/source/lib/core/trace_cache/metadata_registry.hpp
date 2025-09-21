@@ -215,7 +215,7 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
-    metadata_registry() = default;
+    metadata_registry();
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>

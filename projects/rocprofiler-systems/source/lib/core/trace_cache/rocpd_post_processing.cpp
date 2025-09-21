@@ -311,19 +311,7 @@ rocpd_post_processing::get_region_callback() const
         auto _name                 = std::string{ callback_tracing_info.at(
             static_cast<rocprofiler_callback_tracing_kind_t>(_rs.kind),
             static_cast<rocprofiler_tracing_operation_t>(_rs.operation)) };
-#    if(ROCPROFILER_VERSION >= 600)
-        // Special name for supported OMPT phase none events with start/end
-        if(_rs.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
-        {
-            if(_rs.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
-               _rs.operation == ROCPROFILER_OMPT_ID_parallel_end)
-                _name = "omp_parallel";
-            if(_rs.operation == ROCPROFILER_OMPT_ID_lock_init ||
-               _rs.operation == ROCPROFILER_OMPT_ID_lock_destroy)
-                _name = "omp_lock";
-        }
-#    endif
-        auto name_primary_key = data_processor.insert_string(_name.c_str());
+        auto name_primary_key      = data_processor.insert_string(_name.c_str());
 
         auto category_primary_key = data_processor.insert_string(_rs.category.c_str());
 
