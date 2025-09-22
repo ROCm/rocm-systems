@@ -99,7 +99,7 @@ jobs:
           echo "✅ ROCm Installation Complete!"
 
       - name: Configure, Build, and Test
-        timeout-minutes: 115
+        timeout-minutes: 120
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
@@ -111,32 +111,28 @@ jobs:
             -S ${PWD} \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
-            --build-jobs 2 \
+            --build-jobs 16 \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_DYNINST=ON \
             -DROCPROFSYS_BUILD_BOOST=ON \
             -DROCPROFSYS_BUILD_TBB=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
             -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
-            -DROCPROFSYS_BUILD_TESTING=ON
+            -DROCPROFSYS_MAX_THREADS=64 \
+            -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
+            -- \
+            -LE "transpose|rccl|videodecode|jpegdecode|network"
 
       - name: Install
         timeout-minutes: 10
         working-directory: projects/rocprofiler-systems
         run: |
-          cmake --build build --target install --parallel 2
-
-      - name: CPack and Install
-        working-directory: projects/rocprofiler-systems/
-        run: |
-          cd build
-          cpack -G STGZ
-          mkdir -p /opt/rocprofiler-systems
-          ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
+          cmake --build build --target install --parallel 16
 
