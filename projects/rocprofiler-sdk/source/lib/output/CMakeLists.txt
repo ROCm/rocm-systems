@@ -61,7 +61,6 @@ target_link_libraries(
     rocprofiler-sdk-output-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
-            rocprofiler-sdk::rocprofiler-sdk-hip-nolink
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
