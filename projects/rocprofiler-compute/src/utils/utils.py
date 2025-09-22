@@ -352,6 +352,10 @@ def capture_subprocess_output(
         selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
     def forward_input():
+        """
+        Forward the keyboard input from the terminal to the inside subprocess
+        """
+
         try:
             sys.stdin.fileno()
         except (io.UnsupportedOperation, AttributeError):
@@ -828,6 +832,9 @@ def run_prof(
 
             @contextmanager
             def temporary_env(env_vars):
+                """
+                Temparaily change the environment variable of this application.
+                """
                 original_env = os.environ.copy()
                 os.environ.update({k: str(v) for k, v in env_vars.items()})
                 try:

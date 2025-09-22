@@ -72,13 +72,13 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             args.format_rocprof_output,
         ]
 
-        if self.get_args().attach_pid:
+        if args.attach_pid:
             profiling_options.append("--pid")
-            profiling_options.append(self.get_args().attach_pid)
+            profiling_options.append(args.attach_pid)
 
-            if self.get_args().attach_duration_msec:
+            if args.attach_duration_msec:
                 profiling_options.append("--attach-duration-msec")
-                profiling_options.append(self.get_args().attach_duration_msec)
+                profiling_options.append(args.attach_duration_msec)
 
         # Kernel filtering
         if args.kernel:

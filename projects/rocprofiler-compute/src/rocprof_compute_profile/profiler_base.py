@@ -109,7 +109,7 @@ class RocProfCompute_Base:
                     "Please verify."
                 )
             args.remaining = " ".join(args.remaining)
-        elif not self.__args.attach_pid:
+        elif not args.attach_pid:
             console_error(
                 "Profiling command required. Pass application executable after -- "
                 "at the end of options.\n"
