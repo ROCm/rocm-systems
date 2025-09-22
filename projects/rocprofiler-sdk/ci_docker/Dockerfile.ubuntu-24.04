@@ -88,7 +88,8 @@ RUN apt-get update && apt-get install -y ccache && \
 ENV PATH="/usr/lib/ccache:${PATH}"
 
 # Install AWS CLI for later stages (use pip on noble to avoid apt candidate issues)
-RUN python3 -m pip install -U awscli
+RUN python3 -m pip install --upgrade pip --break-system-packages && \
+    python3 -m pip install awscli --break-system-packages
 
 # Configure git for container builds (kept for compatibility)
 RUN git config --global --add safe.directory '*'

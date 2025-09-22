@@ -23,6 +23,7 @@ RUN dnf update -y && dnf install -y \
     rpm-build \
     libzstd-devel \
     zlib-devel \
+    openssl-devel \
     # Additional development tools
     diffutils \
     patch \
