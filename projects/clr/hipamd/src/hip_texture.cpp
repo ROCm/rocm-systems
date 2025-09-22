@@ -1491,6 +1491,11 @@ hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  if (static_cast<hipResourceType>(pResDesc->resType) == hipResourceTypePitch2D &&
+      ((pResDesc->res.pitch2D.width == 0) || (pResDesc->res.pitch2D.height == 0))) {
+    HIP_RETURN(hipSuccess);
+  }
+
   hipResourceDesc resDesc = hip::getResourceDesc(*pResDesc);
   hipTextureDesc texDesc = hip::getTextureDesc(*pTexDesc);
 
