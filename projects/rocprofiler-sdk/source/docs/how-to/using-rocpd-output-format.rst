@@ -452,4 +452,409 @@ Tool Integration and Workflow Examples
    rocpd2pftrace -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o interactive_trace
 
 
+Interactive Database Querying
+++++++++++++++++++++++++++++++
 
+The ``rocpd query`` command provides powerful SQL-based analysis capabilities for exploring and extracting data from rocpd databases. This tool enables custom analysis workflows, automated reporting, and integration with external analysis pipelines.
+
+rocpd query - SQL Query Engine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Purpose:** Execute custom SQL queries against rocpd databases with support for multiple output formats, automated reporting, and email delivery.
+
+**Location:** ``/opt/rocm/bin/rocpd query``
+
+**Syntax:**
+
+.. code-block:: bash
+
+   rocpd query -i INPUT [INPUT ...] --query "SQL_STATEMENT" [OPTIONS]
+
+**Key Features:**
+
+- **Standard SQL Support:** Full SQLite3 SQL syntax including JOINs, aggregate functions, and complex WHERE clauses
+- **Multi-Database Aggregation:** Query across multiple database files as unified virtual database
+- **Multiple Output Formats:** Console, CSV, HTML, JSON, Markdown, PDF, and interactive dashboards
+- **Script Execution:** Execute complex SQL scripts with view definitions and custom functions
+- **Automated Reporting:** Email delivery with SMTP configuration and attachment management
+- **Time Window Integration:** Apply temporal filtering before query execution
+
+Database Schema and Views
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+rocpd databases provide comprehensive views for analysis:
+
+**Core Data Views:**
+
+.. code-block:: sql
+
+   -- System and hardware information
+   SELECT * FROM rocpd_info_agents;
+   SELECT * FROM rocpd_info_node;
+   
+   -- Kernel execution data
+   SELECT * FROM kernels;
+   SELECT * FROM top_kernels;
+   
+   -- API trace information
+   SELECT * FROM hip_api_trace;
+   SELECT * FROM rocr_api_trace;
+   
+   -- Performance counters
+   SELECT * FROM counters_collection;
+   
+   -- Memory operations
+   SELECT * FROM memory_copies;
+   SELECT * FROM memory_allocations;
+   
+   -- Process and thread information
+   SELECT * FROM processes;
+   SELECT * FROM threads;
+   
+   -- Marker and region data
+   SELECT * FROM regions;
+   SELECT * FROM markers;
+
+**Summary and Analysis Views:**
+
+.. code-block:: sql
+
+   -- Top performing kernels by execution time
+   SELECT * FROM top_kernels LIMIT 10;
+   
+   -- Memory bandwidth analysis
+   SELECT * FROM memory_copy_summary;
+   
+   -- API call frequency statistics
+   SELECT * FROM api_call_statistics;
+   
+   -- Device utilization metrics
+   SELECT * FROM device_utilization;
+
+Basic Query Examples
+~~~~~~~~~~~~~~~~~~~
+
+**Simple Data Exploration:**
+
+.. code-block:: bash
+
+   # List available GPU agents
+   rocpd query -i profile.db --query "SELECT * FROM rocpd_info_agents"
+   
+   # Show top 10 longest-running kernels
+   rocpd query -i profile.db --query "SELECT kernel_name, duration_ns FROM kernels ORDER BY duration_ns DESC LIMIT 10"
+   
+   # Count total number of kernel dispatches
+   rocpd query -i profile.db --query "SELECT COUNT(*) as total_kernels FROM kernels"
+
+**Multi-Database Aggregation:**
+
+.. code-block:: bash
+
+   # Combine data from multiple profiling sessions
+   rocpd query -i session1.db session2.db session3.db \
+               --query "SELECT pid, COUNT(*) as kernel_count FROM kernels GROUP BY pid"
+   
+   # Cross-session performance comparison
+   rocpd query -i baseline.db optimized.db \
+               --query "SELECT kernel_name, AVG(duration_ns) as avg_duration FROM kernels GROUP BY kernel_name"
+
+**Advanced Analytics:**
+
+.. code-block:: bash
+
+   # Kernel performance analysis with statistics
+   rocpd query -i profile.db --query "
+   SELECT 
+       kernel_name,
+       COUNT(*) as dispatch_count,
+       MIN(duration_ns) as min_duration,
+       AVG(duration_ns) as avg_duration,
+       MAX(duration_ns) as max_duration,
+       SUM(duration_ns) as total_duration
+   FROM kernels 
+   GROUP BY kernel_name 
+   ORDER BY total_duration DESC"
+
+**Memory Transfer Analysis:**
+
+.. code-block:: bash
+
+   # Memory copy performance by direction
+   rocpd query -i profile.db --query "
+   SELECT 
+       copy_kind,
+       COUNT(*) as transfer_count,
+       SUM(size_bytes) as total_bytes,
+       AVG(bandwidth_gb_per_sec) as avg_bandwidth
+   FROM memory_copies 
+   GROUP BY copy_kind 
+   ORDER BY total_bytes DESC"
+
+Output Format Options
+~~~~~~~~~~~~~~~~~~~~
+
+**Console Output (Default):**
+
+.. code-block:: bash
+
+   # Display results in terminal
+   rocpd query -i profile.db --query "SELECT * FROM top_kernels LIMIT 5"
+
+**CSV Export for Data Analysis:**
+
+.. code-block:: bash
+
+   # Export to CSV file
+   rocpd query -i profile.db --query "SELECT * FROM kernels" --format csv -o kernel_analysis
+
+   # Specify custom output directory
+   rocpd query -i profile.db --query "SELECT * FROM kernels" --format csv -d ~/analysis/ -o kernel_data
+
+**HTML Reports:**
+
+.. code-block:: bash
+
+   # Generate HTML table
+   rocpd query -i profile.db --query "SELECT * FROM top_kernels" --format html -o performance_report
+
+**Interactive Dashboard:**
+
+.. code-block:: bash
+
+   # Create interactive HTML dashboard
+   rocpd query -i profile.db --query "SELECT * FROM device_utilization" --format dashboard -o utilization_dashboard
+   
+   # Use custom dashboard template
+   rocpd query -i profile.db --query "SELECT * FROM kernels" --format dashboard \
+               --template-path ~/templates/custom_dashboard.html -o custom_report
+
+**JSON for Programmatic Integration:**
+
+.. code-block:: bash
+
+   # Export structured JSON data
+   rocpd query -i profile.db --query "SELECT * FROM counters_collection" --format json -o counter_data
+
+**PDF Reports:**
+
+.. code-block:: bash
+
+   # Generate PDF report with monospace formatting
+   rocpd query -i profile.db --query "SELECT kernel_name, duration_ns FROM top_kernels" --format pdf -o kernel_report
+
+Script-Based Analysis
+~~~~~~~~~~~~~~~~~~~~~
+
+Execute complex SQL scripts with view definitions and custom analysis logic:
+
+**SQL Script Example (analysis.sql):**
+
+.. code-block:: sql
+
+   -- Create temporary views for complex analysis
+   CREATE TEMP VIEW kernel_stats AS
+   SELECT 
+       kernel_name,
+       COUNT(*) as dispatch_count,
+       AVG(duration_ns) as avg_duration,
+       STDDEV(duration_ns) as duration_stddev
+   FROM kernels 
+   GROUP BY kernel_name;
+   
+   CREATE TEMP VIEW performance_outliers AS
+   SELECT k.*, ks.avg_duration, ks.duration_stddev
+   FROM kernels k
+   JOIN kernel_stats ks ON k.kernel_name = ks.kernel_name
+   WHERE ABS(k.duration_ns - ks.avg_duration) > 2 * ks.duration_stddev;
+
+**Execute Script with Query:**
+
+.. code-block:: bash
+
+   # Run script then execute query
+   rocpd query -i profile.db --script analysis.sql \
+               --query "SELECT * FROM performance_outliers" --format html -o outlier_analysis
+
+Time Window Integration
+~~~~~~~~~~~~~~~~~~~~~~
+
+Apply temporal filtering before query execution:
+
+.. code-block:: bash
+
+   # Query only middle 50% of execution timeline
+   rocpd query -i profile.db --start 25% --end 75% \
+               --query "SELECT COUNT(*) as kernel_count FROM kernels"
+   
+   # Use marker-based time windows
+   rocpd query -i profile.db --start-marker "computation_begin" --end-marker "computation_end" \
+               --query "SELECT * FROM kernels ORDER BY start_time"
+   
+   # Absolute timestamp filtering
+   rocpd query -i profile.db --start 1000000000 --end 2000000000 \
+               --query "SELECT * FROM kernels WHERE start_time BETWEEN 1000000000 AND 2000000000"
+
+Automated Email Reporting
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Basic Email Delivery:**
+
+.. code-block:: bash
+
+   # Send CSV report via email
+   rocpd query -i profile.db --query "SELECT * FROM top_kernels" --format csv \
+               --email-to analyst@company.com --email-from profiler@company.com \
+               --email-subject "Weekly Performance Report"
+
+**Advanced Email Configuration:**
+
+.. code-block:: bash
+
+   # Multiple recipients with SMTP authentication
+   rocpd query -i profile.db --query "SELECT * FROM device_utilization" --format html \
+               --email-to "team@company.com,manager@company.com" \
+               --email-from profiler@company.com \
+               --email-subject "GPU Utilization Analysis" \
+               --smtp-server smtp.company.com --smtp-port 587 \
+               --smtp-user profiler@company.com --smtp-password $(cat ~/.smtp_pass) \
+               --inline-preview --zip-attachments
+
+**Dashboard Email Reports:**
+
+.. code-block:: bash
+
+   # Send interactive dashboard via email
+   rocpd query -i profile.db --query "SELECT * FROM kernels" --format dashboard \
+               --template-path ~/templates/executive_summary.html \
+               --email-to executives@company.com --email-from profiler@company.com \
+               --email-subject "Executive Performance Dashboard" \
+               --inline-preview
+
+Integration Workflows
+~~~~~~~~~~~~~~~~~~~~
+
+**Automated Analysis Pipeline:**
+
+.. code-block:: bash
+
+   #!/bin/bash
+   # Automated reporting script
+   
+   DB_FILE="$1"
+   REPORT_DATE=$(date +%Y-%m-%d)
+   
+   # Generate multiple analysis reports
+   rocpd query -i "$DB_FILE" --query "SELECT * FROM top_kernels LIMIT 20" \
+               --format html -o "top_kernels_$REPORT_DATE"
+   
+   rocpd query -i "$DB_FILE" --query "SELECT * FROM memory_copy_summary" \
+               --format csv -o "memory_analysis_$REPORT_DATE"
+   
+   rocpd query -i "$DB_FILE" --query "SELECT * FROM device_utilization" \
+               --format dashboard -o "utilization_dashboard_$REPORT_DATE" \
+               --email-to team@company.com --email-from automation@company.com
+
+**Performance Regression Detection:**
+
+.. code-block:: bash
+
+   # Compare current performance against baseline
+   rocpd query -i baseline.db current.db --script performance_comparison.sql \
+               --query "SELECT * FROM performance_regression_analysis" \
+               --format html -o regression_report \
+               --email-to devteam@company.com --email-from ci@company.com \
+               --email-subject "Performance Regression Analysis"
+
+**Custom Analysis Functions:**
+
+rocpd databases support custom SQL functions for advanced analysis:
+
+.. code-block:: bash
+
+   # Use built-in rocpd functions
+   rocpd query -i profile.db --query "
+   SELECT 
+       kernel_name,
+       rocpd_get_string(name_id, 0, nid, pid) as full_kernel_name,
+       duration_ns
+   FROM kernels 
+   WHERE rocpd_get_string(name_id, 0, nid, pid) LIKE '%gemm%'"
+
+rocpd query Command-Line Reference
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: none
+
+   usage: rocpd query [-h] -i INPUT [INPUT ...] --query QUERY [--script SCRIPT]
+                      [--format {console,csv,html,json,md,pdf,dashboard,clipboard}]
+                      [-o OUTPUT_FILE] [-d OUTPUT_PATH]
+                      [--email-to EMAIL_TO] [--email-from EMAIL_FROM]
+                      [--email-subject EMAIL_SUBJECT] [--smtp-server SMTP_SERVER]
+                      [--smtp-port SMTP_PORT] [--smtp-user SMTP_USER]
+                      [--smtp-password SMTP_PASSWORD] [--zip-attachments]
+                      [--inline-preview] [--template-path TEMPLATE_PATH]
+                      [--start START | --start-marker START_MARKER]
+                      [--end END | --end-marker END_MARKER]
+
+**Required Arguments:**
+
+- ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]``
+  Input database file paths. Multiple databases are merged into unified view.
+
+- ``--query QUERY``
+  SQL SELECT statement to execute. Enclose complex queries in quotes.
+
+**Query Options:**
+
+- ``--script SCRIPT``
+  SQL script file to execute before running the main query. Useful for creating views and functions.
+
+- ``--format {console,csv,html,json,md,pdf,dashboard,clipboard}``
+  Output format (default: console). Dashboard format creates interactive HTML reports.
+
+**Output Configuration:**
+
+- ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE``
+  Base filename for exported files.
+
+- ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``
+  Output directory path.
+
+- ``--template-path TEMPLATE_PATH``
+  Jinja2 template file for dashboard format customization.
+
+**Email Reporting:**
+
+- ``--email-to EMAIL_TO``
+  Recipient email addresses (comma-separated for multiple recipients).
+
+- ``--email-from EMAIL_FROM``
+  Sender email address (required when using email delivery).
+
+- ``--email-subject EMAIL_SUBJECT``
+  Email subject line.
+
+- ``--smtp-server SMTP_SERVER``, ``--smtp-port SMTP_PORT``
+  SMTP server configuration (default: localhost:25).
+
+- ``--smtp-user SMTP_USER``, ``--smtp-password SMTP_PASSWORD``
+  SMTP authentication credentials.
+
+- ``--zip-attachments``
+  Bundle all attachments into single ZIP file.
+
+- ``--inline-preview``
+  Embed HTML reports as email body content.
+
+**Time Window Filtering:**
+
+- ``--start START``, ``--end END``
+  Temporal boundaries using percentage (e.g., 25%) or absolute timestamps.
+
+- ``--start-marker START_MARKER``, ``--end-marker END_MARKER``
+  Named marker events defining time window boundaries.
+
+The ``rocpd query`` tool provides comprehensive SQL-based analysis capabilities, enabling custom workflows and automated reporting for GPU profiling data analysis.
+
+**Documentation:** :ref:`using-rocpd-output-format` (SQL Schema Reference), :ref:`using-rocprofv3` (Marker Integration)
