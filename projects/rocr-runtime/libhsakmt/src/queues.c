@@ -90,6 +90,10 @@ struct hsa_kfd_queue_context
 struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx)
 {
 	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
 
 	if (ctx->queue_context)
 		return ctx->queue_context;
@@ -580,7 +584,7 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
 		 */
-		if (!q->use_ats && hsakmt_is_svm_api_supported) {
+		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported) {
 			uint32_t size = PAGE_ALIGN_UP(q->total_mem_alloc_size);
 
 			pr_info("Allocating GTT for CWSR\n");
