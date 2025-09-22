@@ -193,6 +193,9 @@ typedef enum {
   // RDC_FI_PCIE_TX, RDC_FI_PCIE_RX are not supported on new ASIC
   // The RDC_FI_PCIE_BANDWIDTH should be used
   RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  //!< PCIe link recovery count
+  RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,          //!< PCIe NAK received count
+  RDC_FI_PCIE_NAK_SENT_COUNT_ACC,          //!< PCIe NAK sent count
 
   /**
    * @brief GPU usage related fields
