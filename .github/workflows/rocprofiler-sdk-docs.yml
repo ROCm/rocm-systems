@@ -71,8 +71,23 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
-    runs-on: rocprofiler-mi3xx
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    container:
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
     steps:
+      - name: Install Latest Nightly ROCm
+        shell: bash
+        working-directory: /tmp
+        run: |
+          tar -xf /opt/rocm-gfx94X.tar.gz -C /opt/rocm-7.0.0
+          ln -s /opt/rocm-7.0.0 /opt/rocm
+          echo "ROCm installed to: /opt/rocm"
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
