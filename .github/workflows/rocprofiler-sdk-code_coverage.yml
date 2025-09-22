@@ -203,7 +203,6 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
