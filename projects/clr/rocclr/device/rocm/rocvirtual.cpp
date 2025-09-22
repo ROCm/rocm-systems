@@ -1063,7 +1063,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   // Note: direct dispatch relies on the slot stall above to keep the forward progress
   // of the app if a dispatched kernel requires some CPU input for completion
   if (blocking || (!AMD_DIRECT_DISPATCH &&
-                   (index - hsa_queue_load_read_index_relaxed(gpu_queue_)) >= sw_queue_size)) {
+                   (index - Hsa::queue_load_read_index_relaxed(gpu_queue_)) >= sw_queue_size)) {
     if (packet->completion_signal.handle == 0) {
       packet->completion_signal = Barriers().ActiveSignal();
     }
@@ -1080,8 +1080,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-          "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
-          "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx, "
+          "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], private_seg_size=%u, "
+          "group_seg_size=%u, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx, "
           "correlation_id=%zu, rptr=%u, wptr=%u",
           gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
@@ -1295,8 +1295,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
                   "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
                   "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-                  "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], "
-                  "private_seg_size=%zu, group_seg_size=%zu, kernel_obj=0x%zx, "
+                  "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
+                  "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
                   "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
                   "rptr=%u, wptr=%u",
                   gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
