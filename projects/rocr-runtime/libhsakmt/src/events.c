@@ -45,6 +45,10 @@ struct hsa_kfd_event_context
 struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx)
 {
 	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
 
 	if (ctx->event_context)
 		return ctx->event_context;

@@ -1076,7 +1076,8 @@ err_device_initialize:
 	return ret;
 }
 
-static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
+static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
+						   uint32_t node_id,
 						   HsaNodeProperties *props,
 						   bool *p2p_links,
 						   uint32_t *num_p2pLinks)
@@ -1220,7 +1221,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 			gfxv = (uint32_t)prop_val;
 	}
 
-	if (!hsakmt_is_svm_api_supported)
+	if (!ctx->hsakmt_is_svm_api_supported)
 		props->Capability.ui32.SVMAPISupported = 0;
 
 	/* Bail out early, if a CPU node */
@@ -1991,7 +1992,7 @@ retry:
 			goto err;
 		}
 		for (i = 0; i < sys_props.NumNodes; i++) {
-			ret = topology_sysfs_get_node_props(i,
+			ret = topology_sysfs_get_node_props(ctx, i,
 					&temp_props[i].node,
 					&p2p_links, &num_p2pLinks);
 			if (ret != HSAKMT_STATUS_SUCCESS) {
