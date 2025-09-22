@@ -278,51 +278,109 @@ metadata_registry::get_kernel_symbol_list() const
     return result;
 }
 
-metadata_registry::metadata_registry()
+struct modify_cb_tracing_info_names
 {
-    auto                          items = m_callback_tracing_info.items();
-    std::vector<std::string_view> cat_backup;
-    std::vector<std::string_view> ompt_new_op_name;
+    using category = rocprofiler_callback_tracing_kind_t;
+    using category_name = std::string_view;
+    // Index corresponds to op enum
+    using operations = std::vector<std::string_view>;
 
-    cat_backup.reserve(items.size());
-    for(size_t i = 0; i < items.size(); i++)
+    std::map<category, operations> modified; 
+    std::map<category, category_name> category_names; 
+    
+    metadata_registry& registry_ref;
+
+    modify_cb_tracing_info_names(metadata_registry& registry)
+        : registry_ref(registry)
     {
-        const auto* category = items[i];
-        cat_backup.push_back(category->name);
-
-        if(category->value == ROCPROFILER_CALLBACK_TRACING_OMPT)
+        for(category i = ROCPROFILER_CALLBACK_TRACING_NONE;
+            i < ROCPROFILER_CALLBACK_TRACING_LAST; 
+            i = static_cast<category>(static_cast<int>(i) + 1))
         {
-            auto operations = category->items();
-            ompt_new_op_name.reserve(operations.size());
-
-            for(size_t j = 0; j < operations.size(); j++)
-            {
-                const auto& [op_idx, op_name_ptr] = operations[j];
-                ompt_new_op_name.push_back(*op_name_ptr);
-            }
+            category_names[i] = registry_ref.m_callback_tracing_info.at(i);
         }
     }
 
-    // Override
-    ompt_new_op_name[static_cast<size_t>(ROCPROFILER_OMPT_ID_parallel_begin)] =
-        "omp_parallel";
-    ompt_new_op_name[static_cast<size_t>(ROCPROFILER_OMPT_ID_parallel_end)] =
-        "omp_parallel";
-
-    // Rewrite OMPT entry
-    for(size_t i = 0; i < static_cast<size_t>(ROCPROFILER_OMPT_ID_LAST); i++)
+    void overwrite(rocprofiler_callback_tracing_kind_t cat,
+              std::initializer_list<std::pair<int, std::string_view>> overrides)
     {
-        m_callback_tracing_info.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT,
-                                        static_cast<rocprofiler_ompt_operation_t>(i),
-                                        ompt_new_op_name[i].data());
+        assert(modified.find(cat) == modified.end() && 
+               "Overwriting a previously overwritten entry is forbidden");
+        
+        assert((modified.empty() || cat < modified.begin()->first) &&
+                "Category must have a smaller enum value than all previously modified categories");
+
+        auto items = registry_ref.m_callback_tracing_info.items();
+        const auto* target_category = items[static_cast<size_t>(cat)];
+
+        // Rename this variable to avoid conflict
+        auto operations_data = target_category->items();
+
+        operations operations_copy;  // Now this works - operations is the type alias
+        operations_copy.reserve(operations_data.size());  // Use renamed variable
+
+        for(size_t j = 0; j < operations_data.size(); j++)  // Use renamed variable
+        {
+            const auto& [op_idx, op_name_ptr] = operations_data[j];
+            operations_copy.push_back(*op_name_ptr);
+        }
+
+        for(const auto& [index, new_value] : overrides)
+        {
+            assert(index >= 0 && index < static_cast<int>(operations_copy.size()) && 
+                   "Index out of bounds for operation override");
+            operations_copy[index] = new_value;
+        }
+
+        // Insert copy into map
+        modified[cat] = std::move(operations_copy);
     }
 
-    // Add back all categories after OMPT entry
-    for(size_t i = static_cast<size_t>(ROCPROFILER_CALLBACK_TRACING_OMPT) + 1;
-        i < static_cast<size_t>(ROCPROFILER_CALLBACK_TRACING_LAST); i++)
+    ~modify_cb_tracing_info_names()
     {
-        auto enum_value = static_cast<rocprofiler_callback_tracing_kind_t>(i);
-        m_callback_tracing_info.emplace(enum_value, cat_backup[i].data());
+        if (modified.empty()) return;
+    
+        for(category i = modified.begin()->first;
+            i < ROCPROFILER_CALLBACK_TRACING_LAST;
+            i = static_cast<category>(static_cast<int>(i) + 1))
+        {
+            auto it = modified.find(i);
+            if (it != modified.end()) {
+                const auto& operations_vec = it->second;
+                registry_ref.m_callback_tracing_info.emplace(i, category_names.at(i).data());
+                for (size_t op_idx = 0; op_idx < operations_vec.size(); ++op_idx) {
+                    registry_ref.m_callback_tracing_info.emplace(i, 
+                                                static_cast<rocprofiler_tracing_operation_t>(op_idx), 
+                                                operations_vec[op_idx].data());
+                }
+            }
+            else {
+                registry_ref.m_callback_tracing_info.emplace(i, category_names.at(i).data());
+            }
+        }
+    }
+};
+
+metadata_registry::metadata_registry()
+{
+    {
+        modify_cb_tracing_info_names modifier(*this);
+        modifier.overwrite(ROCPROFILER_CALLBACK_TRACING_OMPT, {
+            {ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel"},
+            {ROCPROFILER_OMPT_ID_parallel_end,   "omp_parallel"}
+        });
+    }
+
+    auto items = m_callback_tracing_info.items();
+
+    // Access OMPT category directly
+    const auto* ompt_category = items[static_cast<size_t>(ROCPROFILER_CALLBACK_TRACING_OMPT)];
+
+    // Get operations for OMPT category and print them
+    auto operations = ompt_category->items();
+    for(const auto& [op_idx, op_name_ptr] : operations)
+    {
+        std::cout << "[ROCPD] OMPT Operation " << op_idx << ": " << *op_name_ptr << std::endl;
     }
 }
 

@@ -42,6 +42,8 @@
 #include <string>
 #include <sys/types.h>
 #include <unordered_set>
+#include <map>
+#include <initializer_list>
 
 namespace rocprofsys
 {
@@ -174,6 +176,7 @@ struct kernel_symbol_less
 }  // namespace info
 
 class cache_manager;
+struct modify_cb_tracing_info_names;
 struct metadata_registry
 {
     void set_process(const info::process& process);
@@ -215,6 +218,7 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
+    friend struct modify_cb_tracing_info_names;
     metadata_registry();
     common::synchronized<info::process> m_process;
     common::synchronized<
