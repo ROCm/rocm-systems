@@ -587,6 +587,8 @@ class OmniSoC_Base:
 
         # Create separate perfmon file for LEVEL counters without _sum suffix
         # TCC LEVEL counters are handled channel wise, so ignore them
+        # Convert set to sorted list for determinism in pmc txt files
+        counters = sorted(list(counters))
         for counter in counters.copy():
             if (
                 "LEVEL" in counter
