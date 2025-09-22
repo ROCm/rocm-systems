@@ -60,7 +60,7 @@ CHIP_IDS = {
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-config["app_occupancy"] = ["./tests/occupancy"]
+config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -1737,8 +1737,8 @@ def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     # Test output
@@ -1758,8 +1758,8 @@ def test_list_available_metrics_with_block(
     )
     # Should return code 1 since --block cannot be used with --list-available-metrics
     assert code == 1
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1817,7 +1817,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
         "--pc-sampling-method",
         "host_trap",
         "--pc-sampling-interval",
-        "1048576",
+        "256",
     ]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1826,10 +1826,10 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
         options,
         check_success=True,
         roof=False,
-        app_name="app_occupancy",
+        app_name="app_mat_mul_max",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
@@ -1858,10 +1858,10 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
         options,
         check_success=True,
         roof=False,
-        app_name="app_occupancy",
+        app_name="app_mat_mul_max",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
@@ -1984,6 +1984,6 @@ class TestSetsIntegration:
             check_success=False,
             roof=False,
         )
-        # workload dir should be empty
-        assert not os.listdir(workload_dir)
+        # workload dir should not exist
+        assert not Path(workload_dir).exists()
         test_utils.clean_output_dir(config["cleanup"], workload_dir)

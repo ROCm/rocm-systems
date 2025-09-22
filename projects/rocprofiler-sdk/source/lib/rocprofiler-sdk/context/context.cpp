@@ -397,6 +397,22 @@ stop_context(rocprofiler_context_id_t idx)
     return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;  // compare exchange failed
 }
 
+context_id_array_t
+get_client_contexts(rocprofiler_client_id_t id)
+{
+    auto _data = context_id_array_t{};
+    if(!get_registered_contexts_impl()) return _data;
+
+    for(auto& itr : *get_registered_contexts_impl())
+    {
+        if(itr->client_idx == id.handle)
+        {
+            _data.emplace_back(rocprofiler_context_id_t{.handle = itr->context_idx});
+        }
+    }
+    return _data;
+}
+
 rocprofiler_status_t
 stop_client_contexts(rocprofiler_client_id_t client_id)
 {
