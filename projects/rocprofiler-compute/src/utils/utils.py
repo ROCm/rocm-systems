@@ -352,28 +352,30 @@ def capture_subprocess_output(
         selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
     def forward_input():
-        # Check if sys.stdin is a tty or has data ready to read
+        try:
+            sys.stdin.fileno()
+        except (io.UnsupportedOperation, AttributeError):
+            # Stdin can't be used in select; skip input forwarding
+            return
+
         if sys.stdin.isatty():
-            # Interactive input is available; forward line by line
             for line in sys.stdin:
                 if process.poll() is not None:
                     break
                 process.stdin.write(line)
                 process.stdin.flush()
         else:
-            # sys.stdin is not a tty (probably piped or empty), use select to check for data
             while process.poll() is None:
-                # Use select to check if there's data to read
-                rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+                try:
+                    rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+                except (io.UnsupportedOperation, AttributeError):
+                    break
                 if rlist:
                     line = sys.stdin.readline()
                     if not line:
                         break
                     process.stdin.write(line)
                     process.stdin.flush()
-                else:
-                    # No data ready to read, avoid busy wait
-                    continue
         try:
             process.stdin.close()
         except Exception:
@@ -816,6 +818,7 @@ def run_prof(
     time_1 = time.time()
 
     if rocprof_cmd == "rocprofiler-sdk":
+        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         for key, value in options.items():
             new_env[key] = value
         console_debug(f"rocprof sdk env vars: {new_env}")
@@ -861,7 +864,11 @@ def run_prof(
                 c_lib.detach()
 
         else:
-            app_cmd = options.pop("APP_CMD")
+            if app_cmd is None:
+                console_error(
+                    "APP_CMD, the workload's execuatble must be provided when not in live attach mode"
+                )
+
             console_debug(f"rocprof sdk user provided command: {app_cmd}")
             success, output = capture_subprocess_output(
                 app_cmd, new_env=new_env, profileMode=True
