@@ -28,8 +28,8 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
     zypper --non-interactive install -y binutils-gold chrpath cmake curl dpkg-devel \
-        gcc-c++ git iproute2 libnuma-devel ninja openmpi3-devel papi-devel python3-pip \
-        rpm-build sqlite3-devel vim wget && \
+        gcc-c++ git iproute2 libnuma-devel ninja openmpi3-devel papi-devel python3-devel \
+        python3-pip rpm-build sqlite3-devel vim wget && \
     zypper --non-interactive clean --all && \
     python3 -m pip install 'cmake==3.21' perfetto
 
@@ -46,6 +46,15 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
     cd /tmp && \
     shopt -s dotglob extglob && \
     rm -rf *
+
+# The Rock Tarball
+ARG GPU_TYPE=""
+ARG GPU_TARBALL=""
+RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
+        python3 -m pip install -U awscli; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz; \
+    fi
 
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
