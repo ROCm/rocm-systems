@@ -1094,11 +1094,11 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
 @demarcate
 def process_kokkos_trace_output(workload_dir, fbase):
     """
-        Processes marker_api_trace and counter_collection CSV files generated during profiling. 
-        -    Concatenates per-process files
-        -    Merges them on Correlation_Id
-        -    Filters for Kokkos kernels
-        -    Finally saves the combined results as CSVs in top-level workload directory.
+    Processes marker_api_trace and counter_collection CSV files generated during profiling.
+    -    Concatenates per-process files
+    -    Merges them on Correlation_Id
+    -    Filters for Kokkos kernels
+    -    Finally saves the combined results as CSVs in top-level workload directory.
     """
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(

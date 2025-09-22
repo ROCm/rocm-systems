@@ -1809,17 +1809,14 @@ def test_comprehensive_error_paths():
 @pytest.mark.kokkos
 def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     """
-        Verifies the following while profiling a mock Kokkos app with --kokkos-trace enabled.
-        -   All expected trace files are generated.
-        -   Looks for consistency between a kernel's attributes derived from counter_collection and from marker_trace.
-            Eg. Names, IDs, interval overlaps.            
+    Verifies the following while profiling a mock Kokkos app with --kokkos-trace enabled.
+    -   All expected trace files are generated.
+    -   Looks for consistency between a kernel's attributes derived from counter_collection and from marker_trace.
+        Eg. Names, IDs, interval overlaps.
     """
 
-
     kokkos_app_dir = str(
-        Path(__file__).parent.parent
-        / "build"
-        / "kokkos_mock_app_build"
+        Path(__file__).parent.parent / "build" / "kokkos_mock_app_build"
     )
     num_kernels = 1
     kokkos_app = kokkos_app_dir + "/mock_kokkos_minimal"
