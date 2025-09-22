@@ -52,6 +52,9 @@ jobs:
     runs-on: ${{ matrix.system.runner }}
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu-${{ matrix.system.os-release }}:systems-ci-${{ matrix.system.arch }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: --ipc host
         --group-add video
         --device /dev/kfd
