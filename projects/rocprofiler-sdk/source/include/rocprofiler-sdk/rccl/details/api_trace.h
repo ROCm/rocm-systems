@@ -273,7 +273,6 @@ typedef struct rcclApiFuncTable
     ncclCommFinalize_fn_t         ncclCommFinalize_fn;
     ncclCommDestroy_fn_t          ncclCommDestroy_fn;
     ncclCommAbort_fn_t            ncclCommAbort_fn;
-    ncclCommShrink_fn_t           ncclCommShrink_fn;
     ncclCommSplit_fn_t            ncclCommSplit_fn;
     ncclGetErrorString_fn_t       ncclGetErrorString_fn;
     ncclGetLastError_fn_t         ncclGetLastError_fn;
@@ -288,9 +287,10 @@ typedef struct rcclApiFuncTable
     mscclUnloadAlgo_fn_t          mscclUnloadAlgo_fn;
     ncclCommRegister_fn_t         ncclCommRegister_fn;
     ncclCommDeregister_fn_t       ncclCommDeregister_fn;
+    ncclAllReduceWithBias_fn_t    ncclAllReduceWithBias_fn;
+    ncclCommShrink_fn_t           ncclCommShrink_fn;
     ncclCommWindowRegister_fn_t   ncclCommWindowRegister_fn;
     ncclCommWindowDeregister_fn_t ncclCommWindowDeregister_fn;
-    ncclAllReduceWithBias_fn_t    ncclAllReduceWithBias_fn;
 } rcclApiFuncTable;
 
 RCCL_EXTERN_C_FINI
