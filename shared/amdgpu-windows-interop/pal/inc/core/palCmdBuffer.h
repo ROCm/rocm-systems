@@ -540,7 +540,12 @@ union CmdBufferBuildFlags
         /// non-TMZ memory, the results are undefined. Only valid for graphics and compute.
         uint32  enableTmz                      :  1;
 
-        uint32 placeholder3                    :  1;
+        /// @internal
+        /// Build this command buffer in system memory
+        ///
+        /// @warning This is an internal flag and its existence, its signature and its semantics are not guaranteed
+        ///          across different PAL versions.
+        uint32 buildInSysMem                   :  1;
 
         /// If set, internal operations such as blits, copies, etc. will not affect active Query results.
         /// Otherwise they may affect the results.
@@ -2089,7 +2094,9 @@ struct CmdBufInfo
             uint32 captureCamera           : 1;  ///< Has Direct Capture camera matrix capture
             uint32 hudLessImagePropChanged : 1;  ///< Indicates whether HUD less image properties changed
             uint32 captureHudLessImage     : 1;  ///< Has Direct Capture HUD less image capture
-            uint32 reserved                : 3;  ///< Reserved for future usage.
+            uint32 llmDecodeStart          : 1;  ///< Has LLM decode Start Enabled in the CmdBufInfo packet
+            uint32 llmDecodeStop           : 1;  ///< Has LLM decode Stop Enabled in the CmdBufInfo packet
+            uint32 reserved                : 1;  ///< Reserved for future usage.
         };
         uint32 u32All;                           ///< Flags packed as uint32.
     };
