@@ -1,4 +1,3 @@
-
 name: rocprofiler-compute Formatting
 
 on:
@@ -9,6 +8,7 @@ on:
       - 'projects/rocprofiler-compute/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-compute-formatting.yml'
       - 'projects/rocprofiler-compute/**'
 
 concurrency:
@@ -65,14 +65,14 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install cmake-format
-    - name: cmake-format
+        python3 -m pip install gersemi
+    - name: gersemi
       working-directory: projects/rocprofiler-compute
       run: |
         set +e
-        cmake-format -i $(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        gersemi -i $(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
         if [ $(git diff | wc -l) -gt 0 ]; then
-          echo -e "\nError! CMake code not formatted. Run cmake-format...\n"
+          echo -e "\nError! CMake code not formatted. Run gersemi...\n"
           echo -e "\nFiles:\n"
           git diff --name-only
           echo -e "\nFull diff:\n"
