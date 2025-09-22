@@ -69,6 +69,8 @@
 #define COL_YEL  "\x1B[33m"
 #define COL_RESET "\033[0m"
 
+#define UNUSED(x) (void)(x)
+
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
     char err_val[12];                                                         \
@@ -277,6 +279,7 @@ static void printLabel(char const *l, bool newline = false,
   }
 }
 static void printValueStr(char const *s, bool newline = true) {
+  UNUSED(newline);
   printf("%-*s\n", kValueFieldSize, s);
 }
 
@@ -883,6 +886,8 @@ AcquireAndDisplayMemPoolInfo(const hsa_amd_memory_pool_t pool,
   hsa_status_t err;
   pool_info_t pool_i;
 
+  UNUSED(indent);
+
   err = AcquirePoolInfo(pool, &pool_i);
   RET_IF_HSA_ERR(err);
 
@@ -1033,6 +1038,8 @@ static hsa_status_t
 AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t indent) {
   hsa_status_t err;
   isa_info_t isa_i;
+
+  UNUSED(indent);
 
   isa_i.name_str = nullptr;
   err = AcquireISAInfo(isa, &isa_i);
@@ -1304,7 +1311,7 @@ int CheckInitialState(void) {
 // acccumulate information about those objects. Corresponding to each
 // Acquire-type function is a Display* function which display the
 // accumulated data in a formatted way.
-int main(int argc, char* argv[]) {
+int main() {
   hsa_status_t err;
 
   DetectWSLEnvironment();
