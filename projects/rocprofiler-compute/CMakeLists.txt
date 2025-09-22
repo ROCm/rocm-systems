@@ -434,7 +434,6 @@ set_tests_properties(
     test_profile_misc
     test_profile_path
     test_profile_roofline
-    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1)
     test_profile_kernel_execution
     test_profile_dispatch
     test_profile_mem
