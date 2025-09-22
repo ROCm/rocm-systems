@@ -20,7 +20,7 @@ ARG NJOBS="8"
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && crb enable && \
     yum install -y --allowerasing chrpath cmake curl dpkg-devel iproute ninja-build numactl-devel \
-        openmpi-devel papi-devel python3-pip sqlite-devel texinfo wget which vim zlib-devel && \
+        openmpi-devel papi-devel python3-devel python3-pip sqlite-devel texinfo wget which vim zlib-devel && \
     yum clean all && \
     python3 -m pip install 'cmake==3.21' perfetto
 
@@ -37,6 +37,15 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
     cd /tmp && \
     shopt -s dotglob extglob && \
     rm -rf *
+
+# The Rock Tarball
+ARG GPU_TYPE=""
+ARG GPU_TARBALL=""
+RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
+        python3 -m pip install -U awscli; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz; \
+    fi
 
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
