@@ -105,8 +105,6 @@ if(ENABLE_KOKKOS)
             -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/../tests/kokkos-build
             -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-            -DHSA_RUNTIME_LIBRARY=/opt/rocm/lib/libhsa-runtime64.so
-            -DAMD_HIP_LIBRARY=/opt/rocm/lib/libamdhip64.so 
             -DCMAKE_PREFIX_PATH=/opt/rocm
             -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF
             -DCMAKE_CXX_COMPILER=amdclang++ -DKokkos_ENABLE_OPENMP=OFF
