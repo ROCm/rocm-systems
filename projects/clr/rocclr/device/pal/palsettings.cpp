@@ -161,6 +161,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 
   switch (palProp.revision) {
     // Fall through for Navi4x ...
+    case Pal::AsicRevision::Navi44:
     case Pal::AsicRevision::Navi48:
     // Fall through for Navi3x ...
     case Pal::AsicRevision::Navi33:
