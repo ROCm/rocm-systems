@@ -879,8 +879,6 @@ def run_prof(
                 process_hip_trace_output(workload_dir, fbase)
         else:
             if "--kokkos-trace" in options:
-                # TODO: as rocprofv3 --kokkos-trace feature improves,
-                # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
@@ -1095,6 +1093,13 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
 
 @demarcate
 def process_kokkos_trace_output(workload_dir, fbase):
+    """
+        Processes marker_api_trace and counter_collection CSV files generated during profiling. 
+        -    Concatenates per-process files
+        -    Merges them on Correlation_Id
+        -    Filters for Kokkos kernels
+        -    Finally saves the combined results as CSVs in top-level workload directory.
+    """
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
         workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
