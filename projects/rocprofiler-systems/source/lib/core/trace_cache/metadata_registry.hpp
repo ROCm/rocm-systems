@@ -35,6 +35,8 @@
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
+#include <initializer_list>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdint.h>
@@ -42,8 +44,6 @@
 #include <string>
 #include <sys/types.h>
 #include <unordered_set>
-#include <map>
-#include <initializer_list>
 
 namespace rocprofsys
 {
@@ -219,6 +219,21 @@ struct metadata_registry
 private:
     friend class cache_manager;
     friend struct modify_cb_tracing_info_names;
+    struct modify_cb_tracing_info_names
+    {
+        using category      = rocprofiler_callback_tracing_kind_t;
+        using category_name = std::string_view;
+        using operations    = std::vector<std::string_view>;
+
+        std::map<category, operations>    modified;
+        std::map<category, category_name> category_names;
+        metadata_registry&                registry_ref;
+
+        modify_cb_tracing_info_names(metadata_registry& registry);
+        void overwrite(rocprofiler_callback_tracing_kind_t                     cat,
+                       std::initializer_list<std::pair<int, std::string_view>> overrides);
+        ~modify_cb_tracing_info_names();
+    };
     metadata_registry();
     common::synchronized<info::process> m_process;
     common::synchronized<
