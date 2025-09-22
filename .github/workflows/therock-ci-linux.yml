@@ -40,8 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          # TODO: update
-          ref: users/geomin12/external-temp-patches
+          ref: 80198e080271a2013073fc1d3dd03672a3214779 # 2025-09-22 commit
 
       - name: Runner Health Settings
         run: |
@@ -68,16 +67,16 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
           pip freeze
 
-      - name: Patch rocm-libraries
+      - name: Patch rocm-systems
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects external-rocm-systems
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Configure Projects
         env:
