@@ -63,10 +63,10 @@ try:
     agent_indexing = libpyrocpd.agent_indexing
     schema_jinja_variables = libpyrocpd.schema_jinja_variables
     metadata = libpyrocpd.metadata
-    thread = libpyrocpd.thread
-    process = libpyrocpd.process
-    node = libpyrocpd.node
-    agent = libpyrocpd.agent
+    Thread = libpyrocpd.Thread
+    Process = libpyrocpd.Process
+    Node = libpyrocpd.Node
+    Agent = libpyrocpd.Agent
 
     # enumerations defined by the bindings
     agent_indexing = libpyrocpd.agent_indexing
