@@ -635,7 +635,13 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::region::decoded_extdata& data)
 {
-    LOAD_DATA_FIELD(message);
+    try
+    {
+        LOAD_DATA_FIELD(message);
+    } catch(const cereal::Exception& e)
+    {
+        std::cerr << "Error reading \"extdata:message\" from \"region\": " << e.what() << '\n';
+    }
 }
 
 template <typename ArchiveT>
@@ -661,7 +667,13 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::sample::decoded_extdata& data)
 {
-    LOAD_DATA_FIELD(message);
+    try
+    {
+        LOAD_DATA_FIELD(message);
+    } catch(const cereal::Exception& e)
+    {
+        std::cerr << "Error reading \"extdata:message\" from \"sample\": " << e.what() << '\n';
+    }
 }
 
 template <typename ArchiveT>
