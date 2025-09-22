@@ -1066,7 +1066,7 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     """
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
-        f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
+        workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
     )
 
     # counter collection csv files are generated for each process
@@ -1112,7 +1112,7 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         index=False,
     )
 
-    if Path(f"{workload_dir}/out").exists():
+    if Path(workload_dir + "/out").exists():
         shutil.copyfile(
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             workload_dir + "/" + fbase + "_marker_api_trace.csv",

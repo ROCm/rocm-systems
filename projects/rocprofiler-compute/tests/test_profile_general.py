@@ -1846,7 +1846,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     KOKKOS_TRACE_FILES = [f + "_kokkos_trace.csv" for f in fbase_]
     MARKER_TRACE_FILES = [f + "_marker_api_trace.csv" for f in fbase_]
 
-    options = ["--kokkos-trace"]
+    options = ["--kokkos-trace", "--format-rocprof-output", "csv"]
     workload_dir = test_utils.get_output_dir()
 
     _ = binary_handler_profile_rocprof_compute(
@@ -1854,7 +1854,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         workload_dir,
         options,
         check_success=True,
-        roof=True,
+        roof=False,
         app_name="app_kokkos",
     )
 

@@ -52,7 +52,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
         if args.kokkos_trace:
             trace_option = "--kokkos-trace"
-        if self.get_args().hip_trace:
+        elif args.hip_trace:
             trace_option = "--hip-trace"
         else:
             trace_option = "--kernel-trace"
