@@ -638,6 +638,9 @@ global:
     hipLibraryUnload;
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
+    hipExtDisableLogging;
+    hipExtEnableLogging;
+    hipExtSetLoggingParams;
 local:
     *;
 } hip_7.1;

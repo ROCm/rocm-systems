@@ -9526,6 +9526,11 @@ hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
 /**
  * @}
  */
+
+hipError_t hipExtEnableLogging();
+hipError_t hipExtDisableLogging();
+hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+
 #ifdef __cplusplus
 } /* extern "c" */
 #endif
