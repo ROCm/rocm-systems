@@ -71,9 +71,16 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-once-csv-validate
-    PROPERTIES TIMEOUT 30 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-attachment-attach-once-execute FIXTURES_REQUIRED
-               rocprofv3-test-attachment-attach-once)
+    PROPERTIES TIMEOUT
+               30
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-attachment-attach-once-execute
+               FIXTURES_REQUIRED
+               rocprofv3-test-attachment-attach-once
+               DISABLED
+               "${IS_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-attachment-attach-once-json-validate
@@ -87,6 +94,13 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-once-json-validate
-    PROPERTIES TIMEOUT 30 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-attachment-attach-once-execute FIXTURES_REQUIRED
-               rocprofv3-test-attachment-attach-once)
+    PROPERTIES TIMEOUT
+               30
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-attachment-attach-once-execute
+               FIXTURES_REQUIRED
+               rocprofv3-test-attachment-attach-once
+               DISABLED
+               "${IS_DISABLED}")
