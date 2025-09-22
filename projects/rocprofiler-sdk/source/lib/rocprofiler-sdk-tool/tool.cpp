@@ -1433,7 +1433,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) return;
 
-    ROCP_FATAL_IF(record.payload != nullptr)
+    ROCP_FATAL_IF(record.payload == nullptr)
         << fmt::format("Expected record payload to not be null for {}", __FUNCTION__);
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
     auto* rdata = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(record.payload);
