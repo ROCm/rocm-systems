@@ -401,7 +401,12 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
         set_summary(ite->second, gpu_info.pcie_rx, summary_info.pcie_rx, 1024 * 1024);
       } else if (ite->first == RDC_FI_PCIE_BANDWIDTH) {
         set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
-      }
+      } else if (ite->first == RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY) {
+        set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
+      } else if (ite->first == RDC_FI_PCIE_NAK_RCVD_COUNT_ACC) {
+        set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
+      } else if (ite->first == RDC_FI_PCIE_NAK_SENT_COUNT_ACC) {
+        set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
     }
   }
   // Set the average of the summary
