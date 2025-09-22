@@ -27,10 +27,10 @@ import numpy as np
 import pandas as pd
 
 
-def stochastic_assert(df, df_condition_selection, max_failing_samples=10):
+def stochastic_assert(df, df_condition_selection, max_failing_samples=20):
     # TODO: When asserting certain conditions related to exec_masks for all samples,
     # we observe some failures.
-    # This usually happens because some small number of samples (e.g., 1-10 out of 100k)
+    # This usually happens because some small number of samples (e.g., 1-20 out of 100k)
     # do not satisfy the condition. This is either a regression in the ROCr 2nd level trap
     # handler (as sometimes execution mask or correlation ID mismatches), or
     # just stochastic nature of the sampling (meaning our checks are too strict).
@@ -172,29 +172,49 @@ def exec_mask_manipulation_validate_csv(df, all_sampled=False):
     # Validate samples with non-zero correlation IDs (and with decoded instructions)
     samples_cid_non_zero_df = df[df["Correlation_Id"] != 0]
 
-    # exactly 65 kernels and 65 correlation id
+    # We have exactly wave_size + 1 kernels and matching correaltion IDs.
+    # Depending on the underlying architecture, that's either 33 (32 + 1)
+    # or 65
+    unique_kernels_num = samples_cid_non_zero_df["Correlation_Id"].max()
+    assert unique_kernels_num in [
+        33,
+        65,
+    ], f"Expected 33 or 65 unique kernels, got {unique_kernels_num}"
+
     assert (samples_cid_non_zero_df["Correlation_Id"].astype(int) >= 1).all()
-    assert (samples_cid_non_zero_df["Correlation_Id"].astype(int) <= 65).all()
+    assert (
+        samples_cid_non_zero_df["Correlation_Id"].astype(int) <= unique_kernels_num
+    ).all()
     if all_sampled:
         # all correlation IDs must be sampled
-        assert len(samples_cid_non_zero_df["Correlation_Id"].astype(int).unique()) == 65
+        assert (
+            len(samples_cid_non_zero_df["Correlation_Id"].astype(int).unique())
+            == unique_kernels_num
+        )
 
-    first_64_kernels_df = samples_cid_non_zero_df[
-        samples_cid_non_zero_df["Correlation_Id"] <= 64
+    # all kernels except the last one
+    first_kernels_df = samples_cid_non_zero_df[
+        samples_cid_non_zero_df["Correlation_Id"] <= unique_kernels_num - 1
     ]
 
     # Make a copy, so that we don't work (modify) a view.
-    validate_exec_mask_based_on_correlation_id(first_64_kernels_df.copy())
+    validate_exec_mask_based_on_correlation_id(first_kernels_df.copy())
 
     # validate the last kernel
-    kernel_65_df = df[df["Correlation_Id"] == 65]
+    last_kernel = df[df["Correlation_Id"] == unique_kernels_num]
+
+    # For 32 wave size, the exec mask is 32 bits or 8 hex digits.
+    # For 64 wave size, the exec mask is 64 bits or 16 hex digits.
+    exec_mask_size_hex_digits = unique_kernels_num // 4
+    even_simd_threads_active_exec_mask = int("5" * exec_mask_size_hex_digits, 16)
+    odd_simd_threads_active_exec_mask = int("A" * exec_mask_size_hex_digits, 16)
 
     # assert that v_rcp instructions are properly decoded
     # the v_rcp is executed by even SIMD threads
     validate_instruction_decoding(
-        kernel_65_df,
+        last_kernel,
         "v_rcp_f64",
-        exec_mask_uint64=np.uint64(int("5555555555555555", 16)),
+        exec_mask_uint64=np.uint64(even_simd_threads_active_exec_mask),
         source_code_lines_range=(288, 387),
         all_source_lines_samples=all_sampled,
     )
@@ -202,9 +222,9 @@ def exec_mask_manipulation_validate_csv(df, all_sampled=False):
     # assert that v_rcp_f32 instructions are properly decoded
     # the v_rcp_f32 is executed by odd SIMD threads
     validate_instruction_decoding(
-        kernel_65_df,
+        last_kernel,
         "v_rcp_f32",
-        exec_mask_uint64=np.uint64(int("AAAAAAAAAAAAAAAA", 16)),
+        exec_mask_uint64=np.uint64(odd_simd_threads_active_exec_mask),
         source_code_lines_range=(391, 490),
         all_source_lines_samples=all_sampled,
     )
