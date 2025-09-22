@@ -51,7 +51,7 @@ jobs:
 
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.therock-s3 }}-latest
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -60,9 +60,9 @@ jobs:
       options: --privileged
 
     env:
-        BUILD_TYPE: RelWithDebInfo
-        INSTALL_PREFIX: /opt/rocprofiler-register
-        PACKAGING_INSTALL_PREFIX: /opt/rocm
+      BUILD_TYPE: RelWithDebInfo
+      INSTALL_PREFIX: /opt/rocprofiler-register
+      PACKAGING_INSTALL_PREFIX: /opt/rocm
 
     steps:
     - name: Install Latest Nightly ROCm
