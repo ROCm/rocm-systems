@@ -1513,6 +1513,11 @@ typedef union
 
 #pragma pack(pop, hsakmttypes_h)
 
+typedef enum _HsaAisFlags {
+    HSA_AIS_READ = 0x1,
+    HSA_AIS_WRITE= 0x2
+} HsaAisFlags;
+
 
 #ifdef __cplusplus
 }   //extern "C"

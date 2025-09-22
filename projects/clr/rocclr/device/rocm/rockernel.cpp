@@ -128,7 +128,7 @@ bool Kernel::postLoad() {
   }
   assert(wavefront_size > 0);
 
-  workGroupInfo_.availableVGPRs_ = device().info().vgprsPerSimd_;
+  workGroupInfo_.availableVGPRs_ = device().info().availableVGPRs_;
   workGroupInfo_.availableSGPRs_ = device().info().availableSGPRs_;
   workGroupInfo_.privateMemSize_ = workitemPrivateSegmentByteSize_;
   workGroupInfo_.localMemSize_ = workgroupGroupSegmentByteSize_;
