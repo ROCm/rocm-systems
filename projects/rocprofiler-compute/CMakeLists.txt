@@ -104,8 +104,7 @@ if(ENABLE_KOKKOS)
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/../tests/kokkos-build
             -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-            -DCMAKE_PREFIX_PATH=/opt/rocm
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_PREFIX_PATH=/opt/rocm
             -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF
             -DCMAKE_CXX_COMPILER=amdclang++ -DKokkos_ENABLE_OPENMP=OFF
             -DKokkos_ENABLE_SERIAL=ON -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
