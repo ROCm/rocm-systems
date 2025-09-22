@@ -8,9 +8,11 @@ on:
     branches: [ develop ]
     paths:
       - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
+      - 'projects/rocprofiler-sdk/docker/Dockerfile.ci'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
+      - 'projects/rocprofiler-sdk/docker/Dockerfile.ci'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,14 +34,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ 'ubuntu-22.04', 'rhel-8.8', 'rhel-9.5', 'sles-15.6' ]
-        gpu: [ 'gfx94X', 'gfx110X', 'gfx120X' ]
+        gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
     steps:
       - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk/requirements.txt
-            projects/rocprofiler-sdk/Docker/Dockerfile.ci
+            projects/rocprofiler-sdk/docker/Dockerfile.ci
 
       - name: Get the latest therock build
         id: therock
@@ -52,26 +54,10 @@ jobs:
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key")
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
           KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; }
-          echo "gfx120X=${KEY}" >> $GITHUB_OUTPUT
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
-          echo "gfx94X=${KEY}" >> $GITHUB_OUTPUT
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; }
-          echo "gfx110X=${KEY}" >> $GITHUB_OUTPUT
+          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
@@ -88,13 +74,11 @@ jobs:
         with:
           file: projects/rocprofiler-sdk/docker/Dockerfile.ci
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BASE_TAG=${{ matrix.os }}
             GPU_TYPE=${{ matrix.gpu }}
-            GFX94X_FILE_NAME=${{ steps.therock.outputs.gfx94X }}
-            GFX110X_FILE_NAME=${{ steps.therock.outputs.gfx110X }}
-            GFX120X_FILE_NAME=${{ steps.therock.outputs.gfx120X }}
+            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
           tags: |
             docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-latest
           cache-from: type=gha,scope=rocprofiler-ci-${{ matrix.os }}-${{ matrix.gpu }}
