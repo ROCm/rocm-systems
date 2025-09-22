@@ -66,6 +66,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -85,6 +86,7 @@
 #include <cassert>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -114,6 +116,7 @@ __gcov_dump(void);
 
 namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
+namespace fs     = ::rocprofiler::common::filesystem;
 
 extern "C" {
 void
@@ -488,11 +491,9 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
     // Check whether services are enabled
     const bool kernel_rename_service_enabled =
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
-        tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
-        !thread_dispatch_rename->empty();
+        thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty();
 
-    const bool hip_stream_enabled =
-        !tool::get_config().group_by_queue && rocprofiler::tool::stream::stream_stack_not_null();
+    const bool hip_stream_enabled = rocprofiler::tool::stream::stream_stack_not_null();
 
     if(!kernel_rename_service_enabled && !hip_stream_enabled) return 1;
 
@@ -566,7 +567,7 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 data)
 {
-    if(!tool::get_config().kernel_rename || thread_dispatch_rename == nullptr) return;
+    if(thread_dispatch_rename == nullptr) return;
 
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
@@ -617,8 +618,7 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t*              user_data,
                             void*                                 data)
 {
-    if(tool::get_config().group_by_queue || record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM)
-        return;
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
     // Extract stream ID from record
     auto* stream_handle_data =
         static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
@@ -1771,6 +1771,47 @@ get_tracing_callbacks()
 }
 
 int
+tool_attach(rocprofiler_client_detach_t /*detach_func*/,
+            rocprofiler_context_id_t* context_ids,
+            uint64_t                  context_ids_length,
+            void* /*tool_data*/)
+{
+    // save the existing config for comparison
+    auto original_config = tool::get_config();
+
+    // reset config for attach (i.e. re-parse environment variables)
+    tool::get_config() = tool::config{};
+
+    // ensure the config has not changed which services were requested.
+    // NOTE: this is a temporary restriction
+    ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
+        << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
+           "support changing the set of enabled tracing services between initial load and attach. "
+           "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
+           "<output_file> -d <output_directory> ...]` to attach to a new process.";
+
+    pid_t target_pid = getppid();  // The target process we're attaching to
+    pid_t tool_pid   = getpid();   // The rocprofv3 tool process
+    ROCP_INFO << "Attach mode: Setting process_id to target PID " << target_pid
+              << " (tool PID: " << tool_pid << ")";
+    tool_metadata->set_process_id(target_pid, 0);  // Set target as main process
+
+    for(uint64_t i = 0; i < context_ids_length; ++i)
+    {
+        if(int status = 0;
+           rocprofiler_context_is_active(context_ids[i], &status) == ROCPROFILER_STATUS_SUCCESS &&
+           status == 0)
+        {
+            ROCP_INFO << "Attach mode: starting context ID " << context_ids[i].handle;
+            ROCPROFILER_CALL(rocprofiler_start_context(context_ids[i]),
+                             "failed to start received context");
+        }
+    }
+
+    return 0;
+}
+
+int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     static constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
@@ -2078,67 +2119,60 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(counter_collection_ctx, "counter collection");
     }
 
-    if(tool::get_config().kernel_rename)
-    {
-        auto rename_ctx            = rocprofiler_context_id_t{0};
-        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
-            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
-            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
-        };
+    auto rename_ctx            = rocprofiler_context_id_t{0};
+    auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
+    };
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             rename_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
-                             marker_core_api_kinds.data(),
-                             marker_core_api_kinds.size(),
-                             callbacks.kernel_rename,
-                             nullptr),
-                         "callback tracing service failed to configure");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         rename_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                         marker_core_api_kinds.data(),
+                         marker_core_api_kinds.size(),
+                         callbacks.kernel_rename,
+                         nullptr),
+                     "callback tracing service failed to configure");
 
-        start_context(rename_ctx, "kernel rename");
-    }
+    start_context(rename_ctx, "kernel rename");
 
-    if(!tool::get_config().group_by_queue)
-    {
-        // Track stream ID information via callback service
-        auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
+    // Track stream ID information via callback service
+    auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
-                         "failed to create hip stream context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
+                     "failed to create hip stream context");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                           nullptr,
-                                                           0,
-                                                           callbacks.hip_stream,
-                                                           nullptr),
-            "hip stream tracing configure failed");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                       nullptr,
+                                                       0,
+                                                       callbacks.hip_stream,
+                                                       nullptr),
+        "hip stream tracing configure failed");
 
-        start_context(hip_stream_display_ctx, "hip stream");
+    start_context(hip_stream_display_ctx, "hip stream");
 
-        // Track if HIP runtime has been initialized via runtime_intialization service
-        auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
+    // Track if HIP runtime has been initialized via runtime_intialization service
+    auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
-                         "failed to create runtime initialization context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
+                     "failed to create runtime initialization context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             runtime_initialization_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
-                             nullptr,
-                             0,
-                             runtime_initialization_callback,
-                             nullptr),
-                         "runtime initialization tracing configure failed");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         runtime_initialization_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                         nullptr,
+                         0,
+                         runtime_initialization_callback,
+                         nullptr),
+                     "runtime initialization tracing configure failed");
 
-        start_context(runtime_initialization_ctx, "runtime initialization");
-    }
+    start_context(runtime_initialization_ctx, "runtime initialization");
 
-    if((tool::get_config().kernel_rename || !tool::get_config().group_by_queue) &&
-       tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
+    if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
             std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
@@ -2234,6 +2268,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     tool_metadata->set_process_id(getpid(), getppid());
+
     // set_process_id should set process_start_ns unless it cannot read from /proc/<pid>/stat
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
@@ -2274,10 +2309,16 @@ api_timestamps_callback(rocprofiler_intercept_table_t table_id,
     });
 }
 
+enum class cleanup_mode
+{
+    destroy,
+    reset,
+};
+
 using stats_data_t       = tool::stats_data_t;
 using stats_entry_t      = tool::stats_entry_t;
 using domain_stats_vec_t = tool::domain_stats_vec_t;
-using cleanup_vec_t      = std::vector<std::function<void()>>;
+using cleanup_vec_t      = std::vector<std::function<void(cleanup_mode)>>;
 
 struct output_data
 {
@@ -2376,7 +2417,26 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
                 domain_stats_vec_t&                 contributions_v,
                 cleanup_vec_t&                      cleanups_v)
 {
-    cleanups_v.emplace_back([&output_v]() { output_v.destroy(); });
+    cleanups_v.emplace_back([&output_v](cleanup_mode _mode) {
+        switch(_mode)
+        {
+            case cleanup_mode::destroy:
+            {
+                // ROCP_INFO << fmt::format("destroying buffer for {}",
+                //                          get_domain_column_name(DomainT));
+                output_v.destroy();
+                return;
+            }
+            case cleanup_mode::reset:
+            {
+                // ROCP_INFO << fmt::format("resetting buffer for {}",
+                //                          get_domain_column_name(DomainT));
+                output_v.reset();
+                return;
+            }
+        }
+        ROCP_CI_LOG(WARNING) << fmt::format("invalid cleanup mode {}", static_cast<int>(_mode));
+    });
 
     if(!output_v) return;
 
@@ -2412,23 +2472,9 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 }
 
 void
-tool_fini(void* /*tool_data*/)
+generate_output(cleanup_mode _cleanup_mode)
 {
-    static bool _first = true;
-    if(!_first) return;
-    _first = false;
-
-    client_identifier = nullptr;
-    client_finalizer  = nullptr;
-
-    auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
-
-    if(tool_metadata->process_end_ns == 0)
-        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
-
-    flush();
-    rocprofiler_stop_context(get_client_ctx());
-    flush();
+    auto _output_gen_timer = common::simple_timer{"[rocprofv3] output generation"};
 
     auto kernel_dispatch_output =
         rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
@@ -2467,10 +2513,10 @@ tool_fini(void* /*tool_data*/)
     auto contributions = domain_stats_vec_t{};
     auto cleanups      = cleanup_vec_t{};
 
-    auto run_cleanup = [&cleanups]() {
+    auto run_cleanup = [&cleanups, _cleanup_mode]() {
         for(const auto& itr : cleanups)
         {
-            if(itr) itr();
+            if(itr) itr(_cleanup_mode);
         }
         cleanups.clear();
     };
@@ -2655,6 +2701,43 @@ tool_fini(void* /*tool_data*/)
     }
 
     run_cleanup();
+}
+
+void
+tool_detach(void* /*tool_data*/)
+{
+    auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
+
+    // Flush all buffers (same as tool_fini)
+    flush();
+
+    // Set process end timestamp for this detachment cycle
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    generate_output(cleanup_mode::reset);
+}
+
+void
+tool_fini(void* /*tool_data*/)
+{
+    static bool _first = true;
+    if(!_first) return;
+    _first = false;
+
+    client_identifier = nullptr;
+    client_finalizer  = nullptr;
+
+    auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
+
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    flush();
+    rocprofiler_stop_context(get_client_ctx());
+    flush();
+
+    generate_output(cleanup_mode::destroy);
 
     if(destructors)
     {
@@ -2662,6 +2745,14 @@ tool_fini(void* /*tool_data*/)
             itr();
         delete destructors;
         destructors = nullptr;
+    }
+
+    // remove the attach arguments file if it exists
+    if(auto attach_args_fname = fmt::format("/tmp/rocprofv3_attach_{}.pkl", getpid());
+       fs::exists(attach_args_fname))
+    {
+        ROCP_INFO << "removing attach arguments file: " << attach_args_fname;
+        fs::remove(attach_args_fname);
     }
 
 #if defined(CODECOV) && CODECOV > 0
@@ -3082,13 +3173,29 @@ rocprofiler_configure(uint32_t                 version,
     ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";
 
-    // create configure data
+    // create configure data using experimental struct with attach/detach support
     static auto cfg = rocprofiler_tool_configure_result_t{
         sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
 
     // return pointer to configure data
     return &cfg;
-    // data passed around all the callbacks
+}
+
+rocprofiler_tool_configure_attach_result_t*
+rocprofiler_configure_attach(uint32_t /*version*/,
+                             const char* /*runtime_version*/,
+                             uint32_t /*priority*/,
+                             rocprofiler_client_id_t* /*id*/)
+{
+    // This function is called right after rocprofiler_configure with the same parameters.
+    // The data returned is only used when attaching to a running process.
+
+    // create configure data using experimental struct with attach/detach support
+    static auto cfg = rocprofiler_tool_configure_attach_result_t{
+        sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach, &tool_detach, nullptr};
+
+    // return pointer to configure data
+    return &cfg;
 }
 
 void

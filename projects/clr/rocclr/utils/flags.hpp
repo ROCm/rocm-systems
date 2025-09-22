@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -255,6 +255,8 @@ release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
         "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
+release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
+        "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \

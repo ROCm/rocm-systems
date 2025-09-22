@@ -161,6 +161,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 
   switch (palProp.revision) {
     // Fall through for Navi4x ...
+    case Pal::AsicRevision::Navi44:
     case Pal::AsicRevision::Navi48:
     // Fall through for Navi3x ...
     case Pal::AsicRevision::Navi33:
@@ -292,13 +293,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   }
 
   imageSupport_ = true;
-  std::string imageSupport;
-  if (amd::device::getValueFromIsaMeta(isa.isaName(), "ImageSupport", imageSupport)) {
-    imageSupport_ = atoi(imageSupport.c_str());
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "imageSupport=%u", imageSupport_);
-  } else {
-    LogInfo("Can not get image support info from ISA meta");
-  }
+
   // Use kernels for blit if appropriate
   blitEngine_ = BlitEngineKernel;
 
