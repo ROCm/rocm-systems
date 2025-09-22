@@ -143,7 +143,7 @@ Options
   Specifies shared memory allocation hint for Perfetto inter-process communication in kilobytes (default: 64 KB).
 
 - ``--group-by-queue``  
-  Organizes trace data by HIP stream abstractions rather than low-level HSA queue identifiers, providing higher-level application context for kernel and memory transfer operations.
+   Displays the HSA queues to which these kernel and memory operations were submitted. By default, ``rocprofv3`` shows the HIP streams to which the kernel and memory copy operations were submitted
 
 **Temporal Filtering Configuration:**
 
@@ -199,4 +199,257 @@ Convert multiple databases to all supported formats (CSV, OTF2, and Perfetto tra
 .. code-block:: bash
 
    /opt/rocm/bin/rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
+
+Dedicated Conversion Tools
+++++++++++++++++++++++++++
+
+ROCprofiler-SDK provides specialized conversion utilities for efficient format-specific operations. These tools offer streamlined interfaces for single-format conversions and are particularly useful in automated workflows and scripts.
+
+rocpd2csv - CSV Export Tool
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Purpose:** Converts rocpd SQLite3 databases to Comma-Separated Values (CSV) format for spreadsheet analysis and data processing workflows.
+
+**Location:** ``/opt/rocm/bin/rocpd2csv``
+
+**Syntax:**
+
+.. code-block:: bash
+
+   rocpd2csv -i INPUT [INPUT ...] [OPTIONS]
+
+**Key Features:**
+
+- **Structured Data Export:** Converts hierarchical database content to tabular CSV format
+- **Multi-Database Support:** Aggregates data from multiple database files into unified CSV output
+- **Time Window Filtering:** Apply temporal filters to limit exported data range
+- **Configurable Output:** Customize output file naming and directory structure
+
+**Usage Examples:**
+
+.. code-block:: bash
+
+   # Basic CSV conversion
+   rocpd2csv -i profile_data.db
+
+   # Convert multiple databases with custom output path
+   rocpd2csv -i db1.db db2.db db3.db -d ~/analysis_output/ -o combined_profile
+
+   # Apply time window filtering (export middle 70% of execution)
+   rocpd2csv -i large_profile.db --start 15% --end 85%
+
+**Common Output Files:**
+- ``out_hip_api_trace.csv`` - HIP API call trace data
+- ``out_kernel_trace.csv`` - GPU kernel execution information
+- ``out_counter_collection.csv`` - Hardware performance counter data
+
+rocpd2otf2 - Open Trace Format 2 Export
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Purpose:** Generates OTF2 (Open Trace Format 2) files for high-performance trace analysis using tools like Vampir, Tau, and Score-P viewers.
+
+**Location:** ``/opt/rocm/bin/rocpd2otf2``
+
+**Syntax:**
+
+.. code-block:: bash
+
+   rocpd2otf2 -i INPUT [INPUT ...] [OPTIONS]
+
+**Key Features:**
+
+- **HPC-Standard Format:** Produces traces compatible with scientific computing analysis tools
+- **Hierarchical Timeline:** Preserves process/thread/queue relationships in trace structure
+- **Scalable Storage:** Efficient binary format for large-scale profiling data
+- **Agent Indexing:** Configurable GPU agent indexing strategies (absolute, relative, type-relative)
+
+**Usage Examples:**
+
+.. code-block:: bash
+
+   # Generate OTF2 trace archive
+   rocpd2otf2 -i gpu_workload.db
+
+   # Multi-process trace with custom indexing
+   rocpd2otf2 -i mpi_rank_*.db --agent-index-value type-relative -o mpi_trace
+
+   # Time-windowed trace export
+   rocpd2otf2 -i long_execution.db --start-marker "computation_begin" --end-marker "computation_end"
+
+**Output Structure:**
+- ``trace.otf2`` - Main trace archive containing timeline data
+- ``trace.def`` - Trace definition file with metadata
+- Supporting files for multi-stream trace data
+
+rocpd2pftrace - Perfetto Trace Export
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Purpose:** Converts rocpd databases to Perfetto protocol buffer format for interactive visualization using the Perfetto UI (ui.perfetto.dev).
+
+**Location:** ``/opt/rocm/bin/rocpd2pftrace``
+
+**Syntax:**
+
+.. code-block:: bash
+
+   rocpd2pftrace -i INPUT [INPUT ...] [OPTIONS]
+
+**Key Features:**
+
+- **Interactive Visualization:** Optimized for modern web-based trace viewers
+- **Real-time Analysis:** Supports streaming analysis workflows
+- **GPU Timeline Integration:** Specialized visualization of GPU execution patterns
+- **Configurable Backend:** Supports both in-process and system-wide tracing backends
+
+**Backend Configuration Options:**
+
+.. code-block:: bash
+
+   # In-process backend (default)
+   rocpd2pftrace -i profile.db --perfetto-backend inprocess
+
+   # System-wide tracing backend
+   rocpd2pftrace -i system_profile.db --perfetto-backend system \
+                 --perfetto-buffer-size 64MB --perfetto-shmem-size-hint 32MB
+
+**Buffer Management:**
+
+.. code-block:: bash
+
+   # Ring buffer mode (overwrites old data)
+   rocpd2pftrace -i continuous_profile.db --perfetto-buffer-fill-policy ring_buffer
+
+   # Discard mode (stops recording when full)
+   rocpd2pftrace -i bounded_profile.db --perfetto-buffer-fill-policy discard
+
+**Usage Examples:**
+
+.. code-block:: bash
+
+   # Basic Perfetto trace generation
+   rocpd2pftrace -i application.db
+
+   # High-throughput configuration
+   rocpd2pftrace -i heavy_workload.db --perfetto-buffer-size 128MB \
+                 --perfetto-buffer-fill-policy ring_buffer
+
+   # Multi-queue analysis
+   rocpd2pftrace -i multi_stream.db --group-by-queue -o queue_analysis
+
+**Visualization Workflow:**
+1. Generate ``.perfetto-trace`` file using ``rocpd2pftrace``
+2. Open https://ui.perfetto.dev in web browser
+3. Load generated trace file for interactive analysis
+
+rocpd2summary - Statistical Analysis Tool
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Purpose:** Generates comprehensive statistical summaries and performance analysis reports from rocpd profiling data.
+
+**Location:** ``/opt/rocm/bin/rocpd2summary``
+
+**Syntax:**
+
+.. code-block:: bash
+
+   rocpd2summary -i INPUT [INPUT ...] [OPTIONS]
+
+**Key Features:**
+
+- **Multi-Format Output:** Supports console, CSV, HTML, JSON, Markdown, and PDF report generation
+- **Comprehensive Statistics:** Kernel execution times, API call frequencies, memory transfer analysis
+- **Domain-Specific Analysis:** Separate summaries for HIP, ROCr, Markers, and other trace domains
+- **Rank-Based Analysis:** Per-process and per-rank performance breakdowns for MPI applications
+- **Configurable Scope:** Selective inclusion/exclusion of analysis categories
+
+**Output Format Options:**
+
+.. code-block:: bash
+
+   # Console output (default)
+   rocpd2summary -i profile.db
+
+   # CSV format for data analysis
+   rocpd2summary -i profile.db --format csv -o performance_metrics
+
+   # HTML report with visualization
+   rocpd2summary -i profile.db --format html -d ~/reports/
+
+   # Multiple output formats
+   rocpd2summary -i profile.db --format csv html json
+
+**Analysis Categories:**
+
+.. code-block:: bash
+
+   # Include all available domains
+   rocpd2summary -i profile.db --region-categories HIP ROCR MARKERS KERNEL
+
+   # Focus on GPU kernel analysis only
+   rocpd2summary -i profile.db --region-categories KERNEL
+
+   # Exclude markers to speed up processing
+   rocpd2summary -i profile.db --region-categories HIP ROCR KERNEL
+
+**Advanced Analysis Options:**
+
+.. code-block:: bash
+
+   # Include domain-specific statistics
+   rocpd2summary -i multi_gpu.db --domain-summary
+
+   # Per-rank analysis for MPI applications
+   rocpd2summary -i mpi_profile_*.db --summary-by-rank --format html
+
+   # Time-windowed summary analysis
+   rocpd2summary -i long_run.db --start 25% --end 75% --format csv
+
+**Report Content:**
+- **Kernel Statistics:** Execution time distributions, call frequencies, grid/block sizes
+- **API Timing:** HIP/ROCr function call durations and frequencies
+- **Memory Analysis:** Transfer patterns, bandwidth utilization, allocation statistics  
+- **Device Utilization:** GPU occupancy patterns and idle time analysis
+- **Synchronization Overhead:** Barrier and synchronization point analysis
+
+**Output Files:**
+- ``summary_kernel.{format}`` - GPU kernel execution summary
+- ``summary_hip_api.{format}`` - HIP API call statistics
+- ``summary_rocr_api.{format}`` - ROCr runtime API analysis
+- ``summary_memory.{format}`` - Memory operation statistics
+
+Tool Integration and Workflow Examples
++++++++++++++++++++++++++++++++++++++++
+
+**Multi-Format Analysis Pipeline:**
+
+.. code-block:: bash
+
+   # Generate all analysis formats for comprehensive review
+   rocpd2csv -i profile.db -o analysis_data
+   rocpd2summary -i profile.db --format html -o performance_report
+   rocpd2pftrace -i profile.db -o interactive_trace
+
+**Automated Performance Monitoring:**
+
+.. code-block:: bash
+
+   #!/bin/bash
+   # Performance analysis automation script
+   
+   PROFILE_DB="$1"
+   OUTPUT_DIR="analysis_$(date +%Y%m%d_%H%M%S)"
+   
+   mkdir -p "$OUTPUT_DIR"
+   
+   # Generate CSV data for automated analysis
+   rocpd2csv -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o raw_data
+   
+   # Create summary reports
+   rocpd2summary -i "$PROFILE_DB" --format csv html \
+                 -d "$OUTPUT_DIR" -o performance_summary
+   
+   # Generate interactive trace for detailed investigation
+   rocpd2pftrace -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o interactive_trace
+
+
 

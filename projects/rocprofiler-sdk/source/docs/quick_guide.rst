@@ -115,7 +115,7 @@ Thread Trace
 .. code-block:: bash
 
    # Collect thread trace data
-   rocprofv3 --thread-trace --output-format csv -- ./your_app
+   rocprofv3 --att --output-format csv -- ./your_app
 
 **Documentation:** :ref:`using-thread-trace`
 
@@ -163,6 +163,77 @@ Converting to Other Formats
    rocprofv3 --runtime-trace --output-format otf2 -- ./your_app
 
 **Documentation:** :ref:`using-rocpd-output-format`
+
+rocpd Database Conversion Tools
+-------------------------------
+
+ROCprofiler-SDK provides dedicated conversion utilities for transforming rocpd databases to different formats:
+
+**rocpd2csv - CSV Export:**
+
+.. code-block:: bash
+
+   # Basic CSV conversion
+   rocpd2csv -i profile.db
+
+   # Multiple databases with custom output
+   rocpd2csv -i db1.db db2.db -d ~/analysis/ -o combined_data
+
+   # Time-windowed export (middle 70% of execution)
+   rocpd2csv -i large_profile.db --start 15% --end 85%
+
+**rocpd2summary - Statistical Reports:**
+
+.. code-block:: bash
+
+   # Console summary (default)
+   rocpd2summary -i profile.db
+
+   # HTML report with all analysis domains
+   rocpd2summary -i profile.db --format html --region-categories HIP ROCR KERNEL
+
+   # CSV statistics for automation
+   rocpd2summary -i profile.db --format csv -o performance_metrics
+
+   # Multi-database aggregated analysis
+   rocpd2summary -i db*.db --summary-by-rank --format html
+
+**rocpd2pftrace - Perfetto Traces:**
+
+.. code-block:: bash
+
+   # Interactive timeline visualization
+   rocpd2pftrace -i profile.db
+
+   # High-throughput configuration
+   rocpd2pftrace -i workload.db --perfetto-buffer-size 128MB
+
+   # Queue-based analysis
+   rocpd2pftrace -i multi_stream.db --group-by-queue -o queue_analysis
+
+**rocpd2otf2 - HPC Analysis Format:**
+
+.. code-block:: bash
+
+   # Standard OTF2 trace
+   rocpd2otf2 -i gpu_workload.db
+
+   # Multi-process with custom agent indexing
+   rocpd2otf2 -i mpi_ranks*.db --agent-index-value type-relative
+
+   # Marker-based time windowing
+   rocpd2otf2 -i long_run.db --start-marker "computation_begin" --end-marker "computation_end"
+
+**Common Workflow - Multi-Format Analysis:**
+
+.. code-block:: bash
+
+   # Generate comprehensive analysis suite
+   rocpd2csv -i profile.db -o raw_data
+   rocpd2summary -i profile.db --format html -o performance_report  
+   rocpd2pftrace -i profile.db -o interactive_trace
+
+**Documentation:** :ref:`using-rocpd-output-format` (Dedicated Conversion Tools section)
 
 Summary and Statistics
 ----------------------
