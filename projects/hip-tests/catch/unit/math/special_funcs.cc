@@ -1117,6 +1117,6 @@ TEST_CASE("Unit_Device_jn_Accuracy_Limited_Positive") {
 TEST_CASE("Unit_Device_jn_jnf_Negative_RTC") { NegativeTestRTCWrapper<8>(kJn); }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

@@ -414,6 +414,7 @@ get_callback_domains()
     {
         // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
     }
 #    endif
@@ -436,6 +437,15 @@ get_callback_domains()
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
     }
 
+#    if ROCPROFILER_VERSION >= 600
+    if(config::get_use_ompt() && _version.formatted >= 600)
+    {
+        // Translate some configuration settings to rocprofiler domains
+        _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
+    }
+#    endif
+
+    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
 
@@ -495,6 +505,9 @@ get_buffered_domains()
     const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+#    if(ROCPROFILER_VERSION >= 600)
+        ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+#    endif
 #    if(ROCPROFILER_VERSION < 10000)
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
@@ -539,6 +552,16 @@ get_buffered_domains()
         else if(itr == "marker_api" || itr == "roctx")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API);
+        }
+#    if(ROCPROFILER_VERSION >= 600)
+        else if(itr == "memory_allocation")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+        }
+#    endif
+        else if(itr == "memory_copy")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
         }
         else
         {

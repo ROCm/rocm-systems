@@ -18,8 +18,6 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/appprofile.hpp"
@@ -31,8 +29,7 @@ amd::AppProfile* rocCreateAppProfile() {
   amd::AppProfile* appProfile = new amd::roc::AppProfile;
 
   if ((appProfile == nullptr) || !appProfile->init()) {
-    DevLogPrintfError("App Profile init failed, appProfile: 0x%x \n",
-                      appProfile);
+    DevLogPrintfError("App Profile init failed, appProfile: 0x%x \n", appProfile);
     return nullptr;
   }
 
@@ -54,6 +51,4 @@ bool AppProfile::ParseApplicationProfile() {
 
   return true;
 }
-}
-
-#endif
+}  // namespace amd::roc

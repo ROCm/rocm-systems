@@ -26,6 +26,7 @@
 import os
 import platform
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 from rich.text import Text
@@ -41,23 +42,23 @@ class Terimnal(Container):
         name: Optional[str] = None,
         id: Optional[str] = None,
         classes: Optional[str] = None,
-    ):
+    ) -> None:
         super().__init__(name=name, id=id, classes=classes)
-        self.current_directory = os.getcwd()
-        self.output_text = ""
-        self.input_text = ""
-        self.input_prompt = ""
-        self.has_focus = True
+        self.current_directory = Path.cwd()
+        self.output_text: str = ""
+        self.input_text: str = ""
+        self.input_prompt: str = ""
+        self.has_focus: bool = True
 
         # Command history
-        self.command_history = []
-        self.history_index = -1
-        self.current_command = ""
+        self.command_history: list[str] = []
+        self.history_index: int = -1
+        self.current_command: str = ""
 
         # Tab completion
-        self.tab_completions = []
-        self.tab_index = -1
-        self.tab_prefix = ""
+        self.tab_completions: list[str] = []
+        self.tab_index: int = -1
+        self.tab_prefix: str = ""
 
     def compose(self) -> ComposeResult:
         # Output area with scroll wrapper
@@ -80,9 +81,7 @@ class Terimnal(Container):
     def update_prompt(self) -> None:
         """Update the command prompt in the input field."""
         input_widget = self.query_one("#terminal-input")
-        current_path = (
-            os.path.basename(self.current_directory) or self.current_directory
-        )
+        current_path = Path(self.current_directory).name or self.current_directory
 
         if platform.system() != "Windows":
             prompt = f"{current_path} $ "
@@ -94,8 +93,8 @@ class Terimnal(Container):
     def add_output(self, text: str) -> None:
         """Add text to the terminal output."""
         self.output_text += text
-        output = self.query_one("#terminal-output")
-        output.update(Text.from_ansi(self.output_text))
+        scroll = self.query_one("#term-output-scroll", VerticalScroll)
+        scroll.scroll_end(animate=False)
 
         # Ensure scroll to bottom
         scroll = self.query_one("#term-output-scroll")
@@ -104,7 +103,7 @@ class Terimnal(Container):
     def action_clear(self) -> None:
         """Clear the terminal output."""
         self.output_text = ""
-        output = self.query_one("#terminal-output")
+        output = self.query_one("#terminal-output", Static)
         output.update(Text.from_ansi(""))
 
     def action_interrupt(self) -> None:
@@ -125,7 +124,7 @@ class Terimnal(Container):
         else:
             # If no process is running, just show ^C and clear the input
             self.add_output("\n^C\n")
-            self.query_one("#terminal-input").value = ""
+            self.query_one("#terminal-input", Input).value = ""
 
     def run_command(self, command: str) -> None:
         """Run a system command and display its output."""
@@ -137,7 +136,7 @@ class Terimnal(Container):
             self.history_index = len(self.command_history)
 
         # Show the command in the output
-        prompt = self.query_one("#terminal-input").placeholder
+        prompt = self.query_one("#terminal-input", Input).placeholder
         self.add_output(f"{prompt}{command}\n")
 
         if not command.strip():
@@ -156,15 +155,21 @@ class Terimnal(Container):
                 path = command[3:].strip()
                 if not path:
                     # Just "cd" usually goes to home directory
-                    path = os.path.expanduser("~")
+                    new_path = Path.home()
+                else:
+                    new_path = Path(path)
 
-                # Handle relative paths
-                if not os.path.isabs(path):
-                    path = os.path.join(self.current_directory, path)
+                    # Handle relative paths
+                    if not new_path.is_absolute():
+                        new_path = Path(self.current_directory) / new_path
+
+                # Resolve any symlinks and normalize the path
+                new_path = new_path.resolve()
 
                 # Change to the new directory
-                os.chdir(path)
-                self.current_directory = os.getcwd()
+                new_path_str = str(new_path)
+                os.chdir(new_path_str)
+                self.current_directory = new_path_str
                 self.add_output(f"Changed directory to {self.current_directory}\n")
                 self.update_prompt()
             except Exception as e:
@@ -207,7 +212,7 @@ class Terimnal(Container):
         """Handle key events for history navigation."""
         # Handle arrow keys for command history
         if event.key == "up" and self.command_history:
-            input_widget = self.query_one("#terminal-input")
+            input_widget = self.query_one("#terminal-input", Input)
             if self.history_index > 0:
                 self.history_index -= 1
                 input_widget.value = self.command_history[self.history_index]
@@ -215,7 +220,7 @@ class Terimnal(Container):
             event.prevent_default()
 
         elif event.key == "down" and self.command_history:
-            input_widget = self.query_one("#terminal-input")
+            input_widget = self.query_one("#terminal-input", Input)
             if self.history_index < len(self.command_history) - 1:
                 self.history_index += 1
                 input_widget.value = self.command_history[self.history_index]

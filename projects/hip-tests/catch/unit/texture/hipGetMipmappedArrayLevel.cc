@@ -43,9 +43,9 @@ TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
 #ifdef __linux__
-    HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
-    return;
-#endif //__linux__
+  HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
+  return;
+#endif  //__linux__
 
   hipMipmappedArray_t array;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
@@ -72,6 +72,6 @@ TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative_Parameters") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

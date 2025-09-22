@@ -36,4 +36,4 @@ THE SOFTWARE.
 typedef struct __nv_bfloat16 __hip_bfloat16;
 typedef struct __nv_bfloat162 __hip_bfloat162;
 
-#endif // HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_FP16_H
+#endif  // HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_FP16_H

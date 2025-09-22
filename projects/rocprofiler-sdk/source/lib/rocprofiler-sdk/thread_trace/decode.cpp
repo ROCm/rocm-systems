@@ -182,7 +182,7 @@ isa_callback(char*                                 isa_instruction,
     try
     {
         auto instruction = decoder->table.wlock(
-            [&](AddressTable& table) { return table.get(pc.marker_id, pc.addr); });
+            [&](AddressTable& table) { return table.get(pc.code_object_id, pc.address); });
 
         if(!instruction) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -199,7 +199,7 @@ isa_callback(char*                                 isa_instruction,
 
     } catch(std::exception& e)
     {
-        ROCP_CI_LOG(INFO) << pc.marker_id << ":" << pc.addr << ' ' << e.what();
+        ROCP_CI_LOG(INFO) << pc.code_object_id << ":" << pc.address << ' ' << e.what();
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
     }
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;

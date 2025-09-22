@@ -27,9 +27,8 @@
  * - Sets attributes of a memory pool
  */
 
-template <typename T>
-static void MemPoolSetGetAttribute(const hipMemPool_t mempool, const hipMemPoolAttr attr,
-                                   T& set_value) {
+template <typename T> static void MemPoolSetGetAttribute(const hipMemPool_t mempool,
+                                                         const hipMemPoolAttr attr, T& set_value) {
   T get_value = 100;
   HIP_CHECK(hipMemPoolSetAttribute(mempool, attr, &set_value));
   HIP_CHECK(hipMemPoolGetAttribute(mempool, attr, &get_value));
@@ -53,7 +52,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_Default") {
 
   checkMempoolSupported(device)
 
-  const auto mempool_type = GENERATE(MemPools::dev_default, MemPools::created);
+      const auto mempool_type = GENERATE(MemPools::dev_default, MemPools::created);
   MemPoolGuard mempool(mempool_type, device);
 
   const auto attr_type =
@@ -86,7 +85,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_MemBasic") {
 
   checkMempoolSupported(device)
 
-  const auto mempool_type = GENERATE(MemPools::dev_default, MemPools::created);
+      const auto mempool_type = GENERATE(MemPools::dev_default, MemPools::created);
   MemPoolGuard mempool(mempool_type, device);
 
   // Check hipMemPoolAttrReleaseThreshold default value
@@ -121,7 +120,8 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id)
 
-  unsigned int* notified1 = nullptr, *notified2 = nullptr;
+      unsigned int *notified1 = nullptr,
+                   *notified2 = nullptr;
   HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
   HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)));
   *notified1 = 0;
@@ -236,7 +236,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    *notified1 = 1; // Notifiy kernel to exit after 500 ms
+    *notified1 = 1;  // Notifiy kernel to exit after 500 ms
 
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -316,12 +316,12 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
 
   checkMempoolSupported(device_id)
 
-  MemPoolGuard mempool(MemPools::created, device_id);
+      MemPoolGuard mempool(MemPools::created, device_id);
 
   hipMemPoolAttr attr;
   int blocks = 2;
 
-  unsigned int* notified1 = nullptr, *notified2 = nullptr;
+  unsigned int *notified1 = nullptr, *notified2 = nullptr;
   HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
   HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)));
   *notified1 = 0;
@@ -440,8 +440,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
 TEST_CASE("Unit_hipMemPoolSetAttribute_Negative_Parameters") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
-  checkMempoolSupported(device_id)
-  MemPoolGuard mempool(MemPools::dev_default, device_id);
+  checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
 
   hipMemPoolAttr attr = hipMemPoolReuseFollowEventDependencies;
   int set_value = 0;
@@ -480,12 +479,10 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Negative_Parameters") {
 /**
  * Local function to reset hipMemPoolAttrReservedMemHigh and hipMemPoolAttrUsedMemHigh.
  */
-static void resetHighValue(hipMemPool_t &memPool) {
+static void resetHighValue(hipMemPool_t& memPool) {
   uint64_t value = 0;
-  HIP_CHECK(hipMemPoolSetAttribute(memPool, hipMemPoolAttrReservedMemHigh,
-            &value));
-  HIP_CHECK(hipMemPoolSetAttribute(memPool, hipMemPoolAttrUsedMemHigh,
-            &value));
+  HIP_CHECK(hipMemPoolSetAttribute(memPool, hipMemPoolAttrReservedMemHigh, &value));
+  HIP_CHECK(hipMemPoolSetAttribute(memPool, hipMemPoolAttrUsedMemHigh, &value));
 }
 
 /**
@@ -501,8 +498,8 @@ static void resetHighValue(hipMemPool_t &memPool) {
  */
 TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
   checkMempoolSupported(0)
-  // Create mempool
-  hipMemPool_t mem_pool;
+      // Create mempool
+      hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
   constexpr int N = 1 << 14;
   size_t byte_size = (N * sizeof(int));
@@ -514,9 +511,8 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
   resetHighValue(mem_pool);
 
   // Allocate from mempool
-  int *A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-            byte_size, mem_pool, 0));
+  int* A_d;
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mem_pool, 0));
   // Deallocate
   HIP_CHECK(hipFreeAsync(A_d, 0));
   HIP_CHECK(hipStreamSynchronize(0));
@@ -526,8 +522,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
   uint64_t valueReservedHighAfterReset = 0, valueUsedHighAfterReset = 0;
   HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrReservedMemHigh,
                                    &valueReservedHighAfterReset));
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemHigh,
-                                   &valueUsedHighAfterReset));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemHigh, &valueUsedHighAfterReset));
   REQUIRE(valueReservedHighAfterReset == 0);
   REQUIRE(valueUsedHighAfterReset == 0);
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
@@ -564,8 +559,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
 TEST_CASE("Unit_hipMemPoolGetAttribute_Negative_Parameters") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
-  checkMempoolSupported(device_id)
-  MemPoolGuard mempool(MemPools::dev_default, device_id);
+  checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
 
 
   hipMemPoolAttr attr = hipMemPoolReuseFollowEventDependencies;
@@ -600,15 +594,13 @@ struct mempoolUsgStat {
 /**
  * Local function to fetch usage statistics.
  */
-static void getUsageStatistics(hipMemPool_t &memPool, struct mempoolUsgStat *stat) {
-  HIP_CHECK(hipMemPoolGetAttribute(memPool, hipMemPoolAttrReservedMemCurrent,
-                                   &(stat->reservedMem)));
-  HIP_CHECK(hipMemPoolGetAttribute(memPool, hipMemPoolAttrReservedMemHigh,
-                                   &(stat->reservedMemHigh)));
-  HIP_CHECK(hipMemPoolGetAttribute(memPool, hipMemPoolAttrUsedMemCurrent,
-                                   &(stat->usedMem)));
-  HIP_CHECK(hipMemPoolGetAttribute(memPool, hipMemPoolAttrUsedMemHigh,
-                                   &(stat->usedMemHigh)));
+static void getUsageStatistics(hipMemPool_t& memPool, struct mempoolUsgStat* stat) {
+  HIP_CHECK(
+      hipMemPoolGetAttribute(memPool, hipMemPoolAttrReservedMemCurrent, &(stat->reservedMem)));
+  HIP_CHECK(
+      hipMemPoolGetAttribute(memPool, hipMemPoolAttrReservedMemHigh, &(stat->reservedMemHigh)));
+  HIP_CHECK(hipMemPoolGetAttribute(memPool, hipMemPoolAttrUsedMemCurrent, &(stat->usedMem)));
+  HIP_CHECK(hipMemPoolGetAttribute(memPool, hipMemPoolAttrUsedMemHigh, &(stat->usedMemHigh)));
 }
 
 /**
@@ -679,14 +671,10 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_SetGet") {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {
     checkMempoolSupported(dev)
-    REQUIRE(true == checkhipMemPoolSetAttribute(
-                    hipMemPoolAttrReleaseThreshold, dev));
-    REQUIRE(true == checkhipMemPoolSetAttribute(
-                    hipMemPoolReuseFollowEventDependencies, dev));
-    REQUIRE(true == checkhipMemPoolSetAttribute(
-                    hipMemPoolReuseAllowOpportunistic, dev));
-    REQUIRE(true == checkhipMemPoolSetAttribute(
-                    hipMemPoolReuseAllowInternalDependencies, dev));
+        REQUIRE(true == checkhipMemPoolSetAttribute(hipMemPoolAttrReleaseThreshold, dev));
+    REQUIRE(true == checkhipMemPoolSetAttribute(hipMemPoolReuseFollowEventDependencies, dev));
+    REQUIRE(true == checkhipMemPoolSetAttribute(hipMemPoolReuseAllowOpportunistic, dev));
+    REQUIRE(true == checkhipMemPoolSetAttribute(hipMemPoolReuseAllowInternalDependencies, dev));
   }
 }
 
@@ -701,8 +689,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_SetGet") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
-  checkMempoolSupported(0)
-  constexpr int N = 1 << 14;
+  checkMempoolSupported(0) constexpr int N = 1 << 14;
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
   pool_props.allocType = hipMemAllocationTypePinned;
@@ -716,26 +703,22 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
   // is allocated from this pool.
   SECTION("Check created mempool") {
     uint64_t val = 0;
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-              hipMemPoolAttrUsedMemCurrent, &val));
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemCurrent, &val));
     REQUIRE(val == 0);
-    int *A_d;
+    int* A_d;
     // Allocate memory on dev0 from mem_pool.
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-              byte_size, mem_pool, stream));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mem_pool, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     // Get hipMemPoolAttrUsedMemCurrent value for mem_pool and validate
     // its value.
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-              hipMemPoolAttrUsedMemCurrent, &val));
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemCurrent, &val));
     REQUIRE(val == byte_size);
     // Free memory back to memory pool.
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     // Again get hipMemPoolAttrUsedMemCurrent value for mem_pool and validate
     // its value.
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-              hipMemPoolAttrUsedMemCurrent, &val));
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemCurrent, &val));
     REQUIRE(val == 0);
   }
   SECTION("Check default mempool") {
@@ -743,17 +726,15 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
     // assign default mem pool to device
     HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, 0));
     uint64_t valInitital = 0, valPostAlloc = 0, valPostFree = 0;
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool_default,
-              hipMemPoolAttrUsedMemCurrent, &valInitital));
-    int *A_d;
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool_default, hipMemPoolAttrUsedMemCurrent, &valInitital));
+    int* A_d;
     // Allocate memory on dev0 from mem_pool.
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d),
-              byte_size, stream));
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d), byte_size, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     // Get hipMemPoolAttrUsedMemCurrent value for mem_pool and validate
     // its value.
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool_default,
-              hipMemPoolAttrUsedMemCurrent, &valPostAlloc));
+    HIP_CHECK(
+        hipMemPoolGetAttribute(mem_pool_default, hipMemPoolAttrUsedMemCurrent, &valPostAlloc));
     uint64_t expVal = byte_size;
     expVal = expVal + valInitital;
     REQUIRE(valPostAlloc == expVal);
@@ -762,24 +743,20 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
     HIP_CHECK(hipStreamSynchronize(stream));
     // Again get hipMemPoolAttrUsedMemCurrent value for mem_pool and validate
     // its value.
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool_default,
-              hipMemPoolAttrUsedMemCurrent, &valPostFree));
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool_default, hipMemPoolAttrUsedMemCurrent, &valPostFree));
     REQUIRE(valPostFree == valInitital);
   }
   SECTION("Default memory pool allocation") {
     uint64_t val = 0;
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-              hipMemPoolAttrUsedMemCurrent, &val));
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemCurrent, &val));
     REQUIRE(val == 0);
-    int *A_d;
+    int* A_d;
     // Allocate memory on dev0 from mem_pool.
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d),
-                            byte_size, stream));
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d), byte_size, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     // Get hipMemPoolAttrUsedMemCurrent value for mem_pool and validate
     // its value.
-    HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-              hipMemPoolAttrUsedMemCurrent, &val));
+    HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrUsedMemCurrent, &val));
     REQUIRE(val == 0);
     // Free memory back to memory pool.
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
@@ -800,8 +777,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
-  checkMempoolSupported(0)
-  constexpr int N = 1 << 14;
+  checkMempoolSupported(0) constexpr int N = 1 << 14;
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
   pool_props.allocType = hipMemAllocationTypePinned;
@@ -811,27 +787,23 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
   uint64_t val = 0;
   // Verify that at the beginning mempool contains at least
   // 0 memory reserved.
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-            hipMemPoolAttrReservedMemCurrent, &val));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrReservedMemCurrent, &val));
   REQUIRE(val >= 0);
   size_t byte_size = (N * sizeof(int));
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  int *A_d;
+  int* A_d;
   // Allocate memory on dev0 from mem_pool.
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-            byte_size, mem_pool, stream));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mem_pool, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-            hipMemPoolAttrReservedMemCurrent, &val));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrReservedMemCurrent, &val));
   REQUIRE(val >= byte_size);
   // Free memory back to memory pool.
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   // Again get hipMemPoolAttrReservedMemCurrent value for mem_pool and validate
   // its value.
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool,
-            hipMemPoolAttrReservedMemCurrent, &val));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, hipMemPoolAttrReservedMemCurrent, &val));
   REQUIRE(val >= 0);
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
@@ -848,8 +820,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
-  checkMempoolSupported(0)
-  struct mempoolUsgStat stats;
+  checkMempoolSupported(0) struct mempoolUsgStat stats;
   // Create mempool
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
@@ -868,23 +839,22 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
   REQUIRE(stats.usedMemHigh == 0);
 
   // Allocate from mempool
-  int *A_d[iterations];
+  int* A_d[iterations];
   for (int i = 0; i < iterations; i++) {
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d[i]),
-              byte_size, mem_pool, 0));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d[i]), byte_size, mem_pool, 0));
   }
   HIP_CHECK(hipStreamSynchronize(0));
   // Take Usage Statistics
   getUsageStatistics(mem_pool, &stats);
   // Validate usage statistics
   REQUIRE(stats.reservedMem == stats.reservedMemHigh);
-  REQUIRE(stats.usedMem == (iterations*byte_size));
-  REQUIRE(stats.usedMemHigh == (iterations*byte_size));
+  REQUIRE(stats.usedMem == (iterations * byte_size));
+  REQUIRE(stats.usedMemHigh == (iterations * byte_size));
   reservedHighExp = stats.reservedMemHigh;
-  usedHighExp = (iterations*byte_size);
+  usedHighExp = (iterations * byte_size);
 
   // Deallocate half of the allocations
-  for (int i = 0; i < iterations/2; i++) {
+  for (int i = 0; i < iterations / 2; i++) {
     HIP_CHECK(hipFreeAsync(A_d[i], 0));
   }
   HIP_CHECK(hipStreamSynchronize(0));
@@ -892,11 +862,11 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
   getUsageStatistics(mem_pool, &stats);
   // Validate usage statistics
   REQUIRE(stats.reservedMemHigh == reservedHighExp);
-  REQUIRE(stats.usedMem == (iterations*byte_size - (iterations/2)*byte_size));
+  REQUIRE(stats.usedMem == (iterations * byte_size - (iterations / 2) * byte_size));
   REQUIRE(stats.usedMemHigh == usedHighExp);
 
   // Deallocate remaining allocations
-  for (int i = (iterations/2); i < iterations; i++) {
+  for (int i = (iterations / 2); i < iterations; i++) {
     HIP_CHECK(hipFreeAsync(A_d[i], 0));
   }
   HIP_CHECK(hipStreamSynchronize(0));
@@ -922,8 +892,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool") {
-  checkMempoolSupported(0)
-  struct mempoolUsgStat stats;
+  checkMempoolSupported(0) struct mempoolUsgStat stats;
   // Create mempool
   hipMemPool_t mem_pool;
   constexpr int N = 1 << 14;
@@ -933,14 +902,13 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool") {
   // Reset and Take Usage Statistics
   resetHighValue(mem_pool);
   getUsageStatistics(mem_pool, &stats);
-  uint64_t reservedMemStart, reservedMemHighStart, usedMemStart,
-  usedMemHighStart;
+  uint64_t reservedMemStart, reservedMemHighStart, usedMemStart, usedMemHighStart;
   reservedMemStart = stats.reservedMem;
   reservedMemHighStart = stats.reservedMemHigh;
   usedMemStart = stats.usedMem;
   usedMemHighStart = stats.usedMemHigh;
   // Allocate using hipMalloc
-  int *Ad;
+  int* Ad;
   HIP_CHECK(hipMalloc(&Ad, byte_size));
   getUsageStatistics(mem_pool, &stats);
   REQUIRE(reservedMemStart == stats.reservedMem);
@@ -964,13 +932,9 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_CheckDefaultValues") {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {
     checkMempoolSupported(dev)
-    REQUIRE(true == checkDefaultAttributeValues(
-                    hipMemPoolAttrReleaseThreshold, dev));
-    REQUIRE(true == checkDefaultAttributeValues(
-                    hipMemPoolReuseFollowEventDependencies, dev));
-    REQUIRE(true == checkDefaultAttributeValues(
-                    hipMemPoolReuseAllowOpportunistic, dev));
-    REQUIRE(true == checkDefaultAttributeValues(
-                    hipMemPoolReuseAllowInternalDependencies, dev));
+        REQUIRE(true == checkDefaultAttributeValues(hipMemPoolAttrReleaseThreshold, dev));
+    REQUIRE(true == checkDefaultAttributeValues(hipMemPoolReuseFollowEventDependencies, dev));
+    REQUIRE(true == checkDefaultAttributeValues(hipMemPoolReuseAllowOpportunistic, dev));
+    REQUIRE(true == checkDefaultAttributeValues(hipMemPoolReuseAllowInternalDependencies, dev));
   }
 }

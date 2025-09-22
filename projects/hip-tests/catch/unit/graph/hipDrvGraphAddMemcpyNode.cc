@@ -39,7 +39,8 @@ THE SOFTWARE.
  - Creates a memcpy node and adds it to a graph
  */
 
-// APIs hipDrvGraphMemcpyNodeGetParams, hipDrvGraphMemcpyNodeSetParams are yet to be implemented in HIP runtime.
+// APIs hipDrvGraphMemcpyNodeGetParams, hipDrvGraphMemcpyNodeSetParams are yet to be implemented in
+// HIP runtime.
 #if 0
 /**
  * Test Description
@@ -461,7 +462,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_Positive_Array") {
   HIP_CHECK(hipCtxPopCurrent(&context));
   HIP_CHECK(hipCtxDestroy(context));
 }
-#endif // if 0
+#endif  // if 0
 
 /**
  * Test Description
@@ -662,6 +663,6 @@ TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

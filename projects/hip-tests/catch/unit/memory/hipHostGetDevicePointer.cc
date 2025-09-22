@@ -62,8 +62,8 @@ TEST_CASE("Unit_hipHostGetDevicePointer_Negative") {
 template <typename T> __global__ void set(T* ptr, T val) { *ptr = val; }
 
 TEST_CASE("Unit_hipHostGetDevicePointer_UseCase") {
-  if(!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
-    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory"); 
+  if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
+    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory");
     return;
   }
 
@@ -99,4 +99,26 @@ TEST_CASE("Unit_hipHostGetDevicePointer_UseCase") {
   }
 
   HIP_CHECK(hipHostFree(hPtr));
+}
+
+TEST_CASE("Unit_hipHostGetDevicePointer_Capture") {
+  if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
+    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory");
+    return;
+  }
+
+  int* host_ptr = nullptr;
+  int* device_ptr = nullptr;
+  HIP_CHECK(hipHostMalloc(&host_ptr, sizeof(int)));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&device_ptr), host_ptr, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(host_ptr));
 }

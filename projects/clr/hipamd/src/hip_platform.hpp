@@ -34,7 +34,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 // Unique file descriptor class
 struct UniqueFD {
   UniqueFD(const std::string& fpath, amd::Os::FileDesc fdesc, size_t fsize)
-           : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
+      : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
 
   const std::string fpath_;        //!< File path of this unique file
   const amd::Os::FileDesc fdesc_;  //!< File Descriptor
@@ -113,6 +113,23 @@ class PlatformState {
 
   size_t UfdMapSize() const { return ufd_map_.size(); }
 
+  inline bool RegisterLibraryFunction(const hipKernel_t f) {
+    amd::ScopedLock lock(lock_);
+    if (library_functions_.find(f) == library_functions_.end()) {
+      library_functions_.insert(f);
+      return true;
+    }
+    return false;
+  }
+  inline bool UnregisterLibraryFunction(const hipKernel_t f) {
+    amd::ScopedLock lock(lock_);
+    if (library_functions_.find(f) != library_functions_.end()) {
+      library_functions_.erase(f);
+      return true;
+    }
+    return false;
+  }
+
  private:
   // Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
@@ -120,8 +137,9 @@ class PlatformState {
   bool initialized_{false};
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
 
-  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_; //!< Unique File Desc Map
+  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;  //!< Unique File Desc Map
 
   void* dynamicLibraryHandle_{nullptr};
+  std::unordered_set<hipKernel_t> library_functions_;
 };
 }  // namespace hip

@@ -51,8 +51,8 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
 
   HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  INFO("info: running on bus " << "0x" << props.pciBusID << " " <<
-         props.name << " with " << props.multiProcessorCount << " CUs");
+  INFO("info: running on bus " << "0x" << props.pciBusID << " " << props.name << " with "
+                               << props.multiProcessorCount << " CUs");
 
   const unsigned int maxNum =
       static_cast<unsigned int>(std::ceil((props.multiProcessorCount * 1.0f) / maxCUPerValue));
@@ -63,9 +63,7 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
   if (!gCUMask.empty()) {
     globalCUMask.assign(gCUMask);
 
-    for_each(globalCUMask.begin(), globalCUMask.end(), [](char & c) {
-      c = ::tolower(c);
-    });
+    for_each(globalCUMask.begin(), globalCUMask.end(), [](char& c) { c = ::tolower(c); });
   }
 
   // Create default CU Mask
@@ -106,15 +104,13 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
     INFO("info: CU mask for the default stream is: 0x" << ss.str().c_str());
     if (globalCUMask.size() > 0) {
       if (ss.str().compare(globalCUMask) != 0) {
-        INFO("Expected CU mask:" << globalCUMask.c_str() <<
-                                     ", api returned:" << ss.str().c_str());
+        INFO("Expected CU mask:" << globalCUMask.c_str() << ", api returned:" << ss.str().c_str());
         REQUIRE(false);
       }
     } else {
-      for (int i = 0 ; i < min(cuMask.size(), defaultCUMask.size()); i++) {
+      for (int i = 0; i < min(cuMask.size(), defaultCUMask.size()); i++) {
         if (cuMask[i] != defaultCUMask[i]) {
-          INFO("Expected CU mask " << defaultCUMask[i] <<
-                                      ", api returned:" << cuMask[i]);
+          INFO("Expected CU mask " << defaultCUMask[i] << ", api returned:" << cuMask[i]);
           REQUIRE(false);
         }
       }
@@ -138,8 +134,7 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
       customMask[0] = 0xe;
     }
 
-    HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, customMask.size(),
-                                                      customMask.data()));
+    HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, customMask.size(), customMask.data()));
     ss.str("");
     for (int i = customMask.size() - 1; i >= 0; i--) {
       ss << customMask[i];
@@ -157,14 +152,12 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
       ss.str(ss.str().substr(found, ss.str().length()));
     }
 
-    INFO("info: reading back CU mask 0x" << ss.str() <<
-                                                " for stream " << stream);
+    INFO("info: reading back CU mask 0x" << ss.str() << " for stream " << stream);
 
     if (!gCUMask.empty()) {
       for (size_t i = 0; i < customMask.size(); i++) {
         if (customMask[i] != cuMask[i]) {
-          INFO("Error! expected CU mask:" << customMask[i]
-                            << ", Received CU mask:" << cuMask[i]);
+          INFO("Error! expected CU mask:" << customMask[i] << ", Received CU mask:" << cuMask[i]);
           REQUIRE(false);
         }
       }

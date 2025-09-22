@@ -35,9 +35,8 @@ THE SOFTWARE.
 
 #define LOG_DATA 0
 
-template <typename T>
-__global__ void surf2DLayeredKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width,
-                                     int height) {
+template <typename T> __global__ void surf2DLayeredKernelR(hipSurfaceObject_t surfaceObject,
+                                                           T* outputData, int width, int height) {
 #if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -47,9 +46,8 @@ __global__ void surf2DLayeredKernelR(hipSurfaceObject_t surfaceObject, T* output
 #endif
 }
 
-template <typename T>
-__global__ void surf2DLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width,
-                                     int height) {
+template <typename T> __global__ void surf2DLayeredKernelW(hipSurfaceObject_t surfaceObject,
+                                                           T* inputData, int width, int height) {
 #if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,9 +57,9 @@ __global__ void surf2DLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputD
 #endif
 }
 
-template <typename T>
-__global__ void surf2DLayeredKernelRW(hipSurfaceObject_t surfaceObject,
-                                      hipSurfaceObject_t outputSurfObj, int width, int height) {
+template <typename T> __global__ void surf2DLayeredKernelRW(hipSurfaceObject_t surfaceObject,
+                                                            hipSurfaceObject_t outputSurfObj,
+                                                            int width, int height) {
 #if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -338,6 +336,6 @@ TEMPLATE_TEST_CASE("Unit_surf2DLayered_Positive_ReadWrite", "", char, uchar, sho
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */
