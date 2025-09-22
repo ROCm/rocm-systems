@@ -31,6 +31,7 @@ on:
 
 env:
   ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
   ROCM_VERSION: "7.0.0"
   PYTHON_VENV_NAME: "rocprofiler-systems"
@@ -46,11 +47,11 @@ jobs:
       matrix:
         system:
           - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
-          - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
+          # TODO: Add once the 24.04 gfx950 GHCR image is added
+          #- { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
     runs-on: ${{ matrix.system.runner }}
     container:
-      # TODO: Replace with dgaliffiamd/rocprofiler-systems:ci-${{ matrix.system.arch }}-ubuntu-${{ matrix.system.os-release }}
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-${{ matrix.system.os-release }}
+      image: ghcr.io/rocm/rocprofiler-ubuntu-${{ matrix.system.os-release }}:systems-ci-${{ matrix.system.arch }}
       options: --ipc host
         --group-add video
         --device /dev/kfd
@@ -87,34 +88,6 @@ jobs:
           apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
           echo "✅ amdgpu and ROCm dependencies Installed!"
 
-      # TODO: Remove this step once the gfx Dockers are available
-      - name: Download Latest Nightly ROCm (remove once gfx Dockers are available)
-        id: therock
-        shell: bash
-        working-directory: projects/rocprofiler-systems
-        run: |
-          set -e
-          if [ ${{ matrix.system.os-release }} = '24.04' ]; then
-            apt install -y python3.12-venv
-          else
-            apt install -y python3.10-venv
-          fi
-          python3 -m venv ${{ env.PYTHON_VENV_NAME }}
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
-          python3 -m pip install -U pip
-          python3 -m pip install -U awscli
-          export PATH=~/.local/bin:$PATH
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.system.arch }}')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No ${{ matrix.system.arch }} tarball found"; exit 1; }
-          aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm-${{ matrix.system.arch }}.tar.gz --no-sign-request
-          mv rocm-${{ matrix.system.arch }}.tar.gz /opt/${{ matrix.system.arch }}.tar.gz
-          echo "✅ Latest TheRock Tarball Release for ${{ matrix.system.arch }} Downloaded!"
-
       - name: Install Latest Nightly ROCm
         run: |
           set -e
@@ -136,11 +109,11 @@ jobs:
             -S ${PWD} \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
-            --build-jobs 16 \
+            --build-jobs 2 \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             -- \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DROCPROFSYS_BUILD_DYNINST=ON \
@@ -155,7 +128,7 @@ jobs:
         timeout-minutes: 10
         working-directory: projects/rocprofiler-systems
         run: |
-          cmake --build build --target install --parallel 16
+          cmake --build build --target install --parallel 2
 
       - name: CPack and Install
         working-directory: projects/rocprofiler-systems/
