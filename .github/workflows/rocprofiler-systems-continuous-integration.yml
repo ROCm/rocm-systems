@@ -50,11 +50,10 @@ jobs:
           # TODO: Add once the 24.04 gfx950 GHCR image is added
           #- { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm'}
     runs-on: ${{ matrix.system.runner }}
+    permissions:
+      packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu-${{ matrix.system.os-release }}:systems-ci-${{ matrix.system.arch }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
       options: --ipc host
         --group-add video
         --device /dev/kfd
