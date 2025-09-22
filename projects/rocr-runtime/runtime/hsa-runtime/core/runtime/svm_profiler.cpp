@@ -44,8 +44,17 @@
 
 #include <stdint.h>
 #include <algorithm>
+#if defined(__linux__)
 #include <sys/eventfd.h>
 #include <poll.h>
+#else
+struct pollfd {
+  int fd;
+  short int events;
+  short int revents;
+};
+#define POLLIN 0x001  // from poll.h...
+#endif
 
 #include "core/util/utils.h"
 #include "core/inc/runtime.h"
@@ -171,7 +180,12 @@ void SvmProfileControl::PollSmi() {
   };
 
   while (!exit) {
+#if defined(__linux__)
     int ready = poll(&files[0], files.size(), -1);
+#else
+    int ready = 0;
+    assert(!"Unimplemented!");
+#endif
     if (ready < 1) {
       assert(false && "poll failed!");
       return;
@@ -345,9 +359,10 @@ void SvmProfileControl::PollSmi() {
 }
 
 SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
+#if defined(__linux__)
   event = eventfd(0, EFD_CLOEXEC);
   if (event == -1) return;
-
+#endif
   poll_smi_thread_ = os::CreateThread(PollSmiRun, (void*)this);
   if (poll_smi_thread_ == NULL) {
     assert(false && "Poll SMI thread creation error.");
@@ -356,10 +371,12 @@ SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
 }
 
 SvmProfileControl::~SvmProfileControl() {
+#if defined(__linux__)
   if (event != -1) {
     eventfd_write(event, 1);
     close(event);
   }
+#endif
   if (poll_smi_thread_ != NULL) {
     exit = true;
     os::WaitForThread(poll_smi_thread_);

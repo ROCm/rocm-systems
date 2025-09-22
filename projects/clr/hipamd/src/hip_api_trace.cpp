@@ -863,6 +863,17 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
                                  unsigned long long flags, hipStream_t stream);
 hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
 hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream);
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption** jitOptions,
+                              void** jitOptionsValues, unsigned int numJitOptions,
+                              hipLibraryOption** libraryOptions, void** libraryOptionValues,
+                              unsigned int numLibraryOptions);
+hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
+                                  hipJitOption** jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption** libraryOptions,
+                                  void** libraryOptionValues, unsigned int numLibraryOptions);
+hipError_t hipLibraryUnload(hipLibrary_t library);
+hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
+hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
 }  // namespace hip
 
 namespace hip {
@@ -1398,6 +1409,11 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemcpy3DBatchAsync_fn = hip::hipMemcpy3DBatchAsync;
   ptrDispatchTable->hipMemcpy3DPeer_fn = hip::hipMemcpy3DPeer;
   ptrDispatchTable->hipMemcpy3DPeerAsync_fn = hip::hipMemcpy3DPeerAsync;
+  ptrDispatchTable->hipLibraryLoadData_fn = hip::hipLibraryLoadData;
+  ptrDispatchTable->hipLibraryLoadFromFile_fn = hip::hipLibraryLoadFromFile;
+  ptrDispatchTable->hipLibraryUnload_fn = hip::hipLibraryUnload;
+  ptrDispatchTable->hipLibraryGetKernel_fn = hip::hipLibraryGetKernel;
+  ptrDispatchTable->hipLibraryGetKernelCount_fn = hip::hipLibraryGetKernelCount;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2062,15 +2078,21 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGetDriverEntryPoint_spt_fn, 492);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchAsync_v2_fn, 493);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemAdvise_v2_fn, 494);
 HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetId_fn, 495);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadData_fn, 496);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadFromFile_fn, 497);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryUnload_fn, 498);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernel_fn, 499);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 496)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 501)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 14,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 15,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 14
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 15
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1087,6 +1087,23 @@ typedef hipError_t (*t_hipGetDriverEntryPoint)(const char* symbol, void** funcPt
 typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** funcPtr,
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
+typedef hipError_t (*t_hipLibraryLoadData)(hipLibrary_t* library, const void* code,
+                                           hipJitOption** jitOptions, void** jitOptionsValues,
+                                           unsigned int numJitOptions,
+                                           hipLibraryOption** libraryOptions,
+                                           void** libraryOptionValues,
+                                           unsigned int numLibraryOptions);
+typedef hipError_t (*t_hipLibraryLoadFromFile)(hipLibrary_t* library, const char* fileName,
+                                               hipJitOption** jitOptions, void** jitOptionsValues,
+                                               unsigned int numJitOptions,
+                                               hipLibraryOption** libraryOptions,
+                                               void** libraryOptionValues,
+                                               unsigned int numLibraryOptions);
+typedef hipError_t (*t_hipLibraryUnload)(hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t library,
+                                            const char* name);
+typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
+                                                 hipLibrary_t library);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1654,6 +1671,13 @@ struct HipDispatchTable {
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
   t_hipStreamGetId hipStreamGetId_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 15
+  t_hipLibraryLoadData hipLibraryLoadData_fn;
+  t_hipLibraryLoadFromFile hipLibraryLoadFromFile_fn;
+  t_hipLibraryUnload hipLibraryUnload_fn;
+  t_hipLibraryGetKernel hipLibraryGetKernel_fn;
+  t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15

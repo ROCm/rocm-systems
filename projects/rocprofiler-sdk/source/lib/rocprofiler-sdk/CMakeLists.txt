@@ -8,6 +8,7 @@ set(ROCPROFILER_LIB_HEADERS
     internal_threading.hpp ompt.hpp registration.hpp runtime_initialization.hpp)
 set(ROCPROFILER_LIB_SOURCES
     agent.cpp
+    attach.cpp
     buffer.cpp
     buffer_tracing.cpp
     callback_tracing.cpp

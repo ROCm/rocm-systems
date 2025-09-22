@@ -48,7 +48,9 @@
 #include <cstdint>
 #include <iostream>
 #include <libelf.h>
+#if defined(__linux__)
 #include <link.h>
+#endif
 #include <list>
 #include <string>
 #include <unordered_map>
@@ -61,6 +63,74 @@
 #include "core/inc/amd_hsa_code.hpp"
 #include "inc/amd_hsa_kernel_code.h"
 #include "amd_hsa_locks.hpp"
+
+#if defined(_WIN32) || defined(_WIN64)
+// r_version history:
+// 1: Initial debug protocol
+// 2: New trap handler ABI. The reason for halting a wave is recorded in ttmp11[8:7].
+// 3: New trap handler ABI. A wave halted at S_ENDPGM rewinds its PC by 8 bytes, and sets
+// ttmp11[9]=1. 4: New trap handler ABI. Save the trap id in ttmp11[16:9] 5: New trap handler ABI.
+// Save the PC in ttmp11[22:7] ttmp6[31:0], and park the wave if stopped 6: New trap handler ABI.
+// ttmp6[25:0] contains dispatch index modulo queue size 7: New trap handler ABI. Send interrupts as
+// a bitmask, coalescing concurrent exceptions. 8: New trap handler ABI. for gfx942: Initialize
+// ttmp[4:5] if ttmp11[31] == 0. 9: New trap handler ABI. For gfx11: Save PC in ttmp11[22:7]
+// ttmp6[31:0], and park the wave if stopped. 10: New trap handler ABI. Set status.skip_export when
+// halting the wave.
+//                           For gfx942, set ttmp6[31] = 0 if ttmp11[31] == 0.
+#if _WIN64
+#define __WORDSIZE 64
+#else
+#define __WORDSIZE 32
+#endif
+
+#define __ELF_NATIVE_CLASS __WORDSIZE
+
+/* We use this macro to refer to ELF types independent of the native wordsize.
+   `ElfW(TYPE)' is used in place of `Elf32_TYPE' or `Elf64_TYPE'.  */
+#define _ElfW_1(e, w, t) e##w##t
+#define _ElfW(e, w, t) _ElfW_1(e, w, _##t)
+#define ElfW(type) _ElfW(Elf, __ELF_NATIVE_CLASS, type)
+
+/* Structure describing a loaded shared object.  The `l_next' and `l_prev'
+   members form a chain of all the shared objects loaded at startup.
+
+   These data structures exist in space used by the run-time dynamic linker;
+   modifying them may have disastrous results.  */
+
+struct link_map {
+  /* These first few members are part of the protocol with the debugger.
+     This is the same format used in SVR4.  */
+
+  ElfW(Addr) l_addr;                /* Difference between the address in the ELF
+                                       file and the addresses in memory.  */
+  char* l_name;                     /* Absolute file name object was found in.  */
+  ElfW(Dyn) * l_ld;                 /* Dynamic section of the shared object.  */
+  struct link_map *l_next, *l_prev; /* Chain of loaded objects.  */
+};
+
+struct r_debug {
+  /* Version number for this protocol.  It should be greater than 0.  */
+  int r_version;
+
+  struct link_map* r_map; /* Head of the chain of loaded objects.  */
+
+  /* This is the address of a function internal to the run-time linker,
+     that will always be called when the linker begins to map in a
+     library or unmap it, and again when the mapping change is complete.
+     The debugger can set a breakpoint at this address if it wants to
+     notice shared object mapping changes.  */
+  ElfW(Addr) r_brk;
+  enum RT {
+    /* This state value describes the mapping change taking place when
+       the `r_brk' address is called.  */
+    RT_CONSISTENT, /* Mapping change is complete.  */
+    RT_ADD,        /* Beginning to add a new object.  */
+    RT_DELETE      /* Beginning to remove an object mapping.  */
+  } r_state;
+
+  ElfW(Addr) r_ldbase; /* Base address the linker is loaded at.  */
+};
+#endif
 
 namespace rocr {
 namespace amd {
@@ -604,7 +674,7 @@ public:
   hsa_status_t QuerySegmentDescriptors(
     hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
     size_t *num_segment_descriptors) override;
-
+  #undef FindExecutable
   hsa_executable_t FindExecutable(uint64_t device_address) override;
 
   uint64_t FindHostAddress(uint64_t device_address) override;

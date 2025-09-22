@@ -120,6 +120,12 @@ tmp_file::open(std::ios::openmode _mode)
         _ofs.open(filename, std::ofstream::binary | std::ofstream::out);
     }
 
+    if(stream.is_open() && stream.good())
+    {
+        ROCP_TRACE << "temporary file: '" << filename << "' is already open...";
+        return true;
+    }
+
     ROCP_INFO << "opening temporary file: '" << filename << "'...";
     stream.open(filename, _mode);
     return (stream.is_open() && stream.good());

@@ -62,6 +62,13 @@ typedef struct
 /// @var ROCP_REG_EXCESS_API_INSTANCES
 /// @brief The same API has been registered too many times
 ///
+/// @var ROCP_REG_INVALID_ARGUMENT
+/// @brief Rocprofiler-register API function was provided an invalid argument
+///
+/// @var ROCP_REG_ATTACHMENT_NOT_AVAILABLE
+/// @brief Rocprofiler-register attach or detach was invoked, but the attachment
+/// library was not loaded at app startup.
+///
 typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
 {
     ROCP_REG_SUCCESS = 0,
@@ -72,6 +79,8 @@ typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
     ROCP_REG_INVALID_API_ADDRESS,
     ROCP_REG_ROCPROFILER_ERROR,
     ROCP_REG_EXCESS_API_INSTANCES,
+    ROCP_REG_INVALID_ARGUMENT,
+    ROCP_REG_ATTACHMENT_NOT_AVAILABLE,
     ROCP_REG_ERROR_CODE_END,
 } rocprofiler_register_error_code_t;
 
