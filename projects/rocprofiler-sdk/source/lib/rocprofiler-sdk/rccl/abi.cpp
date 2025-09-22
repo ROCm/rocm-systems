@@ -71,9 +71,9 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, mscclRunAlgo_fn, 33)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, mscclUnloadAlgo_fn, 34)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommRegister_fn, 35)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommDeregister_fn, 36)
-#elif RCCL_API_TRACE_VERSION_PATCH == 1
+#if RCCL_API_TRACE_VERSION_PATCH >= 1
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAllReduceWithBias_fn, 37)
-#elif RCCL_API_TRACE_VERSION_PATCH == 2
+#elif RCCL_API_TRACE_VERSION_PATCH >= 2
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommShrink_fn, 38)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommWindowRegister_fn, 39)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommWindowDeregister_fn, 40)
