@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
@@ -13,6 +14,7 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
@@ -68,7 +70,11 @@ jobs:
         sudo apt install -y software-properties-common
         sudo apt-add-repository ppa:git-core/ppa
         sudo apt-get update
-        sudo apt-get install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rocdecode-dev rocjpeg-dev
+        sudo apt install wget
+        sudo wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb
+        sudo apt-get install -y -o Dpkg::Options::="--force-confnew" /tmp/amdgpu-install_7.0.70000-1_all.deb
+        sudo apt-get update
+        sudo apt-get install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev libva-amdgpu-dev rocdecode-dev rocjpeg-dev
         git config --global --add safe.directory '*'
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
