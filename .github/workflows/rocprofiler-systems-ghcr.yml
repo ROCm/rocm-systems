@@ -44,11 +44,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        #system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
-        #gpu: [ 'gfx94X', 'gfx950' ]
-        system: 
-          - { distro: "ubuntu", version: "22.04" }
-        gpu: [ 'gfx950' ]
+        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        gpu: [ 'gfx94X', 'gfx950' ]
 
     steps:
       - name: Checkout Repository
@@ -110,7 +107,7 @@ jobs:
         with:
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
             VERSION=${{ matrix.system.version }}
