@@ -166,7 +166,7 @@ class KFDBaseComponentTest : public testing::Test {
             return;
         }
         m_xnack = -1;
-        HSAKMT_STATUS ret = hsaKmtGetXNACKMode(&m_xnack);
+        HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &m_xnack);
         if (ret != HSAKMT_STATUS_SUCCESS) {
             LOG() << "Failed " << ret << " to get XNACK mode" << std::endl;
             return;
@@ -187,7 +187,7 @@ class KFDBaseComponentTest : public testing::Test {
         if (xnack_on == m_xnack)
             return;
 
-        ret = hsaKmtSetXNACKMode(xnack_on);
+        ret = HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, xnack_on);
         if (ret != HSAKMT_STATUS_SUCCESS)
             LOG() << "Failed " << ret << " to set XNACK mode " << xnack_on << std::endl;
         else
@@ -201,7 +201,7 @@ class KFDBaseComponentTest : public testing::Test {
         if (m_xnack == -1)
             return;
 
-        hsaKmtSetXNACKMode(m_xnack);
+        HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, m_xnack);
     }
 };
 

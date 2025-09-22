@@ -29,6 +29,7 @@
 #include "OSWrapper.hpp"
 #include "GoogleTestExtension.hpp"
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmtctx.h"
 #include "Assemble.hpp"
 #include "ShaderStore.hpp"
 

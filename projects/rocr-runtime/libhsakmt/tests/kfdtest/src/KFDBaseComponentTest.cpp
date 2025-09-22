@@ -60,6 +60,7 @@ void KFDBaseComponentTest::SetUp() {
 
     EXPECT_SUCCESS(hsaKmtGetVersion(&m_VersionInfo));
 
+    g_baseTest = this;
     /** In order to be correctly testing the KFD interfaces and ensure
      *  that the KFD acknowledges relevant node parameters
      *  for the rest of the tests and used for more specific topology tests,
@@ -93,7 +94,6 @@ void KFDBaseComponentTest::SetUp() {
     GetHwQueueInfo(nodeProperties, &m_numCpQueues, &m_numSdmaEngines,
                     &m_numSdmaXgmiEngines, &m_numSdmaQueuesPerEngine);
 
-    g_baseTest = this;
 
     /* m_pAsm is default gpu assembler, keep it to support old test method */
     m_pAsm = new Assembler(GetGfxVersion(nodeProperties));
