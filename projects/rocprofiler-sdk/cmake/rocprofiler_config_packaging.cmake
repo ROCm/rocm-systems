@@ -104,7 +104,7 @@ endif()
 if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL EXPECTED_PACKAGING_COMPONENTS)
     message(
         FATAL_ERROR
-            "Error new install component needs COMPONENT_NAME_* and COMPONENT_SEP_* entries: ${ROCPROFILER_PACKAGING_COMPONENTS}"
+            "Error new install component needs COMPONENT_NAME_* , COMPONENT_DEP_* , and COMPONENT_DESC_* entries: ${ROCPROFILER_PACKAGING_COMPONENTS}"
         )
 endif()
 

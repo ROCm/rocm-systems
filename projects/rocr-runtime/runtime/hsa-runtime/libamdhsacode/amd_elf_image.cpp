@@ -274,7 +274,16 @@ namespace elf {
     {
       size_t size1 = getSize();
       void* buffer1 = malloc(size1);
-      if (_read(d, buffer1, size1) < 0) { free(buffer1); return perror("read failed"); }
+      ssize_t bytes_read = _read(d, buffer1, size1);
+      if (bytes_read < 0) {
+        free(buffer1);
+        return perror("read failed");
+      }
+      if (static_cast<size_t>(bytes_read) != size1) {
+        free(buffer1);
+        return perror("Incomplete read");
+      }
+      
       *buffer = buffer1;
       if (size) { *size = size1; }
       return true;
@@ -284,7 +293,10 @@ namespace elf {
     {
       size_t size1 = getSize();
       if (size < size1) { return error("Buffer size is not enough"); }
-      if (_read(d, buffer, size1) < 0) { return perror("read failed"); }
+      ssize_t bytes_read = _read(d, buffer, size1);
+      if (bytes_read < 0) { return perror("read failed"); }
+      if (static_cast<size_t>(bytes_read) != size1) { return perror("Incomplete read"); }
+
       return true;
     }
 
