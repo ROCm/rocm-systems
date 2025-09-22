@@ -211,6 +211,10 @@ int PrintfDbg::checkVectorSpecifier(const std::string& fmt, size_t startPos, siz
     else if ((curPos >= 5) && (fmt[curPos - 5] == 'v')) {
       size = 4;
     }
+    // modifier is "hh" or "hl" with vec size 16
+    else if ((curPos >= 6) && (fmt[curPos - 6] == 'v')) {
+      size = 5;
+    }
     if (size > 0) {
       curPos = size;
       pos -= curPos;
@@ -254,11 +258,9 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
   if (checkString(fmt.c_str())) {
     // copiedBytes should be as number of printed chars
     copiedBytes = 0;
-    //(null) should be printed
     if (*(reinterpret_cast<const unsigned char*>(argument)) == 0) {
-      amd::Os::printf(fmt.data(), 0);
-      // copiedBytes = strlen("(null)")
-      copiedBytes = 6;
+      // accounts for null character
+      copiedBytes = 1;
     } else {
       const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
       amd::Os::printf(fmt.data(), argumentStr);
@@ -291,7 +293,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
           const float fArg = size == 2
                                  ? amd::half2float(*(reinterpret_cast<const uint16_t*>(argument)))
                                  : *(reinterpret_cast<const float*>(argument));
-          static const char* fSpecifiers = "eEfgGa";
+          static const char* fSpecifiers = "eEfFgGaA";
           std::string fmtF = fmt;
           size_t posS = fmtF.find_first_of("%");
           size_t posE = fmtF.find_first_of(fSpecifiers);
@@ -319,13 +321,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
         } else {
           bool hhModifier = (strstr(fmt.c_str(), "hh") != nullptr);
           if (hhModifier) {
-            // current implementation of printf in gcc 4.5.2 runtime libraries, doesn`t recognize
-            // "hh" modifier ==>
-            // argument should be explicitly converted to  unsigned char (uchar) before printing and
-            // fmt should be updated not to contain "hh" modifier
-            std::string hhFmt = fmt;
-            hhFmt.erase(hhFmt.find_first_of("h"), 2);
-            amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            amd::Os::printf(fmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
           } else if (hlModifier) {
             amd::Os::printf(hlFmt.data(), size == 2
                                               ? *(reinterpret_cast<const uint16_t*>(argument))
@@ -366,7 +362,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
 
 void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* workitemData,
                                 size_t& i) const {
-  static const char* specifiers = "cdieEfgGaosuxXp";
+  static const char* specifiers = "cdieEfFgGaAosuxXp";
   static const char* modifiers = "hl";
   static const char* special = "%n";
   static const std::string sepStr = "%s";
@@ -479,8 +475,14 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
     }
   }
 
+  // handle '%%' escapes
   if (pos != std::string::npos) {
     fmt = str.substr(pos, str.size() - pos);
+    size_t P = fmt.find("%%");
+    while (P != std::string::npos) {
+      fmt.replace(P, 2, "%");
+      P = fmt.find("%%", P);
+    }
     outputArgument(sepStr, false, ConstStr, fmt.data());
   }
 }
