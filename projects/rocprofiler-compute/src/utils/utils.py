@@ -842,8 +842,6 @@ def run_prof(
                 process_hip_trace_output(workload_dir, fbase)
         else:
             if "--kokkos-trace" in options:
-                # TODO: as rocprofv3 --kokkos-trace feature improves,
-                # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
@@ -1060,11 +1058,11 @@ def process_rocprofv3_output(
 @demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     """
-        Processes marker_api_trace and counter_collection CSV files generated during profiling. 
-        -    Concatenates per-process files
-        -    Merges them on Correlation_Id
-        -    Filters for Kokkos kernels
-        -    Finally saves the combined results as CSVs in top-level workload directory.
+    Processes marker_api_trace and counter_collection CSV files generated during profiling.
+    -    Concatenates per-process files
+    -    Merges them on Correlation_Id
+    -    Filters for Kokkos kernels
+    -    Finally saves the combined results as CSVs in top-level workload directory.
     """
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
@@ -1076,9 +1074,9 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
     )
 
-    existing_marker_files_csv = [d for d in marker_api_trace_csvs if path(d).is_file()]
+    existing_marker_files_csv = [d for d in marker_api_trace_csvs if Path(d).is_file()]
     existing_counter_files_csv = [
-        d for d in counter_collection_csvs if path(d).is_file()
+        d for d in counter_collection_csvs if Path(d).is_file()
     ]
 
     if len(existing_counter_files_csv) != len(existing_marker_files_csv):
@@ -1110,7 +1108,7 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         index=False,
     )
     combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_kernel_trace.csv",
+        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
         index=False,
     )
 
@@ -1120,8 +1118,8 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             workload_dir + "/" + fbase + "_marker_api_trace.csv",
         )
         shutil.copyfile(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_kernel_trace.csv",
-            workload_dir + "/" + fbase + "_kokkos_kernel_trace.csv",
+            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+            workload_dir + "/" + fbase + "_kokkos_trace.csv",
         )
 
 

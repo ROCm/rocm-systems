@@ -1809,19 +1809,17 @@ def test_comprehensive_error_paths():
 @pytest.mark.kokkos
 def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     """
-        Verifies the following while profiling a mock Kokkos app with --kokkos-trace enabled.
-        -   All expected trace files are generated.
-        -   Looks for consistency between a kernel's attributes derived from counter_collection and from marker_trace.
-            Eg. Names, IDs, interval overlaps.            
+    Verifies the following while profiling a mock Kokkos app with --kokkos-trace enabled.
+    -   All expected trace files are generated.
+    -   Looks for consistency between a kernel's attributes derived from counter_collection and from marker_trace.
+        Eg. Names, IDs, interval overlaps.
     """
     kokkos_app_dir = str(
-        Path(__file__).parent.parent
-        / "build"
-        / "kokkos_mock_app_build"
+        Path(__file__).parent.parent / "build" / "kokkos_mock_app_build"
     )
     num_kernels = 1
     kokkos_app = kokkos_app_dir + "/mock_kokkos_minimal"
-    print('*'*80)
+    print("*" * 80)
     config["app_kokkos"] = [kokkos_app]
     if not os.path.exists(kokkos_app):
         print("Kokkos app not found at {}, skipping test".format(kokkos_app))
@@ -1845,7 +1843,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
 
     fbase_ = [f.split(".")[0] for f in OTHER_CSV_FILES]
     fbase_ = [f for f in fbase_ if f not in ["sysinfo", "pmc_perf"]]
-    KOKKOS_TRACE_FILES = [f + "_kokkos_kernel_trace.csv" for f in fbase_]
+    KOKKOS_TRACE_FILES = [f + "_kokkos_trace.csv" for f in fbase_]
     MARKER_TRACE_FILES = [f + "_marker_api_trace.csv" for f in fbase_]
 
     options = ["--kokkos-trace"]
@@ -1856,7 +1854,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         workload_dir,
         options,
         check_success=True,
-        roof=False,
+        roof=True,
         app_name="app_kokkos",
     )
 
