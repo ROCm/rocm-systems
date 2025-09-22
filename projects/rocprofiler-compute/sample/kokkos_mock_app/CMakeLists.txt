@@ -1,10 +1,7 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.19)
+set(CMAKE_HIP_COMPILER "/opt/rocm/bin/amdclang++" CACHE STRING "HIP compiler" FORCE)
 project(mock_kokkos_minimal CXX HIP)
 
-# set(KOKKOS_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../tests/kokkos-build")
-# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
-
-# set(CMAKE_HIP_ARCHITECTURES "gfx942")
 message(STATUS "CMAKE_HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 message(STATUS "KOKKOS_BUILD_DIR: ${KOKKOS_BUILD_DIR}")
 

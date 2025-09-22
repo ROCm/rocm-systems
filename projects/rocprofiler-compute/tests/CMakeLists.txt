@@ -77,15 +77,6 @@ if(KOKKOS_ARCH)
         ${CMAKE_BINARY_DIR}/kokkos_mock_app_build
     )
 
-    # set(Kokkos_DIR "${CMAKE_BINARY_DIR}/kokkos-build/lib/cmake/Kokkos")
-    # find_package(Kokkos REQUIRED)
-
-    # set(MOCK_KOKKOS ../sample/mock_kokkos_minimal.cpp)
-    # set_source_files_properties(${MOCK_KOKKOS} PROPERTIES LANGUAGE HIP)
-    # add_executable(mock_kokkos ${MOCK_KOKKOS})
-    # target_link_libraries(mock_kokkos PRIVATE Kokkos::kokkos)
-    # set_target_properties(mock_kokkos PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-    #                                         ${CMAKE_SOURCE_DIR}/tests)
     message(STATUS "Built mock_kokkos test.")
 else()
     message(ERROR "KOKKOS_ARCH not set. Skipping mock_kokkos test build.")
