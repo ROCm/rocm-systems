@@ -1,5 +1,5 @@
 outs:
-- md5: 852e161ac4115309a2591db0b80f13dd
-  size: 24025742
+- md5: dddaf92ee3b6f5aab21f77eb0d4a2fd9
+  size: 133
   hash: md5
   path: pal.lib
