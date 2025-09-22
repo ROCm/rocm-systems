@@ -1866,7 +1866,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     assert sorted(list(file_dict.keys())) == sorted(
         OTHER_CSV_FILES + KOKKOS_TRACE_FILES + MARKER_TRACE_FILES
     )
-    
+
     for f in KOKKOS_TRACE_FILES:
         df = pd.read_csv(os.path.join(workload_dir, f))
         if df.empty:
