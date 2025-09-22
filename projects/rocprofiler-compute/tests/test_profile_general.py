@@ -1808,6 +1808,12 @@ def test_comprehensive_error_paths():
 
 @pytest.mark.kokkos
 def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
+    """
+        Verifies the following while profiling a mock Kokkos app with --kokkos-trace enabled.
+        -   All expected trace files are generated.
+        -   Looks for consistency between a kernel's attributes derived from counter_collection and from marker_trace.
+            Eg. Names, IDs, interval overlaps.            
+    """
     kokkos_app_dir = str(
         Path(__file__).parent.parent
         / "build"
@@ -1859,10 +1865,6 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         OTHER_CSV_FILES + KOKKOS_TRACE_FILES + MARKER_TRACE_FILES
     )
 
-    print('='*20)
-    print(file_dict.keys())
-    print('='*20)
-
     for f in KOKKOS_TRACE_FILES:
         df = pd.read_csv(os.path.join(workload_dir, f))
         if df.empty:
@@ -1878,7 +1880,6 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         overlap = (df.Start_Timestamp_x <= df.End_Timestamp_y) & (
             df.Start_Timestamp_y <= df.End_Timestamp_x
         )
-        # assert overlap.all()
 
         if not overlap.all():
             mismatches = df[~overlap][["Function"]]
