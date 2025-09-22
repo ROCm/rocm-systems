@@ -29,6 +29,7 @@
 #include "OSWrapper.hpp"
 #include "GoogleTestExtension.hpp"
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmtctx.h"
 
 class BaseQueue;
 #define ARRAY_SIZE(_x) (sizeof(_x)/sizeof(_x[0]))

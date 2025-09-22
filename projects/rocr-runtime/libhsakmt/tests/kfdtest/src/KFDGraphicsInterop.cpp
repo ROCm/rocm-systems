@@ -80,7 +80,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
 
     // Register it with HSA
     HsaGraphicsResourceInfo info;
-    ASSERT_SUCCESS_GPU(hsaKmtRegisterGraphicsHandleToNodes(dmabufFd, &info,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes, g_baseTest->m_hsakmt_current_ctx, dmabufFd, &info,
                                                        1, nodes), gpuNode);
 
     /* DMA buffer handle and GEM handle are no longer needed, KFD
@@ -95,7 +95,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
     EXPECT_EQ_GPU(0, strcmp(metadata, (const char *)info.Metadata), gpuNode);
 
     // Map the buffer
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(info.MemoryAddress,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, info.MemoryAddress,
                                         info.SizeInBytes,
                                         NULL), gpuNode);
 
@@ -124,7 +124,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
 
     // Test QueryMem before the cleanup
     HsaPointerInfo ptrInfo;
-    EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo((const void *)info.MemoryAddress, &ptrInfo), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, g_baseTest->m_hsakmt_current_ctx, (const void *)info.MemoryAddress, &ptrInfo), gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_REGISTERED_GRAPHICS, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Node, (HSAuint32)gpuNode, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.GPUAddress, (HSAuint64)info.MemoryAddress, gpuNode);
@@ -132,8 +132,8 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
     EXPECT_EQ_GPU(ptrInfo.MemFlags.ui32.CoarseGrain, 1, gpuNode);
 
     // Cleanup
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(info.MemoryAddress), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtDeregisterMemory(info.MemoryAddress), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, info.MemoryAddress), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, g_baseTest->m_hsakmt_current_ctx, info.MemoryAddress), gpuNode);
 
 }
 TEST_F(KFDGraphicsInterop, RegisterGraphicsHandle) {

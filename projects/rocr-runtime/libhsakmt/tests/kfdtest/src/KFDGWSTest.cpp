@@ -58,7 +58,7 @@ static void Allocate(KFDTEST_PARAMETERS* pTestParamters) {
     }
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtAllocQueueGWS(queue.GetResource()->QueueId,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocQueueGWS, g_baseTest->m_hsakmt_current_ctx, queue.GetResource()->QueueId,
                        pNodeProperties->NumGws,&firstGWS), gpuNode);
     EXPECT_EQ_GPU(0, firstGWS, gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -92,7 +92,7 @@ static void Semaphore(KFDTEST_PARAMETERS* pTestParamters) {
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
     HsaMemoryBuffer buffer(PAGE_SIZE, gpuNode, true, false, false);
     ASSERT_SUCCESS(queue.Create(gpuNode));
-    ASSERT_SUCCESS_GPU(hsaKmtAllocQueueGWS(queue.GetResource()->QueueId,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocQueueGWS, g_baseTest->m_hsakmt_current_ctx, queue.GetResource()->QueueId,
                        pNodeProperties->NumGws,&firstGWS), gpuNode);
     EXPECT_EQ_GPU(0, firstGWS, gpuNode);
 

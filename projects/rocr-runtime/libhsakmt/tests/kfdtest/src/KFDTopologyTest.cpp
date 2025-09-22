@@ -79,7 +79,7 @@ TEST_F(KFDTopologyTest , BasicTest) {
 TEST_F(KFDTopologyTest, GetNodePropertiesInvalidParams) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtGetNodeProperties(0, NULL));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, 0, NULL));
 
     TEST_END
 }
@@ -90,7 +90,7 @@ TEST_F(KFDTopologyTest, GetNodePropertiesInvalidNodeNum) {
 
     HsaNodeProperties nodeProperties;
     memset(&nodeProperties, 0, sizeof(nodeProperties));
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_NODE_UNIT, hsaKmtGetNodeProperties(m_SystemProperties.NumNodes, &nodeProperties));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_NODE_UNIT, HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, m_SystemProperties.NumNodes, &nodeProperties));
 
     TEST_END
 }
@@ -106,7 +106,7 @@ TEST_F(KFDTopologyTest, GetNodeMemoryProperties) {
 
         if (pNodeProperties != NULL) {
             HsaMemoryProperties *memoryProperties = new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(node, pNodeProperties->NumMemoryBanks, memoryProperties));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx, node, pNodeProperties->NumMemoryBanks, memoryProperties));
             delete [] memoryProperties;
         }
     }
@@ -131,7 +131,7 @@ TEST_F(KFDTopologyTest, GpuvmApertureValidate) {
                 return;
             }
             HsaMemoryProperties *memoryProperties =  new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(GpuNodes.at(i), pNodeProperties->NumMemoryBanks,
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx, GpuNodes.at(i), pNodeProperties->NumMemoryBanks,
                                                          memoryProperties));
             bool GpuVMHeapFound = false;
             for (unsigned int bank = 0 ; bank  < pNodeProperties->NumMemoryBanks ; bank++) {
