@@ -73,7 +73,7 @@ jobs:
         ln -s /opt/rocm-7.0.0 /opt/rocm
         echo "ROCm installed to: /opt/rocm"
           
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/rocprofiler-register
         submodules: true
