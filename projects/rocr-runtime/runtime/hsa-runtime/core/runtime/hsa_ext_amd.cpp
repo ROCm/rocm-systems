@@ -835,12 +835,14 @@ hsa_status_t hsa_amd_agent_iterate_memory_pools(
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
+#if defined(__linux__)
   case core::Agent::kAmdAieDevice:
     return reinterpret_cast<const AMD::AieAgent *>(agent)->VisitRegion(
         false,
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
+#endif
   case core::Agent::kAmdGpuDevice:
     return reinterpret_cast<const AMD::GpuAgentInt *>(agent)->VisitRegion(
         false,
@@ -1532,6 +1534,45 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* _queue,
   IS_VALID(queue);
 
   return queue->GetInfo(attribute, value);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                    uint64_t size, int64_t file_offset,
+                                    uint64_t *size_copied, int32_t *status) {
+  TRY;
+  IS_OPEN();
+
+  if (devicePtr == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Call the kernel module function through the thunk layer
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
+                                                          file_offset, HSA_AIS_WRITE,
+                                                          size_copied, status);
+
+  return (ret == HSAKMT_STATUS_SUCCESS) ?
+                            HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                   uint64_t size, int64_t file_offset,
+                                   uint64_t *size_copied, int32_t *status) {
+  TRY;
+  IS_OPEN();
+
+  if (devicePtr == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Call the kernel module function through the thunk layer
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
+                                                          file_offset, HSA_AIS_READ,
+                                                          size_copied, status);
+
+  return (ret == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
   CATCH;
 }
 

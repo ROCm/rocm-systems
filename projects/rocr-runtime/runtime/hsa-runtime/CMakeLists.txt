@@ -48,7 +48,11 @@ cmake_minimum_required ( VERSION 3.7 )
 unset ( hsa-runtime64_LIB_DEPENDS CACHE )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
-set(CMAKE_CXX_STANDARD 17)
+if (UNIX)
+  set(CMAKE_CXX_STANDARD 17)
+else()
+  set(CMAKE_CXX_STANDARD 20)
+endif()
 
 ## Set core runtime module name and project name.
 set ( CORE_RUNTIME_NAME "hsa-runtime64" )
@@ -89,35 +93,46 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
-pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
-
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
 
+if (UNIX)
+  pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
+else()
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LIBELF_INCLUDE_DIR})
+  if (${BUILD_SHARED_LIBS})
+    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE oclelf)
+  endif()
+endif()
 ## Enforce uniform output file naming.
 set_property(TARGET  ${CORE_RUNTIME_TARGET} PROPERTY OUTPUT_NAME ${CORE_RUNTIME_NAME} )
 
 ## Compiler preproc definitions.
-target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" __linux__ HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
-ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}" )
-
-## Check for memfd_create syscall
-include(CheckSymbolExists)
-CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE )
-if ( HAVE_MEMFD_CREATE )
-  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
-endif()
-
-## Check for _GNU_SOURCE pthread extensions
-set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
-CHECK_SYMBOL_EXISTS ( "pthread_rwlockattr_setkind_np" "pthread.h" HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
-unset(CMAKE_REQUIRED_DEFINITIONS)
-if ( HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
-  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
-endif()
-if ( HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
-  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+if (UNIX)
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" __linux__ HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
+  ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}" )
+  
+  ## Check for memfd_create syscall
+  include(CheckSymbolExists)
+  CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE )
+  if ( HAVE_MEMFD_CREATE )
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
+  endif()
+  
+  ## Check for _GNU_SOURCE pthread extensions
+  set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+  CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+  CHECK_SYMBOL_EXISTS ( "pthread_rwlockattr_setkind_np" "pthread.h" HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  if ( HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+  endif()
+  if ( HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+  endif()
+else()
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" AMD_LIBELF=1 HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
+    ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}")
 endif()
 
 ## Set include directories for ROCr runtime
@@ -133,15 +148,17 @@ target_include_directories( ${CORE_RUNTIME_TARGET}
 
 
 ## ------------------------- Linux Compiler and Linker options -------------------------
-set ( HSA_CXX_FLAGS ${HSA_COMMON_CXX_FLAGS} -fexceptions -fno-rtti -fvisibility=hidden -Wno-error=missing-braces -Wno-error=sign-compare -Wno-sign-compare -Wno-write-strings -Wno-conversion-null -fno-math-errno -fno-threadsafe-statics -fmerge-all-constants -fms-extensions -Wno-error=comment -Wno-comment -Wno-error=pointer-arith -Wno-pointer-arith -Wno-error=unused-variable -Wno-error=unused-function )
+if (UNIX)
+  set ( HSA_CXX_FLAGS ${HSA_COMMON_CXX_FLAGS} -fexceptions -fno-rtti -fvisibility=hidden -Wno-error=missing-braces -Wno-error=sign-compare -Wno-sign-compare -Wno-write-strings -Wno-conversion-null -fno-math-errno -fno-threadsafe-statics -fmerge-all-constants -fms-extensions -Wno-error=comment -Wno-comment -Wno-error=pointer-arith -Wno-pointer-arith -Wno-error=unused-variable -Wno-error=unused-function )
 
-## Extra x86 specific settings
-if ( CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64" )
-  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -mmwaitx )
+  ## Extra x86 specific settings
+  if ( CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64" )
+    set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -mmwaitx )
+  endif()
+
+  ## Extra image settings - audit!
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -Wno-deprecated-declarations )
 endif()
-
-## Extra image settings - audit!
-set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -Wno-deprecated-declarations )
 
 if ( CMAKE_COMPILER_IS_GNUCXX )
     set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -Wno-error=maybe-uninitialized -Wno-error=unused-but-set-variable)
@@ -153,9 +170,14 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
-set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
-set ( LNKSCR "hsacore.so.link" )
-set ( HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags" )
+if (UNIX)
+  set ( LNKSCR "hsacore.so.link" )
+  set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
+  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags")
+else()
+  target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
+  set(HSA_SHARED_LINK_FLAGS "")
+endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
 #target_link_options not available prior to CMake 3.13
@@ -165,13 +187,9 @@ set_property(TARGET ${CORE_RUNTIME_TARGET} PROPERTY LINK_FLAGS ${HSA_SHARED_LINK
 ## Source files.
 set ( SRCS core/driver/driver.cpp
            core/driver/kfd/amd_kfd_driver.cpp
-           core/driver/xdna/amd_xdna_driver.cpp
-           core/util/lnx/os_linux.cpp
            core/util/small_heap.cpp
            core/util/timer.cpp
            core/util/flag.cpp
-           core/runtime/amd_aie_agent.cpp
-           core/runtime/amd_aie_aql_queue.cpp
            core/runtime/amd_blit_kernel.cpp
            core/runtime/amd_blit_sdma.cpp
            core/runtime/amd_cpu_agent.cpp
@@ -208,12 +226,22 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code.cpp
            libamdhsacode/amd_core_dump.cpp )
 
+if(UNIX)
+  set(SRC_OS core/util/lnx/os_linux.cpp)
+  set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
+               core/runtime/amd_aie_agent.cpp
+               core/runtime/amd_aie_aql_queue.cpp)
+else()
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
+  set(SRC_OS core/util/win/os_win.cpp)
+endif()
+         
 if ( BUILD_THUNK_VIRTIO )
   list(APPEND SRCS core/driver/virtio/amd_kfd_virtio_driver.cpp)
   target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
 endif()
 
-target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} )
+target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} )
 
 ## Depend on trap handler target.
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/trap_handler )
@@ -233,10 +261,15 @@ if (${PC_SAMPLING_SUPPORT})
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
 endif()
 
-if ( NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64" )
-  set ( IMAGE_SUPPORT ON )
-endif()
+if (UNIX)
+  if ( NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64" )
+    set ( IMAGE_SUPPORT ON )
+  endif()
 set ( IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise)." )
+else()
+  # Force IMAGE_SUPPORT to be OFF
+  set(IMAGE_SUPPORT OFF CACHE BOOL "Build with image support (forced to OFF)" FORCE)
+endif()
 
 ## Optional image module defintions.
 if(${IMAGE_SUPPORT})
@@ -305,30 +338,45 @@ if(${IMAGE_SUPPORT})
 
 endif()
 
-target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+if (UNIX)
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+else()
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
+  target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE dxcore)
+endif()
+
 # For static package rocprofiler-register dependency is not required
 # Link to hsakmt target for shared library builds
 # Link to hsakmt-staticdrm target for static library builds
 if( BUILD_SHARED_LIBS )
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt PkgConfig::drm)
-  if( BUILD_THUNK_VIRTIO )
-    message(STATUS "Building with virtio support")
-    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt_virtio)
-  endif()
-  find_package(rocprofiler-register)
-  if(rocprofiler-register_FOUND)
-    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ROCPROFILER_REGISTER=1
-                                                              HSA_VERSION_MAJOR=${VERSION_MAJOR}
-                                                              HSA_VERSION_MINOR=${VERSION_MINOR}
-                                                              HSA_VERSION_PATCH=${VERSION_PATCH})
-    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE rocprofiler-register::rocprofiler-register)
-    set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+  if (UNIX)
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt PkgConfig::drm)
+    if( BUILD_THUNK_VIRTIO )
+      message(STATUS "Building with virtio support")
+      target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt_virtio)
+    endif()
+    find_package(rocprofiler-register)
+    if(rocprofiler-register_FOUND)
+      target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ROCPROFILER_REGISTER=1
+                                                                HSA_VERSION_MAJOR=${VERSION_MAJOR}
+                                                                HSA_VERSION_MINOR=${VERSION_MINOR}
+                                                                HSA_VERSION_PATCH=${VERSION_PATCH})
+      target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE rocprofiler-register::rocprofiler-register)
+      set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+    else()
+      set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
+    endif() # end rocprofiler-register_FOUND
   else()
-    set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
-  endif() # end rocprofiler-register_FOUND
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt)
+  endif()
 else()
-  include_directories(${drm_INCLUDE_DIRS})
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
+  if (UNIX)
+    include_directories(${drm_INCLUDE_DIRS})
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
+  else()
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
+  endif()
 endif()#end BUILD_SHARED_LIBS
 
 ## Set the VERSION and SOVERSION values
@@ -350,8 +398,11 @@ if( NOT ${BUILD_SHARED_LIBS} )
 
   ## Add external link requirements.
   target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE hsakmt-staticdrm::hsakmt-staticdrm )
-  target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
-
+  if (UNIX)
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
+  else()
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE rt )
+  endif()
   install ( TARGETS ${CORE_RUNTIME_NAME} EXPORT ${CORE_RUNTIME_NAME}Targets )
 endif()
 
@@ -404,10 +455,12 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CM
 
 # Install build files needed only when using a static build.
 if( NOT ${BUILD_SHARED_LIBS} )
-  # libelf find package module
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-    COMPONENT dev)
+  if (UNIX)
+    # libelf find package module
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+      COMPONENT dev)
+  endif()
   # Linker script (defines function aliases)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
