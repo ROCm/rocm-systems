@@ -47,7 +47,7 @@ jobs:
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: rocprofiler-mi3xx
+    runs-on: linux-mi325-1gpu-ossci-rocm
 
     env:
         BUILD_TYPE: RelWithDebInfo
@@ -55,6 +55,14 @@ jobs:
         PACKAGING_INSTALL_PREFIX: /opt/rocm
 
     steps:
+    - name: Install Latest Nightly ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        tar -xf /opt/rocm-${{ matrix.system.therock-s3 }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-register
