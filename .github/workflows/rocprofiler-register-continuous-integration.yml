@@ -50,6 +50,14 @@ jobs:
         #     ci-tag: '-undefined-behavior-sanitizer'
 
     runs-on: linux-mi325-1gpu-ossci-rocm
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.therock-s3 }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
 
     env:
         BUILD_TYPE: RelWithDebInfo
@@ -61,9 +69,9 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-${{ matrix.system.therock-s3 }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+        tar -xf /opt/rocm-gfx94X.tar.gz -C /opt/rocm-7.0.0
+        ln -s /opt/rocm-7.0.0 /opt/rocm
+        echo "ROCm installed to: /opt/rocm"
           
     - uses: actions/checkout@v4
       with:
