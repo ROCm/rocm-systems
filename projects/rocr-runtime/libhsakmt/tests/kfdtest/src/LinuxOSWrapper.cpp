@@ -140,7 +140,7 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
     rArgs.DstNodeId = -1;
     rArgs.SleepTime = 0;
     rArgs.ConcurrentNodes = "";
-    rArgs.TestNodeNum = 1;
+    rArgs.TestNodeNum = 0;
 
     while (true) {
         int c = getopt_long(argc, argv, "", long_options, &option_index);

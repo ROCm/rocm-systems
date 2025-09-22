@@ -31,6 +31,7 @@
 #include <amdgpu.h>
 #include <amdgpu_drm.h>
 #include <sys/param.h>
+#include <algorithm>
 #include "hsakmt/hsakmt.h"
 #include "OSWrapper.hpp"
 #include "KFDTestUtil.hpp"

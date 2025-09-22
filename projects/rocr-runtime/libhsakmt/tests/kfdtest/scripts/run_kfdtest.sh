@@ -251,12 +251,12 @@ runKfdTest() {
             fi
             sudo docker rm kfdtest_docker
         else
-            if [ "$CONCURRENTNODES" != "" ]; then
-                echo "++++ Starting parallel testing on node $CONCURRENTNODES  ++++"
+            if [ -n "$CONCURRENTNODES" ]; then
+                echo "++++ Starting parallel testing on node(s) $CONCURRENTNODES  ++++"
                 $GDB $KFDTEST "--concurrentnodes=$CONCURRENTNODES" $gtestFilter $GTEST_ARGS
-                echo "++++ Finished parallel testing on node $CONCURRENTNODES  ++++"
+                echo "++++ Finished parallel testing on node(s) $CONCURRENTNODES  ++++"
                 exit 0;
-            elif [ "$TESTNODENUM" != "" ]; then
+            elif [ -n "$TESTNODENUM" ]; then
                 echo "++++ Starting parallel testing on $TESTNODENUM node(s) ++++"
                 $GDB $KFDTEST "--testnodenum=$TESTNODENUM" $gtestFilter $GTEST_ARGS
                 echo "++++ Finished parallel testing on $TESTNODENUM node(s) ++++"
@@ -327,8 +327,6 @@ else
         fi
     done
 fi
-
-concurrentNodesCount=${#concurrentNodesArray[@]}
 
 # If the SMI is missing, try to find it
 SMI="$(find /opt/rocm* -type l -name rocm-smi 2>/dev/null | tail -1)"

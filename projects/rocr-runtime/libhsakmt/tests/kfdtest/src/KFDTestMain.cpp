@@ -49,17 +49,17 @@ std::ostream& operator << (std::ostream& out, TESTPROFILE profile) {
     return out;
 }
 
-unsigned int g_TestGPUsNum ;
+unsigned int g_TestGPUsNum = 0;
 unsigned int g_TestRunProfile;
 unsigned int g_TestENVCaps;
 unsigned int g_TestTimeOut;
-int g_TestNodeId;
+int g_TestNodeId = -1;
 int g_TestDstNodeId;
 bool g_IsChildProcess;
 bool g_IsEmuMode;
 unsigned int g_SleepTime;
 unsigned int g_TestGPUFamilyId;
-std::string g_ConcurrentNodes;
+std::string g_ConcurrentNodes = "";
 std::vector<int> g_SelectedNodes;
 class KFDBaseComponentTest *g_baseTest;
 
@@ -92,42 +92,18 @@ GTEST_API_ int main(int argc, char **argv) {
             g_SleepTime = args.SleepTime;
         }
 
-        // If --node is not specified, then args.NodeId == -1
-        g_TestNodeId = args.NodeId;
         g_TestDstNodeId = args.DstNodeId;
-        g_ConcurrentNodes = args.ConcurrentNodes;
-        g_TestGPUsNum = args.TestNodeNum;
 
-        if (g_TestNodeId < 0 && !g_ConcurrentNodes.empty()) {
-            std::set<int> uniqueIndices;
-            size_t start = 0, end = 0;
-
-            while ((end = g_ConcurrentNodes.find(',', start)) != std::string::npos) {
-                std::string token = g_ConcurrentNodes.substr(start, end - start);
-                if (!token.empty()) uniqueIndices.insert(std::stoi(token));
-                start = end + 1;
-            }
-            if (start < g_ConcurrentNodes.size()) {
-                uniqueIndices.insert(std::stoi(g_ConcurrentNodes.substr(start)));
-            }
-
-            g_SelectedNodes.assign(uniqueIndices.begin(), uniqueIndices.end());
-            g_TestGPUsNum = static_cast<unsigned int>(g_SelectedNodes.size());
-
-            if (g_TestGPUsNum > MAX_GPU) {
-                g_SelectedNodes.resize(MAX_GPU);
-                g_TestGPUsNum = MAX_GPU;
-            }
-
-            g_ConcurrentNodes.clear();
-            for (size_t i = 0; i < g_SelectedNodes.size(); ++i) {
-                g_ConcurrentNodes += std::to_string(g_SelectedNodes[i]);
-                if (i != g_SelectedNodes.size() - 1) {
-                    g_ConcurrentNodes += ",";
-                }
-            }
+        // If --node is not specified, then args.NodeId == -1
+        if (!args.ConcurrentNodes.empty()) {
+            g_ConcurrentNodes = args.ConcurrentNodes;
+        } else if (args.TestNodeNum > 0) {
+            g_TestGPUsNum = args.TestNodeNum;
+        } else {
+            g_TestNodeId = args.NodeId;
+            g_TestGPUsNum = 1;
         }
-
+        
         g_IsEmuMode = CheckEmuModeEnabled();
 
         LOG() << "Profile: " << (TESTPROFILE)g_TestRunProfile << std::endl;
