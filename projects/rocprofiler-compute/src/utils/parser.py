@@ -1246,25 +1246,31 @@ def apply_filters(workload, dir, is_gui, debug):
                 "Mixing kernel indices and string filters is not currently supported",
             )
 
-    if workload.filter_dispatch_ids:
-        # NB: support ignoring the 1st n dispatched execution by '> n'
-        #     The better way may be parsing python slice string
-        for d in workload.filter_dispatch_ids:
-            if int(d) >= len(ret_df):  # subtract 2 bc of the two header rows
-                console_error("analysis", "{} is an invalid dispatch id.".format(d))
-        if ">" in workload.filter_dispatch_ids[0]:
-            m = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
-            ret_df = ret_df[
-                ret_df[schema.pmc_perf_file_prefix]["Dispatch_ID"] > int(m.group(1))
-            ]
-        else:
-            dispatches = [int(x) for x in workload.filter_dispatch_ids]
-            ret_df = ret_df.loc[dispatches]
-    if debug:
-        print("~" * 40, "\nraw pmc df info:\n")
-        print(workload.raw_pmc.info())
-        print("~" * 40, "\nfiltered pmc df info:")
-        print(ret_df.info())
+    return df
+
+
+def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
+    """Apply dispatch ID filters."""
+    # NB: support ignoring the 1st n dispatched execution by '> n'
+    #     The better way may be parsing python slice string
+    for dispatch_id in workload.filter_dispatch_ids:
+        if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
+            console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
+
+    if (
+        isinstance(workload.filter_dispatch_ids[0], str)
+        and ">" in workload.filter_dispatch_ids[0]
+    ):
+        dispatch_match = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
+        df = df[
+            df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]
+            > int(dispatch_match.group(1))
+        ]
+    else:
+        selected_dispatches = [
+            int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
+        ]
+        df = df.loc[selected_dispatches]
 
     return ret_df
 

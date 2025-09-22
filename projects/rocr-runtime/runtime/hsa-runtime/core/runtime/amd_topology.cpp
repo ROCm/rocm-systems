@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -58,8 +58,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <link.h>
-
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_available_drivers.h"
 #include "core/inc/amd_cpu_agent.h"
@@ -72,7 +70,12 @@
 #include "core/inc/amd_virtio_driver.h"
 #endif
 
-extern r_debug _amdgpu_r_debug;
+#if defined(__linux__)
+#include <link.h>
+#else
+#include "loader/executable.hpp"
+#endif
+extern r_debug _amdgpu_r_debug_r;
 
 namespace rocr {
 namespace AMD {
@@ -81,17 +84,17 @@ namespace {
 
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #if _WIN32
-                 0
+                 1
 #elif __linux__
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >
     discover_driver_funcs = {
+        KfdDriver::DiscoverDriver
 #ifdef __linux__
-        KfdDriver::DiscoverDriver,
-        XdnaDriver::DiscoverDriver,
+        , XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED
-        KfdVirtioDriver::DiscoverDriver,
+        , KfdVirtioDriver::DiscoverDriver
 #endif
 #endif
 };
@@ -181,8 +184,10 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
 }
 
 void DiscoverAie(uint32_t node_id, HsaNodeProperties& node_prop) {
+#if defined(__linux__)
   AieAgent* aie = new AieAgent(node_id, node_prop);
   core::Runtime::runtime_singleton_->RegisterAgent(aie, true);
+#endif
 }
 
 void RegisterLinkInfo(const std::unique_ptr<core::Driver>& driver, uint32_t node_id,

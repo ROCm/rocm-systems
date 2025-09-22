@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -828,6 +828,11 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
 
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   HIP_INIT_API(hipMemPtrGetInfo, ptr, size);
+
+  if (ptr == nullptr) {
+    *size = 0;
+    HIP_RETURN(hipSuccess);
+  }
 
   size_t offset = 0;
   amd::Memory* svmMem = getMemoryObject(ptr, offset);
@@ -1795,7 +1800,7 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
   } else {
     amd::Command::EventWaitList waitList;
     auto* pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
-    if (stream != pStream) {
+    if (stream->DeviceId() != srcMemory->getUserData().deviceId) {
       amd::Command* cmd = pStream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);

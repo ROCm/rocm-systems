@@ -127,7 +127,9 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
                             hipHostMallocWriteCombined | hipHostMallocMapped));
     SECTION("hipHostMallocDefault") { flag = hipHostMallocDefault; }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-    SECTION("hipHostMallocUncached") { flag = hipHostMallocUncached; }
+    if (!IsNavi4X()) {
+      SECTION("hipHostMallocUncached") { flag = hipHostMallocUncached; }
+    }
     SECTION("hipHostMallocCoherent") { flag = hipHostMallocCoherent; }
     SECTION("hipHostMallocNonCoherent") { flag = hipHostMallocNonCoherent; }
 #endif

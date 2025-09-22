@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -903,9 +903,13 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
     // Ensure the packet body is written as header may get reordered when writing over PCIE
     _mm_sfence();
   }
+#if defined(__linux__)
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
                     kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
-
+#else
+  std::atomic_ref<uint32_t> atomic_header(queue_buffer[index & queue_bitmask_].full_header);
+  atomic_header.store(kDispatchPacketHeader | packet.setup << 16, std::memory_order_release);
+#endif
   LogPrint(HSA_AMD_LOG_FLAG_AQL,
     "HWq=%p, id=%lu, Dispatch Header = "
     "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
