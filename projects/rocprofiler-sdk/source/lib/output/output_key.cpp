@@ -271,10 +271,19 @@ output_keys(std::string _tag)
         }
     }
 
+    auto _login = std::string{".UNKNOWN_USERNAME."};
+    {
+        constexpr auto buffer_len         = 1024UL;
+        char           buffer[buffer_len] = {'\0'};
+        if(getlogin_r(buffer, sizeof(buffer) - 1) == 0 && strnlen(buffer, buffer_len) > 0 &&
+           strnlen(buffer, buffer_len) < buffer_len)
+            _login = std::string{buffer};
+    }
+
     auto _launch_time = (launch_datetime) ? *launch_datetime : std::string{".UNKNOWN_LAUNCH_TIME."};
     auto _launch_date = (launch_date) ? *launch_date : std::string{".UNKNOWN_LAUNCH_DATE."};
     auto _hostname    = get_hostname();
-    auto _user        = common::get_env("USER", getlogin());
+    auto _user        = get_variable_env<std::string>(_login, {"USER", "LOGNAME"});
     auto _cwd         = fs::absolute(fs::current_path()).lexically_normal().string();
     auto _pwd = fs::absolute(fs::path{common::get_env("PWD", _cwd)}).lexically_normal().string();
 

@@ -35,7 +35,8 @@ namespace fs     = ::rocprofiler::common::filesystem;
 
 TEST(output, output_key_list)
 {
-    common::init_logging("TEST");
+    common::init_logging("TEST",
+                         rocprofiler::common::logging_config{.install_failure_handler = true});
 
     auto output_keys = rocprofiler::tool::output_keys("test_tag");
 
@@ -62,7 +63,8 @@ TEST(output, output_key_list)
 
 TEST(output, output_key_resolution)
 {
-    common::init_logging("TEST");
+    common::init_logging("TEST",
+                         rocprofiler::common::logging_config{.install_failure_handler = true});
 
     auto verify = [](std::string inp, std::string_view expected) {
         ROCP_INFO << "";
