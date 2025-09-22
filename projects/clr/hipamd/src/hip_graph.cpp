@@ -1518,6 +1518,7 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
   graph->clone(*pGraphExec, true);
   (*pGraphExec)->ScheduleNodes();
   if (false == (*pGraphExec)->TopologicalOrder()) {
+    delete *pGraphExec;
     return hipErrorInvalidValue;
   }
   graph->SetGraphInstantiated(true);
