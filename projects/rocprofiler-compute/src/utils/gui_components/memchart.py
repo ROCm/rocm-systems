@@ -22,34 +22,29 @@
 # THE SOFTWARE.
 
 ##############################################################################
-from typing import Any
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
-from utils import schema
 from utils.logger import console_error
 from utils.utils import format_scientific_notation_if_needed
 
-# Constants for display formatting
-DEFAULT_MAX_LENGTH = 6
-DEFAULT_PRECISION = 1
-DEFAULT_SCIENTIFIC_WIDTH = 8
 
-
-def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> G:
+def insert_chart_data(mem_data, base_data):
     if len(mem_data) != 1:
         console_error("Memory Chart config doesn't follow expected formatting")
 
     table_config = mem_data[0]["metric_table"]
+
     original_df = base_data.dfs[table_config["id"]]
+
     display_columns = original_df.columns.values.tolist().copy()
     display_df = original_df[display_columns]
 
     alias = display_df["Metric"].values
     values = display_df["Value"].values
 
-    memchart_values: dict[str, Any] = {}
+    memchart_values = {}
     for i in range(0, len(alias)):
         memchart_values[alias[i]] = values[i]
 
@@ -526,9 +521,7 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload
     )
 
 
-def get_memchart(
-    mem_data: list[dict[str, Any]], base_data: schema.Workload
-) -> html.Section:
+def get_memchart(mem_data, base_data):
     return html.Section(
         id="memchart",
         children=[
@@ -2046,7 +2039,7 @@ def get_memchart(
     )
 
 
-def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str:  # noqa: ANN401
+def format_value_for_display(value, max_length=6):
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 
@@ -2104,8 +2097,8 @@ def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -
         sci = format_scientific_notation_if_needed(
             abs_val,
             align=">",
-            width_align=DEFAULT_SCIENTIFIC_WIDTH,
-            precision=DEFAULT_PRECISION,
+            width_align=8,
+            precision=1,
             fmt_type_align="e",
             max_length=max_length,
         ).strip()
@@ -2117,7 +2110,7 @@ def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -
             value = normal
 
         if is_negative:
-            value = f"-{value}"
+            value = "-" + value
 
     else:
         value = str(value)
@@ -2130,11 +2123,11 @@ def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -
             exponent = value[e_index:]
             max_mantissa_len = max_length - len(exponent)
             if max_mantissa_len < 1:
-                value = f"{exponent[: max_length - 1]}…"
+                value = exponent[: max_length - 1] + "…"
             else:
                 truncated_mantissa = mantissa[:max_mantissa_len]
                 value = truncated_mantissa + exponent
         else:
-            value = f"{value[: max_length - 1]}…"
+            value = value[: max_length - 1] + "…"
 
     return value

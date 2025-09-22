@@ -1,9 +1,3 @@
-/*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
- * SPDX-License-Identifier: MIT
- */
- 
 #include "hsa_base_util.h"
 #include "HSAILAmdExt.h"
 

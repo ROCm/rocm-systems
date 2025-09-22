@@ -1,9 +1,3 @@
-/* 
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
- 
-SPDX-License-Identifier: MIT 
-*/
-
 #include "rocm_version.h"
 #include <string.h>
 #include <stdlib.h>

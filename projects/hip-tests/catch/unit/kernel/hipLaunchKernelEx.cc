@@ -192,7 +192,6 @@ TEST_CASE("Unit_hipLaunchKernelExC_NegetiveTsts") {
     HIP_CHECK_ERROR(hipLaunchKernelExC(&invalidConfig, (void*)cooperativeKernelExC, kernelArgs),
                     hipErrorInvalidConfiguration);
   }
-  HIP_CHECK(hipFree(d_output));
 }
 /**
  * Test Description
@@ -258,7 +257,6 @@ TEST_CASE("Unit_hipLaunchKernelEx_NegetiveTsts") {
                                       d_output, totalThreads),
                     hipErrorInvalidConfiguration);
   }
-  HIP_CHECK(hipFree(d_output));
 }
 
 bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int blockSize,
@@ -407,7 +405,6 @@ TEST_CASE("Unit_hipLaunchKernelEx_With_Different_Kernels") {
 
     int result = 0;
     HIP_CHECK(hipMemcpy(&result, devMem, sizeof(result), hipMemcpyDefault));
-    HIP_CHECK(hipFree(devMem));
     REQUIRE(result == 100);
   }
 

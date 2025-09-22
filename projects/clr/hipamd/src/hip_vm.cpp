@@ -87,8 +87,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   //  Currently we do not support Pinned memory
   if (handle == nullptr || size == 0 || flags != 0 || prop == nullptr ||
       (prop->type != hipMemAllocationTypePinned && prop->type != hipMemAllocationTypeUncached) ||
-      (prop->location.type != hipMemLocationTypeDevice &&
-          prop->location.type != hipMemLocationTypeHost)) {
+      prop->location.type != hipMemLocationTypeDevice) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -107,15 +106,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     ihipFlags |= CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
   }
 
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
-  amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
-  amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
-
-  if (amdContext == nullptr) {
-    return hipErrorOutOfMemory;
-  }
-
-  const auto& dev_info = amdContext->devices()[0]->info();
+  // Device info validation
+  const auto& dev_info = g_devices[prop->location.id]->devices()[0]->info();
 
   if (dev_info.maxPhysicalMemAllocSize_ < size) {
     HIP_RETURN(hipErrorOutOfMemory);
@@ -124,8 +116,10 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size, dev_info.memBaseAddrAlign_,
-                                     useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
+  amd::Context* amdContext = g_devices[prop->location.id]->asContext();
+
+  void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size,
+                                     dev_info.memBaseAddrAlign_, nullptr);
 
   // Handle out of memory cases,
   if (ptr == nullptr) {
@@ -145,7 +139,6 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   amd::Memory* phys_mem_obj = getMemoryObject(ptr, offset);
   // saves the current device id so that it can be accessed later
   phys_mem_obj->getUserData().deviceId = prop->location.id;
-  phys_mem_obj->getUserData().locationType = prop->location.type;
   phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, size, *prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
@@ -210,23 +203,17 @@ hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* loca
 
 hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp* prop,
                                           hipMemAllocationGranularity_flags option) {
-
   HIP_INIT_API(hipMemGetAllocationGranularity, granularity, prop, option);
 
   if (granularity == nullptr || prop == nullptr || (prop->type != hipMemAllocationTypePinned &&
       prop->type != hipMemAllocationTypeUncached) ||
-      (prop->location.type != hipMemLocationTypeDevice &&
-       prop->location.type != hipMemLocationTypeHost) ||
-      prop->location.id >= g_devices.size() ||
+      prop->location.type != hipMemLocationTypeDevice || prop->location.id >= g_devices.size() ||
       (option != hipMemAllocationGranularityMinimum &&
        option != hipMemAllocationGranularityRecommended)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
-  amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
-  amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
-  const auto& dev_info = amdContext->devices()[0]->info();
+  const auto& dev_info = g_devices[prop->location.id]->devices()[0]->info();
 
   *granularity = dev_info.virtualMemAllocGranularity_;
 
@@ -360,37 +347,25 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
   // Ensure that the specified size parameter matches the total size of a complete set of
   // sub-buffers, disallowing partial sub-buffer coverage
   auto mem_object = amd::MemObjMap::FindMemObj(ptr);
-  hipMemLocationType memLocationType = hipMemLocationTypeNone;
-
-  if (mem_object) {
-    memLocationType = static_cast<hipMemLocationType>(mem_object->getUserData().locationType);
-    if (mem_object->parent()) {
-      size_t accumulated_buffer_size = 0;
-      for (auto sub_buffer : mem_object->parent()->subBuffers()) {
-        accumulated_buffer_size += sub_buffer->getSize();
-        if (accumulated_buffer_size > size) {
-          HIP_RETURN(hipErrorInvalidValue);
-        } else if (accumulated_buffer_size == size) {
-          break;
-        }
-      }
-
-      if (accumulated_buffer_size != size) {
+  if (mem_object && mem_object->parent()) {
+    size_t accumulated_buffer_size = 0;
+    for (auto sub_buffer : mem_object->parent()->subBuffers()) {
+      accumulated_buffer_size += sub_buffer->getSize();
+      if (accumulated_buffer_size > size) {
         HIP_RETURN(hipErrorInvalidValue);
+      } else if (accumulated_buffer_size == size) {
+        break;
       }
     }
-  } else {
-    HIP_RETURN(hipErrorInvalidValue);
+
+    if (accumulated_buffer_size != size) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
   }
 
   for (size_t desc_idx = 0; desc_idx < count; ++desc_idx) {
-    hipMemLocationType accessLocationType = desc[desc_idx].location.type;
-    if (accessLocationType != hipMemLocationTypeDevice && accessLocationType != hipMemLocationTypeHost) {
+    if (desc[desc_idx].location.type != hipMemLocationTypeDevice) {
       HIP_RETURN(hipErrorInvalidValue);
-    }
-    if (accessLocationType == hipMemLocationTypeHost &&
-        memLocationType != hipMemLocationTypeHost) {
-      HIP_RETURN(hipErrorInvalidValue)
     }
 
     if (desc[desc_idx].location.id >= g_devices.size()) {
@@ -405,8 +380,7 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    if (!dev->devices()[0]->SetMemAccess(ptr, size, access_flags,
-                                         static_cast<amd::Device::VmmLocationType>(accessLocationType))) {
+    if (!dev->devices()[0]->SetMemAccess(ptr, size, access_flags)) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   }

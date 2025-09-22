@@ -25,8 +25,6 @@
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
-#include "lib/rocprofiler-sdk-attach/table.h"
-
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 
@@ -136,9 +134,6 @@ queue_controller_fini();
 
 void
 queue_controller_sync();
-
-void
-queue_controller_init(RocAttachDispatchTable* table);
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);

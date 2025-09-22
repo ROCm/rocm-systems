@@ -145,10 +145,7 @@ class NullDevice : public amd::Device {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) { return nullptr; };
   virtual bool virtualFree(void* addr) { return true; }
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) {
-    return true;
-  }
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) { return true; }
 
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const { return true; }
 
@@ -539,7 +536,7 @@ class Device : public NullDevice {
 
   //! host memory alloc
   virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr) const override;
+                          const void* agentInfo = nullptr) const;
 
   //! SVM allocation
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
@@ -558,8 +555,7 @@ class Device : public NullDevice {
   virtual bool virtualFree(void* addr);
 
   //! Set/Get memory access set by the app
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice);
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const;
 

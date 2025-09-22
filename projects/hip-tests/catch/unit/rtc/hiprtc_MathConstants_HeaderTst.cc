@@ -166,7 +166,11 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
   const char* compiler_option = complete_CO.c_str();
   for (int scenario = 0; scenario < 2; scenario++) {
     hiprtcProgram prog;
-    std::array<const char*, 2> compiler_options = {compiler_option, ""};
+    const char** compiler_options = new const char*[2];
+    for (int i = 0; i < 2; i++) {
+      compiler_options[0] = compiler_option;
+      compiler_options[1] = "";
+    }
     HIPRTC_CHECK(hiprtcCreateProgram(&prog, mathConstants_string, kername, 0, NULL, NULL));
     if (scenario == 0) {
       hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
@@ -180,7 +184,7 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
         REQUIRE(false);
       }
     } else {
-      hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options.data())};
+      hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
       if (!(compileResult == HIPRTC_SUCCESS)) {
         WARN("hiprtcCompileProgram() api failed!!");
         size_t logSize;

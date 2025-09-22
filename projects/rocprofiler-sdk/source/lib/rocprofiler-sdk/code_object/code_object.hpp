@@ -25,8 +25,6 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 
-#include "lib/rocprofiler-sdk-attach/table.h"
-
 #include <hsa/hsa_api_trace.h>
 
 #include <cstdint>
@@ -66,9 +64,5 @@ initialize(HipCompilerDispatchTable* table);
 
 void
 finalize();
-
-void
-initialize(RocAttachDispatchTable* table);
-
 }  // namespace code_object
 }  // namespace rocprofiler

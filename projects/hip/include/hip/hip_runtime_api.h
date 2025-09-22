@@ -830,17 +830,14 @@ enum hipLimit_t {
 
 /** Allocates the memory as write-combined. On some system configurations, write-combined allocation
  * may be transferred faster across the PCI Express bus, however, could have low read efficiency by
- * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.
- * @note  This flag is only for CUDA source compatibility but not functional within HIP runtime,
- * because the allocation path is currently not supported on the AMD platform.*/
+ * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.*/
 #define hipHostAllocWriteCombined 0x4
 
 /** Allocates the memory as write-combined. On some system configurations, write-combined allocation
  * may be transferred faster across the PCI Express bus, however, could have low read efficiency by
  * most CPUs. It's a good option for data transfer from host to device via mapped pinned memory.
  * @note  This flag is the same definition as #hipHostAllocWriteCombined which is equivalent to
- * cudaHostAllocWriteCombined. It is only for CUDA source compatibility but not functional within
- * HIP runtime, because the allocation path is currently not supported on the AMD platform.*/
+ * cudaHostAllocWriteCombined.*/
 #define hipHostMallocWriteCombined 0x4
 
 /**
@@ -6399,22 +6396,8 @@ hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned l
  */
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
 /**
- * @brief builds module from code object data which resides in host memory.
- *
- * The "image" is a pointer to the location of code object data. This data can be either
- * a single code object or a fat binary (fatbin), which serves as the entry point for loading and
- * launching device-specific kernel executions.
- *
- * By default, the following command generates a fatbin:
- *
- * "amdclang++ -O3 -c --offload-device-only --offload-arch=<GPU_ARCH> <input_file> -o <output_file>"
- *
- * For more details, refer to:
- * <a
- * href= "https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/kernel_language_cpp_support.html#kernel-compilation">
- * Kernel Compilation</a> in the HIP kernel language C++ support, or
- * <a
- * href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html">HIP runtime compilation (HIP RTC)</a>.
+ * @brief builds module from code object which resides in host memory. Image is pointer to that
+ * location.
  *
  * @param [in] image  The pointer to the location of data
  * @param [out] module  Retuned module

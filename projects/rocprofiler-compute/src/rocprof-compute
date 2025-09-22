@@ -25,8 +25,11 @@
 # SOFTWARE.
 ##############################################################################el
 
+import os
 import re
 import sys
+
+# import logging
 from pathlib import Path
 
 try:
@@ -35,109 +38,112 @@ try:
     from rocprof_compute_base import RocProfCompute
     from utils.logger import console_error
 except ImportError as e:
-    print (f"{e}")
     # In wheel package, softlink is not supported.
     # rocprof-compute will get installed in bin and libexec/rocprofiler-compute.
-    # When invoked from bin folder, the extra paths are required to import the
-    # dependent scripts
-
+    # When invoked from bin folder, the extra paths are required to import the dependent scripts
     try:
-        current_path = Path(__file__).resolve().parent
-        additional_path = current_path / "../libexec/rocprofiler-compute"
-        sys.path.append(str(additional_path.resolve()))
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        additional_path = f"{current_path}/../libexec/rocprofiler-compute"
+        sys.path.append(os.path.abspath(additional_path))
 
         from importlib import metadata
 
         from rocprof_compute_base import RocProfCompute
         from utils.utils import console_error
-    except ImportError:
+    except ImportError as e:
+        # print("Failed to import required modules: " + str(e))
         pass
 
 
-def check_version(local_ver, desired_ver, operator) -> bool:
+def verify_deps_version(localVer, desiredVer, operator):
     """Check package version strings with simple operators used in companion
     requirements.txt file"""
-    ops = {
-        "==": lambda loc, des: loc == des,
-        ">=": lambda loc, des: loc >= des,
-        "<=": lambda loc, des: loc <= des,
-        ">": lambda loc, des: loc > des,
-        "<": lambda loc, des: loc < des,
-    }
-    return ops.get(operator, lambda loc, des: True)(local_ver, desired_ver)
+    if operator == "==":
+        return localVer == desiredVer
+    elif operator == ">=":
+        return localVer >= desiredVer
+    elif operator == "<=":
+        return localVer <= desiredVer
+    elif operator == ">":
+        return localVer > desiredVer
+    elif operator == "<":
+        return localVer < desiredVer
+    else:
+        return True
 
 
-def verify_deps() -> None:
+def verify_deps():
     """Utility to read library dependencies from requirements.txt and endeavor
     to load them within current execution environment.
     Used in top-level rocprofiler-compute to provide error messages if necessary
     dependencies are not available."""
 
     # Check which version of python is being used
-    if sys.version_info < (3, 8):
-        print(
-            f"[ERROR] Python 3.8 or higher is required to run rocprofiler-compute. "
-            f"The current version is {sys.version_info[0]}.{sys.version_info[1]}."
-        )
+    if sys.version_info[0] < 3 or (sys.version_info[0] == 3
+                                   and sys.version_info[1] < 8):
+        print("[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
+              f" The current version is {sys.version_info[0]}.{sys.version_info[1]}.")
         sys.exit(1)
 
     bindir = str(Path(__file__).resolve().parent)
-    deps_locations = ["requirements.txt", "../requirements.txt"]
+    depsLocation = ["requirements.txt", "../requirements.txt"]
 
-    for location in deps_locations:
-        check_file = Path(bindir).joinpath(location)
-        if check_file.exists():
-            dependencies = check_file.read_text(encoding="utf-8").splitlines()
+    for location in depsLocation:
+        checkFile = str(Path(bindir).joinpath(location))
+        if Path(checkFile).exists():
+            with open(checkFile, "r", encoding="utf-8") as file_in:
+                dependencies = file_in.read().splitlines()
 
             error = False
-            version_pattern = re.compile(r"^([^=<>]+)([=<>]+)(.*)$")
+            version_pattern = r"^([^=<>]+)([=<>]+)(.*)$"
 
             for dependency in dependencies:
-                match = version_pattern.match(dependency)
+                desiredVersion = None
+                match = re.match(version_pattern, dependency)
                 if match:
-                    package, operator, desired_version = match.groups()
+                    package = match.group(1)
+                    operator = match.group(2) or None
+                    desiredVersion = match.group(3) or None
                 else:
-                    package, operator, desired_version = dependency, None, None
-
+                    package = dependency
                 try:
-                    local_version = metadata.distribution(package).version
+                    localVersion = metadata.distribution(package).version
                 except metadata.PackageNotFoundError:
                     error = True
-                    print(
-                        f"[ERROR] The '{dependency}' package was not found "
-                        "in the current execution environment."
-                    )
-                    continue
+                    print(f"[ERROR] The '{dependency}' package was not found "
+                          "in the current execution environment.")
 
-                # Check version requirement
-                if desired_version and not check_version(
-                    local_version, desired_version, operator
-                ):
-                    print(
-                        f"[ERROR] the '{dependency}' distribution does not meet "
-                        "version requirements to use rocprofiler-compute."
-                    )
-                    print(f"  --> version installed : {local_version}")
-                    error = True
+                # check version requirement
+                if not error:
+                    if desiredVersion:
+                        if not verify_deps_version(localVersion, desiredVersion,
+                                                   operator):
+                            print(
+                                f"[ERROR] the '{dependency}' distribution does "
+                                "not meet version requirements to use rocprofiler-compute."
+                            )
+                            print("  --> version installed :", localVersion)
+                            error = True
 
             if error:
-                print(
-                    "\nPlease verify all of the python dependencies called out "
-                    "in the requirements file"
-                )
+                print("")
+                print("Please verify all of the python dependencies called out "
+                      "in the requirements file")
                 print("are installed locally prior to running rocprofiler-compute.")
-                print(f"\nSee: {check_file}")
+                print("")
+                print(f"See: {checkFile}")
                 sys.exit(1)
-            return
+    return
 
 
-def main() -> None:
+def main():
     """Main function for rocprofiler-compute"""
 
     # verify required python dependencies
     verify_deps()
 
     rocprof_compute = RocProfCompute()
+
     mode = rocprof_compute.get_mode()
 
     # major rocprofiler-compute execution modes

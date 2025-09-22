@@ -179,7 +179,7 @@ class ScopeGuard {
 
   ScopeGuard(ScopeGuard& rhs) { *this = rhs; }
 
-  __forceinline ~ScopeGuard() noexcept(false) {
+  __forceinline ~ScopeGuard() {
     if (!dismiss_) release_();
   }
   __forceinline ScopeGuard& operator=(ScopeGuard& rhs) {

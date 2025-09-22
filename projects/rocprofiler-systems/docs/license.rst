@@ -5,4 +5,4 @@
 License
 *******
 
-.. include:: ../LICENSE.md
+.. include:: ../LICENSE

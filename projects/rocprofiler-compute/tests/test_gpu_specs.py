@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import os
 import re
 import subprocess
 import tempfile
@@ -151,7 +152,7 @@ def test_num_xcds_spec_class(monkeypatch):
     num_xcds = get_num_xcds()
 
     # 2. load machine specs
-    machine_spec = generate_machine_specs(None, None)
+    machine_spec = generate_machine_specs(None)
 
     # 3. check results are expected
     assert machine_spec.compute_partition is not None
@@ -202,24 +203,26 @@ def test_load_yaml_file_not_found():
     """Test _load_yaml with non-existent file - covers lines 104-105"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    with pytest.raises(FileNotFoundError):
-        MIGPUSpecs._load_yaml("non_existent_file.yaml")
+    non_existent_path = "/path/that/does/not/exist/file.yaml"
+
+    with pytest.raises(SystemExit):
+        MIGPUSpecs._load_yaml(non_existent_path)
 
 
 @pytest.mark.misc
 def test_load_yaml_invalid_yaml():
     """Test _load_yaml with corrupted YAML - covers lines 106-107"""
-    import yaml
-
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    # Create invalid YAML file
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write("invalid: yaml: content: [\nunclosed bracket")
         temp_path = f.name
 
-    with pytest.raises(yaml.YAMLError):
-        MIGPUSpecs._load_yaml(str(temp_path))
+    try:
+        with pytest.raises(SystemExit):
+            MIGPUSpecs._load_yaml(temp_path)
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.misc
@@ -228,7 +231,7 @@ def test_load_yaml_generic_exception():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch("builtins.open", side_effect=PermissionError("Access denied")):
-        with pytest.raises(PermissionError, match="Access denied"):
+        with pytest.raises(SystemExit):
             MIGPUSpecs._load_yaml("some_file.yaml")
 
 
@@ -238,7 +241,8 @@ def test_get_gpu_series_dict_uninitialized():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
-        assert MIGPUSpecs.get_gpu_series_dict() == {}
+        with pytest.raises(SystemExit):
+            MIGPUSpecs.get_gpu_series_dict()
 
 
 @pytest.mark.misc
@@ -247,7 +251,8 @@ def test_get_gpu_series_uninitialized():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
-        assert MIGPUSpecs.get_gpu_series_dict() == {}
+        with pytest.raises(SystemExit):
+            result = MIGPUSpecs.get_gpu_series("gfx942")  # noqa: F841
 
 
 @pytest.mark.misc
@@ -323,9 +328,7 @@ def test_get_num_xcds_unknown_gpu_model():
     """Test get_num_xcds with unknown gpu model - covers lines 319-321"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
-        gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL"
-    )
+    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL")  # noqa: F841
 
 
 @pytest.mark.misc
@@ -376,7 +379,9 @@ def test_get_chip_id_dict_empty():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_chip_id_dict", {}):
-        assert MIGPUSpecs.get_chip_id_dict() == {}
+        with patch("src.utils.mi_gpu_spec.console_error") as mock_error:
+            result = MIGPUSpecs.get_chip_id_dict()  # noqa: F841
+            mock_error.assert_called_once()
 
 
 @pytest.mark.misc
@@ -385,7 +390,9 @@ def test_get_num_xcds_dict_empty():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_num_xcds_dict", {}):
-        assert MIGPUSpecs.get_num_xcds_dict() == {}
+        with patch("src.utils.mi_gpu_spec.console_error") as mock_error:
+            result = MIGPUSpecs.get_num_xcds_dict()  # noqa: F841
+            mock_error.assert_called_once()
 
 
 @pytest.mark.misc
@@ -394,7 +401,6 @@ def test_normal_functionality_still_works():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     result = MIGPUSpecs.get_gpu_model("gfx90a", None)
-
     assert result is not None
 
     result = MIGPUSpecs.get_gpu_series("gfx90a")

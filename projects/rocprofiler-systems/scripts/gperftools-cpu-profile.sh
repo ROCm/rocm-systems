@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 EXE=$(basename ${1})
 DIR=gperftools-output
 mkdir -p ${DIR}

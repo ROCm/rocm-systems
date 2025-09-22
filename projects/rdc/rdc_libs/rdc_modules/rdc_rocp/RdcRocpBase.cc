@@ -35,6 +35,7 @@ THE SOFTWARE.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iomanip>
 #include <stdexcept>
 #include <vector>
 
@@ -44,6 +45,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 #include "rdc_lib/impl/SmiUtils.h"
+#include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rocp/RdcRocpCounterSampler.h"
 
 namespace amd {
@@ -155,7 +157,6 @@ const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
 
 const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
   std::vector<rdc_field_t> field_ids;
-  field_ids.reserve(field_to_metric.size());
   for (auto& [k, v] : field_to_metric) {
     field_ids.push_back(k);
   }
@@ -296,7 +297,6 @@ void RdcRocpBase::init_rocp_if_not() {
   }
 
   // populate fields
-  all_fields.reserve(temp_field_map_k.size());
   for (const auto& [k, v] : temp_field_map_k) {
     all_fields.emplace_back(v);
   }

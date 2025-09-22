@@ -2007,14 +2007,13 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 
 // ================================================================================================
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const AgentInfo* agentInfo) const {
   void* ptr = nullptr;
   uint32_t memFlags = 0;
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  hsa_amd_memory_pool_t pool =
-      getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
   hsa_status_t stat = hsa_amd_memory_pool_allocate(pool, size, memFlags, &ptr);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Allocate hsa host memory %p, size 0x%zx,"
@@ -2291,7 +2290,7 @@ void* Device::virtualAlloc(void* req_addr, size_t size, size_t alignment) {
   }
 
   constexpr bool kParent = true;
-  amd::Memory* mem = CreateVirtualBuffer(context(), vptr, size, -1, -1, kParent);
+  amd::Memory* mem = CreateVirtualBuffer(context(), vptr, size, -1, kParent);
   if (mem == nullptr) {
     LogPrintfError("Cannot create Virtual Buffer for vptr: %p of size: %u", vptr, size);
   }
@@ -2317,13 +2316,11 @@ bool Device::virtualFree(void* addr) {
   return true;
 }
 
-bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                          VmmLocationType access_location) {
+bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_memory_access_desc_t desc;
   desc.permissions = static_cast<hsa_access_permission_t>(access_flags);
-  desc.agent_handle =
-      access_location == VmmLocationType::kDevice ? getBackendDevice() : getCpuAgent();
+  desc.agent_handle = getBackendDevice();
 
   if ((hsa_status = hsa_amd_vmem_set_access(va_addr, va_size, &desc, 1)) != HSA_STATUS_SUCCESS) {
     LogPrintfError("Failed hsa_amd_vmem_set_access. Failed with status:%d \n", hsa_status);
@@ -3513,8 +3510,7 @@ void Device::RemoveKernel(Kernel& gpuKernel) const {
 // ================================================================================================
 ProfilingSignal::~ProfilingSignal() {
   if (signal_.handle != 0) {
-    if (hsa_signal_load_relaxed(signal_) > 0
-        && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+    if (hsa_signal_load_relaxed(signal_) > 0) {
       LogError("Runtime shouldn't destroy a signal that is still busy!");
       if (hsa_signal_wait_scacquire(signal_, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                     kUnlimitedWait, HSA_WAIT_STATE_BLOCKED) != 0) {

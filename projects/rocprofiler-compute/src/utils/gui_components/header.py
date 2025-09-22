@@ -23,19 +23,16 @@
 
 ##############################################################################
 
-from typing import Any, Union
-
 import dash_bootstrap_components as dbc
-import pandas as pd
 from dash import dcc, html
 
 from utils import schema
 
-AVAIL_NORMALIZATIONS = ["per_wave", "per_cycle", "per_second", "per_kernel"]
+avail_normalizations = ["per_wave", "per_cycle", "per_second", "per_kernel"]
 
 
 # List all the unique column values for desired column in df, 'target_col'
-def list_unique(orig_list: list[str], is_numeric: bool) -> list[str]:
+def list_unique(orig_list, is_numeric):
     list_set = set(orig_list)
     unique_list = list(list_set)
     if is_numeric:
@@ -43,23 +40,18 @@ def list_unique(orig_list: list[str], is_numeric: bool) -> list[str]:
     return unique_list
 
 
-def create_span(input_value: str) -> dict[str, Union[html.Span, str]]:
-    return {
-        "label": html.Span(str(input_value), title=str(input_value)),
-        "value": str(input_value),
-    }
+def create_span(input):
+    return {"label": html.Span(str(input), title=str(input)), "value": str(input)}
 
 
-def get_header(
-    raw_pmc: pd.DataFrame, input_filters: dict[str, Any], kernel_names: list[str]
-) -> html.Header:
-    pmc_data = raw_pmc[schema.PMC_PERF_FILE_PREFIX]
-    kernel_names = [str(name).strip() for name in pmc_data["Kernel_Name"]]
-
-    # Extract GPU and Dispatch IDs
-    gpu_ids = [str(gpu_id) for gpu_id in pmc_data["GPU_ID"]]
-    dispatch_ids = [str(dispatch_id) for dispatch_id in pmc_data["Dispatch_ID"]]
-
+def get_header(raw_pmc, input_filters, kernel_names):
+    kernel_names = list(
+        map(
+            str,
+            raw_pmc[schema.pmc_perf_file_prefix]["Kernel_Name"],
+        )
+    )
+    kernel_names = [x.strip() for x in kernel_names]
     return html.Header(
         id="home",
         children=[
@@ -183,7 +175,7 @@ def get_header(
                                                 children=["Normalization:"],
                                             ),
                                             dcc.Dropdown(
-                                                AVAIL_NORMALIZATIONS,
+                                                avail_normalizations,
                                                 id="norm-filt",
                                                 value=input_filters["normalization"],
                                                 clearable=False,
@@ -204,7 +196,14 @@ def get_header(
                                             ),
                                             dcc.Dropdown(
                                                 list_unique(
-                                                    gpu_ids,
+                                                    list(
+                                                        map(
+                                                            str,
+                                                            raw_pmc[
+                                                                schema.pmc_perf_file_prefix
+                                                            ]["GPU_ID"],
+                                                        )
+                                                    ),
                                                     True,
                                                 ),  # list avail gcd ids
                                                 id="gcd-filt",
@@ -230,7 +229,14 @@ def get_header(
                                                 children=["Dispatch Filter:"],
                                             ),
                                             dcc.Dropdown(
-                                                dispatch_ids,
+                                                list(
+                                                    map(
+                                                        str,
+                                                        raw_pmc[
+                                                            schema.pmc_perf_file_prefix
+                                                        ]["Dispatch_ID"],
+                                                    )
+                                                ),
                                                 id="disp-filt",
                                                 multi=True,
                                                 # default to any dispatch
@@ -276,12 +282,15 @@ def get_header(
                                                 children=["Kernels:"],
                                             ),
                                             dcc.Dropdown(
-                                                [
-                                                    create_span(name)
-                                                    for name in list_unique(
-                                                        kernel_names, False
+                                                list(
+                                                    map(
+                                                        create_span,
+                                                        list_unique(
+                                                            orig_list=kernel_names,
+                                                            is_numeric=False,
+                                                        ),  # list avail kernel names
                                                     )
-                                                ],
+                                                ),
                                                 id="kernel-filt",
                                                 multi=True,
                                                 value=input_filters["kernel"],

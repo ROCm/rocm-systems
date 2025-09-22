@@ -53,9 +53,6 @@ template <typename T> static void runTestShflUp_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
-
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
 }
 
 template <typename T> __global__ void shflUp_2(T* Input, T* Output) {
@@ -92,9 +89,6 @@ template <typename T> static void runTestShflUp_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
-
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
 }
 
 template <typename T> __global__ void shflUp_3(T* Input, T* Output) {
@@ -137,9 +131,6 @@ template <typename T> static void runTestShflUp_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
-
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void shflUp_4(int* Input, int* Output) {
@@ -184,9 +175,6 @@ static void runTestShflUp_4() {
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
-
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
 }
 
 /**

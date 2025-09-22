@@ -32,7 +32,6 @@ trigger:
     - projects/rocprofiler-sdk/*.md
     - projects/rocprofiler-sdk/CODEOWNERS
     - projects/rocprofiler-sdk/LICENSE
-    - projects/rocprofiler-sdk/source/docs
 
 pr: none
 

@@ -1,6 +1,3 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
-
 #ifndef _CORE_TIMER_H_
 #define _CORE_TIMER_H_
 

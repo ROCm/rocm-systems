@@ -1,6 +1,3 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
-
 #include <atomic>
 #include <cstdlib>
 #include <cstdio>

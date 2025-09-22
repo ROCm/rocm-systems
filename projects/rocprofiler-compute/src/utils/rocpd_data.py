@@ -26,9 +26,6 @@
 import csv
 import sqlite3
 from contextlib import closing
-from typing import Any
-
-import pandas as pd
 
 from utils.logger import console_error
 
@@ -73,22 +70,19 @@ def convert_db_to_csv(
                     ])
                     for row in cursor:
                         writer.writerow(row)
-    except OSError as e:
-        console_error(f"Database error while converting to CSV: {e}")
-    except Exception as e:
-        console_error(f"Unexpected error converting database to CSV: {e}")
+    except (sqlite3.DatabaseError, IOError) as e:
+        console_error(f"Error converting database to CSV: {e}")
 
 
-def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
+def process_rocpd_csv(df):
     """
     Merge counters across unique dispatches from the
     input dataframe and return processed dataframe.
     """
-    if df.empty:
-        return df
+    # Only import pandas if needed
+    import pandas as pd
 
-    data: list[dict[str, Any]] = []
-
+    data = list()
     # Group by unique kernel and merge into a single row
     for _, group_df in df.groupby([
         "Dispatch_ID",

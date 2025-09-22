@@ -1,6 +1,3 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
-
 #include <hip/hip_runtime.h>
 #include <rocprofiler/v2/rocprofiler.h>
 

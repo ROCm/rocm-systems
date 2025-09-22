@@ -334,8 +334,6 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     return;
   }
 
-  HIP_CHECK(hipSetDevice(0));
-
   void* hipModuleLaunchCooperativeKernel_ptr = nullptr;
   void* hipModuleLaunchCooperativeKernelMultiDevice_ptr = nullptr;
   void* hipLaunchCooperativeKernel_ptr = nullptr;
@@ -433,13 +431,13 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
-    auto module = std::make_unique<hipModule_t[]>(deviceCount);
-    auto function = std::make_unique<hipFunction_t[]>(deviceCount);
-    auto stream_arr = std::make_unique<hipStream_t[]>(deviceCount);
+    hipModule_t* module = new hipModule_t[deviceCount];
+    hipFunction_t* function = new hipFunction_t[deviceCount];
+    hipStream_t* streamArr = new hipStream_t[deviceCount];
 
     for (int i = 0; i < deviceCount; ++i) {
       HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipStreamCreate(&stream_arr[i]));
+      HIP_CHECK(hipStreamCreate(&streamArr[i]));
 
       HIP_CHECK(hipModuleLoad(&module[i], "addKernel.code"));
       REQUIRE(module[i] != nullptr);
@@ -462,7 +460,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
       params[i].blockDimZ = 1;
       params[i].kernelParams = nullptr;
       params[i].sharedMemBytes = 0;
-      params[i].hStream = stream_arr[i];
+      params[i].hStream = streamArr[i];
     }
 
     HIP_CHECK(dyn_hipModuleLaunchCooperativeKernelMultiDevice_ptr(params.data(), deviceCount, 0));
@@ -472,7 +470,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     }
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamDestroy(stream_arr[i]));
+      HIP_CHECK(hipStreamDestroy(streamArr[i]));
       HIP_CHECK(hipModuleUnload(module[i]));
     }
   }
@@ -491,14 +489,12 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
-    auto stream_arr = std::make_unique<hipStream_t[]>(deviceCount);
+    hipStream_t* streamArr = new hipStream_t[deviceCount];
 
     for (int i = 0; i < deviceCount; ++i) {
       HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipStreamCreate(&stream_arr[i]));
+      HIP_CHECK(hipStreamCreate(&streamArr[i]));
     }
-
-    HIP_CHECK(hipSetDevice(0));
 
     std::vector<hipLaunchParams> params(deviceCount);
 
@@ -508,7 +504,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
       params[i].blockDim = {1, 1, 1};
       params[i].args = nullptr;
       params[i].sharedMem = 0;
-      params[i].stream = stream_arr[i];
+      params[i].stream = streamArr[i];
     }
 
     HIP_CHECK(dyn_hipLaunchCooperativeKernelMultiDevice_ptr(params.data(), deviceCount, 0));
@@ -518,7 +514,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     }
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamDestroy(stream_arr[i]));
+      HIP_CHECK(hipStreamDestroy(streamArr[i]));
     }
   }
 
@@ -527,14 +523,12 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
-    auto stream_arr = std::make_unique<hipStream_t[]>(deviceCount);
+    hipStream_t* streamArr = new hipStream_t[deviceCount];
 
     for (int i = 0; i < deviceCount; ++i) {
       HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipStreamCreate(&stream_arr[i]));
+      HIP_CHECK(hipStreamCreate(&streamArr[i]));
     }
-
-    HIP_CHECK(hipSetDevice(0));
 
     std::vector<hipLaunchParams> params(deviceCount);
 
@@ -544,7 +538,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
       params[i].blockDim = {1, 1, 1};
       params[i].args = nullptr;
       params[i].sharedMem = 0;
-      params[i].stream = stream_arr[i];
+      params[i].stream = streamArr[i];
     }
 
     HIP_CHECK(dyn_hipExtLaunchMultiKernelMultiDevice_ptr(params.data(), deviceCount, 0));
@@ -554,7 +548,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     }
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamDestroy(stream_arr[i]));
+      HIP_CHECK(hipStreamDestroy(streamArr[i]));
     }
   }
 

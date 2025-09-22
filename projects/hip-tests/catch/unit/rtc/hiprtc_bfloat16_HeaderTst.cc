@@ -135,7 +135,6 @@ TEST_CASE("Unit_Rtc_bfloat16_header") {
     }
   }
   HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(result_d));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   delete[] result_h;
 }

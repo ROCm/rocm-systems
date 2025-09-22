@@ -23,98 +23,82 @@
 
 ##############################################################################
 
-import argparse
 import shlex
 from pathlib import Path
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
-from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_error, console_log, demarcate
+from utils.logger import console_log, demarcate
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
-    def __init__(
-        self,
-        profiling_args: argparse.Namespace,
-        profiler_mode: str,
-        soc: OmniSoC_Base,
-    ) -> None:
+    def __init__(self, profiling_args, profiler_mode, soc):
         super().__init__(profiling_args, profiler_mode, soc)
         self.ready_to_profile = (
             self.get_args().roof_only
-            and not (Path(self.get_args().path) / "pmc_perf.csv").is_file()
+            and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname: str, soc: OmniSoC_Base) -> list[str]:
-        args = self.get_args()
-        app_cmd = shlex.split(args.remaining)
-
-        if args.kokkos_trace:
+    def get_profiler_options(self, fname, soc):
+        app_cmd = shlex.split(self.get_args().remaining)
+        trace_option = "--kernel-trace"
+        if self.get_args().kokkos_trace:
             trace_option = "--kokkos-trace"
         if self.get_args().hip_trace:
             trace_option = "--hip-trace"
-        else:
-            trace_option = "--kernel-trace"
 
-        profiling_options = [
+        args = [
             # v3 requires output directory argument
             "-d",
-            f"{self.get_args().path}/out",
+            self.get_args().path + "/" + "out",
             trace_option,
             "--output-format",
-            args.format_rocprof_output,
+            self.get_args().format_rocprof_output,
         ]
-
         # Kernel filtering
-        if args.kernel:
-            profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
-
+        if self.get_args().kernel:
+            args.extend(["--kernel-include-regex", "|".join(self.get_args().kernel)])
         # Dispatch filtering
         dispatch = []
         # rocprofv3 dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
+        if self.get_args().dispatch:
+            for dispatch_id in self.get_args().dispatch:
                 if ":" in dispatch_id:
+                    tokens = dispatch_id.split(":")
                     # 4:7 -> 5-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{int(start) + 1}-{end}")
+                    dispatch.append(f"{int(tokens[0]) + 1}-{tokens[1]}")
                 else:
                     # 4 -> 5
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
-            profiling_options.extend([
-                "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
-            ])
-
-        profiling_options.append("--")
-        profiling_options.extend(app_cmd)
-        return profiling_options
+            args.extend(["--kernel-iteration-range", f"[{','.join(dispatch)}]"])
+        args.append("--")
+        args.extend(app_cmd)
+        return args
 
     # -----------------------
     # Required child methods
     # -----------------------
     @demarcate
-    def pre_processing(self) -> None:
+    def pre_processing(self):
         """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
 
     @demarcate
-    def run_profiling(self, version: str, prog: str) -> None:
+    def run_profiling(self, version, prog):
         """Run profiling."""
-        if not self.ready_to_profile:
+        if self.ready_to_profile:
+            if self.get_args().roof_only:
+                console_log(
+                    "roofline", "Generating pmc_perf.csv (roofline counters only)."
+                )
+            # Log profiling options and setup filtering
+            super().run_profiling(version, prog)
+        else:
             console_log("roofline", "Detected existing pmc_perf.csv")
-            return
-
-        if self.get_args().roof_only:
-            console_log("roofline", "Generating pmc_perf.csv (roofline counters only).")
-
-        # Log profiling options and setup filtering
-        super().run_profiling(version, prog)
 
     @demarcate
-    def post_processing(self) -> None:
+    def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output

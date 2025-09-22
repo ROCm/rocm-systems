@@ -1,9 +1,4 @@
-/*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
- * SPDX-License-Identifier: MIT
- */
- 
+
 // Compiling for Windows Platform
 #ifdef _WIN32
 

@@ -46,8 +46,6 @@ static __global__ void squareKernel(int* arr) {
  *  - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
-  DISABLE_CORE_DUMPS();
-
   int* devMem = nullptr;
   HIP_CHECK(hipMalloc(&devMem, sizeBytes));
   REQUIRE(devMem != nullptr);
@@ -85,8 +83,6 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
 
   ret = hipGetLastError();
   REQUIRE(ret == hipErrorIllegalAddress);
-
-  RESTORE_CORE_DUMPS();
 }
 
 /**
@@ -109,8 +105,6 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices") {
     HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
     return;
   }
-
-  DISABLE_CORE_DUMPS();
 
   // Perform Invalid operation on Device 0
   HIP_CHECK(hipSetDevice(0));
@@ -153,8 +147,6 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices") {
 
   ret = hipGetLastError();
   REQUIRE(ret == expectedError);
-
-  RESTORE_CORE_DUMPS();
 }
 
 /**
@@ -171,8 +163,6 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices") {
  *  - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoStreams") {
-  DISABLE_CORE_DUMPS();
-
   int* devMem = nullptr;
   HIP_CHECK(hipMalloc(&devMem, sizeBytes));
   REQUIRE(devMem != nullptr);
@@ -207,6 +197,4 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoStreams") {
 
   ret = hipGetLastError();
   REQUIRE(ret == hipErrorIllegalAddress);
-
-  RESTORE_CORE_DUMPS();
 }

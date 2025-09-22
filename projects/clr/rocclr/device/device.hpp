@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1351,11 +1351,10 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool isFenceDirty() const = 0;
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
+  //! Dispatch captured AQL packet
+  virtual bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
+                                 amd::AccumulateCommand* vcmd = nullptr) = 0;
 
-  //! Dispatches multiple AQL packets in a single batch operation
-  virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<std::string>& kernelNames,
-                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1659,8 +1658,6 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
-  //<! Enum describing the location of Virtual memory
-  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1895,7 +1892,7 @@ class Device : public RuntimeObject {
    * @param ForceAlloc force_alloc
    */
   amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size, int deviceId,
-                                   int locationType, bool parent, bool kForceAlloc = false);
+                                   bool parent, bool kForceAlloc = false);
 
   /**
    * Deletes Virtual Buffer and creates memob
@@ -1921,8 +1918,7 @@ class Device : public RuntimeObject {
    * @param access_flags Access permissions
    * @param count Number of access permissions
    */
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) = 0;
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.

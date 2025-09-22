@@ -4,28 +4,28 @@
 #        collapsed: true
 sections:
   - title: "High Level Analysis"
-    collapsed: True
+    collapsed: true
     class: "sysinfo-section"
     subsections:
       - title: "GPU Speed-of-Light"
         data_path: ["32. GPU Speed-of-Light", "32.1 GPU Speed-of-Light"]
-        collapsed: True
+        collapsed: true
       - title: "Compute Throughput"
         data_path: ["33. Compute Throughput", "33.1 Compute Throughput"]
-        collapsed: True
+        collapsed: true
       - title: "Memory Throughput"
         data_path: ["34. Memory Throughput", "34.1 Memory Throughput"]
-        collapsed: True
+        collapsed: true
       - title: "Memory Chart"
         data_path: ["3. Memory Chart", "3.1 Memory Chart"]
-        collapsed: True
+        collapsed: true
         tui_style: "mem_chart"
 
   - title: "Detailed Block Analysis"
-    collapsed: True
+    collapsed: true
     class: "block-section"
     subsections:
-      - arch_config_data: True
+      - arch_config_data: true
         exclude_keys:
           - "0. Top Stats"
           - "1. System Info"
@@ -35,12 +35,12 @@ sections:
           - "32. GPU Speed-of-Light"
           - "33. Compute Throughput"
           - "34. Memory Throughput"
-        collapsed: True
+        collapsed: true
 
   - title: "Source Level Analysis"
-    collapsed: True
+    collapsed: true
     class: "source-section"
     subsections:
       - title: "PC Sampling"
         data_path: ["21. PC Sampling", "21.1 PC Sampling"]
-        collapsed: True
+        collapsed: true

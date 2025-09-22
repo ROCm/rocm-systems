@@ -28,6 +28,7 @@ THE SOFTWARE.
 
 #include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcLogger.h"
 
 namespace amd {
 namespace rdc {
@@ -107,6 +108,14 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
       return ret;
     }
 
+    for (auto& proc : procs) {
+      processor_type_t proc_type = {};
+      ret = amdsmi_get_processor_type(proc, &proc_type);
+      if (proc_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+      }
+    }
+
     procs_by_socket[s] = procs;
   }
 
@@ -160,7 +169,7 @@ amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle process
 
 amdsmi_status_t get_processor_count(uint32_t& all_processor_count) {
   uint32_t total_processor_count = 0;
-  uint32_t socket_count = 0;
+  uint32_t socket_count;
   auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
@@ -168,7 +177,7 @@ amdsmi_status_t get_processor_count(uint32_t& all_processor_count) {
   std::vector<amdsmi_socket_handle> sockets(socket_count);
   ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   for (auto& socket : sockets) {
-    uint32_t processor_count = 0;
+    uint32_t processor_count;
     ret = amdsmi_get_processor_handles(socket, &processor_count, nullptr);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       return ret;
@@ -225,7 +234,7 @@ amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metric
 
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   // Get the processor handle for the physical device.
-  amdsmi_processor_handle proc_handle = nullptr;
+  amdsmi_processor_handle proc_handle;
   amdsmi_status_t ret = get_processor_handle_from_id(index, &proc_handle);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;

@@ -21,7 +21,7 @@ trigger:
     - docs
     - '.*.y*ml'
     - '*.md'
-    - LICENSE
+    - License.txt
 
 pr:
   autoCancel: true
@@ -35,7 +35,7 @@ pr:
     - docs
     - '.*.y*ml'
     - '*.md'
-    - LICENSE
+    - License.txt
   drafts: false
 
 jobs:

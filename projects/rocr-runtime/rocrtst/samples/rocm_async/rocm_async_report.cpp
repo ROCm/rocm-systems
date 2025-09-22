@@ -1,9 +1,3 @@
-/*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
- * SPDX-License-Identifier: MIT
- */
- 
 #include "common.hpp"
 #include "rocm_async.hpp"
 

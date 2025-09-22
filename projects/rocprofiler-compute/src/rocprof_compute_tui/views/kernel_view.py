@@ -29,10 +29,9 @@ Panel Widget Modules
 Contains the panel widgets used in the main layout.
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 from textual import on
-from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Label, RadioButton, RadioSet
 
@@ -79,14 +78,13 @@ class KernelView(Container):
     }
     """
 
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self, config_path: Optional[str] = None):
         super().__init__(id="kernel-view")
-        self.kernel_to_df_dict: dict[str, dict[str, Any]] = {}
-        self.top_kernel_to_df_list: list[dict[str, Any]] = []
-        self.current_selection: Optional[str] = None
-        self.status_label: Optional[Label] = None
+        self.kernel_to_df_dict = {}
+        self.top_kernel_to_df_list = []
+        self.current_selection = None
 
-        self.config_path = config_path or str(
+        self.config_path = config_path or (
             rocprof_compute_home
             / "rocprof_compute_tui"
             / "utils"
@@ -95,7 +93,7 @@ class KernelView(Container):
             else None
         )
 
-    def compose(self) -> ComposeResult:
+    def compose(self):
         """
         Compose the split panel layout with two scrollable containers.
         """
@@ -112,11 +110,7 @@ class KernelView(Container):
             # empty on init
             pass
 
-    def update_results(
-        self,
-        kernel_to_df_dict: dict[str, dict[str, Any]],
-        top_kernel_to_df_list: list[dict[str, Any]],
-    ) -> None:
+    def update_results(self, kernel_to_df_dict, top_kernel_to_df_list) -> None:
         self.kernel_to_df_dict = kernel_to_df_dict
         self.top_kernel_to_df_list = top_kernel_to_df_list
 
@@ -157,7 +151,7 @@ class KernelView(Container):
             self.status_label.update(message)
             self.status_label.set_classes(log_level)
 
-    def new_perf_metric(self) -> None:
+    def new_perf_metric(self):
         new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
         for new_metric in new_metrics:
             for i, kernel in enumerate(self.top_kernel_to_df_list):
@@ -177,7 +171,7 @@ class KernelView(Container):
             self.current_selection = kernel_data["Kernel_Name"]
             self.update_bottom_content()
 
-    def update_bottom_content(self) -> None:
+    def update_bottom_content(self):
         bottom_container = self.query_one("#bottom-container", VerticalScroll)
         bottom_container.remove_children()
 

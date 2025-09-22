@@ -324,7 +324,6 @@ if(ROCPROFILER_BUILD_GOTCHA)
         install(
             TARGETS gotcha
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk"
-            COMPONENT rocpd
             OPTIONAL)
     endfunction()
 

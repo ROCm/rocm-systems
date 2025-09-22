@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -35,97 +34,89 @@ class cli_analysis(OmniAnalyze_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def pre_processing(self) -> None:
+    def pre_processing(self):
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
-        args = self.get_args()
-
-        if args.random_port:
+        if self.get_args().random_port:
             console_error("--gui flag is required to enable --random-port")
-
-        for path_info in args.path:
-            workload = self._runs[path_info[0]]
-
+        for d in self.get_args().path:
+            workload = self._runs[d[0]]
             # create 'mega dataframe'
             workload.raw_pmc = file_io.create_df_pmc(
-                path_info[0],
-                args.nodes,
-                args.spatial_multiplexing,
-                args.kernel_verbose,
-                args.verbose,
+                d[0],
+                self.get_args().nodes,
+                self.get_args().spatial_multiplexing,
+                self.get_args().kernel_verbose,
+                self.get_args().verbose,
                 self._profiling_config,
             )
 
-            if args.spatial_multiplexing:
+            if self.get_args().spatial_multiplexing:
                 workload.raw_pmc = self.spatial_multiplex_merge_counters(
                     workload.raw_pmc
                 )
 
             file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
-                raw_data_dir=path_info[0],
+                raw_data_dir=d[0],
                 filter_gpu_ids=workload.filter_gpu_ids,
                 filter_dispatch_ids=workload.filter_dispatch_ids,
                 filter_nodes=workload.filter_nodes,
-                time_unit=args.time_unit,
-                kernel_verbose=args.kernel_verbose,
+                time_unit=self.get_args().time_unit,
+                max_stat_num=self.get_args().max_stat_num,
+                kernel_verbose=self.get_args().kernel_verbose,
             )
 
             # demangle and overwrite original 'Kernel_Name'
-            kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
+            kernel_name_shortener(workload.raw_pmc, self.get_args().kernel_verbose)
 
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
-                dir_path=path_info[0],
+                dir=d[0],
                 is_gui=False,
-                args=args,
+                args=self.get_args(),
                 config=self._profiling_config,
             )
 
     @demarcate
-    def run_analysis(self) -> None:
+    def run_analysis(self):
         """Run CLI analysis."""
         super().run_analysis()
 
-        args = self.get_args()
-
-        workload_path = args.path[0][0]
+        workload_path = self.get_args().path[0][0]
         workload = self._runs[workload_path]
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
-        if args.list_stats:
+        if self.get_args().list_stats:
             tty.show_kernel_stats(
-                args,
+                self.get_args(),
                 self._runs,
                 arch_config,
                 self._output,
             )
         else:
             roof_plot = None
-
-            # Generate roofline plot for single-path, compatible architectures
-            if (len(args.path)) == 1:
+            # 1. check if not baseline && compatible soc:
+            if (len(self.get_args().path)) == 1:
                 if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
-                    soc = self.get_socs()
-                    if soc and gpu_arch in soc:
-                        roof_obj = soc[gpu_arch].roofline_obj
+                    roof_obj = self.get_socs()[gpu_arch].roofline_obj
 
-                        if roof_obj:
-                            # store path in workload for calc_ai_analyze
-                            workload.path = workload_path
+                    if roof_obj:
+                        # store path in workload for calc_ai_analyze
+                        workload.path = workload_path
 
-                            # NOTE: using default data type
-                            roof_plot = roof_obj.cli_generate_plot(
-                                dtype=roof_obj.get_dtype()[0],
-                                workload=workload,
-                                config=self._profiling_config,
-                                arch_config=arch_config,
-                            )
+                        # NOTE: using default data type
+                        roof_plot = roof_obj.cli_generate_plot(
+                            dtype=roof_obj.get_dtype()[0],
+                            workload=workload,
+                            config=self._profiling_config,
+                            arch_config=arch_config,
+                        )
 
             tty.show_all(
-                args,
+                self.get_args(),
                 self._runs,
                 arch_config,
                 self._output,

@@ -276,7 +276,6 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
-  CHECK_P2P_SUPPORT
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
@@ -424,7 +423,6 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
-  CHECK_P2P_SUPPORT
   int deviceId = 0, devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
@@ -434,7 +432,6 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   hipDevice_t device;
-  HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
@@ -454,9 +451,9 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
   }
   // Allocate a physical memory chunk
   for (int dev = 0; dev < devicecount; dev++) {
-    hipDevice_t dev_handle;
-    HIP_CHECK(hipDeviceGet(&dev_handle, dev));
-    prop.location.id = dev_handle;
+    hipDevice_t device;
+    HIP_CHECK(hipDeviceGet(&device, dev));
+    prop.location.id = device;
     HIP_CHECK(hipMemCreate(&handle[dev], size_mem, &prop, 0));
   }
   // Allocate devicecount virtual address ranges

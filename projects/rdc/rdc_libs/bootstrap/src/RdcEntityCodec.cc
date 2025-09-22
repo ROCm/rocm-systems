@@ -24,7 +24,10 @@ THE SOFTWARE.
 #include <rdc_lib/RdcEntityCodec.h>
 
 #include <algorithm>
+#include <iostream>
 #include <string>
+
+#include "common/rdc_utils.h"
 
 rdc_entity_info_t rdc_get_info_from_entity_index(uint32_t entity_index) {
   rdc_entity_info_t info;
@@ -51,34 +54,33 @@ bool rdc_is_partition_string(const char* s) {
     return false;
   }
 
-  // Support both GPU ('g') and CPU ('c') partition strings
-  if (s[0] != 'g' && s[0] != 'c') {
+  if (s[0] != 'g') {
     return false;
   }
 
   std::string str(s);
-  size_t dot_pos = str.find('.');
-  if (dot_pos == std::string::npos) return false;
+  size_t dotPos = str.find('.');
+  if (dotPos == std::string::npos) return false;
 
-  if (dot_pos <= 1 || dot_pos >= str.size() - 1) return false;
+  if (dotPos <= 1 || dotPos >= str.size() - 1) return false;
 
-  std::string socket_part = str.substr(1, dot_pos - 1);
-  std::string partition_part = str.substr(dot_pos + 1);
+  std::string gpuPart = str.substr(1, dotPos - 1);
+  std::string partitionPart = str.substr(dotPos + 1);
 
-  if (!std::all_of(socket_part.begin(), socket_part.end(), ::isdigit) ||
-      !std::all_of(partition_part.begin(), partition_part.end(), ::isdigit))
+  if (!std::all_of(gpuPart.begin(), gpuPart.end(), ::isdigit) ||
+      !std::all_of(partitionPart.begin(), partitionPart.end(), ::isdigit))
     return false;
 
-  int socket_index = std::stoi(socket_part);
-  int partition_index = std::stoi(partition_part);
+  int gpuIndex = std::stoi(gpuPart);
+  int partitionIndex = std::stoi(partitionPart);
 
-  if (socket_index < 0 || socket_index >= RDC_MAX_NUM_DEVICES) return false;
-  if (partition_index < 0 || partition_index >= RDC_MAX_NUM_PARTITIONS) return false;
+  if (gpuIndex < 0 || gpuIndex >= RDC_MAX_NUM_DEVICES) return false;
+  if (partitionIndex < 0 || partitionIndex >= RDC_MAX_NUM_PARTITIONS) return false;
 
   return true;
 }
 
-bool rdc_parse_partition_string(const char* s, uint32_t* socket, uint32_t* partition) {
+bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* partition) {
   if (!s) {
     return false;
   }
@@ -94,17 +96,16 @@ bool rdc_parse_partition_string(const char* s, uint32_t* socket, uint32_t* parti
 
   if (pos == std::string::npos) return false;
 
-  std::string socket_str = rest.substr(0, pos);
-  std::string partition_str = rest.substr(pos + 1);
+  std::string gpuStr = rest.substr(0, pos);
+  std::string partStr = rest.substr(pos + 1);
 
   // Ensure both parts are a number
-  if (!(!socket_str.empty() && std::all_of(socket_str.begin(), socket_str.end(), ::isdigit)) ||
-      !(!partition_str.empty() &&
-        std::all_of(partition_str.begin(), partition_str.end(), ::isdigit))) {
+  if (!(!gpuStr.empty() && std::all_of(gpuStr.begin(), gpuStr.end(), ::isdigit)) ||
+      !(!partStr.empty() && std::all_of(partStr.begin(), partStr.end(), ::isdigit))) {
     return false;
   }
 
-  *socket = std::stoi(socket_str);
-  *partition = std::stoi(partition_str);
+  *physicalGpu = std::stoi(gpuStr);
+  *partition = std::stoi(partStr);
   return true;
 }
