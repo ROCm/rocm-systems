@@ -33,6 +33,7 @@
 #include <sys/param.h>
 #include <algorithm>
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmtctx.h"
 #include "OSWrapper.hpp"
 #include "KFDTestUtil.hpp"
 #include "Assemble.hpp"
@@ -57,7 +58,7 @@ typedef struct _KFDTESTGPU_PARAMETERS
 //  @class KFDBaseComponentTest
 class KFDBaseComponentTest : public testing::Test {
  public:
-    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; }
+    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; m_hsakmt_current_ctx = NULL; }
     ~KFDBaseComponentTest(void) {}
 
     HSAuint64 GetSysMemSize();
@@ -112,7 +113,12 @@ class KFDBaseComponentTest : public testing::Test {
 
     HSAKMT_STATUS KFDTest_Launch(Test_Function test_function);
 
+    HsaKFDContext *m_hsakmt_current_ctx;
+
  protected:
+    HsaKFDContext *m_hsakmt_primary_ctx;
+    HsaKFDContext *m_hsakmt_secondary_ctx;
+
     HsaVersionInfo  m_VersionInfo;
     HsaSystemProperties m_SystemProperties;
     unsigned int m_FamilyId;
