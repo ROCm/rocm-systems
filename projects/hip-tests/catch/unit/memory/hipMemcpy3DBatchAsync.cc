@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(16, 16, 4);
   size_t elements_3d =
-      extent.width * extent.height * extent.depth * sizeof(char);
+      extent.width * extent.height * extent.depth;
 
   // Source Pointers
   std::vector<char> srcPtr1(elements_3d, 'a');
@@ -198,7 +198,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps") {
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(16, 16, 4);
   size_t elements_3d =
-      extent.width * extent.height * extent.depth * sizeof(char);
+      extent.width * extent.height * extent.depth;
 
   // Host Pointers
   std::vector<char> srcPtr1(elements_3d, 'a');
