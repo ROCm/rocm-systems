@@ -22,7 +22,7 @@
 
 #pragma once
 
-class GFX11
+class GFX12
 {
 public:
     enum inst_type_issued
@@ -39,10 +39,11 @@ public:
         TYPE_BRANCH_TAKEN,
         TYPE_JUMP,
         TYPE_OTHER,
-        TYPE_NO_INST,
-        TYPE_DUAL_VALU = 31,
-        TYPE_MATRIX    = 31,
-        TYPE_FLAT      = 31,
+        TYPE_NO_INST,  // regspec call this NONE
+        TYPE_DUAL_VALU,
+        TYPE_FLAT,
+        TYPE_MATRIX,
+        TYPE_LAST
     };
 
     enum reason_not_issued
@@ -54,26 +55,28 @@ public:
         REASON_SLEEP_WAIT,
         REASON_BARRIER_WAIT,
         REASON_OTHER_WAIT,
-        REASON_INTERNAL_INSTRUCTION = 31,
+        REASON_INTERNAL_INSTRUCTION,
+        REASON_LAST,
         REASON_ARBITER_WIN_EX_STALL = 31,
     };
 
     enum arb_state
     {
-        ISSUE_MISC = 0,
+        ISSUE_BRMSG = 0,
         ISSUE_EXP,
         ISSUE_LDS_DIRECT,
         ISSUE_LDS,
         ISSUE_VMEM_TEX,
         ISSUE_SCALAR,
         ISSUE_VALU,
+        ISSUE_LAST,
         ISSUE_MATRIX = 31,
         ISSUE_FLAT   = 31,
-        ISSUE_BRMSG  = 31,
+        ISSUE_MISC   = 31,
     };
 
     // max number of waves per SIMD
     static constexpr size_t   max_wave_cnt = 16;
-    static constexpr uint32_t gfx_ip_major = 11;
+    static constexpr uint32_t gfx_ip_major = 12;
     static constexpr uint32_t gfx_ip_minor = 0;
 };

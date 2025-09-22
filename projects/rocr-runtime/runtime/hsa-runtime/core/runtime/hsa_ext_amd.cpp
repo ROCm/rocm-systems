@@ -1537,6 +1537,45 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* _queue,
   CATCH;
 }
 
+hsa_status_t hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                    uint64_t size, int64_t file_offset,
+                                    uint64_t *size_copied, int32_t *status) {
+  TRY;
+  IS_OPEN();
+
+  if (devicePtr == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Call the kernel module function through the thunk layer
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
+                                                          file_offset, HSA_AIS_WRITE,
+                                                          size_copied, status);
+
+  return (ret == HSAKMT_STATUS_SUCCESS) ?
+                            HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                   uint64_t size, int64_t file_offset,
+                                   uint64_t *size_copied, int32_t *status) {
+  TRY;
+  IS_OPEN();
+
+  if (devicePtr == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Call the kernel module function through the thunk layer
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
+                                                          file_offset, HSA_AIS_READ,
+                                                          size_copied, status);
+
+  return (ret == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   TRY;
   return core::Runtime::runtime_singleton_->EnableLogging(flags, file);
