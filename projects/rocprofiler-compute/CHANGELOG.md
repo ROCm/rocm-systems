@@ -58,6 +58,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
 
+* Roofline support for Debian 12 and Azure Linux 3.0.
+
 ### Changed
 
 * On memory chart, long string of numbers are displayed as scientific notation. It also solves the issue of overflow of displaying long number

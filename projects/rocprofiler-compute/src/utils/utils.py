@@ -1159,10 +1159,13 @@ def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
         "path": None,
     }
 
+    # Create distro ID list based off of ID (a string, containing a single distro)
+    # and ID_LIKE (a string, listing at least one distro, separated by a single space)
+    # from the system /etc/os-release file
     os_release = Path("/etc/os-release").read_text()
-    ubuntu_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
-    rhel_distro = specs.search(r'PLATFORM_ID="(.*?)"', os_release)
-    sles_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
+    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release) or ""
+    id = specs.search(r'^ID="?(.*?)"?$', os_release) or ""
+    id_list = id_list.split() + [id]
 
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
@@ -1181,28 +1184,19 @@ def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
                 f"ROOFLINE_BIN = {rooflineBinary}\n",
             )
 
-    # Must be a valid RHEL machine
-    elif rhel_distro in {
-        "platform:el8",
-        "platform:al8",
-        "platform:el9",
-        "platform:el10",
-    }:
+    # check that the system OS is based off of one of the following distributions
+    elif "azurelinux" in id_list:
+        distro = "azurelinux"
+
+    elif "debian" in id_list:
+        distro = "22.04"
+
+    elif "fedora" in id_list:
         distro = "platform:el8"
 
-    # Must be a valid SLES machine
-    elif (
-        isinstance(sles_distro, str)
-        and len(sles_distro) >= 3
-        and sles_distro[:2] == "15"  # confirm string and len
-        and int(sles_distro[3]) >= 6  # SLES15 and SP >= 6
-    ):
-        # Use SP6 binary for all forward compatible service pack versions
+    elif "suse" in id_list:
         distro = "15.6"
 
-    # Must be a valid Ubuntu machine
-    elif ubuntu_distro in {"22.04", "24.04"}:
-        distro = "22.04"
     else:
         console_error(
             "roofline", "Cannot find a valid binary for your operating system"
@@ -1221,6 +1215,7 @@ def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
         "platform:el8": "rhel8",
         "15.6": "sles15sp6",
         "22.04": "ubuntu22_04",
+        "azurelinux": "azurelinux3",
     }
 
     binary_paths: list[str] = []
