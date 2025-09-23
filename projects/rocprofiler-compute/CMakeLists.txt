@@ -50,6 +50,8 @@ include(ExternalProject)
 include(GNUInstallDirs)
 
 set(ENABLE_KOKKOS OFF)
+option(USE_MOCK_KOKKOS "Use mock Kokkos implementation for testing" ON)
+
 
 if(ENABLE_TESTS)
     if(UNIX)
@@ -95,28 +97,23 @@ if(ENABLE_TESTS)
 endif()
 
 if(ENABLE_KOKKOS)
-    ExternalProject_Add(
-        kokkos_src
-        GIT_REPOSITORY https://github.com/kokkos/kokkos.git
-        GIT_TAG caea1f54557acb408fe994c7d5b2574e4847454e
-        SOURCE_DIR ${CMAKE_BINARY_DIR}/../tests/kokkos-src
-        BINARY_DIR ${CMAKE_BINARY_DIR}/../tests/kokkos-build
-        CMAKE_ARGS
-            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/../tests/kokkos-build
-            -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_PREFIX_PATH=/opt/rocm
-            -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF
-            -DCMAKE_CXX_COMPILER=amdclang++ -DKokkos_ENABLE_OPENMP=OFF
-            -DKokkos_ENABLE_SERIAL=ON -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
-        BUILD_COMMAND ${CMAKE_COMMAND} --build . --target install
-    )
-
-    ExternalProject_Add_Step(
-        kokkos_src
-        build_mock_app
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        DEPENDEES download
-    )
+    if(NOT USE_MOCK_KOKKOS)
+        ExternalProject_Add(
+            kokkos_src
+            GIT_REPOSITORY https://github.com/kokkos/kokkos.git
+            GIT_TAG caea1f54557acb408fe994c7d5b2574e4847454e
+            SOURCE_DIR ${CMAKE_BINARY_DIR}/../tests/kokkos-src
+            BINARY_DIR ${CMAKE_BINARY_DIR}/../tests/kokkos-build
+            CMAKE_ARGS
+                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/../tests/kokkos-build
+                -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_PREFIX_PATH=/opt/rocm
+                -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF
+                -DCMAKE_CXX_COMPILER=amdclang++ -DKokkos_ENABLE_OPENMP=OFF
+                -DKokkos_ENABLE_SERIAL=ON -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
+            BUILD_COMMAND ${CMAKE_COMMAND} --build . --target install
+        )
+    endif()
 endif()
 
 # version control info

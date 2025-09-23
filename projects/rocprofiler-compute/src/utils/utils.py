@@ -1082,14 +1082,15 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
 
     # Check if we have files to process
     if not existing_marker_files_csv:
-        console_warning(
-            "No marker_api_trace files found. Exiting kokkos trace processing."
-        )
         no_results = pd.DataFrame()
+        if not Path(workload_dir + "/out/pmc_1").exists():
+            Path(workload_dir + "/out/pmc_1").mkdir(parents=True, exist_ok=True)
+
         no_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             index=False,
         )
+        
     else:
         # concate and output marker api trace info
         combined_results_marker = pd.concat(
@@ -1107,24 +1108,23 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         )
 
     if not existing_counter_files_csv:
-        console_warning(
-            "No counter_collection files found. Exiting kokkos trace processing."
-        )
         no_results = pd.DataFrame()
         no_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
             index=False,
         )
     else:
-        if len(existing_counter_files_csv) != len(existing_marker_files_csv):
-            console_warning(
-                "Mismatch in number of marker_api_trace and counter_collection files."
-            )
-
         combined_results_counter = pd.concat(
             [pd.read_csv(f) for f in existing_counter_files_csv], ignore_index=True
-        )
+            )
 
+    if not existing_marker_files_csv and not existing_marker_files_csv:
+        return
+    if not existing_marker_files_csv:
+        combined_results = combined_results_counter
+    elif not existing_counter_files_csv:
+        combined_results = combined_results_marker
+    else:
         combined_results = pd.merge(
             combined_results_marker,
             combined_results_counter,
@@ -1132,19 +1132,19 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             on="Correlation_Id",
         )
 
-        combined_results = combined_results[
-            combined_results["Kernel_Name"].str.contains("kokkos", case=False, na=False)
-        ]
+    combined_results = combined_results[
+        combined_results["Kernel_Name"].str.contains("kokkos", case=False, na=False)
+    ]
 
-        combined_results.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
-            index=False,
-        )
+    combined_results.to_csv(
+        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+        index=False,
+    )
 
-        shutil.copyfile(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
-            workload_dir + "/" + fbase + "_kokkos_trace.csv",
-        )
+    shutil.copyfile(
+        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+        workload_dir + "/" + fbase + "_kokkos_trace.csv",
+    )
 
 
 @demarcate

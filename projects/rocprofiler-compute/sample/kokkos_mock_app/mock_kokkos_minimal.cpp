@@ -1,41 +1,54 @@
-#include <Kokkos_Core.hpp>
-#include <iostream>
+#include "mock_kokkos.hpp"
 
-int main(int argc, char** argv) {
-    std::cout << "Kokkos configuration:" << std::endl;
-    #ifdef KOKKOS_ENABLE_HIP
-        std::cout << "  HIP enabled" << std::endl;
-    #endif
-    #ifdef KOKKOS_ENABLE_CUDA
-        std::cout << "  CUDA enabled" << std::endl;
-    #endif
-    #ifdef KOKKOS_ENABLE_OPENMP
-        std::cout << "  OpenMP enabled" << std::endl;
-    #endif
-    #ifdef KOKKOS_ENABLE_SERIAL
-        std::cout << "  Serial enabled" << std::endl;
-    #endif
-
-    Kokkos::initialize(argc, argv);
-    std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
-
-    {
-        // Use a larger N for meaningful roofline data, but not too large
-        int N = 1000000;
-        Kokkos::View<int*> data("data", N);
-
-        Kokkos::parallel_for("FillData", N, KOKKOS_LAMBDA(const int i) {
-            data(i) = i * i;
-        });
-
-        int sum = 0;
-        Kokkos::parallel_reduce("SumData", N, KOKKOS_LAMBDA(const int i, int& lsum) {
-            lsum += data(i);
-        }, sum);
-
-        std::cout << "Sum of squares from 0 to " << N-1 << " is " << sum << std::endl;
-    } // All Kokkos Views destroyed here
-
+int main() {
+    // Initialize Kokkos
+    Kokkos::initialize();
+    
+    const int n = 100;
+    
+    // Create a View - make sure it's not const and properly sized
+    Kokkos::View<int> data("test_data", n);
+    
+    // Get device pointer for kernel access
+    int* data_ptr = data.data();  // Get raw device pointer
+    
+    // Fill the view with data using parallel_for
+    Kokkos::parallel_for<Kokkos::HIP>(
+        Kokkos::RangePolicy<int>(0, n),
+        [=] __device__ (const int i) {  // Add __device__ and use [=] with device pointer
+            data_ptr[i] = i * i;
+        }
+    );
+    
+    // Debug: Print first few values to verify data was written
+    std::cout << "First few values: ";
+    for(int i = 0; i < 5 && i < n; ++i) {
+        std::cout << data(i) << " ";  // This uses host access
+    }
+    std::cout << std::endl;
+    
+    // Sum all values using parallel_reduce with device pointer
+    // CHANGED: Use Kokkos::HIP instead of Kokkos::Serial to launch GPU kernels
+    int sum = 0;
+    Kokkos::parallel_reduce<Kokkos::HIP>(
+        Kokkos::RangePolicy<int>(0, n),
+        [=] __device__ (const int i, int& result) {  // Add __device__ and use device pointer
+            result += data_ptr[i];
+        }, 
+        sum
+    );
+    
+    std::cout << "Sum of squares from 0 to " << (n-1) << " = " << sum << std::endl;
+    
+    // Expected sum should be: 0² + 1² + 2² + ... + 99² = 328350
+    int expected = 0;
+    for(int i = 0; i < n; i++) {
+        expected += i * i;
+    }
+    std::cout << "Expected sum: " << expected << std::endl;
+    
+    // Clean up
     Kokkos::finalize();
+    
     return 0;
 }
