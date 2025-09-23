@@ -1026,6 +1026,105 @@ struct __hip_fp8_e4m3_fnuz {
                                    __default_interpret)) {
   }
 
+#if HIP_FP8_TYPE_FNUZ
+  __FP8_HOST_DEVICE__ __hip_fp8_e4m3_fnuz(long long val) {
+#else
+  __FP8_HOST__ __hip_fp8_e4m3_fnuz(long long val) {
+#endif
+    if (val == 0) {
+      __x = 0;
+      return;
+    }
+
+    uint8_t sign = static_cast<std::uint8_t>((val & 0x8000000000000000ULL) >> 56);
+    uint64_t absVal = (sign) ? (~val + 1) : val;
+
+#if __HIP_DEVICE_COMPILE__
+    int msb_pos = 64 - __clzll(absVal);
+#else
+    int msb_pos = 64 - __builtin_clzll(absVal);
+#endif
+
+    int exp = msb_pos + 7;
+
+    if (exp >= 15) {
+      __x = 0x7E;
+      return;
+    }
+
+    uint64_t mantissa_bits = 0;
+    if (msb_pos >= 3) {
+      mantissa_bits = (absVal >> (msb_pos - 3)) & 0x07;
+      if (msb_pos > 3) {
+        uint64_t remainder = absVal & ((1ULL << (msb_pos - 3)) - 1);
+        uint64_t halfway = 1ULL << (msb_pos - 4);
+        if (remainder > halfway || (remainder == halfway && (mantissa_bits & 1))) mantissa_bits++;
+      }
+    } else if (msb_pos == 2) {
+      mantissa_bits = (absVal & 0x03) << 1;
+    } else if (msb_pos == 1) {
+      mantissa_bits = (absVal & 0x01) << 2;
+    }
+
+    if (mantissa_bits >= 8) {
+      mantissa_bits = 0;
+      exp++;
+      if (exp >= 15) {
+        __x = 0x7E;
+        return;
+      }
+    }
+    __x = sign | (exp << 3) | (mantissa_bits & 0x07);
+  }
+
+#if HIP_FP8_TYPE_FNUZ
+  __FP8_HOST_DEVICE__ __hip_fp8_e4m3_fnuz(unsigned long long val) {
+#else
+  __FP8_HOST__ __hip_fp8_e4m3_fnuz(unsigned long long val) {
+#endif
+    if (val == 0) {
+      __x = 0;
+      return;
+    }
+
+#if __HIP_DEVICE_COMPILE__
+    int msb_pos = 64 - __clzll(absVal);
+#else
+    int msb_pos = 64 - __builtin_clzll(val);
+#endif
+
+    int exp = msb_pos + 7;
+
+    if (exp >= 15) {
+      __x = 0xFE;
+      return;
+    }
+
+    uint64_t mantissa_bits = 0;
+    if (msb_pos >= 3) {
+      mantissa_bits = (val >> (msb_pos - 3)) & 0x07;
+      if (msb_pos > 3) {
+        uint64_t remainder = val & ((1ULL << (msb_pos - 3)) - 1);
+        uint64_t halfway = 1ULL << (msb_pos - 4);
+        if (remainder > halfway || (remainder == halfway && (mantissa_bits & 1))) mantissa_bits++;
+      }
+    } else if (msb_pos == 2) {
+      mantissa_bits = (val & 0x03) << 1;
+    } else if (msb_pos == 1) {
+      mantissa_bits = (val & 0x01) << 2;
+    }
+
+    if (mantissa_bits >= 8) {
+      mantissa_bits = 0;
+      exp++;
+      if (exp >= 15) {
+        __x = 0xFE;
+        return;
+      }
+    }
+    __x = (exp << 3) | (mantissa_bits & 0x07);
+  }
+
   /*! create fp8 e4m3 from double */
 #if HIP_FP8_TYPE_FNUZ
   __FP8_HOST_DEVICE__ __hip_fp8_e4m3_fnuz(const double f)
@@ -1662,6 +1761,101 @@ struct __hip_fp8_e5m2_fnuz {
 #endif
     float f = *this;
     return __hip_bfloat16(f);
+  }
+
+#if HIP_FP8_TYPE_FNUZ
+  __FP8_HOST_DEVICE__ __hip_fp8_e5m2_fnuz(long long val) {
+#else
+  __FP8_HOST__ __hip_fp8_e5m2_fnuz(long long val) {
+#endif
+    if (val == 0) {
+      __x = 0;
+      return;
+    }
+
+    uint8_t sign = static_cast<std::uint8_t>((val & 0x8000000000000000ULL) >> 56);
+    uint64_t absVal = (sign) ? (~val + 1) : val;
+
+#if __HIP_DEVICE_COMPILE__
+    int msb_pos = 64 - __clzll(absVal);
+#else
+    int msb_pos = 64 - __builtin_clzll(absVal);
+#endif
+
+    int exp = msb_pos + 15;
+
+    if (exp >= 31) {
+      __x = 0x7E;
+      return;
+    }
+
+    uint64_t mantissa_bits = 0;
+    if (msb_pos >= 2) {
+      mantissa_bits = (absVal >> (msb_pos - 2)) & 0x03;
+      if (msb_pos > 2) {
+        uint64_t remainder = absVal & ((1ULL << (msb_pos - 2)) - 1);
+        uint64_t halfway = 1ULL << (msb_pos - 3);
+        if (remainder > halfway || (remainder == halfway && (mantissa_bits & 1))) mantissa_bits++;
+      }
+    } else if (msb_pos == 1) {
+      mantissa_bits = (absVal & 1) << 1;
+    }
+
+    if (mantissa_bits >= 4) {
+      mantissa_bits = 0;
+      exp++;
+      if (exp >= 31) {
+        __x = 0x7E;
+        return;
+      }
+    }
+    __x = sign | (exp << 2) | (mantissa_bits & 0x03);
+  }
+
+#if HIP_FP8_TYPE_FNUZ
+  __FP8_HOST_DEVICE__ __hip_fp8_e5m2_fnuz(unsigned long long val) {
+#else
+  __FP8_HOST__ __hip_fp8_e5m2_fnuz(unsigned long long val) {
+#endif
+    if (val == 0) {
+      __x = 0;
+      return;
+    }
+
+#if __HIP_DEVICE_COMPILE__
+    int msb_pos = 64 - __clzll(absVal);
+#else
+    int msb_pos = 64 - __builtin_clzll(val);
+#endif
+
+    int exp = msb_pos + 15;
+
+    if (exp >= 31) {
+      __x = 0xFE;
+      return;
+    }
+
+    uint64_t mantissa_bits = 0;
+    if (msb_pos >= 2) {
+      mantissa_bits = (val >> (msb_pos - 2)) & 0x03;
+      if (msb_pos > 2) {
+        uint64_t remainder = val & ((1ULL << (msb_pos - 2)) - 1);
+        uint64_t halfway = 1ULL << (msb_pos - 3);
+        if (remainder > halfway || (remainder == halfway && (mantissa_bits & 1))) mantissa_bits++;
+      }
+    } else if (msb_pos == 1) {
+      mantissa_bits = (val & 1) << 1;
+    }
+
+    if (mantissa_bits >= 4) {
+      mantissa_bits = 0;
+      exp++;
+      if (exp >= 31) {
+        __x = 0xFE;
+        return;
+      }
+    }
+    __x = (exp << 2) | (mantissa_bits & 0x03);
   }
 
   /*! convert fp8 e4m3 to bool, return false if value is 0, true otherwise */
