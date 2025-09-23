@@ -49,6 +49,22 @@ The ``rocpd`` database format supports conversion to alternative output formats 
 
 The ``rocpd`` conversion utility is distributed as part of the ROCm installation package, located in ``/opt/rocm-<version>/bin``, and provides both executable and Python module interfaces for programmatic integration.
 
+**Available rocpd Commands**
+
+The ``rocpd`` tool provides three main subcommands for different analysis workflows. To see all available options:
+
+.. code-block:: bash
+
+   rocpd --help
+
+This will display the available subcommands: ``{convert, query, summary}``
+
+- **convert** - Transform rocpd databases to alternative formats (CSV, OTF2, PFTrace)
+- **query** - Execute SQL queries against rocpd databases with flexible output options
+- **summary** - Generate statistical analysis reports equivalent to rocprofv3 summary functionality
+
+**Format Conversion**
+
 Invoke the ``rocpd convert`` command with appropriate parameters to transform database files into target formats.
 
 **CSV Format Conversion:**
@@ -417,6 +433,228 @@ rocpd2summary - Statistical Analysis Tool
 - ``summary_rocr_api.{format}`` - ROCr runtime API analysis
 - ``summary_memory.{format}`` - Memory operation statistics
 
+Summary
++++++++
+
+The ``rocpd summary`` command provides statistical analysis and performance summaries equivalent to the summary functionality available in ``rocprofv3``. This command generates comprehensive reports from rocpd database files, offering the same analytical capabilities that were previously available through ``rocprofv3 --summary`` but now operating on the structured database format.
+
+**Purpose:** Generate statistical summaries and performance reports from rocpd database files, providing equivalent functionality to rocprofv3's built-in summary capabilities.
+
+**Location:** ``/opt/rocm/bin/rocpd summary``
+
+**Syntax:**
+
+.. code-block:: bash
+
+   rocpd summary -i INPUT [INPUT ...] [OPTIONS]
+
+**Key Features:**
+
+- **Compatible Analysis:** Provides the same summary statistics and reports as ``rocprofv3 --summary``
+- **Database-Driven:** Operates on structured rocpd database files for consistent, reproducible analysis
+- **Multi-Database Aggregation:** Combine and analyze data from multiple profiling sessions, ranks, or nodes in a single operation
+- **Comparative Analysis:** Use ``--summary-by-rank`` to compare performance across different ranks, nodes, or execution contexts
+- **Flexible Output:** Generate summaries in multiple formats (console, CSV, HTML, JSON)
+- **Selective Reporting:** Focus on specific performance domains and categories
+
+**Multi-Database Analysis Benefits**
+
+The ``rocpd summary`` command excels at aggregating multiple database files, providing capabilities not available with single-session analysis:
+
+**Unified Summary Reports:**
+
+.. code-block:: bash
+
+   # Aggregate multiple databases into single comprehensive summary
+   rocpd summary -i session1.db session2.db session3.db --format html -o unified_summary
+   
+   # Combine all MPI rank databases for overall application analysis
+   rocpd summary -i rank_*.db --format csv -o mpi_application_summary
+   
+   # Time-series aggregation across multiple profiling runs
+   rocpd summary -i daily_profile_*.db --format json -o weekly_performance_trends
+
+**Rank-by-Rank Comparative Analysis:**
+
+The ``--summary-by-rank`` option enables detailed comparative analysis, allowing you to identify performance variations, load balancing issues, and optimization opportunities across different execution contexts:
+
+.. code-block:: bash
+
+   # Compare performance across MPI ranks
+   rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank --format html -o rank_comparison
+   
+   # Analyze multi-node performance characteristics
+   rocpd summary -i node_*.db --summary-by-rank --format csv -o node_performance_analysis
+   
+   # Compare GPU device performance in multi-GPU applications
+   rocpd summary -i gpu_0.db gpu_1.db gpu_2.db gpu_3.db --summary-by-rank --format json -o gpu_scaling_analysis
+
+**Use Cases for Multi-Database Summary Analysis:**
+
+**1. MPI Application Performance Analysis:**
+
+.. code-block:: bash
+
+   # Profile distributed MPI application
+   mpirun -np 8 rocprofv3 --hip-trace --output-format rocpd -- mpi_simulation
+   
+   # Generate unified summary for overall application performance
+   rocpd summary -i results_rank_*.db --format html -o application_overview
+   
+   # Identify load balancing issues with rank-by-rank comparison
+   rocpd summary -i results_rank_*.db --summary-by-rank --format csv -o load_balance_analysis
+
+**2. Multi-GPU Scaling Studies:**
+
+.. code-block:: bash
+
+   # Profile scaling from 1 to 4 GPUs
+   for gpus in 1 2 4; do
+       rocprofv3 --hip-trace --device 0:$((gpus-1)) --output-format rocpd -o "scaling_${gpus}gpu.db" -- gpu_benchmark
+   done
+   
+   # Aggregate scaling analysis
+   rocpd summary -i scaling_*gpu.db --format html -o gpu_scaling_summary
+   
+   # Compare efficiency across different GPU counts
+   rocpd summary -i scaling_*gpu.db --summary-by-rank --format json -o scaling_efficiency
+
+**3. Performance Regression Testing:**
+
+.. code-block:: bash
+
+   # Profile baseline and optimized versions
+   rocprofv3 --hip-trace --output-format rocpd -o baseline.db -- application_v1
+   rocprofv3 --hip-trace --output-format rocpd -o optimized.db -- application_v2
+   
+   # Generate unified performance comparison
+   rocpd summary -i baseline.db optimized.db --summary-by-rank --format html -o regression_analysis
+
+**4. Cross-Platform Performance Comparison:**
+
+.. code-block:: bash
+
+   # Profile on different hardware platforms
+   rocprofv3 --hip-trace --output-format rocpd -o platform_A.db -- benchmark
+   rocprofv3 --hip-trace --output-format rocpd -o platform_B.db -- benchmark
+   
+   # Compare platform performance characteristics
+   rocpd summary -i platform_*.db --summary-by-rank --format csv -o platform_comparison
+
+**Advanced Summary Analysis:**
+
+.. code-block:: bash
+
+   # Cross-rank summary for MPI applications with domain focus
+   rocpd summary -i rank_*.db --summary-by-rank --region-categories KERNEL HIP --format html
+   
+   # Time-windowed multi-database analysis
+   rocpd summary -i profile_*.db --start 25% --end 75% --summary-by-rank
+   
+   # Domain-specific comparative analysis
+   rocpd summary -i node_*.db --domain-summary --summary-by-rank --region-categories HIP ROCR
+
+**Output Interpretation:**
+
+- **Unified Summaries:** Provide aggregate statistics across all input databases, showing combined performance metrics
+- **Rank-by-Rank Summaries:** Generate separate statistical reports for each input database, enabling direct comparison of performance characteristics
+- **Comparative Metrics:** Highlight performance variations, identify outliers, and reveal load balancing opportunities
+
+**Integration with rocprofv3 Workflow:**
+
+The ``rocpd summary`` command maintains full compatibility with ``rocprofv3`` summary analysis while extending capabilities to multi-database scenarios. Users familiar with ``rocprofv3 --summary`` will find identical statistical outputs and report formats when using ``rocpd summary`` on database files, with the added benefit of cross-session analysis capabilities.
+
+For detailed information about summary statistics and report interpretation, see :ref:`using-rocprofv3-summary`.
+
+Aggregating rocpd Data
+++++++++++++++++++++++
+
+One of the key advantages of the ``rocpd`` format is its ability to aggregate and analyze data from multiple profiling sessions, ranks, or nodes within a unified framework. This capability enables comprehensive analysis workflows that were not possible with previous output formats.
+
+**Multi-Database Analysis Capabilities**
+
+Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases can be seamlessly combined for cross-session analysis:
+
+.. code-block:: bash
+
+   # Aggregate analysis across multiple profiling sessions
+   rocpd query -i session1.db session2.db session3.db \
+               --query "SELECT kernel_name, AVG(duration_ns) FROM kernels GROUP BY kernel_name"
+   
+   # Cross-rank performance comparison for MPI applications
+   rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank
+   
+   # Multi-node scaling analysis
+   rocpd query -i node_*.db \
+               --query "SELECT COUNT(*) as total_kernels, SUM(duration_ns) as total_time FROM kernels"
+
+**Distributed Computing Workflows**
+
+**MPI Application Analysis:**
+
+.. code-block:: bash
+
+   # Profile MPI application across multiple ranks
+   mpirun -np 4 rocprofv3 --hip-trace --output-format rocpd -- mpi_application
+   
+   # Generate aggregated performance summary
+   rocpd summary -i results_rank_*.db --summary-by-rank --format html -o mpi_performance_report
+   
+   # Analyze load balancing across ranks
+   rocpd query -i results_rank_*.db \
+               --query "SELECT pid, COUNT(*) as kernel_count, AVG(duration_ns) as avg_duration FROM kernels GROUP BY pid"
+
+**Multi-GPU Scaling Analysis:**
+
+.. code-block:: bash
+
+   # Profile application with multiple GPU devices
+   rocprofv3 --hip-trace --device 0,1,2,3 --output-format rocpd -- multi_gpu_app
+   
+   # Aggregate device utilization analysis
+   rocpd query -i multi_gpu_results.db \
+               --query "SELECT device_id, COUNT(*) as operations, SUM(duration_ns) as total_time FROM kernels GROUP BY device_id"
+   
+   # Cross-device performance comparison
+   rocpd summary -i multi_gpu_results.db --domain-summary
+
+**Temporal Aggregation**
+
+**Time-Series Analysis:**
+
+.. code-block:: bash
+
+   # Collect profiles over time for performance monitoring
+   for hour in {1..24}; do
+       rocprofv3 --hip-trace --output-format rocpd -o "profile_hour_$hour.db" -- application
+   done
+   
+   # Analyze performance trends over time
+   rocpd query -i profile_hour_*.db \
+               --query "SELECT AVG(duration_ns) as avg_kernel_time, COUNT(*) as kernel_count FROM kernels" \
+               --format csv -o performance_trends
+
+**Comparative Analysis:**
+
+.. code-block:: bash
+
+   # Compare baseline vs optimized performance
+   rocpd query -i baseline.db optimized.db \
+               --query "SELECT kernel_name, AVG(duration_ns) as avg_time FROM kernels GROUP BY kernel_name ORDER BY avg_time DESC"
+   
+   # Generate comparative summary reports
+   rocpd summary -i baseline.db optimized.db --format html -o comparison_report
+
+**Data Aggregation Benefits**
+
+- **Unified Analysis:** Combine data from different execution contexts, hardware configurations, and time periods
+- **Scalability Insights:** Analyze performance scaling across multiple nodes, ranks, or GPU devices
+- **Trend Analysis:** Track performance evolution over time or across different software versions
+- **Load Balancing:** Identify performance bottlenecks and load distribution issues in distributed applications
+- **Cross-Platform Comparison:** Compare performance across different hardware platforms using unified database schema
+
+The aggregation capabilities of ``rocpd`` format enable sophisticated analysis workflows that provide deeper insights into application performance characteristics across diverse computing environments.
+
 Tool Integration and Workflow Examples
 +++++++++++++++++++++++++++++++++++++++
 
@@ -452,8 +690,8 @@ Tool Integration and Workflow Examples
    rocpd2pftrace -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o interactive_trace
 
 
-Interactive Database Querying
-++++++++++++++++++++++++++++++
+Query
++++++
 
 The ``rocpd query`` command provides powerful SQL-based analysis capabilities for exploring and extracting data from rocpd databases. This tool enables custom analysis workflows, automated reporting, and integration with external analysis pipelines.
 
