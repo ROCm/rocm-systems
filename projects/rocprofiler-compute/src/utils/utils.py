@@ -1064,6 +1064,7 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     -    Filters for Kokkos kernels
     -    Finally saves the combined results as CSVs in top-level workload directory.
     """
+
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
         workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
@@ -1074,49 +1075,70 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
     )
 
+
     existing_marker_files_csv = [d for d in marker_api_trace_csvs if Path(d).is_file()]
     existing_counter_files_csv = [
         d for d in counter_collection_csvs if Path(d).is_file()
     ]
 
-    if len(existing_counter_files_csv) != len(existing_marker_files_csv):
-        console_warning(
-            "Mismatch in number of marker_api_trace and counter_collection files."
+    # Check if we have files to process
+    if not existing_marker_files_csv:
+        console_warning("No marker_api_trace files found. Exiting kokkos trace processing.")
+        no_results = pd.DataFrame()
+        no_results.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
+            index=False,
+        )
+    else:    
+        # concate and output marker api trace info
+        combined_results_marker = pd.concat(
+            [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
         )
 
-    # concate and output marker api trace info
-    combined_results_marker = pd.concat(
-        [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
-    )
-    combined_results_counter = pd.concat(
-        [pd.read_csv(f) for f in existing_counter_files_csv], ignore_index=True
-    )
+        combined_results_marker.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
+            index=False,
+        )
 
-    combined_results = pd.merge(
-        combined_results_marker,
-        combined_results_counter,
-        how="inner",
-        on="Correlation_Id",
-    )
-
-    combined_results = combined_results[
-        combined_results["Kernel_Name"].str.contains("kokkos", case=False, na=False)
-    ]
-
-    combined_results_marker.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
-        index=False,
-    )
-    combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
-        index=False,
-    )
-
-    if Path(workload_dir + "/out").exists():
         shutil.copyfile(
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             workload_dir + "/" + fbase + "_marker_api_trace.csv",
         )
+
+    
+    if not existing_counter_files_csv:
+        console_warning("No counter_collection files found. Exiting kokkos trace processing.")
+        no_results = pd.DataFrame()
+        no_results.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+            index=False,
+        )
+    else:
+        if len(existing_counter_files_csv) != len(existing_marker_files_csv):
+            console_warning(
+                "Mismatch in number of marker_api_trace and counter_collection files."
+            )
+
+        combined_results_counter = pd.concat(
+            [pd.read_csv(f) for f in existing_counter_files_csv], ignore_index=True
+        )
+
+        combined_results = pd.merge(
+            combined_results_marker,
+            combined_results_counter,
+            how="inner",
+            on="Correlation_Id",
+        )
+
+        combined_results = combined_results[
+            combined_results["Kernel_Name"].str.contains("kokkos", case=False, na=False)
+        ]
+
+        combined_results.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+            index=False,
+        )
+
         shutil.copyfile(
             workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
             workload_dir + "/" + fbase + "_kokkos_trace.csv",

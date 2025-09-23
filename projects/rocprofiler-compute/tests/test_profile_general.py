@@ -1819,7 +1819,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     )
     num_kernels = 1
     kokkos_app = kokkos_app_dir + "/mock_kokkos_minimal"
-    print("*" * 80)
+    
     config["app_kokkos"] = [kokkos_app]
     if not os.path.exists(kokkos_app):
         print("Kokkos app not found at {}, skipping test".format(kokkos_app))
