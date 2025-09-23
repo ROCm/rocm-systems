@@ -940,7 +940,7 @@ get_agent_mapping()
     return *CHECK_NOTNULL(_v);
 }
 aqlprofile_agent_handle_t
-register_aql_agent(const rocprofiler_agent_t* agent)
+get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
 {
     // aqlprofile header initially had no versioning macros.
     // IP discovery support was "officially" added when versioning was added
@@ -986,7 +986,7 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                agent_handles.push_back(register_aql_agent(agent));
+                agent_handles.push_back(get_aqlprofile_agent_handle(agent));
             }
             return agent_handles;
         }());
