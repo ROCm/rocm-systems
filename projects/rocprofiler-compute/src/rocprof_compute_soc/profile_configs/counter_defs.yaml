@@ -1519,10 +1519,12 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+    - architectures:
       - gfx12
       - gfx1200
       - gfx1201
-      expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   - name: MAX_WAVE_SIZE
     description: Max wave size constant
     properties: []
