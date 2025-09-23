@@ -44,6 +44,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional, Union, cast
+from typing import Dict, Generator
+from contextlib import contextmanager
 
 import pandas as pd
 import yaml
@@ -351,7 +353,7 @@ def capture_subprocess_output(
     if process.stdout is not None:
         selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
-    def forward_input():
+    def forward_input() -> None:
         """
         Forward the keyboard input from the terminal to the inside subprocess
         """
@@ -828,12 +830,11 @@ def run_prof(
         console_debug(f"rocprof sdk env vars: {new_env}")
 
         if is_mode_live_attach:
-            from contextlib import contextmanager
 
             @contextmanager
-            def temporary_env(env_vars):
+            def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
                 """
-                Temparaily change the environment variable of this application.
+                Temporarily change the environment variable of this application.
                 """
                 original_env = os.environ.copy()
                 os.environ.update({k: str(v) for k, v in env_vars.items()})
