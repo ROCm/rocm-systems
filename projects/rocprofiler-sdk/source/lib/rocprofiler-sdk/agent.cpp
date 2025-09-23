@@ -939,6 +939,44 @@ get_agent_mapping()
     static auto*& _v = common::static_object<std::vector<agent_pair>>::construct();
     return *CHECK_NOTNULL(_v);
 }
+aqlprofile_agent_handle_t
+register_aql_agent(const rocprofiler_agent_t* agent)
+{
+    // aqlprofile header initially had no versioning macros.
+    // IP discovery support was "officially" added when versioning was added
+    // If the macros are defined, the version is at least 1.0.0
+
+    aqlprofile_agent_handle_t handle = {.handle = 0};
+
+#if defined(AQLPROFILE_VERSION) && AQLPROFILE_VERSION == 10000
+    aqlprofile_agent_info_v1_t agent_info = {
+        .agent_gfxip          = agent->name,
+        .xcc_num              = agent->num_xcc,
+        .se_num               = agent->num_shader_banks,
+        .cu_num               = agent->cu_count,
+        .shader_arrays_per_se = agent->simd_arrays_per_engine,
+        .domain               = agent->domain,
+        .location_id          = agent->location_id,
+    };
+    if(aqlprofile_register_agent_info(&handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
+       HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to register agent " << agent->name;
+    }
+#else
+    aqlprofile_agent_info_t agent_info = {.agent_gfxip          = agent->name,
+                                          .xcc_num              = agent->num_xcc,
+                                          .se_num               = agent->num_shader_banks,
+                                          .cu_num               = agent->cu_count,
+                                          .shader_arrays_per_se = agent->simd_arrays_per_engine};
+    if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to register agent " << agent->name;
+    }
+#endif
+
+    return handle;
+}
 
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
@@ -948,22 +986,7 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_info_v1_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine,
-                    .domain               = agent->domain,
-                    .location_id          = agent->location_id,
-                };
-                aqlprofile_agent_handle_t handle = {.handle = 0};
-                if(aqlprofile_register_agent_info(
-                       &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
-                {
-                    ROCP_WARNING << "Failed to register agent " << agent->name;
-                }
-                agent_handles.push_back(handle);
+                agent_handles.push_back(register_aql_agent(agent));
             }
             return agent_handles;
         }());
