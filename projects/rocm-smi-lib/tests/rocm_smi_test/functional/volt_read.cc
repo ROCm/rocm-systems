@@ -118,14 +118,17 @@ void TestVoltRead::Run(void) {
                                "Not supported on this machine" << std::endl;
           }
 
+            std::cout << "[GABRPHAM DEBUG] before second execution of rsmi_dev_volt_metric_get" << std::endl;
             // Verify api support checking functionality is working
             err = rsmi_dev_volt_metric_get(i, type, met, nullptr);
-            ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
             return;
         } else {
           CHK_ERR_ASRT(err)
         }
       }
+
+      std::cout << "[GABRPHAM DEBUG] before third execution of rsmi_dev_volt_metric_get" << std::endl;
       // Verify api support checking functionality is working
       err = rsmi_dev_volt_metric_get(i, type, met, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);

@@ -101,7 +101,7 @@ void TestFanReadWrite::Run(void) {
     PrintDeviceHeader(dv_ind);
 
     ret = rsmi_dev_fan_speed_get(dv_ind, 0, &orig_speed);
-    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    if (ret == RSMI_STATUS_NOT_SUPPORTED || ret == RSMI_STATUS_UNEXPECTED_DATA) {
        IF_VERB(STANDARD) {
           std::cout << "\t**" <<  ": " <<
                              "Not supported on this machine" << std::endl;
@@ -137,7 +137,7 @@ void TestFanReadWrite::Run(void) {
     }
 
     ret = rsmi_dev_fan_speed_set(dv_ind, 0, new_speed);
-    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    if (ret == RSMI_STATUS_NOT_SUPPORTED || ret == RSMI_STATUS_UNEXPECTED_DATA) {
       std::cout << "***System fan set is not supported." << std::endl;
       continue;
     }

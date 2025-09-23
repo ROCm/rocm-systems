@@ -321,13 +321,18 @@ static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
 
 static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
                          uint32_t dv_ind, uint32_t sensor_ind, int64_t *val) {
-  assert(val != nullptr);
+  std::ostringstream ss;
+  std::cout << "[GABRPHAM DEBUG] Entered get_dev_mon_value" << std::endl;
+
+//   assert(val != nullptr);
   if (val == nullptr) {
+    std::cout << "[GABRPHAM DEBUG] get_dev_mon_value: nullptr received for val for device " << dv_ind << std::endl;
     return RSMI_STATUS_INVALID_ARGS;
   }
   GET_DEV_FROM_INDX
 
   if (dev->monitor() == nullptr) {
+    std::cout << "[GABRPHAM DEBUG] get_dev_mon_value: Monitor is not available for device " << dv_ind << std::endl;
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -2960,6 +2965,7 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
   GET_DEV_FROM_INDX
 
   if (dev->monitor() == nullptr) {
+    std::cout << "[GABRPHAM DEBUG] rsmi_dev_volt_metric_get: Monitor is not available for device " << dv_ind << std::endl;
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
@@ -2971,9 +2977,12 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
     sensor_index =
       m->getVoltSensorIndex(sensor_type);
   } catch (...) {
+    std::cout << "[GABRPHAM DEBUG] rsmi_dev_volt_metric_get: unable to obtain sensor_index for device " << dv_ind << std::endl;
     return RSMI_STATUS_NOT_SUPPORTED;
   }
+  std::cout << "[GABRPHAM DEBUG] checking API support for device " << dv_ind << std::endl;
   CHK_API_SUPPORT_ONLY(voltage, metric, sensor_index)
+  // Issue with rsmi tests seems to be with this chk api support macro/function. For some reason it returns both RSMI_STATUS_NOT_SUPPORTED and RSMI_STATUS_INVALID_ARGS
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, voltage);
 
