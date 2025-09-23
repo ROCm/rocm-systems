@@ -483,7 +483,12 @@ class RocProfCompute_Base:
                 ):
                     if total_runs > 1:
                         console_error(
-                            f'Cannot attach process for profiling as the requsted performance counters excceed the collection capacity of single pass counter collection. The current setup of requested counter blocks needs {total_runs} number of passes. Please use "--block" or "--set" to adjust or reduce the requested performance metrics!'
+                            f"Cannot attach process for profiling as the requested "
+                            f"performance counters exceed the collection capacity of "
+                            f"single pass counter collection. The current setup of "
+                            f"requested counter blocks needs {total_runs} number of "
+                            f'passes. Please use "--block" or "--set" '
+                            f"to adjust or reduce the requested performance metrics!"
                         )
 
                 run_prof(

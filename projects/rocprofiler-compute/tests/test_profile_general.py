@@ -1901,7 +1901,8 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     # kill the process of the workload at thsi point if it's still running
     if process_workload.poll() is None:
         print(
-            f"rocprof-compute has detached and finished, killing workload process (pid={process_workload.pid})..."
+            f"rocprof-compute has detached and finished, "
+            f"killing workload process (pid={process_workload.pid})..."
         )
         process_workload.kill()
         process_workload.wait()
@@ -1957,7 +1958,8 @@ def test_live_attach_detach_singlepath_launch_stats(
     # kill the process of the workload at thsi point if it's still running
     if process_workload.poll() is None:
         print(
-            f"rocprof-compute has detached and finished, killing workload process (pid={process_workload.pid})..."
+            f"rocprof-compute has detached and finished, "
+            f"killing workload process (pid={process_workload.pid})..."
         )
         process_workload.kill()
         process_workload.wait()

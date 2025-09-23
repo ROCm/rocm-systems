@@ -162,7 +162,11 @@ Examples:
         metavar="",
         default=None,
         required=False,
-        help='\t\t\tWhen --attach-pid is used, it specifies the attach duration in milliseconds. If not set, detachment occurs when "Enter" key is pressed.',
+        help=(
+            "\t\t\tWhen --attach-pid is used, it specifies the attach duration "
+            "in milliseconds. If not set, detachment occurs when "
+            '"Enter" key is pressed.'
+        ),
     )
     profile_group.add_argument(
         "-p",

@@ -860,12 +860,14 @@ def run_prof(
                 duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
                 if duration is None:
                     console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m"
+                        f"\033[93mAttach to process with ID {pid} is successful, "
+                        "Press Enter to detach...\033[0m"
                     )
                     input()
                 else:
                     console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, detach will happen in {duration} miliseconds...\033[0m"
+                        f"\033[93mAttach to process with ID {pid} is successful, "
+                        f"detach will happen in {duration} milliseconds...\033[0m"
                     )
                     time.sleep(int(duration) / 1000)
                 c_lib.detach()
@@ -873,7 +875,8 @@ def run_prof(
         else:
             if app_cmd is None:
                 console_error(
-                    "APP_CMD, the workload's execuatble must be provided when not in live attach mode"
+                    "APP_CMD, the workload's execuatble must be provided "
+                    "when not in live attach mode"
                 )
 
             console_debug(f"rocprof sdk user provided command: {app_cmd}")
