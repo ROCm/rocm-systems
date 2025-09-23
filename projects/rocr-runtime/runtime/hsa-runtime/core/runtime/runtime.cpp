@@ -3392,7 +3392,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
-      std::forward_as_tuple(&memoryHandleIt->second, addressHandle, offset, size, drm_fd,
+      std::forward_as_tuple(&memoryHandleIt->second, addressHandle, va, offset, size, drm_fd,
                             reinterpret_cast<void*>(drm_cpu_addr), HSA_ACCESS_PERMISSION_NONE,
                             shareable_handle));
 
@@ -3524,13 +3524,46 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (munmap(va, size) != 0)
-      return HSA_STATUS_ERROR;
-    return HSA_STATUS_SUCCESS;
+    if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+      if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
+
+      /* We need to keep the CPU mapping. So change it to PROT_NONE */
+      void* mapped_ptr = mmap(va, mappedHandle->size, PROT_NONE, MAP_SHARED | MAP_FIXED,
+                mappedHandle->drm_fd,
+                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
+      if (mapped_ptr != va)
+        return HSA_STATUS_ERROR;
+
+      permissions = HSA_ACCESS_PERMISSION_NONE;
+    }
   } else {
     return targetAgent->driver().Unmap(
         shareable_handle, va, mappedHandle->offset, mappedHandle->size);
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
+                 void* va, uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
+  : mem_handle(mem_handle), address_handle(address_handle), offset(offset),
+    size(size), drm_fd(drm_fd), drm_cpu_addr(drm_cpu_addr),
+    shareable_handle(shareable_handle)
+{
+  /* Create a CPU mapping with PROT_NONE */
+  auto cpu_agent = ((AMD::GpuAgent*)agentOwner())->GetNearestCpuAgent();
+  auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
+                       std::forward_as_tuple(cpu_agent),
+                       std::forward_as_tuple(this, cpu_agent, va,
+                                             size, HSA_ACCESS_PERMISSION_NONE))
+                      .first;
+
+  auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
+  if (ret != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+}
+
+Runtime::MappedHandle::~MappedHandle() {
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
