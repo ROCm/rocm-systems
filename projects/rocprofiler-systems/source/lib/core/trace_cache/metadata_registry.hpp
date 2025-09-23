@@ -176,7 +176,6 @@ struct kernel_symbol_less
 }  // namespace info
 
 class cache_manager;
-struct modify_cb_tracing_info_names;
 struct metadata_registry
 {
     void set_process(const info::process& process);
@@ -218,23 +217,10 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
-    friend struct modify_cb_tracing_info_names;
-    struct modify_cb_tracing_info_names
-    {
-        using category      = rocprofiler_callback_tracing_kind_t;
-        using category_name = std::string_view;
-        using operations    = std::vector<std::string_view>;
-
-        std::map<category, operations>    modified;
-        std::map<category, category_name> category_names;
-        metadata_registry&                registry_ref;
-
-        modify_cb_tracing_info_names(metadata_registry& registry);
-        void overwrite(rocprofiler_callback_tracing_kind_t                     cat,
-                       std::initializer_list<std::pair<int, std::string_view>> overrides);
-        ~modify_cb_tracing_info_names();
-    };
     metadata_registry();
+    friend void overwrite_names(metadata_registry&, rocprofiler_callback_tracing_kind_t,
+                                std::initializer_list<std::pair<int, std::string_view>>);
+    friend void overwrite_names_finalize(metadata_registry&);
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
