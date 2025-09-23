@@ -9,40 +9,38 @@ if(NOT USE_MOCK_KOKKOS)
     message(STATUS "Found Kokkos: ${Kokkos_DIR}")
     set_source_files_properties(real_kokkos_minimal.cpp PROPERTIES LANGUAGE HIP)
     add_executable(real_kokkos_minimal real_kokkos_minimal.cpp)
-    
+
     target_include_directories(
-    real_kokkos_minimal
-    PRIVATE
-        ${KOKKOS_BUILD_DIR}/include
-        ${KOKKOS_BUILD_DIR}/core/src
-        ${KOKKOS_BUILD_DIR}/containers/src
-        ${KOKKOS_BUILD_DIR}/algorithms/src
-        /opt/rocm/include)
+        real_kokkos_minimal
+        PRIVATE
+            ${KOKKOS_BUILD_DIR}/include
+            ${KOKKOS_BUILD_DIR}/core/src
+            ${KOKKOS_BUILD_DIR}/containers/src
+            ${KOKKOS_BUILD_DIR}/algorithms/src
+            /opt/rocm/include
+    )
 
     target_link_directories(real_kokkos_minimal PRIVATE ${KOKKOS_BUILD_DIR}/lib)
     target_link_libraries(
         real_kokkos_minimal
         PRIVATE kokkoscore kokkoscontainers kokkosalgorithms
     )
-
 else()
     set_source_files_properties(mock_kokkos_minimal.cpp PROPERTIES LANGUAGE HIP)
     add_executable(mock_kokkos_minimal mock_kokkos_minimal.cpp)
     target_include_directories(
-    mock_kokkos_minimal
-    PRIVATE
-        ${KOKKOS_BUILD_DIR}/include
-        ${KOKKOS_BUILD_DIR}/core/src
-        ${KOKKOS_BUILD_DIR}/containers/src
-        ${KOKKOS_BUILD_DIR}/algorithms/src
-        /opt/rocm/include)
+        mock_kokkos_minimal
+        PRIVATE
+            ${KOKKOS_BUILD_DIR}/include
+            ${KOKKOS_BUILD_DIR}/core/src
+            ${KOKKOS_BUILD_DIR}/containers/src
+            ${KOKKOS_BUILD_DIR}/algorithms/src
+            /opt/rocm/include
+    )
 
     target_link_directories(mock_kokkos_minimal PRIVATE ${KOKKOS_BUILD_DIR}/lib)
     target_link_libraries(
         mock_kokkos_minimal
         PRIVATE kokkoscore kokkoscontainers kokkosalgorithms
     )
-
-
 endif()
-

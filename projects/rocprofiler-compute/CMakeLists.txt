@@ -52,7 +52,6 @@ include(GNUInstallDirs)
 set(ENABLE_KOKKOS OFF)
 option(USE_MOCK_KOKKOS "Use mock Kokkos implementation for testing" ON)
 
-
 if(ENABLE_TESTS)
     if(UNIX)
         # Detect AMD GPU architecture using rocminfo
@@ -395,6 +394,12 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m kokkos --junitxml=tests/test_profile_kokkos.xml
         ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+# Set environment variable for kokkos test
+set_tests_properties(
+    test_profile_kokkos
+    PROPERTIES ENVIRONMENT "USE_MOCK_KOKKOS=${USE_MOCK_KOKKOS}"
 )
 
 set_tests_properties(
