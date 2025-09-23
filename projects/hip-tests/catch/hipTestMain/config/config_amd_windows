@@ -1007,6 +1007,10 @@
         "Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread",
         "Unit_hipStreamBeginCapture_CapturingFromWithinStrms",
         "====================================================",
+        "==================SWDEV-556645==================================",
+        "Unit_hipGraphNodeSetEnabled_Functional_KernelNode",
+        "Unit_TexObjectCreate_TypePitch2D_IncompleteInit",
+        "====================================================",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
