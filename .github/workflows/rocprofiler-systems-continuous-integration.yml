@@ -80,7 +80,7 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
-      # TODO: Remove this step once amdgpu logic has been added to gfx Dockers
+      # TODO: Move the amdgpu and base dependencies install to the Docker image
       - name: Install amdgpu and dependencies (remove once added to gfx Dockers)
         shell: bash
         run: |
@@ -89,6 +89,11 @@ jobs:
           apt-get update
           apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
           echo "✅ amdgpu and ROCm dependencies Installed!"
+
+      - name: Install MPI
+        run: |
+          apt install -y libopenmpi-dev
+          echo "✅ MPI Installed!"
 
       - name: Install Latest Nightly ROCm
         run: |
@@ -130,7 +135,8 @@ jobs:
             -DROCPROFSYS_USE_ROCM=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "gpu|rocm|network"
+            -L "rocm" \
+            -LE "rccl|runtime"
 
       - name: Install
         timeout-minutes: 10
