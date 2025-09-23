@@ -89,6 +89,7 @@ TEST_CASE("Unit_hipGraphExecDestroy_Positive_Basic") {
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
 
+  HIP_CHECK(hipFree(devData));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(streamForGraph));

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -405,7 +405,7 @@ bool PrintfDbg::init(bool printfEnabled) {
 
     // Copy offset and number of bytes available for printf data
     // into the corresponding location in the debug buffer
-    hsa_status_t err = hsa_memory_copy(dbgBuffer_, sysMem, 2 * sizeof(uint32_t));
+    hsa_status_t err = Hsa::memory_copy(dbgBuffer_, sysMem, 2 * sizeof(uint32_t));
     if (err != HSA_STATUS_SUCCESS) {
       LogPrintfError(
           "\n Can't copy offset and bytes available data to dgbBuffer_,"

@@ -1381,8 +1381,8 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  *  @brief Get the device id associated with the device with provided device
  *  index.
  *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
- *  this function will write the device id value to the uint64_t pointed to by
+ *  @details Given a device index @p dv_ind and a pointer to a uint16_t @p id,
+ *  this function will write the device id value to the uint16_t pointed to by
  *  @p id. This ID is an identification of the type of device, so calling this
  *  function for different devices will give the same value if they are kind
  *  of device. Consequently, this function should not be used to distinguish
@@ -1391,7 +1391,7 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] id a pointer to uint64_t to which the device id will be
+ *  @param[inout] id a pointer to uint16_t to which the device id will be
  *  written
  * If this parameter is nullptr, this function will return
  * ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
@@ -1409,12 +1409,12 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id);
 /**
  *  @brief Get the device revision associated with the device
  *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t to
+ *  @details Given a device index @p dv_ind and a pointer to a uint16_t to
  *  which the revision will be written
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] revision a pointer to uint32_t to which the device revision
+ *  @param[inout] revision a pointer to uint16_t to which the device revision
  *  will be written
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
@@ -1426,14 +1426,14 @@ rsmi_status_t rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision);
  *  @brief Get the SKU for a desired device associated with the device with
  *  provided device index.
  *
- *  @details Given a device index @p dv_ind and a pointer to a char @p sku,
+ *  @details Given a device index @p dv_ind and a pointer to a uint16_t @p sku,
  *  this function will attempt to obtain the SKU from the Product Information
  *  FRU chip, present on server ASICs. It will write the sku value to the
- *  char array pointed to by @p sku.
+ *  uint16_t pointed to by @p sku.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] sku a pointer to char to which the sku will be written
+ *  @param[inout] sku a pointer to uint16_t to which the sku will be written
  *
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
@@ -1452,13 +1452,13 @@ rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *sku);
  *  @brief Get the device vendor id associated with the device with provided
  *  device index.
  *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
- *  this function will write the device vendor id value to the uint64_t pointed
+ *  @details Given a device index @p dv_ind and a pointer to a uint16_t @p id,
+ *  this function will write the device vendor id value to the uint16_t pointed
  *  to by @p id.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] id a pointer to uint64_t to which the device vendor id will
+ *  @param[inout] id a pointer to uint16_t to which the device vendor id will
  *  be written
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,

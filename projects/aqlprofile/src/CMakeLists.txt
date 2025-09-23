@@ -25,8 +25,19 @@ set ( LIB_SRC
 )
 
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${API_PATH} ${LIB_DIR}/core/include)
-target_link_libraries( ${TARGET_LIB} PRIVATE pthread hsa-runtime64::hsa-runtime64 )
+add_library (aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
+target_include_directories ( ${TARGET_LIB}
+  PRIVATE ${LIB_DIR}
+          ${API_PATH}
+          ${LIB_DIR}/core/include
+)
+target_link_libraries( ${TARGET_LIB}
+  PRIVATE
+    pthread
+    hsa-runtime64::hsa-runtime64
+  PUBLIC
+    aqlprofile::headers
+)
 
 ## Generating definitions
 set ( SCRIPT_DIR "${ROOT_DIR}/script" )
