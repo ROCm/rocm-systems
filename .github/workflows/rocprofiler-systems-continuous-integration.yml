@@ -118,17 +118,14 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
-            -DROCPROFSYS_BUILD_DYNINST=ON \
-            -DROCPROFSYS_BUILD_BOOST=ON \
-            -DROCPROFSYS_BUILD_TBB=ON \
-            -DROCPROFSYS_BUILD_ELFUTILS=ON \
-            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_BUILD_{DYNINST,TBB,BOOST,ELFUTILS,LIBIBERTY}=ON \
+            -DROCPROFSYS_BUILD_CI=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
+            -DROCPROFSYS_USE_ROCM=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
-            -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
             -- \
-            -LE "transpose|rccl|videodecode|jpegdecode|network"
+            -L "gpu|rocm|network"
 
       - name: Install
         timeout-minutes: 10
