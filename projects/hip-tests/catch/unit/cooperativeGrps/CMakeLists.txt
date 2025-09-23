@@ -20,6 +20,7 @@ set(TEST_SRC
   binary_partition.cc
   cg_ballot.cc
   cg_any_all.cc
+  barrier_arrive_barriet_wait.cc
 )
 
 if(HIP_PLATFORM STREQUAL "nvidia")
