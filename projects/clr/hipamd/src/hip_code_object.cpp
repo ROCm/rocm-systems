@@ -101,7 +101,7 @@ DynCO::~DynCO() {
 
 hipError_t DynCO::getDeviceVar(DeviceVar** dvar, std::string var_name) {
   amd::ScopedLock lock(dclock_);
-  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+
   auto it = vars_.find(var_name);
   if (it == vars_.end()) {
     LogPrintfError("Cannot find the Var: %s ", var_name.c_str());
@@ -220,7 +220,6 @@ hipError_t DynCO::populateDynGlobalVars() {
     vars_.insert(
         std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, 0, 0, nullptr)));
   }
-  dyn_data_loaded_ = true;
 
   for (auto& elem : var_names) {
     if (elem.find(managedVarExt) != std::string::npos) {
@@ -229,7 +228,7 @@ hipError_t DynCO::populateDynGlobalVars() {
       err = initDynManagedVars(managedVar);
     }
   }
-
+  dyn_data_loaded_ = true;
   return err;
 }
 
