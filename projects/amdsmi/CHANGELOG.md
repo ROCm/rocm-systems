@@ -139,6 +139,9 @@ GPU: 0
 
 ### Changed
 
+- **Changed struct amdsmi_topology_nearest_t member processor_list**.  
+  - Member size changed, processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP]
+
 - **Changed `amd-smi reset --profile` behavior so that it would not also reset the performance level**.  
   - These settings are completely independent now so there is no longer any need to reset them together. Therefore the reset behavior for performance level has been removed from resetting the profile. Users can still reset the performance level as they normally would using `amd-smi reset --perf-determinism`.  
 
