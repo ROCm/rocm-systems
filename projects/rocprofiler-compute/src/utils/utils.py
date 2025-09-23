@@ -1090,7 +1090,7 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             index=False,
         )
-        
+
     else:
         # concate and output marker api trace info
         combined_results_marker = pd.concat(
@@ -1113,17 +1113,14 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
             index=False,
         )
-    else:
-        combined_results_counter = pd.concat(
-            [pd.read_csv(f) for f in existing_counter_files_csv], ignore_index=True
-            )
-
-    if not existing_marker_files_csv and not existing_marker_files_csv:
         return
+
+    combined_results_counter = pd.concat(
+        [pd.read_csv(f) for f in existing_counter_files_csv], ignore_index=True
+    )
+
     if not existing_marker_files_csv:
         combined_results = combined_results_counter
-    elif not existing_counter_files_csv:
-        combined_results = combined_results_marker
     else:
         combined_results = pd.merge(
             combined_results_marker,

@@ -1815,12 +1815,12 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         Eg. Names, IDs, interval overlaps.
     """
     # Set environment variable for mock Kokkos detection
-    use_mock_kokkos = os.environ.get('USE_MOCK_KOKKOS', '1') == '1'    
+    use_mock_kokkos = os.environ.get("USE_MOCK_KOKKOS", "ON") == "ON"
 
     kokkos_app_dir = str(
         Path(__file__).parent.parent / "build" / "kokkos_mock_app_build"
     )
-    num_kernels = 1
+    num_kernels = 0
     kokkos_app = kokkos_app_dir + "/mock_kokkos_minimal"
 
     config["app_kokkos"] = [kokkos_app]
@@ -1864,12 +1864,11 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if use_mock_kokkos:
         # If using mock Kokkos, marker trace files won't be generated
-        expected_files = sorted(OTHER_CSV_FILES)
+        expected_files = sorted(OTHER_CSV_FILES + KOKKOS_TRACE_FILES)
     else:
         expected_files = sorted(
             OTHER_CSV_FILES + KOKKOS_TRACE_FILES + MARKER_TRACE_FILES
         )
-
 
     assert sorted(list(file_dict.keys())) == expected_files
     if not use_mock_kokkos:
@@ -1891,7 +1890,9 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
 
             if not overlap.all():
                 mismatches = df[~overlap][["Function"]]
-                warnings.warn("The following functions do not have an interval overlap.")
+                warnings.warn(
+                    "The following functions do not have an interval overlap."
+                )
                 warnings.warn(f"Count: {len(mismatches)}")
                 warnings.warn(f"Names: {mismatches['Function'].unique()}")
 
