@@ -57,9 +57,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         rocprofiler_sdk_tool_path = str(
             rocm_libdir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
         )
-        rocm_dir = str(Path(args.rocprofiler_sdk_library_path).parent.parent)
+        rocm_dir = Path(args.rocprofiler_sdk_library_path).parent.parent
         rocprofiler_attach_tool_path = str(
-            Path(rocm_dir).joinpath("lib/rocprofiler-sdk/librocprofv3-attach.so")
+            rocm_dir / "lib" / "rocprofiler-sdk" / "librocprofv3-attach.so"
         )
         ld_preload = [
             rocprofiler_sdk_tool_path,

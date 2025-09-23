@@ -5,9 +5,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## Unreleased
 
 ### Added
-* Add live attach/detach feature.
-  * '--attach-id' to specify the target process id
-  * '--attach-duration-msec' to specify time duration
+* Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
+  * Use '--attach-pid' to specify the target process ID.
+  * Use '--attach-duration-msec' to specify time duration.
 
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
 

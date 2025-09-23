@@ -102,7 +102,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                 f"[{','.join(dispatch)}]",
             ])
 
-        if not self.get_args().attach_pid:
+        if not args.attach_pid:
             profiling_options.append("--")
             profiling_options.extend(app_cmd)
         return profiling_options

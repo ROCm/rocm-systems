@@ -2,17 +2,17 @@
    :description: ROCm Compute Profiler: using Live Attach Detach
    :keywords: ROCm Compute Profiler, Attach Detach
 
-********************************************
-Using Live Attach Detach in ROCm Compute Profiler
-********************************************
+***********************************************************
+Using Live Attach/Detach in ROCm Compute Profiler
+***********************************************************
 
-Live Attach/Detach is a new feature of rocprofiler-compute that allows coupling with a workload process, without controlling its start or end. Instead, the application is already running when the profiler is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
+Live Attach/Detach is a new feature of ROCm Compute Profiler that allows coupling with a workload process, without controlling its start or end. The application can already be running before the profiler application is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
 
-Since a specific attach is not repeatable, it can only collect the set of counters that the hardware is capable of capturing in a single run. Therefore, in the current implementation, the user must specify a subset of counter groups that can be collected within one run. This can be done either by using the --block (for example, --block 3.1.1 4.1.1 5.1.1), or by providing a predefined set through the use of single pass counter collection --set.
+A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1 4.1.1 5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
 
 Detachment can be achieved in two ways:
-By setting the --attach-duration-msec parameter to a specific duration (in milliseconds). In this case, detachment occurs automatically after the specified time has elapsed since the rocprofiler subprocess started.
-By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
+a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the ``rocprof`` subprocess started.
+b) By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
 
 ---------------------
 Profiling options
@@ -20,7 +20,7 @@ Profiling options
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--attach-pid``: Should be the process ID of the process of workload's application.
-* ``--attach-duration-msec``: (Optional) The is for setting up the synchronised detach and it's optional. Its unit is in milliseconds. When setting up, the detach will happen adter this time since rocprof starts. For example, setting it to 60000 yields 1 mins.
+* ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the ``rocprof`` subprocess started. For example, setting it to 60000 yields 1 minute.
 
 **Sample command:**
 
@@ -36,10 +36,10 @@ For using profiling options for PC sampling the configuration needed are:
 -----------------------
 Analysis options
 -----------------------
-The analyze options for attach/detach are completely compatible with the non-attach/detach option
+The analyze options for attach/detach are completely compatible with the non-attach/detach option.
 
 .. note::
 
-  * Live Attach Detach feature is currently in BETA version. To enable Live Attach Detach, you have to have proper verson of rocprofiler-sdk and rocprofiler-register.
-  * To make Live Attach Detach work, you must use "--block" or single path to limit the number of counter input files to 1. This limitation will be release in later version with implementation such as Iteration Mutiplexing.
-  * Due to limitation of rocporfiler-sdk, the attach can now only happen before HSA initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, like function name and other launch parameters. Attaching after this stage misses all crucial infomations of HIP kernel and make it impossible to store output. This limitation will be solved in later releases of rocprofiler-sdk.
+  * Live Attach Detach feature is currently in BETA version. To enable Live/Attach Detach, you need to have the correct supported proper version of ROCprofiler-SDK and rocprofiler-register.
+  * To make the Live Attach/Detach feature work, you must use "--block" or a single path to limit the number of counter input files to one. This limitation will be removed in a later version with implementations such as Iteration Multiplexing.
+  * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.
