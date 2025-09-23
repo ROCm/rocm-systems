@@ -40,6 +40,10 @@ env:
   # TODO: Remove once Docker gfx images have these
   HIP_PLATFORM: "amd"
 
+  # MPI
+  OMPI_ALLOW_RUN_AS_ROOT: 1
+  OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+
 jobs:
   ubuntu:
     name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
@@ -54,10 +58,12 @@ jobs:
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu-${{ matrix.system.os-release }}:systems-ci-${{ matrix.system.arch }}
-      options: --ipc host
+      options: 
+        --ipc host
         --group-add video
         --device /dev/kfd
         --device /dev/dri
+        --cap-add CAP_SYS_ADMIN
     steps:
       - uses: actions/checkout@v4
         with:
@@ -135,7 +141,7 @@ jobs:
             -DROCPROFSYS_USE_ROCM=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm" \
+            -L "rocm|network" \
             -LE "rccl|runtime"
 
       - name: Install
