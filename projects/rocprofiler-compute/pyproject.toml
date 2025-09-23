@@ -24,7 +24,6 @@ extend-exclude = [
     # deprecated files
     "src/rocprof_compute_profile/profiler_rocprof_v1.py",
     "src/rocprof_compute_profile/profiler_rocprof_v2.py",
-    "src/rocprof_compute_analyze/analysis_db.py",
     "src/utils/db_connector.py",
     # WIP files
     "src/rocprof_compute_tui/widgets/splitter.py"

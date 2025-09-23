@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
 import argparse
 from typing import Any, Optional
 
