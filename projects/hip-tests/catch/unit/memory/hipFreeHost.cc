@@ -96,7 +96,7 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
-  for (auto ptr : ptrs) {
+  for (auto& ptr : ptrs) {
     HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
   }
 
