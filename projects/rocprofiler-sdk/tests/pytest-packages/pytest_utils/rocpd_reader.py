@@ -22,16 +22,38 @@
 
 from __future__ import absolute_import
 
-import sqlite3
-
 
 class RocpdReader:
     """Read in rocpd database output"""
 
-    def __init__(self, filename):
+    def __init__(self, filename, require_rocpd=False):
         self.filename = filename if isinstance(filename, (list, tuple)) else [filename]
+        self.require_rocpd = require_rocpd
 
     def read(self, **kwargs):
         """Read rocpd (sqlite3) database"""
 
-        return [sqlite3.connect(itr) for itr in self.filename]
+        try:
+            import rocpd
+
+            return [rocpd.connect(self.filename)]
+        except ImportError:
+            # rocpd is required but not available
+            if self.require_rocpd:
+                raise
+
+            import os
+            import sqlite3
+
+            files = []
+            for itr in self.filename:
+                if os.path.isdir(itr):
+                    files += [
+                        os.path.join(itr, fitr)
+                        for fitr in os.listdir(itr)
+                        if fitr.endswith(".db")
+                    ]
+                elif os.path.isfile(itr):
+                    files += [itr]
+
+            return [sqlite3.connect(itr) for itr in files if itr.endswith(".db")]

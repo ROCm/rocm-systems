@@ -36,7 +36,7 @@ except Exception:
 from . import bindings
 
 
-__all__ = ["format_path", "output_config", "add_args", "process_args"]
+__all__ = ["format_path", "OutputConfig", "add_args", "process_args"]
 
 
 def _generate_attribute_docs(data):
@@ -51,17 +51,17 @@ def _generate_attribute_docs(data):
     return "\n\t- ".join(properties)
 
 
-class output_config(bindings.output_config):
+class OutputConfig(bindings.OutputConfig):
     __doc__ = f"""Output configuration
 
-    Read/Write properties:\n\t- {_generate_attribute_docs(bindings.output_config.__dict__)}
+    Read/Write properties:\n\t- {_generate_attribute_docs(bindings.OutputConfig.__dict__)}
 
     Example:
         # folder for output data
         output_dir = os.path.join(os.getcwd(), "rocpd-output")
 
         # create output config instance
-        cfg = output_config(output_path=output_dir, output_file="out")
+        cfg = OutputConfig(output_path=output_dir, output_file="out")
 
         # using read/write properties
         if cfg.output_path != output_dir:
@@ -69,16 +69,13 @@ class output_config(bindings.output_config):
     """
 
     def __init__(self, **kwargs):
-        super(output_config, self).__init__()
+        super(OutputConfig, self).__init__()
         self.update(**kwargs)
 
     def update(self, **kwargs):
         _strict = kwargs.get("strict", True)
-        # _verbose = kwargs.get("log-level", "config")
         for key, itr in kwargs.items():
             if hasattr(self, key):
-                # if _verbose in ("info", "trace", "config"):
-                #     print(f"  - output_config.{key} = {itr}")
                 if key == "agent_index_value":
                     if itr == "absolute":
                         setattr(self, key, bindings.agent_indexing.node)
@@ -89,7 +86,7 @@ class output_config(bindings.output_config):
                 else:
                     setattr(self, key, itr)
             elif _strict:
-                raise KeyError(f"output_config does not have {key} attribute")
+                raise KeyError(f"OutputConfig does not have {key} attribute")
         return self
 
 

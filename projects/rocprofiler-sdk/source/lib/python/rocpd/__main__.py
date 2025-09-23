@@ -231,7 +231,7 @@ Example usage:
         }
         # setup the config args
         config = (
-            output_config.output_config(**all_args)
+            output_config.OutputConfig(**all_args)
             if config is None
             else config.update(**all_args)
         )

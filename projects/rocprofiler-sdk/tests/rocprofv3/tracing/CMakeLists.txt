@@ -9,6 +9,11 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(Python3 REQUIRED)
+
+set(ROCPD_PYTHON_MODULE_DIR
+    "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
 
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
@@ -23,6 +28,27 @@ set(tracing-env "${PRELOAD_ENV}")
 
 rocprofiler_configure_pytest_files(
     CONFIG pytest.ini COPY validate.py conftest.py input_systrace.json input_trace.json)
+
+add_test(
+    NAME rocprofv3-test-trace-setup
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+            ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.rpdb
+    )
+
+set_tests_properties(
+    rocprofv3-test-trace-setup PROPERTIES TIMEOUT 30 LABELS "integration-tests;rocpd"
+                                          FIXTURES_SETUP rocprofv3-test-trace-setup)
+
+add_test(
+    NAME rocprofv3-test-trace-input-json-setup
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+            ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.rpdb
+    )
+
+set_tests_properties(
+    rocprofv3-test-trace-input-json-setup
+    PROPERTIES TIMEOUT 30 LABELS "integration-tests;rocpd" FIXTURES_SETUP
+               rocprofv3-test-trace-input-json-setup)
 
 add_test(
     NAME rocprofv3-test-trace-execute
@@ -43,7 +69,12 @@ set_tests_properties(
         "${tracing-env}"
         FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+        DEPENDS
+        "rocprofv3-test-trace-setup"
+        FIXTURES_REQUIRED
+        rocprofv3-test-trace-setup
+        FIXTURES_SETUP
+        rocprofv3-test-trace)
 
 add_test(
     NAME rocprofv3-test-trace-input-json-execute
@@ -64,7 +95,12 @@ set_tests_properties(
         "${tracing-env}"
         FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+        DEPENDS
+        "rocprofv3-test-trace-input-json-setup"
+        FIXTURES_REQUIRED
+        rocprofv3-test-trace-input-json-setup
+        FIXTURES_SETUP
+        rocprofv3-test-trace-input-json)
 
 add_test(
     NAME rocprofv3-test-trace-validate
@@ -84,7 +120,7 @@ add_test(
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace
         --rocpd-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.rpdb)
 
 add_test(
     NAME rocprofv3-test-trace-input-json-validate
@@ -104,21 +140,57 @@ add_test(
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace
         --rocpd-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-trace-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-trace-execute" FAIL_REGULAR_EXPRESSION "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               "rocprofv3-test-trace-execute"
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               FIXTURES_REQUIRED
+               rocprofv3-test-trace)
 
 set_tests_properties(
     rocprofv3-test-trace-input-json-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-trace-input-json-execute" FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               "rocprofv3-test-trace-input-json-execute"
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               FIXTURES_REQUIRED
+               rocprofv3-test-trace-input-json)
 
 # sys-trace test: tests --sys-trace command with mangled kernel names and validates
 # generated files
+
+add_test(
+    NAME rocprofv3-test-systrace-setup
+    COMMAND
+        ${CMAKE_COMMAND} -E rm -rf
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.rpdb)
+
+set_tests_properties(
+    rocprofv3-test-systrace-setup PROPERTIES TIMEOUT 30 LABELS "integration-tests;rocpd"
+                                             FIXTURES_SETUP rocprofv3-test-systrace-setup)
+
+add_test(
+    NAME rocprofv3-test-systrace-input-json-setup
+    COMMAND
+        ${CMAKE_COMMAND} -E rm -rf
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.rpdb)
+
+set_tests_properties(
+    rocprofv3-test-systrace-input-json-setup
+    PROPERTIES TIMEOUT 30 LABELS "integration-tests;rocpd" FIXTURES_SETUP
+               rocprofv3-test-systrace-input-json-setup)
 
 add_test(
     NAME rocprofv3-test-systrace-execute
@@ -138,7 +210,12 @@ set_tests_properties(
         "${tracing-env}"
         FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+        DEPENDS
+        "rocprofv3-test-systrace-setup"
+        FIXTURES_REQUIRED
+        rocprofv3-test-systrace-setup
+        FIXTURES_SETUP
+        rocprofv3-test-systrace)
 
 add_test(
     NAME rocprofv3-test-systrace-input-json-execute
@@ -158,7 +235,12 @@ set_tests_properties(
         "${tracing-env}"
         FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+        DEPENDS
+        "rocprofv3-test-systrace-input-json-setup"
+        FIXTURES_REQUIRED
+        rocprofv3-test-systrace-input-json-setup
+        FIXTURES_SETUP
+        rocprofv3-test-systrace-input-json)
 add_test(
     NAME rocprofv3-test-systrace-validate
     COMMAND
@@ -178,7 +260,7 @@ add_test(
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
         --rocpd-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.rpdb)
 
 add_test(
     NAME rocprofv3-test-systrace-input-json-validate
@@ -199,15 +281,30 @@ add_test(
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.pftrace
         --rocpd-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-systrace-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-systrace-execute" FAIL_REGULAR_EXPRESSION "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               "rocprofv3-test-systrace-execute"
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               FIXTURES_REQUIRED
+               rocprofv3-test-systrace)
 
 set_tests_properties(
     rocprofv3-test-systrace-input-json-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-systrace-input-json-execute" FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               "rocprofv3-test-systrace-input-json-execute"
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               FIXTURES_REQUIRED
+               rocprofv3-test-systrace-input-json)

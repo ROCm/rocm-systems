@@ -280,7 +280,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readonly("end", &rocpd::types::thread::end)
         .def_readonly("name", &rocpd::types::thread::name);
 
-    py::class_<tool::output_config>(pyrocpd, "output_config", "Output configuration")
+    py::class_<tool::output_config>(pyrocpd, "OutputConfig", "Output configuration")
         .def(py::init<>())
         .def_readwrite("output_path", &tool::output_config::output_path)
         .def_readwrite("output_file", &tool::output_config::output_file)
@@ -299,7 +299,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("perfetto_buffer_fill_policy",
                        &tool::output_config::perfetto_buffer_fill_policy);
 
-    py::class_<tool::metadata>(pyrocpd, "metadata")
+    py::class_<tool::metadata>(pyrocpd, "Metadata")
         .def("set_process_id", &tool::metadata::set_process_id)
         .def("add_marker_message", &tool::metadata::add_marker_message)
         // .def("add_code_object", &tool::metadata::add_code_object)
@@ -325,12 +325,12 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("command_line", &tool::metadata::command_line);
 
     py::class_<rocpd::jinja_variables>(
-        pyrocpd, "schema_jinja_variables", "Variables for jinja substitution")
+        pyrocpd, "SchemaJinjaVariables", "Variables for jinja substitution")
         .def(py::init<>())
         .def_readwrite("uuid", &rocpd::jinja_variables::uuid)
         .def_readwrite("guid", &rocpd::jinja_variables::guid);
 
-    py::class_<rocpd_version_triplet_t>(pyrocpd, "schema_version", "Schema version triplet")
+    py::class_<rocpd_version_triplet_t>(pyrocpd, "SchemaVersion", "Schema version triplet")
         .def(py::init<>([]() {
             return rocpd_version_triplet_t{0, 0, 0};
         }))

@@ -44,6 +44,15 @@ find_package(Python3 REQUIRED)
 #
 #########################################################################################
 
+add_test(NAME rocprofv3-test-rocpd-no-rename-setup
+         COMMAND ${CMAKE_COMMAND} -E rm -rf
+                 ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.rpdb)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-no-rename-setup
+    PROPERTIES TIMEOUT 30 LABELS "integration-tests;rocpd" FIXTURES_SETUP
+               rocprofv3-test-rocpd-no-rename-setup)
+
 add_test(
     NAME rocprofv3-test-rocpd-no-rename-execute
     COMMAND
@@ -61,6 +70,10 @@ set_tests_properties(
                "${rocprofv3-rocpd-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DEPENDS
+               "rocprofv3-test-rocpd-no-rename-setup"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-setup
                FIXTURES_SETUP
                rocprofv3-test-rocpd-no-rename)
 
@@ -95,7 +108,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-rocpd-rename-csv-generation
@@ -119,7 +132,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv -d
         ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-rocpd-no-rename-csv-generation

@@ -371,10 +371,7 @@ def test_csv_data(
                             string_records = item["operations"]
                     exclude_ops = {"roctxGetThreadId"}
                     for entry in marker_records:
-                        # exclude records where start and end times are the same
-                        if entry["start_timestamp"] == entry["end_timestamp"]:
-                            continue
-                        # excludes roctxMarkA and roctxGetThreadId operations
+                        # excludes roctxGetThreadId operations
                         if (
                             string_records
                             and string_records[entry["operation"]] not in exclude_ops

@@ -42,7 +42,7 @@ def execute(input, config=None, window_args=None, filter_args=None, **kwargs):
     apply_filter(importData, **filter_args)
 
     config = (
-        output_config.output_config(**kwargs)
+        output_config.OutputConfig(**kwargs)
         if config is None
         else config.update(**kwargs)
     )

@@ -37,7 +37,7 @@ export ROCP_TOOL_ATTACH=1
 OUTPUT_SUBDIR="attachment-output"
 # For CSV, we don't require specific files since different traces may or may not be generated
 # We'll just check if at least one CSV file was created
-EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
+EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json")
 OUTPUT_FORMAT="csv json rocpd"
 
 # Clean up any existing output
@@ -110,9 +110,17 @@ else
     echo "Found $CSV_COUNT CSV file(s)"
 fi
 
+DB_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -wholename "*.rpdb/*.db" | wc -l)
+if [ $DB_COUNT -ne 1 ]; then
+    echo "Error: No rocpd files were generated"
+    exit 1
+else
+    echo "Found $DB_COUNT rocpd file(s)"
+fi
+
 # For other formats, check specific expected files
 for expected_file in "${EXPECTED_FILES[@]}"; do
-    if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
+    if [ ! -e "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
         echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
         exit 1
     fi

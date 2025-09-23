@@ -108,7 +108,7 @@ def write_perfetto(connection, config=None, **kwargs):
     Args:
         connection (rocpd.RocpdImportData):
             rocPD instance of database connection(s)
-        config (rocpd.output_config.output_config):
+        config (rocpd.output_config.OutputConfig):
             Output specification
 
     Returns:
@@ -117,7 +117,7 @@ def write_perfetto(connection, config=None, **kwargs):
     from . import output_config
 
     config = (
-        output_config.output_config(**kwargs)
+        output_config.OutputConfig(**kwargs)
         if config is None
         else config.update(**kwargs)
     )
@@ -132,7 +132,7 @@ def write_csv(connection, config=None, **kwargs):
     Args:
         connection (rocpd.RocpdImportData):
             rocPD instance of database connection(s)
-        config (rocpd.output_config.output_config):
+        config (rocpd.output_config.OutputConfig):
             Output specification
 
     Returns:
@@ -141,7 +141,7 @@ def write_csv(connection, config=None, **kwargs):
     from . import output_config
 
     config = (
-        output_config.output_config(**kwargs)
+        output_config.OutputConfig(**kwargs)
         if config is None
         else config.update(**kwargs)
     )
@@ -156,7 +156,7 @@ def write_otf2(connection, config=None, **kwargs):
     Args:
         connection (rocpd.RocpdImportData):
             rocPD instance of database connection(s)
-        config (rocpd.output_config.output_config):
+        config (rocpd.output_config.OutputConfig):
             Output specification
 
     Returns:
@@ -165,7 +165,7 @@ def write_otf2(connection, config=None, **kwargs):
     from . import output_config
 
     config = (
-        output_config.output_config(**kwargs)
+        output_config.OutputConfig(**kwargs)
         if config is None
         else config.update(**kwargs)
     )

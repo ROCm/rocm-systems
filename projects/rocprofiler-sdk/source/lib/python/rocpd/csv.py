@@ -31,6 +31,7 @@ from .query import export_sqlite_query
 from .time_window import apply_time_window
 from .filter import apply_filter
 from . import output_config
+from . import bindings
 
 
 def write_sql_query_to_csv(
@@ -200,15 +201,11 @@ def build_agent_id_string(agent_index_value, prefix=""):
 
     agent_prefix = prefix + "_" if prefix else ""
 
-    if agent_index_value == libpyrocpd.agent_indexing.node:  # absolute
-        return f"'Agent ' || {agent_prefix}agent_abs_index"
-    elif (
-        agent_index_value == libpyrocpd.agent_indexing.logical_node
-    ):  # relative (default)
-        return f"'Agent ' || {agent_prefix}agent_log_index"
-    elif (
-        agent_index_value == libpyrocpd.agent_indexing.logical_node_type
-    ):  # type-relative
+    if agent_index_value == bindings.agent_indexing.node:  # absolute
+        return f"'Agent ' || {agent_prefix}agent_absolute_index"
+    elif agent_index_value == bindings.agent_indexing.logical_node:  # relative (default)
+        return f"'Agent ' || {agent_prefix}agent_logical_index"
+    elif agent_index_value == bindings.agent_indexing.logical_node_type:  # type-relative
         return f"{agent_prefix}agent_type || ' ' || {agent_prefix}agent_type_index"
     else:
         return ""
@@ -236,9 +233,9 @@ def write_kernel_csv(importData, config) -> None:
         "stack_id AS Correlation_Id",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
-        "lds_size AS Lds_Block_Size",
+        "lds_block_size AS Lds_Block_Size",
         "scratch_size",
-        "vgpr_count",
+        "arch_vgpr_count",
         "accum_vgpr_count",
         "sgpr_count",
         "workgroup_x AS Workgroup_Size_X",
@@ -322,6 +319,11 @@ def write_counters_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
+    if config.kernel_rename:
+        kernel_name = "region"
+    else:
+        kernel_name = "name"
+
     select_columns = [
         "guid",
         "stack_id AS Correlation_Id",
@@ -330,17 +332,17 @@ def write_counters_csv(importData, config) -> None:
         "queue_id",
         "pid AS Process_Id",
         "tid AS Thread_Id",
-        "grid_size",
+        "(grid_x * grid_y * grid_z) AS grid_size",
         "kernel_id",
-        "kernel_name",
-        "workgroup_size",
+        f"{kernel_name} AS kernel_name",
+        "(workgroup_x * workgroup_y * workgroup_z) AS workgroup_size",
         "lds_block_size AS Lds_Block_Size",
         "scratch_size",
-        "vgpr_count",
+        "arch_vgpr_count",
         "accum_vgpr_count",
         "sgpr_count",
-        "counter_name",
-        "value AS Counter_Value",
+        "pmc_name AS Counter_Name",
+        "SUM(pmc_value) AS Counter_Value",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
     ]
@@ -354,7 +356,9 @@ def write_counters_csv(importData, config) -> None:
     query = f"""
         SELECT
             {select_clause}
-        FROM "counters_collection"
+        FROM "kernel_pmc_events"
+        GROUP BY
+            event_id, pmc_name
         ORDER BY
             guid ASC, start ASC, end DESC
     """
@@ -369,14 +373,15 @@ def write_scratch_memory_csv(importData, config) -> None:
         SELECT
             guid,
             'SCRATCH_MEMORY' AS Kind,
-            'SCRATCH_MEMORY_' || operation AS Operation,
+            'SCRATCH_MEMORY_' || name AS Operation,
             {agent_id} AS Agent_Id,
             queue_id,
             tid AS Thread_Id,
-            alloc_flags,
+            JSON_EXTRACT(extdata, '$.flags') AS alloc_flags,
             start AS Start_Timestamp,
             end AS End_Timestamp
-        FROM "scratch_memory"
+        FROM "memory_allocations"
+        WHERE level = 'SCRATCH'
         ORDER BY
             guid ASC, start ASC, end DESC
     """
@@ -421,7 +426,7 @@ def execute(input, config=None, window_args=None, filter_args=None, **kwargs):
     apply_filter(importData, **filter_args)
 
     config = (
-        output_config.output_config(**kwargs)
+        output_config.OutputConfig(**kwargs)
         if config is None
         else config.update(**kwargs)
     )

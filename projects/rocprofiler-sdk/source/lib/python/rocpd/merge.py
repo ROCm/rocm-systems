@@ -303,7 +303,7 @@ def merge_sqlite_dbs(
 def execute(input, config=None, **kwargs):
 
     config = (
-        output_config.output_config(**kwargs, strict=False)
+        output_config.OutputConfig(**kwargs, strict=False)
         if config is None
         else config.update(**kwargs)
     )

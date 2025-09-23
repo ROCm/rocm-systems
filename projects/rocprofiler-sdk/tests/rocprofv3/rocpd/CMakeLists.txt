@@ -9,17 +9,18 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-
-set(rocprofv3-rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    "OMPI_ALLOW_RUN_AS_ROOT=1"
-    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
-
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
-
 find_package(MPI)
 find_package(Python3 REQUIRED)
+
+set(ROCPD_PYTHON_MODULE_DIR
+    "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
+
+set(rocprofv3-rocpd-env
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" "PYTHONPATH=${ROCPD_PYTHON_MODULE_DIR}"
+    "OMPI_ALLOW_RUN_AS_ROOT=1" "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
+
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
 if(MPI_FOUND)
     set(MULTIPROC_IS_DISABLED OFF)
@@ -40,6 +41,14 @@ endif()
 #
 #########################################################################################
 
+add_test(NAME rocprofv3-test-rocpd-setup
+         COMMAND ${CMAKE_COMMAND} -E rm -rf
+                 ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.rpdb)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-setup PROPERTIES TIMEOUT 30 LABELS "integration-tests;rocpd"
+                                          FIXTURES_SETUP rocprofv3-test-rocpd-setup)
+
 add_test(
     NAME rocprofv3-test-rocpd-execute
     COMMAND
@@ -58,6 +67,10 @@ set_tests_properties(
                "${rocprofv3-rocpd-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DEPENDS
+               "rocprofv3-test-rocpd-setup"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-setup
                FIXTURES_SETUP
                rocprofv3-test-rocpd)
 
@@ -96,7 +109,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-rocpd-otf2-generation
@@ -149,7 +162,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-rocpd-perfetto-generation
@@ -203,7 +216,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-rocpd-csv-generation
@@ -227,12 +240,13 @@ set_tests_properties(
 # Summary generate
 #
 #########################################################################################
+
 add_test(
     NAME rocprofv3-test-rocpd-summary-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
         -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.rpdb)
 
 set_tests_properties(
     rocprofv3-test-rocpd-summary-generation

@@ -64,5 +64,6 @@ def test_csv_data(csv_data, json_data):
 
 
 if __name__ == "__main__":
-    exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
+    # use --maxfail=0 to run all tests
+    exit_code = pytest.main(["-x", __file__, "--maxfail=0"] + sys.argv[1:])
     sys.exit(exit_code)

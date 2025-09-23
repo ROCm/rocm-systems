@@ -168,4 +168,4 @@ def pftrace_data(request):
 @pytest.fixture
 def rocpd_data(request):
     filename = request.config.getoption("--rocpd-input")
-    return RocpdReader(filename).read()[0]
+    return RocpdReader(filename, require_rocpd=True).read()[0]

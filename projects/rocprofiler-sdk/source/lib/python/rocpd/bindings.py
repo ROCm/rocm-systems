@@ -57,12 +57,12 @@ try:
         """Check if the rocpd python bindings are available."""
         return True
 
-    # class defined by the bindings
+    # classes defined by the bindings
     RocpdImportData = libpyrocpd.RocpdImportData
-    output_config = libpyrocpd.output_config
-    agent_indexing = libpyrocpd.agent_indexing
-    schema_jinja_variables = libpyrocpd.schema_jinja_variables
-    metadata = libpyrocpd.metadata
+    OutputConfig = libpyrocpd.OutputConfig
+    SchemaJinjaVariables = libpyrocpd.SchemaJinjaVariables
+    SchemaVersion = libpyrocpd.SchemaVersion
+    Metadata = libpyrocpd.Metadata
     Thread = libpyrocpd.Thread
     Process = libpyrocpd.Process
     Node = libpyrocpd.Node
@@ -81,7 +81,6 @@ try:
     read_nodes = libpyrocpd.read_nodes
     read_processes = libpyrocpd.read_processes
     read_threads = libpyrocpd.read_threads
-    write_csv = libpyrocpd.write_csv
     write_perfetto = libpyrocpd.write_perfetto
     write_otf2 = libpyrocpd.write_otf2
     load_schema = libpyrocpd.load_schema
@@ -123,11 +122,41 @@ except ImportError:
         def __len__(self):
             return self.size()
 
+    class SchemaVersion:
+        def __init__(self, version=None, major=0, minor=0, patch=0):
+            """Fallback class replicating the interface of libpyrocpd.SchemaVersion.
+            A version of 0.0.0 means use the default schema version.
+
+            Args:
+                version (str): version string of the form "<major>.<minor>.<patch>"
+                major (int): major version number
+                minor (int): minor version number
+                patch (int): patch version number
+            """
+
+            if isinstance(version, str):
+                parts = [int(x) for x in version.split(".")]
+                if len(parts) >= 1:
+                    major = parts[0]
+                if len(parts) >= 2:
+                    minor = parts[1]
+                if len(parts) >= 3:
+                    patch = parts[2]
+
+            self.major = major
+            self.minor = minor
+            self.patch = patch
+
+        def __str__(self):
+            return f"{self.major}.{self.minor}.{self.patch}"
+
+        def __repr__(self):
+            return f"{self.__class__.__name__}(major={self.major}, minor={self.minor}, patch={self.patch})"
+
     def _unsupported_function(*args, **kwargs):
         raise RuntimeError("function requires rocpd Python bindings")
 
     format_path = _unsupported_function
-    write_csv = _unsupported_function
     write_perfetto = _unsupported_function
     write_otf2 = _unsupported_function
 
