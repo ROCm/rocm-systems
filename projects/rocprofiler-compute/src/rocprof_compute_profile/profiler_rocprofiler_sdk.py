@@ -57,9 +57,14 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         rocprofiler_sdk_tool_path = str(
             rocm_libdir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
         )
+        rocm_dir = Path(args.rocprofiler_sdk_library_path).parent.parent
+        rocprofiler_attach_tool_path = str(
+            rocm_dir / "lib" / "rocprofiler-sdk" / "librocprofv3-attach.so"
+        )
         ld_preload = [
             rocprofiler_sdk_tool_path,
             args.rocprofiler_sdk_library_path,
+            rocprofiler_attach_tool_path,
         ]
         options = {
             "ROCPROFILER_LIBRARY_CTOR": "1",
@@ -70,6 +75,17 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
             "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
         }
+
+        if args.attach_pid:
+            options.update({
+                "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_attach_tool_path,
+                "ROCPROF_ATTACH_PID": args.attach_pid,
+            })
+
+            if args.attach_duration_msec:
+                options.update({
+                    "ROCPROF_ATTACH_DURATION": args.attach_duration_msec,
+                })
 
         if args.kokkos_trace:
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -101,7 +117,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
         if dispatch:
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
-        options["APP_CMD"] = app_cmd
+        if not args.attach_pid:
+            options["APP_CMD"] = app_cmd
         return options
 
     # -----------------------

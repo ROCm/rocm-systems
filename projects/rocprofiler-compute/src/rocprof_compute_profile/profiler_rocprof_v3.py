@@ -72,6 +72,14 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             args.format_rocprof_output,
         ]
 
+        if args.attach_pid:
+            profiling_options.append("--pid")
+            profiling_options.append(args.attach_pid)
+
+            if args.attach_duration_msec:
+                profiling_options.append("--attach-duration-msec")
+                profiling_options.append(args.attach_duration_msec)
+
         # Kernel filtering
         if args.kernel:
             profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
@@ -94,8 +102,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                 f"[{','.join(dispatch)}]",
             ])
 
-        profiling_options.append("--")
-        profiling_options.extend(app_cmd)
+        if not args.attach_pid:
+            profiling_options.append("--")
+            profiling_options.extend(app_cmd)
         return profiling_options
 
     # -----------------------
