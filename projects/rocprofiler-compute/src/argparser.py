@@ -185,7 +185,7 @@ Examples:
         metavar="",
         type=str,
         dest="subpath",
-        default="gpu",
+        default="gpu_model",
         required=False,
         help=(
             "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
