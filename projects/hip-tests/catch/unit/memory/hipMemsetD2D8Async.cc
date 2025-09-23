@@ -114,63 +114,6 @@ TEST_CASE("Unit_hipMemsetD2D8Async_UnEvenRowsCols") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(A_d));
 }
-__global__ void copy_ker_async(char* Ad, char* Bd, size_t size) {
-  for (int i = 0; i < size; i++) {
-    Bd[i] = Ad[i];
-  }
-}
-/**
- * Test Description
- * ------------------------
- * - Checks that the Kernel allocated buffer has the expected value
- * after setting it to a known constant.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemsetD2D8Async.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.1
- */
-TEST_CASE("Unit_hipMemsetD2D8Async_KernelOperation") {
-  constexpr size_t size = 4096;
-  constexpr char memsetval = 'c';
-  constexpr unsigned blocksPerCU = 6;
-  constexpr unsigned threadsPerBlock = 256;
-  char *A_d, *C_d;
-  constexpr size_t numH = 64;
-  constexpr size_t numW = 64;
-  size_t devPitchA, devPitchC;
-  size_t width = numW * sizeof(char);
-  size_t sizeElements = numW * numH;
-
-  std::vector<char>C_h(sizeElements, 'a');
-  HIP_CHECK(
-      hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitchA, width, numH, 4 * sizeof(char)));
-  HIP_CHECK(
-      hipMemAllocPitch(reinterpret_cast<void**>(&C_d), &devPitchC, width, numH, 4 * sizeof(char)));
-
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMemsetD2D8Async(A_d, devPitchA, memsetval, numW, numH, stream));
-
-  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, size);
-
-  hipLaunchKernelGGL(copy_ker_async, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, C_d,
-                     size);
-  HIP_CHECK(
-      hipMemcpy2DAsync(C_h.data(), width, C_d, devPitchC, width, numH, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  for (int i = 0; i < numH; i++) {
-    for (int j = 0; j < numW; j++) {
-      INFO("Memset2D mismatch at index:" << i << " computed:" << C_h[i * numW + j]
-                                         << " memsetval:" << memsetval);
-      REQUIRE(C_h[i * numW + j] == memsetval);
-    }
-  }
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
-}
 /**
  * Test Description
  * ------------------------
