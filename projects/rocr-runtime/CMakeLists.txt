@@ -45,6 +45,9 @@ cmake_minimum_required(VERSION 3.7)
 
 # Set the project name
 project("rocr")
+set( CORE_TARGET "rocr" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 ## Expose static library option
@@ -82,6 +85,7 @@ function(add_rocm_subdir subdir subdir_assigns)
 endfunction()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+include ( GNUInstallDirs )
 include(utils)
 
 
@@ -179,14 +183,19 @@ endif()
 if (ENABLE_ASAN_PACKAGING)
   # ASAN Package requires only asan component with libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
+  set( COMP_TYPE "asan" )
 else()
   set(CPACK_COMPONENTS_ALL binary dev)
+  set( COMP_TYPE "runtime" )
 endif()
+
+set(PKG_MAINTAINER_NM "AMD HSA Support")
+set(PKG_MAINTAINER_EMAIL "dl.HSA-Runtime-Support@amd.com")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION_STRING})
-set(CPACK_PACKAGE_CONTACT "AMD HSA Support <dl.HSA-Runtime-Support@amd.com>")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_COMPONENT_DESCRIPTION "Includes HSAKMT, the ROCk driver, headers, pkgonfig and cmake files for ROCT.")
 set(CPACK_COMPONENT_BINARY_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms")
 set(CPACK_COMPONENT_DEV_DESCRIPTION "AMD Heterogeneous System Architecture HSA development package.\n This package contains the headers and cmake files for the rocr-runtime package.")
@@ -334,6 +343,7 @@ include(CPack)
 # Group binary and dev component to single package
 if(NOT BUILD_SHARED_LIBS)
     cpack_add_component_group("static")
+    set( STATIC_COMP_TYPE "STATIC" )
     cpack_add_component(binary  GROUP static)
     cpack_add_component(dev GROUP static)
 endif()
@@ -341,3 +351,32 @@ endif()
 cpack_add_component(asan
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for rocr-runtime")
+
+# Debian specific packaging configuration
+configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+
+message(STATUS "POTATO cmakelist CMAKE_INSTALL_DOCDIR: ${CMAKE_INSTALL_DOCDIR}")
+message(STATUS "POTATO BUILD_ENABLE_LINTIAN_OVERRIDES: ${BUILD_ENABLE_LINTIAN_OVERRIDES}")
+message(STATUS "POTATO BUILD_DEBIAN_PKGING_FLAG: ${BUILD_DEBIAN_PKGING_FLAG}")
+message(STATUS "POTATO COMP_TYPE: ${COMP_TYPE}")
+message(STATUS "POTATO CMakelists.txt BUILD_SHARED_LIBS: ${BUILD_SHARED_LIBS}")
+
+# Custom installation for Debian Lintian File
+if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
+    set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
+    message(STATUS "POTATO inside Custom installation for Debian Lintian File")
+    if(COMP_TYPE)
+	message(STATUS "POTATO inside COMP_TYPE")
+	set( OVERRIDE_TEMP_INSTALL_LOC "/_CPack_Packages/Linux/DEB/${CORE_TARGET}-${CPACK_PACKAGE_VERSION}-Linux/${COMP_TYPE}" )
+    elseif(STATIC_COMP_TYPE)
+	    message(STATUS "POTATO inside STATIC_COMP_TYPE")
+	set( OVERRIDE_TEMP_INSTALL_LOC "/_CPack_Packages/Linux/DEB/${CORE_TARGET}-${CPACK_PACKAGE_VERSION}-Linux/${STATIC_COMP_TYPE}" )
+    endif()
+    set(CPACK_INSTALL_COMMANDS
+	  "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+	  "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+	  )
+  message(STATUS "POTATO CMAKE_COMMAND: ${CMAKE_COMMAND}, CMAKE_BINARY_DIR: ${CMAKE_BINARY_DIR}, OVERRIDE_TEMP_INSTALL_LOC: ${OVERRIDE_TEMP_INSTALL_LOC}, DEB_OVERRIDES_INSTALL_PATH: ${DEB_OVERRIDES_INSTALL_PATH}")
+
+  message(STATUS "POTATO OVERRIDE_FILE: ${OVERRIDE_FILE}")
+endif()
