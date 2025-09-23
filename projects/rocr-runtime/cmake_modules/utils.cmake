@@ -233,12 +233,12 @@ endif()
 endfunction()
 
 ## Configure Copyright File for Debian Package
-function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTAINER_NM_T MAINTAINER_EMAIL_T)
+function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTAINER_NM_T MAINTAINER_EMAIL_T)
     # Check If Debian Platform
     find_file (DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
       set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" FORCE )
-      set_debian_pkg_cmake_flags( ${PACKAGE_NAME_T} ${PACKAGE_VERSION_T}
+      set_pkg_cmake_flags( ${PACKAGE_NAME_T} ${PACKAGE_VERSION_T}
                                   ${MAINTAINER_NM_T} ${MAINTAINER_EMAIL_T} )
 
       # Create debian directory in build tree
@@ -254,13 +254,13 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
       )
 
       # Install copyright file
-      message(STATUS "POTATO Install copyright file FILES CMAKE_BINARY_DIR: ${CMAKE_BINARY_DIR}/DEBIAN/copyright")
-      message(STATUS "POTATO Install copyright file CMAKE_INSTALL_DOCDIR: ${CMAKE_INSTALL_DOCDIR}")
-      message(STATUS "POTATO Install copyright file COMPONENT_NAME_T: ${COMPONENT_NAME_T}")
-      
       install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
 	        DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 	        COMPONENT ${COMPONENT_NAME_T} )
+
+	message(STATUS "POTATO TOMATO Install copyright file FILES CMAKE_BINARY_DIR: ${CMAKE_BINARY_DIR}/DEBIAN/copyright")
+	message(STATUS "POTATO TOMATO Install copyright file CMAKE_INSTALL_DOCDIR: ${CMAKE_INSTALL_DOCDIR}")
+	message(STATUS "POTATO TOMATO Install copyright file COMPONENT_NAME_T: ${COMPONENT_NAME_T}")
 
       # Configure the changelog file
       configure_file(
@@ -271,8 +271,7 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
       message(STATUS "POTATO BUILD_ENABLE_LINTIAN_OVERRIDES: ${BUILD_ENABLE_LINTIAN_OVERRIDES}")
       message(STATUS "POTATO utils.cmake BUILD_SHARED_LIBS: ${BUILD_SHARED_LIBS}")
       if( BUILD_ENABLE_LINTIAN_OVERRIDES )
-	if(FALSE)
-	#if(DEFINED BUILD_SHARED_LIBS AND NOT ${BUILD_SHARED_LIBS} STREQUAL "")
+	if(DEFINED BUILD_SHARED_LIBS AND NOT ${BUILD_SHARED_LIBS} STREQUAL "")
 	  string(FIND ${DEB_OVERRIDES_INSTALL_FILENM} "static" OUT_VAR1)
 	  if(OUT_VAR1 EQUAL -1)
 	    set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-static" )
@@ -313,25 +312,46 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
           message(FATAL_ERROR "Failed to compress: ${error}")
         endif()
 	
-	message(STATUS "POTATO changelog utils.cmake FILES CMAKE_BINARY_DIR/DEBIAN/DEB_CHANGELOG_INSTALL_FILENM: ${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}")
-	message(STATUS "POTATO changelog CMAKE_INSTALL_DOCDIR: ${CMAKE_INSTALL_DOCDIR}")
-	message(STATUS "POTATO changelog COMPONENT: ${COMPONENT_NAME_T}")
-
         install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
                   DESTINATION ${CMAKE_INSTALL_DOCDIR}
                   COMPONENT ${COMPONENT_NAME_T})
+
+        message(STATUS "POTATO changelog INSTALL utils.cmake FILES CMAKE_BINARY_DIR/DEBIAN/DEB_CHANGELOG_INSTALL_FILENM: ${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}")
+	message(STATUS "POTATO changelog INSTALL CMAKE_INSTALL_DOCDIR: ${CMAKE_INSTALL_DOCDIR}")
+	message(STATUS "POTATO changelog INSTALL COMPONENT: ${COMPONENT_NAME_T}")
+
       endif()
+    # rpm package
     else()
         # License file
         install ( FILES ${LICENSE_FILE}
             DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
             COMPONENT ${COMPONENT_NAME_T})
+        
+    message(STATUS "POTATO Install changelog utils.cmake FILES CMAKE_BINARY_DIR/DEBIAN/DEB_CHANGELOG_INSTALL_FILENM: ${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}")
+    message(STATUS "POTATO Install changelog CMAKE_INSTALL_DOCDIR: ${CMAKE_INSTALL_DOCDIR}")
+    message(STATUS "POTATO Install changelog COMPONENT: ${COMPONENT_NAME_T}")
+    endif()
+
+
+    message(STATUS "POTATO BUILD_ENABLE_LINTIAN_OVERRIDES: ${BUILD_ENABLE_LINTIAN_OVERRIDES} BUILD_DEBIAN_PKGING_FLAG: ${BUILD_DEBIAN_PKGING_FLAG}")
+    # Install lintian overrides 
+    if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
+      set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
+      install ( FILES ${OVERRIDE_FILE}
+	  DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
+          COMPONENT ${COMPONENT_NAME_T})
+
+  message(STATUS "POTATO INSIDE OVERRIDE_FILE: ${OVERRIDE_FILE}")
+  message(STATUS "POTATO INSIDE DEB_OVERRIDES_INSTALL_PATH: ${DEB_OVERRIDES_INSTALL_PATH}")
+  message(STATUS "POTATO INSIDE COMPONENT_NAME_T: ${COMPONENT_NAME_T}")
+
     endif()
 endfunction()
 
 # Set variables for changelog and copyright
 # For Debian specific Packages
-function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINTAINER_NM_T DEB_MAINTAINER_EMAIL_T )
+function( set_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINTAINER_NM_T DEB_MAINTAINER_EMAIL_T )
     # Setting configure flags
     set( DEB_PACKAGE_NAME             "${DEB_PACKAGE_NAME_T}" CACHE STRING "Debian Package Name" )
     set( DEB_PACKAGE_VERSION          "${DEB_PACKAGE_VERSION_T}" CACHE STRING "Debian Package Version String" )
