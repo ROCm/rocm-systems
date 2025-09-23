@@ -11,6 +11,7 @@ Live Attach/Detach is a new feature of ROCm Compute Profiler that allows couplin
 A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1 4.1.1 5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
 
 Detachment can be achieved in two ways:
+
 a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the ``rocprof`` subprocess started.
 b) By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
 
