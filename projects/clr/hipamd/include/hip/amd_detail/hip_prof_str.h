@@ -854,6 +854,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipModuleGetFunction: return "hipModuleGetFunction";
     case HIP_API_ID_hipModuleGetFunctionCount: return "hipModuleGetFunctionCount";
     case HIP_API_ID_hipModuleGetGlobal: return "hipModuleGetGlobal";
+    case HIP_API_ID_hipModuleGetLoadingMode: return "hipModuleGetLoadingMode";
     case HIP_API_ID_hipModuleGetTexRef: return "hipModuleGetTexRef";
     case HIP_API_ID_hipModuleLaunchCooperativeKernel: return "hipModuleLaunchCooperativeKernel";
     case HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice: return "hipModuleLaunchCooperativeKernelMultiDevice";
@@ -1294,6 +1295,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipModuleGetFunction", name) == 0) return HIP_API_ID_hipModuleGetFunction;
   if (strcmp("hipModuleGetFunctionCount", name) == 0) return HIP_API_ID_hipModuleGetFunctionCount;
   if (strcmp("hipModuleGetGlobal", name) == 0) return HIP_API_ID_hipModuleGetGlobal;
+  if (strcmp("hipModuleGetLoadingMode", name) == 0) return HIP_API_ID_hipModuleGetLoadingMode;
   if (strcmp("hipModuleGetTexRef", name) == 0) return HIP_API_ID_hipModuleGetTexRef;
   if (strcmp("hipModuleLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernel;
   if (strcmp("hipModuleLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice;
@@ -3525,10 +3527,6 @@ typedef struct hip_api_data_s {
       hipModule_t mod;
     } hipModuleGetFunctionCount;
     struct {
-      hipModuleLoadingMode_t* mode;
-      hipModuleLoadingMode_t mode__val;
-    } hipModuleGetLoadingMode;
-    struct {
       hipDeviceptr_t* dptr;
       hipDeviceptr_t dptr__val;
       size_t* bytes;
@@ -3537,6 +3535,10 @@ typedef struct hip_api_data_s {
       const char* name;
       char name__val;
     } hipModuleGetGlobal;
+    struct {
+      hipModuleLoadingMode_t* mode;
+      hipModuleLoadingMode_t mode__val;
+    } hipModuleGetLoadingMode;
     struct {
       textureReference** texRef;
       textureReference* texRef__val;
@@ -6199,6 +6201,10 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleGetGlobal.hmod = (hipModule_t)hmod; \
   cb_data.args.hipModuleGetGlobal.name = (name) ? strdup(name) : NULL; \
 };
+// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
+#define INIT_hipModuleGetLoadingMode_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipModuleGetLoadingMode.mode = (hipModuleLoadingMode_t*)mode; \
+};
 // hipModuleGetTexRef[('textureReference**', 'texRef'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
 #define INIT_hipModuleGetTexRef_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleGetTexRef.texRef = (textureReference**)texRef; \
@@ -8110,15 +8116,19 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipModuleGetFunction.function) data->args.hipModuleGetFunction.function__val = *(data->args.hipModuleGetFunction.function);
       if (data->args.hipModuleGetFunction.kname) data->args.hipModuleGetFunction.kname__val = *(data->args.hipModuleGetFunction.kname);
       break;
-// hipModuleGetLoadingMode[('hipFunction_t*', 'function')]
-    case HIP_API_ID_hipModuleGetLoadingMode:
-      if (data->args.hipModuleGetLoadingMode.mode) data->args.hipModuleGetLoadingMode.mode__val = *(data->args.hipModuleGetLoadingMode.mode);
-      break;  
+// hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
+    case HIP_API_ID_hipModuleGetFunctionCount:
+      if (data->args.hipModuleGetFunctionCount.count) data->args.hipModuleGetFunctionCount.count__val = *(data->args.hipModuleGetFunctionCount.count);
+      break;
 // hipModuleGetGlobal[('hipDeviceptr_t*', 'dptr'), ('size_t*', 'bytes'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
     case HIP_API_ID_hipModuleGetGlobal:
       if (data->args.hipModuleGetGlobal.dptr) data->args.hipModuleGetGlobal.dptr__val = *(data->args.hipModuleGetGlobal.dptr);
       if (data->args.hipModuleGetGlobal.bytes) data->args.hipModuleGetGlobal.bytes__val = *(data->args.hipModuleGetGlobal.bytes);
       if (data->args.hipModuleGetGlobal.name) data->args.hipModuleGetGlobal.name__val = *(data->args.hipModuleGetGlobal.name);
+      break;
+// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
+    case HIP_API_ID_hipModuleGetLoadingMode:
+      if (data->args.hipModuleGetLoadingMode.mode) data->args.hipModuleGetLoadingMode.mode__val = *(data->args.hipModuleGetLoadingMode.mode);
       break;
 // hipModuleGetTexRef[('textureReference**', 'texRef'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
     case HIP_API_ID_hipModuleGetTexRef:
@@ -10285,12 +10295,20 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << "library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.library__val); }
       oss << ", code="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.code);
       if (data->args.hipLibraryLoadData.jitOptions == NULL) oss << ", jitOptions=NULL";
+<<<<<<< HEAD
       else { oss << ", jitOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.jitOptions__val); }
+=======
+      else { oss << ", jitOptions="; roctracer::hip_support::detail::operator<<(oss, (void*)data->args.hipLibraryLoadData.jitOptions__val); }
+>>>>>>> dbccd064f3 (SWDEV-546177 - fix texture dyn variables)
       if (data->args.hipLibraryLoadData.jitOptionsValues == NULL) oss << ", jitOptionsValues=NULL";
       else { oss << ", jitOptionsValues="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.jitOptionsValues__val); }
       oss << ", numJitOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.numJitOptions);
       if (data->args.hipLibraryLoadData.libraryOptions == NULL) oss << ", libraryOptions=NULL";
+<<<<<<< HEAD
       else { oss << ", libraryOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.libraryOptions__val); }
+=======
+      else { oss << ", libraryOptions="; roctracer::hip_support::detail::operator<<(oss, (void*)data->args.hipLibraryLoadData.libraryOptions__val); }
+>>>>>>> dbccd064f3 (SWDEV-546177 - fix texture dyn variables)
       if (data->args.hipLibraryLoadData.libraryOptionValues == NULL) oss << ", libraryOptionValues=NULL";
       else { oss << ", libraryOptionValues="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.libraryOptionValues__val); }
       oss << ", numLibraryOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.numLibraryOptions);
@@ -10303,12 +10321,20 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipLibraryLoadFromFile.fileName == NULL) oss << ", fileName=NULL";
       else { oss << ", fileName="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.fileName__val); }
       if (data->args.hipLibraryLoadFromFile.jitOptions == NULL) oss << ", jitOptions=NULL";
+<<<<<<< HEAD
       else { oss << ", jitOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.jitOptions__val); }
+=======
+      else { oss << ", jitOptions="; roctracer::hip_support::detail::operator<<(oss, (void*)data->args.hipLibraryLoadFromFile.jitOptions__val); }
+>>>>>>> dbccd064f3 (SWDEV-546177 - fix texture dyn variables)
       if (data->args.hipLibraryLoadFromFile.jitOptionsValues == NULL) oss << ", jitOptionsValues=NULL";
       else { oss << ", jitOptionsValues="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.jitOptionsValues__val); }
       oss << ", numJitOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.numJitOptions);
       if (data->args.hipLibraryLoadFromFile.libraryOptions == NULL) oss << ", libraryOptions=NULL";
+<<<<<<< HEAD
       else { oss << ", libraryOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.libraryOptions__val); }
+=======
+      else { oss << ", libraryOptions="; roctracer::hip_support::detail::operator<<(oss, (void*)data->args.hipLibraryLoadFromFile.libraryOptions__val); }
+>>>>>>> dbccd064f3 (SWDEV-546177 - fix texture dyn variables)
       if (data->args.hipLibraryLoadFromFile.libraryOptionValues == NULL) oss << ", libraryOptionValues=NULL";
       else { oss << ", libraryOptionValues="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.libraryOptionValues__val); }
       oss << ", numLibraryOptions="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.numLibraryOptions);
@@ -11304,12 +11330,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", kname="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunction.kname__val); }
       oss << ")";
     break;
-    case HIP_API_ID_hipModuleGetLoadingMode:
-      oss << "hipModuleGetLoadingMode(";
-      if (data->args.hipModuleGetLoadingMode.mode == NULL) 
-        oss << "mode=NULL";
-      else { oss << "mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetLoadingMode.mode__val); }
-        oss << ")";
+    case HIP_API_ID_hipModuleGetFunctionCount:
+      oss << "hipModuleGetFunctionCount(";
+      if (data->args.hipModuleGetFunctionCount.count == NULL) oss << "count=NULL";
+      else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.count__val); }
+      oss << ", mod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.mod);
+      oss << ")";
     break;
     case HIP_API_ID_hipModuleGetGlobal:
       oss << "hipModuleGetGlobal(";
@@ -11320,6 +11346,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", hmod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetGlobal.hmod);
       if (data->args.hipModuleGetGlobal.name == NULL) oss << ", name=NULL";
       else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetGlobal.name__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipModuleGetLoadingMode:
+      oss << "hipModuleGetLoadingMode(";
+      if (data->args.hipModuleGetLoadingMode.mode == NULL) oss << "mode=NULL";
+      else { oss << "mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetLoadingMode.mode__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipModuleGetTexRef:
