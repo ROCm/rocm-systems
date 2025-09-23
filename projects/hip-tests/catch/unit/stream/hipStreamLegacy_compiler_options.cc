@@ -64,6 +64,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithSptCompilerOption") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
@@ -133,6 +134,7 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption") {
   H2D_Thread.join();
   std::thread D2H_Thread(copyDeviceToHost, devArr, hostArrDst);
   D2H_Thread.join();
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 50 \n");
