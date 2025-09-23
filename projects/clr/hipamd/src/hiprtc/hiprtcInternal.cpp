@@ -160,6 +160,11 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
       res != compile_options.end()) {
     auto isaName = getValueOf(*res);
     isa_ = "amdgcn-amd-amdhsa--" + isaName;
+    bc_type_ = hip::helpers::kLLVM;
+    if (isaName == "amdgcnspirv") {
+      isa_ = "spir64-amd-amdhsa--" + isaName;
+      bc_type_ = hip::helpers::kSPIRV;
+    }
     settings_.offloadArchProvided = true;
     return true;
   }
@@ -187,7 +192,7 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
 
   if (fgpu_rdc_) {
     if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
-                                        LLVMBitcode_)) {
+                                        LLVMBitcode_, bc_type_)) {
       LogError("Error in hiprtc: unable to compile source to bitcode");
       return false;
     }

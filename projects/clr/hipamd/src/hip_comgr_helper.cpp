@@ -345,9 +345,15 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
 
 bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
                       const std::string& isa, std::vector<std::string>& compileOptions,
-                      std::string& buildLog, std::vector<char>& LLVMBitcode) {
+                      std::string& buildLog, std::vector<char>& LLVMBitcode, DataKind bc_type) {
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle compileAction;
+  amd_comgr_action_kind_t action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC;
+  amd_comgr_data_kind_t data_kind = AMD_COMGR_DATA_KIND_BC;
+  if (bc_type == kSPIRV) {
+    action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_TO_SPIRV;
+    data_kind = AMD_COMGR_DATA_KIND_SPIRV;
+  }
 
   comgr_helper::ComgrDataSetUniqueHandle output;
   if (output.Create() != AMD_COMGR_STATUS_SUCCESS) {
@@ -358,9 +364,8 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
     return false;
   }
 
-  if (amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
-                            compileAction.get(), compileInputs.get(),
-                            output.get()) != AMD_COMGR_STATUS_SUCCESS) {
+  if (amd::Comgr::do_action(action_kind, compileAction.get(),
+                            compileInputs.get(), output.get()) != AMD_COMGR_STATUS_SUCCESS) {
     extractBuildLog(output, buildLog);
     return false;
   }
@@ -369,7 +374,7 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
     return false;
   }
 
-  if (!extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, LLVMBitcode)) {
+  if (!extractByteCodeBinary(output, data_kind, LLVMBitcode)) {
     return false;
   }
 
