@@ -1075,7 +1075,6 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
     )
 
-
     existing_marker_files_csv = [d for d in marker_api_trace_csvs if Path(d).is_file()]
     existing_counter_files_csv = [
         d for d in counter_collection_csvs if Path(d).is_file()
@@ -1083,13 +1082,15 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
 
     # Check if we have files to process
     if not existing_marker_files_csv:
-        console_warning("No marker_api_trace files found. Exiting kokkos trace processing.")
+        console_warning(
+            "No marker_api_trace files found. Exiting kokkos trace processing."
+        )
         no_results = pd.DataFrame()
         no_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             index=False,
         )
-    else:    
+    else:
         # concate and output marker api trace info
         combined_results_marker = pd.concat(
             [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
@@ -1105,9 +1106,10 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             workload_dir + "/" + fbase + "_marker_api_trace.csv",
         )
 
-    
     if not existing_counter_files_csv:
-        console_warning("No counter_collection files found. Exiting kokkos trace processing.")
+        console_warning(
+            "No counter_collection files found. Exiting kokkos trace processing."
+        )
         no_results = pd.DataFrame()
         no_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
