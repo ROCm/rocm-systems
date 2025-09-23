@@ -140,9 +140,8 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_NegativeTests") {
             hipMemGetAllocationGranularity(nullptr, &prop, hipMemAllocationGranularityMinimum));
   }
   SECTION("Prop is nullptr") {
-    REQUIRE(
-        hipErrorInvalidValue ==
-        hipMemGetAllocationGranularity(&granularity, nullptr, hipMemAllocationGranularityMinimum));
+    REQUIRE(hipErrorInvalidValue == hipMemGetAllocationGranularity(
+                                        &granularity, nullptr, hipMemAllocationGranularityMinimum));
   }
 
   SECTION("flag is invalid") {
@@ -156,32 +155,28 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_NegativeTests") {
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     prop.location.id = numDevices;  // set to non existing device
-    REQUIRE(
-        hipErrorInvalidValue ==
-        hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+    REQUIRE(hipErrorInvalidValue == hipMemGetAllocationGranularity(
+                                        &granularity, &prop, hipMemAllocationGranularityMinimum));
   }
   SECTION("device id < lowest device id") {
     prop.location.id = -1;  // set to non existing device
-    REQUIRE(
-        hipErrorInvalidValue ==
-        hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+    REQUIRE(hipErrorInvalidValue == hipMemGetAllocationGranularity(
+                                        &granularity, &prop, hipMemAllocationGranularityMinimum));
   }
   SECTION("allocation type as invalid") {
     prop.type = hipMemAllocationTypeInvalid;
-    REQUIRE(
-        hipErrorInvalidValue ==
-        hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+    REQUIRE(hipErrorInvalidValue == hipMemGetAllocationGranularity(
+                                        &granularity, &prop, hipMemAllocationGranularityMinimum));
   }
   SECTION("location type as invalid") {
     prop.location.type = hipMemLocationTypeInvalid;
-    REQUIRE(
-        hipErrorInvalidValue ==
-        hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+    REQUIRE(hipErrorInvalidValue == hipMemGetAllocationGranularity(
+                                        &granularity, &prop, hipMemAllocationGranularityMinimum));
   }
 #endif
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

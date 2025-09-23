@@ -219,17 +219,11 @@ TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_SetProp") {
  * Scenario 1
  */
 TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_SetGet") {
-  SECTION("Flag = hipEventDefault") {
-    validateEventWaitNodeSetEvent(hipEventDefault);
-  }
+  SECTION("Flag = hipEventDefault") { validateEventWaitNodeSetEvent(hipEventDefault); }
 
-  SECTION("Flag = hipEventBlockingSync") {
-    validateEventWaitNodeSetEvent(hipEventBlockingSync);
-  }
+  SECTION("Flag = hipEventBlockingSync") { validateEventWaitNodeSetEvent(hipEventBlockingSync); }
 
-  SECTION("Flag = hipEventDisableTiming") {
-    validateEventWaitNodeSetEvent(hipEventDisableTiming);
-  }
+  SECTION("Flag = hipEventDisableTiming") { validateEventWaitNodeSetEvent(hipEventDisableTiming); }
 }
 
 /**
@@ -275,9 +269,7 @@ TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_Negative") {
     HIP_CHECK(hipFree(A_d));
   }
 
-  SECTION("input node is event record node") {
-    setEventRecordNode();
-  }
+  SECTION("input node is event record node") { setEventRecordNode(); }
 
   SECTION("input node is uninitialized node") {
     hipGraphNode_t node_uninit{};

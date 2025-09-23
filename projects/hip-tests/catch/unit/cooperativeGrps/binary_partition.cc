@@ -88,7 +88,7 @@ TEST_CASE("Unit_cg_binary_part") {
     std::vector<int> input;
     input.reserve(warp_size);
     for (size_t i = 0; i < warp_size; i++) {
-        input.push_back(i + 1);
+      input.push_back(i + 1);
     }
 
     HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice));

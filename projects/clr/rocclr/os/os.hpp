@@ -52,7 +52,6 @@ class Thread;  // For Os::createOsThread()
 
 class Os : AllStatic {
  public:
-
 // File Desc abstraction between OS
 #if defined(_WIN32)
   typedef void* FileDesc;
@@ -373,7 +372,7 @@ ALWAYSINLINE address Os::currentStackPtr() {
 #else
       ""
 #endif
-          );
+  );
 #else   // !__GNUC__
   __asm mov value, esp;
 #endif  // !__GNUC__
@@ -472,7 +471,7 @@ inline void Os::ThreadAffinityMask::clear(uint cpu) {
 
 inline bool Os::ThreadAffinityMask::isSet(uint cpu) const {
   return (KAFFINITY)0 !=
-      (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
+         (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
 }
 
 inline bool Os::ThreadAffinityMask::isEmpty() const {

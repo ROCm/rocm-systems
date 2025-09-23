@@ -89,20 +89,19 @@ bool ValidateUsingCopy(int deviceId, void* dev_ptr, size_t data_size,
   HIP_CHECK(hipMemcpy(dev_ptr, A_h.data(), data_size, hipMemcpyHostToDevice));
   auto end = std::chrono::high_resolution_clock::now();
   h2d_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  
+
   start = std::chrono::high_resolution_clock::now();
   HIP_CHECK(hipMemcpy(B_h.data(), dev_ptr, data_size, hipMemcpyDeviceToHost));
   end = std::chrono::high_resolution_clock::now();
   d2h_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  
+
   if (debug_failure) {
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
   } else {
     assert(A_h.size() == B_h.size());
     for (size_t idx = 0; idx < A_h.size(); ++idx) {
       if (A_h[idx] != B_h[idx]) {
-        std::cout << "Failed at first index: " << idx
-                  << " Expected: " << A_h[idx]
+        std::cout << "Failed at first index: " << idx << " Expected: " << A_h[idx]
                   << " Value: " << B_h[idx] << std::endl;
         break;
       }
@@ -135,8 +134,8 @@ bool TestOnDevice(int deviceId) {
     auto start = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipMemAddressReserve(&dev_ptr, size_idx, granularity, nullptr, 0));
     auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::microseconds reserve_elapsed
-      = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::chrono::microseconds reserve_elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::vector<hipMemGenericAllocationHandle_t> physmem_handles;
     std::chrono::microseconds alloc_elapsed;
     std::chrono::microseconds map_elapsed;
@@ -233,34 +232,34 @@ bool TestOnDevice(int deviceId) {
       ++chunk_idx;
     }
     end = std::chrono::high_resolution_clock::now();
-    std::chrono::microseconds unmap_elapsed
-      = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::chrono::microseconds unmap_elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     start = std::chrono::high_resolution_clock::now();
     for (auto& physmem_handle : physmem_handles) {
       HIP_CHECK(hipMemRelease(physmem_handle));
     }
     end = std::chrono::high_resolution_clock::now();
-    std::chrono::microseconds release_elapsed
-      = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::chrono::microseconds release_elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     start = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipMemAddressFree(dev_ptr, size_idx));
     end = std::chrono::high_resolution_clock::now();
-    std::chrono::microseconds free_elapsed
-      = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::chrono::microseconds free_elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Print the results
     std::cout << "-------------Size: " << (size_idx / kGB) << " GB----------------" << std::endl;
     std::cout << "Time taken to reserve : " << reserve_elapsed.count()
-              << " micro seconds and free: " << free_elapsed.count()
-              << " micro seconds" << std::endl;
-    std::cout <<"Time taken to alloc : " << alloc_elapsed.count()
-              << " micro seconds and release: "<< release_elapsed.count()
-              << " micro seconds" << std::endl;
+              << " micro seconds and free: " << free_elapsed.count() << " micro seconds"
+              << std::endl;
+    std::cout << "Time taken to alloc : " << alloc_elapsed.count()
+              << " micro seconds and release: " << release_elapsed.count() << " micro seconds"
+              << std::endl;
     std::cout << "Time taken to map : " << map_elapsed.count()
-              << " micro seconds and unmap: " << unmap_elapsed.count()
-              << " micro seconds" << std::endl;
+              << " micro seconds and unmap: " << unmap_elapsed.count() << " micro seconds"
+              << std::endl;
     std::cout << "Time taken to H2D : " << h2d_elapsed.count()
               << " micro seconds and D2H: " << d2h_elapsed.count() << " micro seconds" << std::endl;
     std::cout << "-------------------------/hipMallocPerf------------------------" << std::endl;
@@ -269,20 +268,20 @@ bool TestOnDevice(int deviceId) {
     start = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipMalloc(&dev_ptr_legacy, size_idx));
     end = std::chrono::high_resolution_clock::now();
-    std::chrono::microseconds hm_elapsed
-      = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::chrono::microseconds hm_elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     start = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipFree(dev_ptr_legacy));
     end = std::chrono::high_resolution_clock::now();
-    std::chrono::microseconds hf_elapsed
-      = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::chrono::microseconds hf_elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::cout << "Time taken for hipMalloc : " << hm_elapsed.count()
-              << " micro seconds and hipFree: " << hf_elapsed.count()
-              << " micro seconds" << std::endl;
+              << " micro seconds and hipFree: " << hf_elapsed.count() << " micro seconds"
+              << std::endl;
     std::cout << "---------------------------------------------------------------" << std::endl;
     std::cout << std::endl;
   }
- 
+
   return true;
 }
 

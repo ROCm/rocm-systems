@@ -45,7 +45,7 @@
 TEST_CASE("Unit_hipMemPoolDestroy_Negative_Parameter") {
   checkMempoolSupported(0)
 
-  hipMemPool_t mem_pool = nullptr;
+      hipMemPool_t mem_pool = nullptr;
 
   SECTION("Passing nullptr to mempool") {
     HIP_CHECK_ERROR(hipMemPoolDestroy(nullptr), hipErrorInvalidValue);
@@ -73,6 +73,6 @@ TEST_CASE("Unit_hipMemPoolDestroy_Negative_Parameter") {
 }
 
 /**
-* End doxygen group StreamOTest.
-* @}
-*/
+ * End doxygen group StreamOTest.
+ * @}
+ */

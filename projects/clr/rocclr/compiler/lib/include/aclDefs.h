@@ -51,4 +51,4 @@
 #error "MAX_HIDDEN_KERNARGS_NUM is already defined"
 #endif
 
-#endif // _ACL_DEFS_0_8_H_
+#endif  // _ACL_DEFS_0_8_H_

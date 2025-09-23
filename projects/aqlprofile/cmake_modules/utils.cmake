@@ -74,3 +74,33 @@ function ( get_version DEFAULT_VERSION_STRING )
     set( VERSION_BUILD  "${VERSION_BUILD}" PARENT_SCOPE )
 
 endfunction()
+
+function(get_git_rev GIT_REVISION_OUT)
+    find_package(Git)
+
+    if(Git_FOUND)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --tags
+            OUTPUT_VARIABLE GIT_DESCRIBE
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _GIT_DESCRIBE_RESULT
+            ERROR_QUIET)
+        if(NOT _GIT_DESCRIBE_RESULT EQUAL 0)
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} describe
+                OUTPUT_VARIABLE GIT_DESCRIBE
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _GIT_DESCRIBE_RESULT
+                ERROR_QUIET)
+        endif()
+
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            OUTPUT_VARIABLE GIT_REVISION
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        set(${GIT_REVISION_OUT} "${GIT_REVISION}" PARENT_SCOPE)
+    else()
+        set(${GIT_REVISION_OUT} "" PARENT_SCOPE)
+    endif()
+endfunction()

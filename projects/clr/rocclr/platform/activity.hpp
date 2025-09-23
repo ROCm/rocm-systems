@@ -77,6 +77,5 @@ bool IsEnabled(OpId operation_id);
 void ReportActivity(const amd::Command& command);
 
 
-
 const char* getOclCommandKindString(cl_command_type kind);
 }  // namespace amd::activity_prof

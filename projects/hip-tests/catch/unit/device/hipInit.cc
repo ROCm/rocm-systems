@@ -71,6 +71,6 @@ TEST_CASE("Unit_hipInit_Negative") {
 
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

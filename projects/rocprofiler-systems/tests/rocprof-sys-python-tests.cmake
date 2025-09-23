@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -153,7 +134,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             COMMAND ${ROCPROFSYS_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/python-builtin/${_VERSION}/trip_count.txt
-            PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
+            PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:17\\\]"
             DEPENDS python-builtin-${_VERSION}
             ENVIRONMENT "${_python_environment}"
         )
@@ -259,18 +240,18 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     )
 
     set(python_builtin_labels
-        [run][builtin.py:28]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [inefficient][builtin.py:14]
+        [run][builtin.py:31]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [inefficient][builtin.py:17]
     )
     set(python_builtin_count
         5

@@ -33,9 +33,7 @@ class StreamGetPriorityBenchmark : public Benchmark<StreamGetPriorityBenchmark> 
     const hipStream_t stream = stream_guard.stream();
 
     int priority{};
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamGetPriority(stream, &priority));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipStreamGetPriority(stream, &priority)); }
   }
 };
 
@@ -74,6 +72,6 @@ TEST_CASE("Performance_hipStreamGetPriority") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

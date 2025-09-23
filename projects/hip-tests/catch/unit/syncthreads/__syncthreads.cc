@@ -59,6 +59,6 @@ TEST_CASE("Unit___syncthreads_Positive_Basic") {
 }
 
 /**
-* End doxygen group SyncthreadsTest.
-* @}
-*/
+ * End doxygen group SyncthreadsTest.
+ * @}
+ */

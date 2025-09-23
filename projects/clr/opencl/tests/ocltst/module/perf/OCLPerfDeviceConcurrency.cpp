@@ -46,7 +46,7 @@ static coordRec coords[] = {
 
 static unsigned int numCoords = sizeof(coords) / sizeof(coordRec);
 
-static const char *float_mandel_vec =
+static const char* float_mandel_vec =
     "__kernel void mandelbrot(__global uint *out, uint width, float xPos, "
     "float yPos, float xStep, float yStep, uint maxIter)\n"
     "{\n"
@@ -177,7 +177,7 @@ OCLPerfDeviceConcurrency::OCLPerfDeviceConcurrency() {
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 
@@ -185,8 +185,7 @@ OCLPerfDeviceConcurrency::OCLPerfDeviceConcurrency() {
     num_devices = 0;
     /* Get the number of requested devices */
 
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     if (num_devices > MAX_DEVICES) {
       num_devices = MAX_DEVICES;
     }
@@ -197,40 +196,34 @@ OCLPerfDeviceConcurrency::OCLPerfDeviceConcurrency() {
 
 OCLPerfDeviceConcurrency::~OCLPerfDeviceConcurrency() {}
 
-void OCLPerfDeviceConcurrency::setData(cl_mem buffer, unsigned int idx,
-                                       unsigned int val) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_[idx], buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+void OCLPerfDeviceConcurrency::setData(cl_mem buffer, unsigned int idx, unsigned int val) {
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_[idx], buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < width_; i++) data[i] = val;
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_[idx], buffer, data, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_[idx], buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmd_queue_[idx]);
 }
 
 void OCLPerfDeviceConcurrency::checkData(cl_mem buffer, unsigned int idx) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_[idx], buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_[idx], buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL, &error_);
   totalIters = 0;
   for (unsigned int i = 0; i < width_; i++) {
     totalIters += data[i];
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_[idx], buffer, data, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_[idx], buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmd_queue_[idx]);
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfDeviceConcurrency::open(unsigned int test, char *units,
-                                    double &conversion, unsigned int deviceId) {
+void OCLPerfDeviceConcurrency::open(unsigned int test, char* units, double& conversion,
+                                    unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   unsigned int i;
   _crcword = 0;
   conversion = 1.0f;
@@ -264,20 +257,18 @@ void OCLPerfDeviceConcurrency::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
 
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     if (num_devices > MAX_DEVICES) {
       num_devices = MAX_DEVICES;
     }
@@ -289,46 +280,40 @@ void OCLPerfDeviceConcurrency::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested devices */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
-  context_ = _wrapper->clCreateContext(NULL, num_devices, devices,
-                                       notify_callback, NULL, &error_);
+  context_ = _wrapper->clCreateContext(NULL, num_devices, devices, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cur_devices = _openTest + 1;
 
   for (i = 0; i < cur_devices; i++) {
-    cmd_queue_[i] =
-        _wrapper->clCreateCommandQueue(context_, devices[i], 0, NULL);
+    cmd_queue_[i] = _wrapper->clCreateCommandQueue(context_, devices[i], 0, NULL);
     CHECK_RESULT(cmd_queue_[i] == 0, "clCreateCommandQueue failed");
-    outBuffer_[i] =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    outBuffer_[i] = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(outBuffer_[i] == 0, "clCreateBuffer(outBuffer) failed");
   }
 
-  const char *tmp;
+  const char* tmp;
   tmp = float_mandel_vec;
 
   for (i = 0; i < cur_devices; i++) {
-    program_[i] = _wrapper->clCreateProgramWithSource(
-        context_, 1, (const char **)&tmp, NULL, &error_);
+    program_[i] =
+        _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
     CHECK_RESULT(program_[i] == 0, "clCreateProgramWithSource failed");
 
-    error_ =
-        _wrapper->clBuildProgram(program_[i], 1, &devices[i], "", NULL, NULL);
+    error_ = _wrapper->clBuildProgram(program_[i], 1, &devices[i], "", NULL, NULL);
 
     if (error_ != CL_SUCCESS) {
       cl_int intError;
       char log[16384];
-      intError = _wrapper->clGetProgramBuildInfo(
-          program_[i], devices[i], CL_PROGRAM_BUILD_LOG, 16384 * sizeof(char),
-          log, NULL);
+      intError = _wrapper->clGetProgramBuildInfo(program_[i], devices[i], CL_PROGRAM_BUILD_LOG,
+                                                 16384 * sizeof(char), log, NULL);
       printf("Build error on device %d -> %s\n", i, log);
 
       CHECK_RESULT(0, "clBuildProgram failed");
@@ -347,20 +332,13 @@ void OCLPerfDeviceConcurrency::open(unsigned int test, char *units,
   float yPos = (float)(coords[coordIdx].y + 0.5 * coords[coordIdx].width);
 
   for (i = 0; i < cur_devices; i++) {
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 0, sizeof(cl_mem),
-                                      (void *)&outBuffer_[i]);
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 1, sizeof(cl_uint),
-                                      (void *)&width_);
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 2, sizeof(cl_float),
-                                      (void *)&xPos);
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 3, sizeof(cl_float),
-                                      (void *)&yPos);
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 4, sizeof(cl_float),
-                                      (void *)&xStep);
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 5, sizeof(cl_float),
-                                      (void *)&yStep);
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 6, sizeof(cl_uint),
-                                      (void *)&maxIter);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 0, sizeof(cl_mem), (void*)&outBuffer_[i]);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 1, sizeof(cl_uint), (void*)&width_);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 2, sizeof(cl_float), (void*)&xPos);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 3, sizeof(cl_float), (void*)&yPos);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 4, sizeof(cl_float), (void*)&xStep);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 5, sizeof(cl_float), (void*)&yStep);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 6, sizeof(cl_uint), (void*)&maxIter);
   }
 
   for (i = 0; i < cur_devices; i++) {
@@ -368,8 +346,8 @@ void OCLPerfDeviceConcurrency::open(unsigned int test, char *units,
   }
 
   cl_uint clkFrequency = 0;
-  error_ = clGetDeviceInfo(devices[0], CL_DEVICE_MAX_CLOCK_FREQUENCY,
-                           sizeof(clkFrequency), &clkFrequency, NULL);
+  error_ = clGetDeviceInfo(devices[0], CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(clkFrequency),
+                           &clkFrequency, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   assert(clkFrequency > 0);
   maxIter = (unsigned int)(8388608 * ((float)clkFrequency / 1000));
@@ -387,9 +365,9 @@ void OCLPerfDeviceConcurrency::run(void) {
 
   // Warmup
   for (i = 0; i < cur_devices; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_[i], kernel_[i], 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_[i], kernel_[i], 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   }
 
@@ -402,8 +380,7 @@ void OCLPerfDeviceConcurrency::run(void) {
   }
 
   for (i = 0; i < cur_devices; i++) {
-    error_ = _wrapper->clSetKernelArg(kernel_[i], 6, sizeof(cl_uint),
-                                      (void *)&maxIter);
+    error_ = _wrapper->clSetKernelArg(kernel_[i], 6, sizeof(cl_uint), (void*)&maxIter);
   }
 
   CPerfCounter timer;
@@ -412,9 +389,9 @@ void OCLPerfDeviceConcurrency::run(void) {
   timer.Start();
 
   for (i = 0; i < cur_devices; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_[i], kernel_[i], 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_[i], kernel_[i], 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   }
 
@@ -429,8 +406,7 @@ void OCLPerfDeviceConcurrency::run(void) {
   timer.Stop();
   double sec = timer.GetElapsedTime();
 
-  unsigned long long expected =
-      (unsigned long long)width_ * (unsigned long long)maxIter;
+  unsigned long long expected = (unsigned long long)width_ * (unsigned long long)maxIter;
 
   for (i = 0; i < cur_devices; i++) {
     checkData(outBuffer_[i], i);
@@ -439,8 +415,7 @@ void OCLPerfDeviceConcurrency::run(void) {
 
   _perfInfo = (float)sec;
   char buf[128];
-  SNPRINTF(buf, sizeof(buf), "time for %2d devices (s) (%2d queues) ",
-           cur_devices, cur_devices);
+  SNPRINTF(buf, sizeof(buf), "time for %2d devices (s) (%2d queues) ", cur_devices, cur_devices);
   testDescString = buf;
 }
 
@@ -449,26 +424,22 @@ unsigned int OCLPerfDeviceConcurrency::close(void) {
 
   for (i = 0; i < cur_devices; i++) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_[i]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
 
   for (i = 0; i < cur_devices; i++) {
     error_ = _wrapper->clReleaseKernel(kernel_[i]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseKernel(kernel_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseKernel(kernel_) failed");
   }
 
   for (i = 0; i < cur_devices; i++) {
     error_ = _wrapper->clReleaseProgram(program_[i]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseProgram(program_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseProgram(program_) failed");
   }
 
   for (i = 0; i < cur_devices; i++) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_[i]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
 
   if (context_) {

@@ -117,6 +117,11 @@ set_target_properties(hsakmt PROPERTIES
                                 ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/archive"
                                 LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/lib"
                                 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/runtime")
+if (WIN32)
+set_target_properties(hsakmt PROPERTIES
+                      CXX_STANDARD 20
+                      CXX_STANDARD_REQUIRED ON)
+endif()
 
 if (BUILD_THUNK_VIRTIO)
   add_rocm_subdir(libhsakmt/src/virtio "${THUNK_VIRTIO_DEFINITIONS}")
@@ -128,6 +133,11 @@ if (BUILD_ROCR)
                                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocr/archive"
                                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocr/lib"
                                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocr/runtime")
+if (WIN32)
+  set_target_properties(hsa-runtime64 PROPERTIES
+                        CXX_STANDARD 20
+                        CXX_STANDARD_REQUIRED ON)
+endif()
 
   if (BUILD_SHARED_LIBS)
     add_dependencies(hsa-runtime64 hsakmt)
@@ -177,7 +187,7 @@ set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION_STRING})
 set(CPACK_PACKAGE_CONTACT "AMD HSA Support <dl.HSA-Runtime-Support@amd.com>")
-set(CPACK_COMPONENT_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms\nIncludes HSAKMT, the user-mode API interfaces used to interact with the ROCk driver.\n Contains the headers, pkgonfig and\n cmake files for ROCT.")
+set(CPACK_COMPONENT_DESCRIPTION "Includes HSAKMT, the ROCk driver, headers, pkgonfig and cmake files for ROCT.")
 set(CPACK_COMPONENT_BINARY_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms")
 set(CPACK_COMPONENT_DEV_DESCRIPTION "AMD Heterogeneous System Architecture HSA development package.\n This package contains the headers and cmake files for the rocr-runtime package.")
 set(CPACK_COMPONENT_ASAN_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA instrumented libraries for Boltzmann (ROCm) platforms")
@@ -187,6 +197,7 @@ if (DEFINED ENV{ROCM_LIBPATCH_VERSION})
   message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
 
+if (UNIX)
 # Debian package specific variables
 set(CPACK_DEBIAN_BINARY_PACKAGE_NAME "hsa-rocr")
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME "hsa-rocr-dev")
@@ -223,6 +234,10 @@ set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_RECOMMENDS "libdrm-amdgpu-amdgpu1")
+else()
+set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "hsakmt-roct")
+set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "hsakmt-roct")
+endif()
 if (ROCM_DEP_ROCMCORE)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocm-core")
   string(APPEND CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ", rocm-core-asan")
@@ -244,6 +259,7 @@ set(CPACK_RPM_DEV_PACKAGE_OBSOLETES "hsakmt-roct,hsakmt-roct-devel,hsakmt-roct-d
 
 set(CPACK_RPM_DEV_PACKAGE_NAME "hsa-rocr-devel")
 set(CPACK_RPM_ASAN_PACKAGE_NAME "hsa-rocr-asan")
+if (UNIX)
 if (DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
   set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
 else()
@@ -254,6 +270,7 @@ string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
+endif()
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/Binary/post.in" RPM/Binary/post @ONLY)
@@ -289,7 +306,7 @@ endif()
 if (ROCM_DEP_ROCMCORE)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocm-core")
   string(APPEND CPACK_RPM_ASAN_PACKAGE_REQUIRES " rocm-core-asan")
-else()
+elseif (UNIX)
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})

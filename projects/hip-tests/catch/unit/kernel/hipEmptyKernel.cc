@@ -20,7 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
+
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
@@ -49,11 +49,11 @@ __global__ void Empty(int param) {}
  */
 
 TEST_CASE("Unit_hipEmptyKernel") {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(Empty), dim3(1), dim3(1), 0, 0, 0);
-    HIP_CHECK(hipDeviceSynchronize());
+  hipLaunchKernelGGL(HIP_KERNEL_NAME(Empty), dim3(1), dim3(1), 0, 0, 0);
+  HIP_CHECK(hipDeviceSynchronize());
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

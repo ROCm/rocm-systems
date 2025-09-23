@@ -26,7 +26,7 @@ THE SOFTWARE.
 static constexpr int N = 1024;
 static constexpr int Nbytes = N * sizeof(int);
 static size_t NElem{N};
-static constexpr int blocksPerCU = 6; // to hide latency
+static constexpr int blocksPerCU = 6;  // to hide latency
 static constexpr int threadsPerBlock = 256;
 // Num of parallel Branches
 const unsigned int kNumNode = 5;
@@ -39,8 +39,7 @@ const unsigned int kNumNode = 5;
  * - Launches an executable graph in the specified stream.
  */
 unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-template <typename T>
-__global__ void vectorADD(const T *A_d, const T *B_d, T *C_d, size_t NELEM) {
+template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C_d, size_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -73,32 +72,31 @@ TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy1, graph, nullptr, 0, A_d, A_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy2, graph, nullptr, 0, B_d, B_h,
-                                    Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy1, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy2, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddDependencies(graph, &memCpy1, &memCpy2, 1));
 
   for (int i = 0; i < kNumNode; i++) {
     hipKernelNodeParams kernelNodeParams{};
-    void *kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-    kernelNodeParams.func = reinterpret_cast<void *>(vectorADD<int>);
+    void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+    kernelNodeParams.func = reinterpret_cast<void*>(vectorADD<int>);
     kernelNodeParams.gridDim = dim3(blocks);
     kernelNodeParams.blockDim = dim3(threadsPerBlock);
     kernelNodeParams.sharedMemBytes = 0;
-    kernelNodeParams.kernelParams = reinterpret_cast<void **>(kernelArgs);
+    kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams.extra = nullptr;
-    HIP_CHECK(
-        hipGraphAddKernelNode(&kNode[i], graph, nullptr, 0, &kernelNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode[i], graph, nullptr, 0, &kernelNodeParams));
     HIP_CHECK(hipGraphAddDependencies(graph, &memCpy2, &kNode[i], 1));
   }
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy3, graph, nullptr, 0, C_h, C_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy3, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
   for (int i = 0; i < kNumNode; i++) {
     HIP_CHECK(hipGraphAddDependencies(graph, &kNode[i], &memCpy3, 1));
   }
 
-  hipGraphNode_t *nodes{nullptr};
+  hipGraphNode_t* nodes{nullptr};
   size_t numNodes = 0;
   HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
   INFO("Num of nodes in the graph: " << numNodes);
@@ -113,10 +111,9 @@ TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
   // Stop time
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = stop - start;
-  INFO(
-      "Time taken for Graph: "
-      << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
-      << " milliSeconds");
+  INFO("Time taken for Graph: "
+       << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
+       << " milliSeconds");
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
@@ -150,18 +147,17 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyDefault, stream));
     HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
     for (int i = 0; i < kNumNode; i++) {
-      hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0,
-                         stream, A_d, B_d, C_d, NElem);
+      hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d, C_d,
+                         NElem);
     }
     HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = stop - start;
-  INFO(
-      "Time taken for Stream: "
-      << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
-      << " milliSeconds");
+  INFO("Time taken for Stream: "
+       << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
+       << " milliSeconds");
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
@@ -193,8 +189,8 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyDefault, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
   for (int i = 0; i < kNumNode; i++) {
-    hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0,
-                       stream, A_d, B_d, C_d, NElem);
+    hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d, C_d,
+                       NElem);
   }
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -208,10 +204,9 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = stop - start;
-  INFO(
-      "Time taken for Graph via Stream Capture: "
-      << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
-      << " milliSeconds");
+  INFO("Time taken for Graph via Stream Capture: "
+       << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
+       << " milliSeconds");
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
@@ -223,4 +218,3 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
  * End doxygen group GraphTest.
  * @}
  */
-

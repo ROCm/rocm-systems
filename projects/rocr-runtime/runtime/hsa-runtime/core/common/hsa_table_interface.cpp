@@ -1336,6 +1336,20 @@ hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file) {
   return amdExtTable->hsa_amd_enable_logging_fn(flags, file);
 }
 
+hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                            uint64_t size, int64_t file_offset,
+                                            uint64_t *size_copied, int32_t *status) {
+  return amdExtTable->hsa_amd_ais_file_write_fn(handle, devicePtr, size, file_offset,
+                                            size_copied, status);
+}
+
+hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                           uint64_t size, int64_t file_offset,
+                                           uint64_t *size_copied, int32_t *status) {
+  return amdExtTable->hsa_amd_ais_file_read_fn(handle, devicePtr, size, file_offset,
+                                           size_copied, status);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

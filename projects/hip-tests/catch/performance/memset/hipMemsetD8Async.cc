@@ -40,6 +40,7 @@ class MemsetD8AsyncBenchmark : public Benchmark<MemsetD8AsyncBenchmark> {
       HIP_CHECK(hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(dst_.ptr()), 17, size_,
                                  stream_.stream()));
     }
+    HIP_CHECK(hipStreamSynchronize(stream_.stream()));
   }
 
  private:
@@ -82,6 +83,6 @@ TEST_CASE("Performance_hipMemsetD8Async") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */
