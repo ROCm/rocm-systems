@@ -141,6 +141,7 @@ struct agent : public base_class<tool::agent_info>
     uint64_t    nid            = 0;
     uint64_t    absolute_index = 0;
     std::string type           = {};
+    std::string name           = {};
     std::string user_name      = {};
     std::string extdata        = {};
 
@@ -555,6 +556,7 @@ load(ArchiveT& ar, rocpd::types::agent& data)
     LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(absolute_index);
     LOAD_DATA_FIELD(type);
+    LOAD_DATA_FIELD(name);
     LOAD_DATA_FIELD(user_name);
     LOAD_DATA_FIELD(extdata);
 
