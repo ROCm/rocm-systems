@@ -333,7 +333,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/*.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out*.db)
 
 set_tests_properties(
     rocprofv3-test-rocpd-package-generation
@@ -353,9 +353,9 @@ set_tests_properties(
 add_test(
     NAME rocprofv3-test-rocpd-package-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package -d
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/*.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out*.db)
 
 set_tests_properties(
     rocprofv3-test-rocpd-package-generation-multiproc

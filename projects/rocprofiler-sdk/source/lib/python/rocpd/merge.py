@@ -23,172 +23,235 @@
 # THE SOFTWARE.
 ###############################################################################
 
-#
-# Utility classes to merge rpd files
-#
-#
 import argparse
 import os
 import sqlite3
 import time
 
-from collections import defaultdict
-from typing import List, Any, Dict
-from pathlib import Path
-
-# from .schema import RocpdSchema
-
-__all__ = ["RocpdMerger", "execute"]
+from typing import List, Dict, Iterable, Optional, Callable, Any
 
 
-def prepare_output_file(output: str) -> None:
-    """Prepare output file by creating directory and removing existing file"""
+def merge_sqlite_dbs(
+    sources: Iterable[str],
+    dest_path: str,
+    on_log: Optional[Callable[[str], None]] = None,
+) -> None:
+    """
+    Merge multiple SQLite databases into a single destination database.
 
-    output_path = Path(output)
+    Parameters
+    ----------
+    sources : Iterable[str]
+        Paths to source databases.
+    dest_path : str
+        Path to destination database.
+    on_log : Optional[Callable[[str], None]]
+        Logger function; defaults to None. Pass `print` to generate logs.
+    """
 
-    # Create parent directory if needed
-    if output_path.parent != Path("."):
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+    def log(msg: str) -> None:
+        if on_log:
+            on_log(f"  {msg}")
+
+    sources = list(sources)
+    if not sources:
+        raise ValueError("No source databases provided")
+
+    # Prepare output directory
+    output_dir = os.path.dirname(os.path.abspath(dest_path)) or os.getcwd()
+    os.makedirs(output_dir, exist_ok=True)
 
     # Remove existing file
-    if output_path.is_file():
-        output_path.unlink()
+    if os.path.isfile(dest_path):
+        os.remove(dest_path)
 
+    uuids = []
+    views = []
+    schema_versions = []
 
-def internal_init(_input, _output, skip_auto_merge):
-    from . import package
+    with sqlite3.connect(str(dest_path)) as conn:
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA foreign_keys = OFF;")  # defer FK checks until end
 
-    _input = package.flatten_rocpd_yaml_input_file(_input, skip_auto_merge)
-    assert not os.path.isdir(_output), "Output database name must not be a directory"
+        # One big atomic transaction
+        with conn:
+            # Attach sources one by one
+            for i, src in enumerate(sources, 1):
+                alias = f"src{i}"
+                conn.execute(f"ATTACH DATABASE ? AS {alias}", (src,))
+                print(f"Adding {src}")
+                log(f"Attached {src} AS {alias}")
 
-    return _input
+                # UUIDs and schema version
+                _uuids = [
+                    itr[0]
+                    for itr in conn.execute(
+                        f"SELECT value FROM {alias}.rocpd_metadata WHERE tag='uuid'",
+                    ).fetchall()
+                ]
+                uuids += [itr for itr in _uuids if itr not in uuids]
 
+                _schema_versions = [
+                    itr[0]
+                    for itr in conn.execute(
+                        f"SELECT value FROM {alias}.rocpd_metadata WHERE tag='schema_version'",
+                    ).fetchall()
+                ]
+                schema_versions += _schema_versions
 
-class RocpdMerger:
-
-    def __init__(self, input, output):
-
-        if isinstance(input, sqlite3.Connection):
-            raise ValueError("RocpdMerger does not accept existing sqlite3 connections")
-        elif isinstance(input, str):
-            raise ValueError(
-                "RocpdMerger only accepts a list of filenames to merge, not a single filename"
-            )
-        elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
-            self._filenames = internal_init(input, output, skip_auto_merge=True)
-            self._output = output
-            prepare_output_file(self._output)
-            self._connection = sqlite3.connect(str(self._output))
-
-        else:
-            raise ValueError(
-                f"input is unsupported type. Expected list of strings. type={type(input).__name__}"
-            )
-
-    def __enter__(self):
-        # support "with RocpdMerge(...) as db:":
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._connection.close()
-
-    def _create_union_views(self, views_by_base_name) -> list:
-        union_views = []
-
-        for view_name, table_names in views_by_base_name.items():
-            if len(table_names) == 1:
-                union_views.append(
-                    f"""CREATE VIEW IF NOT EXISTS `{view_name}` AS SELECT * FROM `{table_names[0]}`;"""
-                )
-            else:
-                select_statements = [f"SELECT * FROM `{table}`" for table in table_names]
-                union_query = "\nUNION ALL\n".join(select_statements)
-
-                union_views.append(
-                    f"""CREATE VIEW IF NOT EXISTS `{view_name}` AS {union_query};"""
-                )
-        return "\n\n".join(union_views)
-
-    def merge(self):
-        """
-        Merge multiple SQLite databases into a single destination database.
-        """
-        cur_dest = self._connection.cursor()
-
-        views_by_base_name = defaultdict(list)
-
-        versions = []  # Check that all databases have the same schema version
-
-        for orig in self._filenames:
-
-            print(f"Adding {orig}")
-
-            con_orig = sqlite3.connect(orig)
-            cur_orig = con_orig.cursor()
-
-            cur_orig.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cur_orig.fetchall()
-            print(f"Tables found: {len(tables) - 1}")
-
-            uuid_statement = "SELECT value FROM rocpd_metadata WHERE tag='uuid'"
-            _uuid = [itr[0] for itr in cur_orig.execute(uuid_statement).fetchall()][0]
-
-            version_statement = (
-                "SELECT value FROM rocpd_metadata WHERE tag='schema_version'"
-            )
-            versions.extend(
-                [itr[0] for itr in cur_orig.execute(version_statement).fetchall()]
-            )
-
-            for table in tables:
-                table_name = table[0]
-                if "sqlite_sequence" in table_name:
-                    continue
-
-                view_name = table_name.replace(_uuid, "")
-                views_by_base_name[view_name].append(table_name)
-
-                cur_orig.execute(
-                    f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-                )
-                create_table_stmt = cur_orig.fetchone()[0]
-
-                cur_dest.execute(create_table_stmt)
-
-                cur_orig.execute(f"SELECT * FROM {table_name}")
-                rows = cur_orig.fetchall()
-                if rows:
-                    placeholders = ", ".join("?" * len(rows[0]))
-                    cur_dest.executemany(
-                        f"INSERT INTO {table_name} VALUES ({placeholders})", rows
+                # Helper: fetch rows from attached sqlite_master
+                def fetch_master(_alias: str, kind: str):
+                    cur = conn.execute(
+                        f"""
+                        SELECT name, sql
+                        FROM {_alias}.sqlite_master
+                        WHERE type = ? AND name NOT LIKE 'sqlite_%'
+                        ORDER BY name
+                        """,
+                        (kind,),
                     )
+                    return cur.fetchall()
 
-            con_orig.close()
+                # Track dest tables to detect collisions quickly
+                existing_tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                    )
+                }
+
+                # 1) Create tables
+                for name, create_sql in fetch_master(alias, "table"):
+                    if name in existing_tables:
+                        raise AssertionError(
+                            f"Table name collision for '{name}' from {alias}; "
+                            "assumption of globally-unique table names violated."
+                        )
+                    if not create_sql:
+                        continue
+                    log(f"Creating table {name}")
+                    conn.execute(create_sql)
+                    existing_tables.add(name)
+
+                # 2) Copy table data
+                tbls = [name for name, _ in fetch_master(alias, "table")]
+                print(f"Tables found: {len(tbls)}")
+                for name in tbls:
+                    log(f"Inserting rows into {name} from {alias}.{name}")
+                    rows = conn.execute(f'SELECT * FROM {alias}."{name}"').fetchall()
+                    if rows:
+                        col_count = len(rows[0])
+                        placeholders = ", ".join(["?"] * col_count)
+                        conn.executemany(
+                            f'INSERT INTO "{name}" VALUES ({placeholders})', rows
+                        )
+
+                # 3) Recreate indexes (make idempotent with IF NOT EXISTS)
+                def inject_if_not_exists_in_index_sql(sql: str) -> str:
+                    # Naive, but works for standard forms produced by sqlite_master
+                    # Handles UNIQUE and non-UNIQUE:
+                    # "CREATE INDEX name ON ..." or "CREATE UNIQUE INDEX name ON ..."
+                    sql_stripped = sql.strip()
+                    if sql_stripped.upper().startswith("CREATE UNIQUE INDEX"):
+                        return sql_stripped.replace(
+                            "CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX IF NOT EXISTS", 1
+                        )
+                    if sql_stripped.upper().startswith("CREATE INDEX"):
+                        return sql_stripped.replace(
+                            "CREATE INDEX", "CREATE INDEX IF NOT EXISTS", 1
+                        )
+                    return sql
+
+                existing_indexes = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'"
+                    )
+                }
+                for name, create_sql in fetch_master(alias, "index"):
+                    if not create_sql:
+                        continue
+                    if name in existing_indexes:
+                        log(f"Index {name} exists; skipping or using IF NOT EXISTS")
+                    # Try to create with IF NOT EXISTS to avoid collision
+                    sql2 = inject_if_not_exists_in_index_sql(create_sql)
+                    conn.execute(sql2)
+                    existing_indexes.add(name)
+
+                # 4) Recreate triggers (skip on name conflict)
+                existing_triggers = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='trigger'"
+                    )
+                }
+                for name, create_sql in fetch_master(alias, "trigger"):
+                    if not create_sql:
+                        continue
+                    if name in existing_triggers:
+                        log(f"Trigger {name} exists; skipping")
+                        continue
+                    log(f"Creating trigger {name}")
+                    conn.execute(create_sql)
+                    existing_triggers.add(name)
+
+                # 5) Recreate views (skip on name conflict)
+                existing_views = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='view'"
+                    )
+                }
+                for name, create_sql in fetch_master(alias, "view"):
+                    if not create_sql:
+                        continue
+                    if name in existing_views:
+                        log(f"View {name} exists; skipping")
+                        continue
+                    existing_views.add(name)
+
+                views += [itr for itr in list(existing_views) if itr.startswith("rocpd_")]
+
+                conn.commit()
+                conn.execute(f"DETACH DATABASE {alias}")
+                log(f"Detached {alias}")
 
         # Check the schema versions.  Merge only occurs if all the DBs are the same schema version.
-        unique_versions = list(set(versions))
+        unique_versions = list(set(schema_versions))
         if len(unique_versions) != 1:
-            raise RuntimeError(f"Multiple versions found : {unique_versions}")
+            raise RuntimeError(f"Multiple schema versions found: {unique_versions}")
 
-        # Create rocpd_<> views
-        self._connection.executescript(self._create_union_views(views_by_base_name))
+        # Re-enable FKs and run a quick FK check
+        conn.execute("PRAGMA foreign_keys = ON;")
+        # Optional: enforce integrity
+        # try:
+        #     conn.execute("PRAGMA quick_check;")
+        # except sqlite3.DatabaseError as e:
+        #     log(f"SQLite3 quick_check reported an issue: {e}")
 
-        # Create data views
-        con_orig = sqlite3.connect(self._filenames[0])
-        orig_cursor = con_orig.cursor()
-        orig_cursor.execute(
-            "SELECT name, sql FROM sqlite_master WHERE type='view' AND name NOT LIKE 'rocpd_%';"
-        )
-        views = orig_cursor.fetchall()
+        uuids = sorted(list(set(uuids)))  # unique set of uuids
+        views = sorted(list(set(views)))  # unique set of views
 
-        for view in views:
-            _, sql_view = view
-            self._connection.executescript(sql_view)
+        # Create UNION views by listing all tables
+        existing_tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
 
-        con_orig.close()
-        # self._connection.executescript(RocpdSchema().views)
+        # Then UNION all the tables starting with the view name
+        for vitr in views:
+            matching_tables = [
+                titr for titr in existing_tables if titr.startswith(f"{vitr}_")
+            ]
+            tables_union = " UNION ALL ".join(
+                [f"SELECT * FROM {titr}" for titr in matching_tables]
+            )
+            conn.execute(f"CREATE VIEW {vitr} AS {tables_union}")
 
-        self._connection.commit()
+        conn.commit()
 
 
 #
@@ -233,14 +296,21 @@ def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> str:
 
     start_time = time.time()
 
+    input_files = inputs
+    try:
+        from . import package
+
+        input_files = package.flatten_rocpd_yaml_input_file(inputs, skip_auto_merge=True)
+    except Exception as e:
+        print(f"Import error trying to use package, fallback to use inputs: {e}")
+
     output_path = kwargs.get("output_path")
     output_filename = kwargs.get("output_file")
     if not output_filename.endswith(".db"):
         output_filename += ".db"
-    output = Path(output_path, output_filename)
+    output = os.path.join(output_path, output_filename)
 
-    with RocpdMerger(inputs, output) as merger:
-        merger.merge()
+    merge_sqlite_dbs(input_files, output)
 
     elapsed_time = time.time() - start_time
 
