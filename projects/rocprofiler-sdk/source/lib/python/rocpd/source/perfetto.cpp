@@ -33,6 +33,7 @@
 #include "lib/output/sql/common.hpp"
 #include "lib/output/stream_info.hpp"
 #include "lib/rocprofiler-sdk-tool/config.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <fmt/format.h>
 
@@ -174,6 +175,7 @@ write_perfetto(
     const tool::generator<types::sample>&            sample_gen,
     const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
     const tool::generator<types::memory_copies>&     memory_copy_gen,
+    const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen)
 {
@@ -687,19 +689,15 @@ write_perfetto(
             rocprofiler_timestamp_t start_timestamp = 0;
             rocprofiler_timestamp_t end_timestamp   = 0;
             rocprofiler_address_t   address         = {.handle = 0};
+            rocprofiler_queue_id_t  queue           = {.handle = 0};
         };
 
         struct memory_information
         {
-            uint64_t              alloc_size  = {0};
-            rocprofiler_address_t address     = {.handle = 0};
-            bool                  is_alloc_op = {false};
-        };
-
-        struct agent_and_size
-        {
-            uint64_t agent_abs_index = {};
-            uint64_t size            = {0};
+            uint64_t               alloc_size  = {0};
+            rocprofiler_address_t  address     = {.handle = 0};
+            rocprofiler_queue_id_t queue       = {.handle = 0};
+            bool                   is_alloc_op = {false};
         };
 
         auto mem_alloc_endpoints =
@@ -707,7 +705,9 @@ write_perfetto(
         auto mem_alloc_extremes = std::pair<uint64_t, uint64_t>{
             std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
         auto address_to_agent_and_size =
-            std::unordered_map<rocprofiler_address_t, agent_and_size>{};
+            std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+        auto queue_to_agent_and_size =
+            std::unordered_map<rocprofiler_queue_id_t, rocprofiler::agent::index_and_size>{};
         auto free_mem_info = std::vector<free_memory_information>{};
 
         // Load memory allocation endpoints
@@ -719,24 +719,47 @@ write_perfetto(
                 {
                     LOG_IF(FATAL, itr.agent_name.empty())
                         << "Missing agent id for memory allocation trace";
-                    mem_alloc_endpoints[itr.agent_abs_index].emplace(
-                        itr.start,
-                        memory_information{
-                            itr.size, rocprofiler_address_t{.handle = itr.address}, true});
-                    mem_alloc_endpoints[itr.agent_abs_index].emplace(
-                        itr.end,
-                        memory_information{
-                            itr.size, rocprofiler_address_t{.handle = itr.address}, true});
-                    address_to_agent_and_size.emplace(
-                        rocprofiler_address_t{.handle = itr.address},
-                        agent_and_size{itr.agent_abs_index, itr.size});
+
+                    if(itr.level == "REAL")
+                    {
+                        mem_alloc_endpoints[itr.agent_abs_index].emplace(
+                            itr.start,
+                            memory_information{itr.size,
+                                               rocprofiler_address_t{.handle = itr.address},
+                                               rocprofiler_queue_id_t{.handle = itr.queue_id},
+                                               true});
+                        mem_alloc_endpoints[itr.agent_abs_index].emplace(
+                            itr.end,
+                            memory_information{itr.size,
+                                               rocprofiler_address_t{.handle = itr.address},
+                                               rocprofiler_queue_id_t{.handle = itr.queue_id},
+                                               true});
+
+                        address_to_agent_and_size.emplace(
+                            rocprofiler_address_t{.handle = itr.address},
+                            rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
+                    }
+                    // Scratch memory operations are indexed by queue id as agent
+                    // id is not available
+                    else if(itr.level == "SCRATCH")
+                    {
+                        queue_to_agent_and_size.emplace(
+                            rocprofiler_queue_id_t{.handle = itr.queue_id},
+                            rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
+                    }
                 }
                 else if(itr.type == "FREE")
                 {
                     // Store free memory operations in seperate vector to pair with agent
                     // and allocation size in following loop
-                    free_mem_info.push_back(free_memory_information{
-                        itr.start, itr.end, rocprofiler_address_t{.handle = itr.address}});
+                    if(itr.level == "REAL")
+                    {
+                        free_mem_info.push_back(free_memory_information{
+                            itr.start,
+                            itr.end,
+                            rocprofiler_address_t{.handle = itr.address},
+                            rocprofiler_queue_id_t{.handle = itr.queue_id}});
+                    }
                 }
                 else
                 {
@@ -765,9 +788,9 @@ write_perfetto(
             }
             auto [agent_abs_index, size] = address_to_agent_and_size[itr.address];
             mem_alloc_endpoints[agent_abs_index].emplace(
-                itr.start_timestamp, memory_information{size, itr.address, false});
+                itr.start_timestamp, memory_information{size, itr.address, itr.queue, false});
             mem_alloc_endpoints[agent_abs_index].emplace(
-                itr.end_timestamp, memory_information{size, itr.address, false});
+                itr.end_timestamp, memory_information{size, itr.address, itr.queue, false});
         }
         // Create running sum of allocated memory
         for(auto& [_, endpoint_map] : mem_alloc_endpoints)
@@ -817,10 +840,10 @@ write_perfetto(
         {
             mem_alloc_endpoints[abs_index].emplace(
                 mem_alloc_extremes.first - extremes_endpoint_buffer,
-                memory_information{0, {0}, false});
+                memory_information{0, {0}, {0}, false});
             mem_alloc_endpoints[abs_index].emplace(
                 mem_alloc_extremes.second + extremes_endpoint_buffer,
-                memory_information{0, {0}, false});
+                memory_information{0, {0}, {0}, false});
 
             auto _track_name = std::stringstream{};
 
@@ -853,9 +876,93 @@ write_perfetto(
                               mem_alloc_tracks.at(alloc_itr.first),
                               itr.first,
                               itr.second.alloc_size / bytes_multiplier);
+                tracing_session->FlushBlocking();
             }
         }
-        tracing_session->FlushBlocking();
+
+        // scratch memory counter track
+        auto scratch_mem_endpoints =
+            std::unordered_map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
+
+        // Load scratch memory usage endpoints
+        for(const auto& ditr : scratch_memory_gen)
+            for(const auto& itr : scratch_memory_gen.get(ditr))
+            {
+                auto agent_abs_index = itr.agent_abs_index;
+                if(itr.operation == "FREE")
+                {
+                    auto [agent_index, size] =
+                        queue_to_agent_and_size[rocprofiler_queue_id_t{.handle = itr.queue_id}];
+                    agent_abs_index = agent_index;
+                }
+
+                // Track start and end timestamps for this scratch memory record
+                scratch_mem_endpoints[agent_abs_index].emplace(itr.start, 0);
+                scratch_mem_endpoints[agent_abs_index].emplace(itr.end, 0);
+            }
+
+        // Load values at each endpoint
+        for(const auto& ditr : scratch_memory_gen)
+            for(const auto& itr : scratch_memory_gen.get(ditr))
+            {
+                if(itr.operation == "ALLOC")
+                {
+                    auto agent_abs_index = itr.agent_abs_index;
+
+                    // For each timestamp in the range of this record including intervening
+                    // deallocations write in allocation size
+                    auto begin = scratch_mem_endpoints.at(agent_abs_index).lower_bound(itr.start);
+                    auto end   = scratch_mem_endpoints.at(agent_abs_index).upper_bound(itr.end);
+
+                    for(auto mitr = begin; mitr != end; ++mitr)
+                    {
+                        mitr->second = itr.size;
+                    }
+                }
+            }
+
+        // Create counter tracks for visualization
+        auto scratch_mem_tracks = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
+        auto scratch_mem_names  = std::vector<std::string>{};
+        scratch_mem_names.reserve(scratch_mem_endpoints.size());
+
+        for(auto& [abs_index, ts_map] : scratch_mem_endpoints)
+        {
+            // Add buffer timestamps for better visualization
+            if(!ts_map.empty())
+            {
+                auto       _track_name      = std::stringstream{};
+                const auto _agent           = agent_data.at(abs_index).first;
+                auto       agent_index_info = agent_data.at(abs_index).second;
+
+                _track_name << "SCRATCH MEMORY on " << agent_index_info.label << " ["
+                            << agent_index_info.index << "] (" << agent_index_info.type << ")";
+
+                constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
+                auto&          _name = scratch_mem_names.emplace_back(_track_name.str());
+                scratch_mem_tracks.emplace(abs_index,
+                                           ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
+                                               .set_unit(_unit)
+                                               .set_unit_multiplier(bytes_multiplier)
+                                               .set_is_incremental(false));
+            }
+        }
+
+        // Write counter values to perfetto trace
+        for(const auto& mitr : scratch_mem_endpoints)
+        {
+            if(scratch_mem_tracks.count(mitr.first) > 0)
+            {
+                for(const auto& itr : mitr.second)
+                {
+                    TRACE_COUNTER(sdk::perfetto_category<sdk::category::scratch_memory>::name,
+                                  scratch_mem_tracks.at(mitr.first),
+                                  itr.first,
+                                  itr.second / bytes_multiplier);
+                    tracing_session->FlushBlocking();
+                }
+            }
+        }
     }
 
     // Create counter tracks per agent
