@@ -314,7 +314,6 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
                 DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
                 COMPONENT ${COMPONENT_NAME_T})
         endif()
-
     else()
         # License file
         install ( FILES ${LICENSE_FILE}
