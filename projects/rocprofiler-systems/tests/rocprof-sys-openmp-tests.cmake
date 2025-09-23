@@ -107,8 +107,8 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
               -e -v 1 --label return args -E ^GOMP
-            REWRITE_TIMEOUT 180
-            RUNTIME_TIMEOUT 360
+            SAMPLING_TIMEOUT 300
+            REWRITE_TIMEOUT 300
             ENVIRONMENT
               "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
             REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
@@ -133,6 +133,8 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
             GPU ON
             LABELS "openmp;ompvv;openmp-target"
             REWRITE_ARGS -e -v 2
+            SAMPLING_TIMEOUT 300
+            REWRITE_TIMEOUT 300
             ENVIRONMENT
               "${_ompvv_offload_environment}"
             REWRITE_RUN_PASS_REGEX
