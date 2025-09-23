@@ -26,8 +26,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <future>
+#include <iomanip>
+#include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -240,7 +244,65 @@ hsa_status_t _internal_aqlprofile_pmc_create_packets(
   pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
   uint8_t* cmdbuf = reinterpret_cast<uint8_t*>(memorymgr->GetCmdBuf());
 
+  // Lambda to format hex data as string for easy program ingestion
+  auto format_hex_data = [](const void* data, size_t size) -> std::string {
+    std::ostringstream oss;
+    const uint32_t* word_ptr = static_cast<const uint32_t*>(data);
+    size_t word_count = size / 4;
+
+    for (size_t i = 0; i < word_count; ++i) {
+      oss << std::hex << std::setw(8) << std::setfill('0') << word_ptr[i];
+    }
+
+    // Handle remaining bytes if size is not divisible by 4
+    if (size % 4 != 0) {
+      const uint8_t* byte_ptr = static_cast<const uint8_t*>(data);
+      for (size_t i = word_count * 4; i < size; ++i) {
+        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte_ptr[i]);
+      }
+    }
+
+    return oss.str();
+  };
+
+  // Lambda to format event info with human readable block names
+  auto format_event_info = [pm4_factory](const std::vector<EventRequest>& events) -> std::string {
+    std::ostringstream oss;
+    for (size_t i = 0; i < events.size(); ++i) {
+      if (i > 0) oss << ",";
+      const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(events[i].block_name);
+      const char* block_name_str = block_info ? block_info->name : "UNKNOWN";
+      oss << "event_id=" << events[i].event_id << "_block_name=" << block_name_str
+          << "_block_id=" << events[i].block_name;
+    }
+    return oss.str();
+  };
+
+  // Lambda to write output to both console and file
+  auto write_output = [](const std::string& content) {
+    std::cout << content << std::endl;
+
+    std::ofstream file("/home/ben/original_aql_out.txt", std::ios::app);
+    if (file.is_open()) {
+      file << content << std::endl;
+      file.close();
+    }
+  };
+
+  // Print event information
+  auto& events = memorymgr->GetEvents();
+  write_output("EVENT_INFO: " + format_event_info(events));
+
+  // Print command buffer data
+  write_output("CMD_BUFFER_READ: size=" + std::to_string(read_cmd.Size()) +
+               " data=" + format_hex_data(read_cmd.Data(), read_cmd.Size()));
+  write_output("CMD_BUFFER_START: size=" + std::to_string(start_cmd.Size()) +
+               " data=" + format_hex_data(start_cmd.Data(), start_cmd.Size()));
+  write_output("CMD_BUFFER_STOP: size=" + std::to_string(stop_cmd.Size()) +
+               " data=" + format_hex_data(stop_cmd.Data(), stop_cmd.Size()));
+
   memcpy_cb(cmdbuf, read_cmd.Data(), read_cmd.Size(), userdata);
+
   aql_profile::PopulateAql(cmdbuf, read_cmd.Size(), cmd_writer, &packets->read_packet);
   cmdbuf += read_size;
   memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata);
@@ -248,6 +310,14 @@ hsa_status_t _internal_aqlprofile_pmc_create_packets(
   cmdbuf += start_size;
   memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata);
   aql_profile::PopulateAql(cmdbuf, stop_cmd.Size(), cmd_writer, &packets->stop_packet);
+
+  // Print AQL packet data
+  write_output("AQL_PACKET_READ: size=" + std::to_string(sizeof(packets->read_packet)) +
+               " data=" + format_hex_data(&packets->read_packet, sizeof(packets->read_packet)));
+  write_output("AQL_PACKET_START: size=" + std::to_string(sizeof(packets->start_packet)) +
+               " data=" + format_hex_data(&packets->start_packet, sizeof(packets->start_packet)));
+  write_output("AQL_PACKET_STOP: size=" + std::to_string(sizeof(packets->stop_packet)) +
+               " data=" + format_hex_data(&packets->stop_packet, sizeof(packets->stop_packet)));
 
   return HSA_STATUS_SUCCESS;
 }

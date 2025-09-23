@@ -83,6 +83,22 @@ enum measurement_state {
     MEASUREMENT_ERROR
 };
 
+/* Work Operation Types */
+enum aql_work_op_type {
+    AQL_WORK_START = 0,
+    AQL_WORK_STOP,
+    AQL_WORK_READ
+};
+
+/* AQL Work Structure for Deferred Operations */
+struct aql_work_item {
+    struct work_struct work;
+    struct aql_measurement *measurement;
+    enum aql_work_op_type op_type;
+    struct completion *completion;  /* For synchronous operations */
+    int result;                     /* Operation result */
+};
+
 /* AQL Packet Types */
 enum aql_perf_packet_type {
     AQL_PERF_PACKET_START = 0x01,
@@ -177,6 +193,12 @@ struct aql_measurement {
     ktime_t start_time;
     enum measurement_state state;
     uint64_t last_counter_value;
+
+    /* Work queue support for atomic context handling */
+    struct workqueue_struct *work_queue;
+    spinlock_t cache_lock;           /* Protects cached_counter_value */
+    uint64_t cached_counter_value;   /* Cached value for atomic reads */
+    bool cache_valid;                /* Whether cached value is valid */
 };
 
 /* Main AQL Performance Session Structure */
@@ -255,6 +277,16 @@ int aql_perf_measurement_start(struct aql_measurement *measurement);
 int aql_perf_measurement_stop(struct aql_measurement *measurement);
 uint64_t aql_perf_measurement_read(struct aql_measurement *measurement);
 void aql_perf_measurement_destroy(struct aql_measurement *measurement);
+
+/* Atomic Context Support - New Functions */
+int aql_perf_measurement_start_atomic(struct aql_measurement *measurement);
+int aql_perf_measurement_stop_atomic(struct aql_measurement *measurement);
+uint64_t aql_perf_measurement_read_atomic(struct aql_measurement *measurement);
+
+/* Work Handler Functions */
+void aql_work_handler(struct work_struct *work);
+struct aql_work_item *aql_create_work_item(struct aql_measurement *measurement,
+                                          enum aql_work_op_type op_type);
 
 /* Error Handling */
 void aql_perf_handle_error(struct aql_perf_session *session,

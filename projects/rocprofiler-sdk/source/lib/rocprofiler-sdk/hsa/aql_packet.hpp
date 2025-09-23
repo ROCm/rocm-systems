@@ -119,6 +119,12 @@ class CounterAQLPacket : public AQLPacket
         decltype(hsa_memory_copy)*              api_copy_fn     = nullptr;
         bool                                    bIgnoreKernArg  = false;
 
+        // Track allocated buffers for debugging
+        void* command_buffer_ptr = nullptr;
+        uint32_t command_buffer_size = 0;
+        void* output_buffer_ptr = nullptr;
+        uint32_t output_buffer_size = 0;
+
         static void         Free(void* ptr, void* data);
         static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
         static hsa_status_t Copy(void* dst, const void* src, size_t size, void* data);
@@ -142,6 +148,12 @@ public:
     };
 
     aqlprofile_pmc_aql_packets_t packets{};
+
+    // Exposed buffer pointers for debugging
+    void* command_buffer_ptr = nullptr;
+    uint32_t command_buffer_size = 0;
+    void* output_buffer_ptr = nullptr;
+    uint32_t output_buffer_size = 0;
 
 protected:
     CounterMemoryPool pool{};

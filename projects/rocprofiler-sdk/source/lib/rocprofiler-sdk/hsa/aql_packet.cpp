@@ -68,6 +68,23 @@ CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags
         return status;
     }
 
+    // Track buffer allocations: first alloc is output buffer, second is command buffer
+    if(!pool.output_buffer_ptr)
+    {
+        // First allocation: output buffer for results
+        pool.output_buffer_ptr = *ptr;
+        pool.output_buffer_size = static_cast<uint32_t>(size);
+    }
+    else if(!pool.command_buffer_ptr)
+    {
+        // Second allocation: command buffer for PM4 commands
+        pool.command_buffer_ptr = *ptr;
+        pool.command_buffer_size = static_cast<uint32_t>(size);
+    } else {
+        // More than two allocations is unexpected
+        ROCP_FATAL << "More than two allocations from CounterMemoryPool";
+    }
+
     status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
     if(status != HSA_STATUS_SUCCESS) return status;
 
@@ -82,6 +99,7 @@ CounterAQLPacket::CounterMemoryPool::Free(void* ptr, void* data)
 
     assert(data);
     auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
+    ROCP_ERROR  << "Freeing CounterMemoryPool allocation, this may cause issues if used after free";
     assert(pool.free_fn);
     pool.free_fn(ptr);
 }
@@ -92,7 +110,7 @@ CounterAQLPacket::CounterMemoryPool::Copy(void* dst, const void* src, size_t siz
     if(size == 0) return HSA_STATUS_SUCCESS;
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
-
+        ROCP_ERROR  << "Copying CounterMemoryPool allocation, this may cause issues if used after free";
     if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
 
     return pool.api_copy_fn(dst, src, size);
@@ -141,6 +159,12 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
     packets.stop_packet.header  = VENDOR_BIT | BARRIER_BIT;
     packets.read_packet.header  = VENDOR_BIT | BARRIER_BIT;
     empty                       = false;
+
+    // Copy buffer info for debugging access
+    command_buffer_ptr = pool.command_buffer_ptr;
+    command_buffer_size = pool.command_buffer_size;
+    output_buffer_ptr = pool.output_buffer_ptr;
+    output_buffer_size = pool.output_buffer_size;
 }
 
 hsa_status_t

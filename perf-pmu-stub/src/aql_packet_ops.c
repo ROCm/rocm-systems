@@ -13,6 +13,7 @@
 #include <linux/atomic.h>
 #include <linux/delay.h>
 #include <linux/workqueue.h>
+#include <linux/completion.h>
 
 #include "aql_perf.h"
 #include "pmu_stub.h"
@@ -344,6 +345,19 @@ struct aql_measurement *aql_perf_measurement_create(struct aql_perf_session *ses
     measurement->counter_id = (uint32_t)event->attr.config; /* Use event config as counter ID */
     measurement->last_counter_value = 0;
 
+    /* Initialize work queue support */
+    measurement->work_queue = alloc_workqueue("aql_gpu_%u", WQ_MEM_RECLAIM | WQ_HIGHPRI, 1, gpu_id);
+    if (!measurement->work_queue) {
+        aql_err("Session %llu: Failed to create work queue for GPU %u",
+                session->session_id, gpu_id);
+        kfree(measurement);
+        return ERR_PTR(-ENOMEM);
+    }
+
+    spin_lock_init(&measurement->cache_lock);
+    measurement->cached_counter_value = 0;
+    measurement->cache_valid = false;
+
     aql_debug("Session %llu: Created measurement for GPU %u",
               session->session_id, gpu_id);
 
@@ -586,11 +600,202 @@ void aql_perf_measurement_destroy(struct aql_measurement *measurement)
         aql_perf_measurement_stop(measurement);
     }
 
+    /* Clean up work queue */
+    if (measurement->work_queue) {
+        flush_workqueue(measurement->work_queue);
+        destroy_workqueue(measurement->work_queue);
+        measurement->work_queue = NULL;
+    }
+
     aql_debug("Session %llu: Destroyed measurement for GPU %u",
               measurement->session ? measurement->session->session_id : 0,
               measurement->gpu_id);
 
     kfree(measurement);
+}
+
+/* Work Queue Implementation for Atomic Context Support */
+
+/**
+ * aql_work_handler - Work queue handler for deferred AQL operations
+ * @work: Work item containing operation details
+ */
+void aql_work_handler(struct work_struct *work)
+{
+    struct aql_work_item *work_item = container_of(work, struct aql_work_item, work);
+    struct aql_measurement *measurement = work_item->measurement;
+    int result = 0;
+    unsigned long flags;
+
+    aql_debug("Starting work handler for GPU %u, op_type=%d",
+              measurement->gpu_id, work_item->op_type);
+
+    switch (work_item->op_type) {
+    case AQL_WORK_START:
+        result = aql_perf_measurement_start(measurement);
+        break;
+
+    case AQL_WORK_STOP:
+        result = aql_perf_measurement_stop(measurement);
+        break;
+
+    case AQL_WORK_READ:
+        {
+            uint64_t counter_value = aql_perf_measurement_read(measurement);
+            /* Update cached value with fresh read */
+            spin_lock_irqsave(&measurement->cache_lock, flags);
+            measurement->cached_counter_value = counter_value;
+            measurement->cache_valid = true;
+            spin_unlock_irqrestore(&measurement->cache_lock, flags);
+            result = 0; /* Read operations always succeed if we get here */
+        }
+        break;
+
+    default:
+        aql_err("Unknown work operation type: %d", work_item->op_type);
+        result = -EINVAL;
+        break;
+    }
+
+    work_item->result = result;
+
+    /* Signal completion if waiting */
+    if (work_item->completion) {
+        complete(work_item->completion);
+    }
+
+    aql_debug("Completed work handler for GPU %u, op_type=%d, result=%d",
+              measurement->gpu_id, work_item->op_type, result);
+}
+
+/**
+ * aql_create_work_item - Create and schedule work item
+ * @measurement: Target measurement
+ * @op_type: Operation type to perform
+ *
+ * Returns: Work item or ERR_PTR on error
+ */
+struct aql_work_item *aql_create_work_item(struct aql_measurement *measurement,
+                                          enum aql_work_op_type op_type)
+{
+    struct aql_work_item *work_item;
+
+    if (!measurement || !measurement->work_queue) {
+        aql_err("Invalid measurement or work queue");
+        return ERR_PTR(-EINVAL);
+    }
+
+    work_item = kzalloc(sizeof(*work_item), GFP_ATOMIC);
+    if (!work_item) {
+        aql_err("Failed to allocate work item");
+        return ERR_PTR(-ENOMEM);
+    }
+
+    INIT_WORK(&work_item->work, aql_work_handler);
+    work_item->measurement = measurement;
+    work_item->op_type = op_type;
+    work_item->completion = NULL;
+    work_item->result = 0;
+
+    return work_item;
+}
+
+/**
+ * aql_perf_measurement_start_atomic - Start measurement from atomic context
+ * @measurement: Measurement to start
+ *
+ * Returns: 0 on success (work scheduled), negative error code on failure
+ */
+int aql_perf_measurement_start_atomic(struct aql_measurement *measurement)
+{
+    struct aql_work_item *work_item;
+
+    if (!measurement) {
+        return -EINVAL;
+    }
+
+    work_item = aql_create_work_item(measurement, AQL_WORK_START);
+    if (IS_ERR(work_item)) {
+        return PTR_ERR(work_item);
+    }
+
+    /* Schedule work without waiting */
+    if (!queue_work(measurement->work_queue, &work_item->work)) {
+        kfree(work_item);
+        return -EBUSY; /* Work already queued */
+    }
+
+    aql_debug("Scheduled START work for GPU %u from atomic context",
+              measurement->gpu_id);
+    return 0;
+}
+
+/**
+ * aql_perf_measurement_stop_atomic - Stop measurement from atomic context
+ * @measurement: Measurement to stop
+ *
+ * Returns: 0 on success (work scheduled), negative error code on failure
+ */
+int aql_perf_measurement_stop_atomic(struct aql_measurement *measurement)
+{
+    struct aql_work_item *work_item;
+
+    if (!measurement) {
+        return -EINVAL;
+    }
+
+    work_item = aql_create_work_item(measurement, AQL_WORK_STOP);
+    if (IS_ERR(work_item)) {
+        return PTR_ERR(work_item);
+    }
+
+    /* Schedule work without waiting */
+    if (!queue_work(measurement->work_queue, &work_item->work)) {
+        kfree(work_item);
+        return -EBUSY; /* Work already queued */
+    }
+
+    aql_debug("Scheduled STOP work for GPU %u from atomic context",
+              measurement->gpu_id);
+    return 0;
+}
+
+/**
+ * aql_perf_measurement_read_atomic - Read measurement from atomic context
+ * @measurement: Measurement to read
+ *
+ * Returns: Cached counter value (may schedule background refresh)
+ */
+uint64_t aql_perf_measurement_read_atomic(struct aql_measurement *measurement)
+{
+    struct aql_work_item *work_item;
+    unsigned long flags;
+    uint64_t cached_value = 0;
+
+    if (!measurement) {
+        return 0;
+    }
+
+    /* Return cached value immediately */
+    spin_lock_irqsave(&measurement->cache_lock, flags);
+    if (measurement->cache_valid) {
+        cached_value = measurement->cached_counter_value;
+    }
+    spin_unlock_irqrestore(&measurement->cache_lock, flags);
+
+    /* Schedule background refresh of cached value */
+    work_item = aql_create_work_item(measurement, AQL_WORK_READ);
+    if (!IS_ERR(work_item)) {
+        if (!queue_work(measurement->work_queue, &work_item->work)) {
+            kfree(work_item); /* Work already queued */
+        } else {
+            aql_debug("Scheduled READ work for GPU %u from atomic context",
+                      measurement->gpu_id);
+        }
+    }
+
+    aql_debug("Returned cached value %llu for GPU %u", cached_value, measurement->gpu_id);
+    return cached_value;
 }
 
 EXPORT_SYMBOL_GPL(aql_perf_create_start_packet);
@@ -602,3 +807,8 @@ EXPORT_SYMBOL_GPL(aql_perf_measurement_start);
 EXPORT_SYMBOL_GPL(aql_perf_measurement_stop);
 EXPORT_SYMBOL_GPL(aql_perf_measurement_read);
 EXPORT_SYMBOL_GPL(aql_perf_measurement_destroy);
+EXPORT_SYMBOL_GPL(aql_perf_measurement_start_atomic);
+EXPORT_SYMBOL_GPL(aql_perf_measurement_stop_atomic);
+EXPORT_SYMBOL_GPL(aql_perf_measurement_read_atomic);
+EXPORT_SYMBOL_GPL(aql_work_handler);
+EXPORT_SYMBOL_GPL(aql_create_work_item);

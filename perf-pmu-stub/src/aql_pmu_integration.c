@@ -285,17 +285,15 @@ int aql_pmu_event_start(struct perf_event *event)
 
     measurement = (struct aql_measurement *)event->hw.config_base;
 
-    mutex_lock(&aql_pmu_mutex);
-
-    ret = aql_perf_measurement_start(measurement);
+    /* Use atomic version to avoid sleeping in PMU callback */
+    ret = aql_perf_measurement_start_atomic(measurement);
     if (ret) {
-        aql_err("Failed to start AQL measurement for GPU %u: %d",
+        aql_err("Failed to schedule start for AQL measurement on GPU %u: %d",
                 measurement->gpu_id, ret);
     } else {
-        aql_debug("Started AQL measurement for GPU %u", measurement->gpu_id);
+        aql_debug("Scheduled start for AQL measurement on GPU %u", measurement->gpu_id);
     }
 
-    mutex_unlock(&aql_pmu_mutex);
     return ret;
 }
 
@@ -315,17 +313,15 @@ int aql_pmu_event_stop(struct perf_event *event)
 
     measurement = (struct aql_measurement *)event->hw.config_base;
 
-    mutex_lock(&aql_pmu_mutex);
-
-    ret = aql_perf_measurement_stop(measurement);
+    /* Use atomic version to avoid sleeping in PMU callback */
+    ret = aql_perf_measurement_stop_atomic(measurement);
     if (ret) {
-        aql_err("Failed to stop AQL measurement for GPU %u: %d",
+        aql_err("Failed to schedule stop for AQL measurement on GPU %u: %d",
                 measurement->gpu_id, ret);
     } else {
-        aql_debug("Stopped AQL measurement for GPU %u", measurement->gpu_id);
+        aql_debug("Scheduled stop for AQL measurement on GPU %u", measurement->gpu_id);
     }
 
-    mutex_unlock(&aql_pmu_mutex);
     return ret;
 }
 
@@ -345,14 +341,12 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
 
     measurement = (struct aql_measurement *)event->hw.config_base;
 
-    mutex_lock(&aql_pmu_mutex);
+    /* Use atomic version to return cached value and schedule refresh */
+    counter_value = aql_perf_measurement_read_atomic(measurement);
 
-    counter_value = aql_perf_measurement_read(measurement);
-
-    aql_debug("Read counter value %llu from GPU %u",
+    aql_debug("Read cached counter value %llu from GPU %u",
               counter_value, measurement->gpu_id);
 
-    mutex_unlock(&aql_pmu_mutex);
     return counter_value;
 }
 

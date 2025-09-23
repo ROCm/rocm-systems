@@ -38,6 +38,87 @@
 
 using namespace rocprofiler::counters::test_constants;
 
+// Function to print all packets from construct_packet result with decoded command buffers
+std::string print_construct_packet_result(const std::unique_ptr<rocprofiler::hsa::CounterAQLPacket>& aql_packet) {
+    if(!aql_packet) {
+        return "ERROR: AQL packet is null\n";
+    }
+
+    std::ostringstream oss;
+    oss << "=== CONSTRUCT_PACKET RESULT ===\n";
+
+    // Helper lambda to decode address and size from PM4 packet
+    auto decode_buffer_info = [](const hsa_ext_amd_aql_pm4_packet_t& packet) -> std::pair<uint64_t, uint32_t> {
+        uint32_t addr_low  = packet.pm4_command[1];
+        uint32_t addr_high = packet.pm4_command[2];
+        uint64_t address = ((uint64_t)addr_high << 32) | addr_low;
+        uint32_t size = packet.pm4_command[3];
+        return {address, size};
+    };
+
+    // Helper lambda to print a single packet with decoded command buffer
+    auto print_packet = [&](const hsa_ext_amd_aql_pm4_packet_t& packet, const std::string& name) {
+        oss << "=== " << name << " ===\n";
+        oss << "PM4 Packet:\n";
+        oss << "  header: 0x" << std::hex << packet.header << std::dec << "\n";
+        oss << "  pm4_command: ";
+        for(size_t i = 0; i < sizeof(packet.pm4_command)/sizeof(packet.pm4_command[0]); ++i) {
+            oss << "0x" << std::hex << std::setfill('0') << std::setw(4) << packet.pm4_command[i] << std::dec << " ";
+        }
+        oss << "\n  completion_signal: 0x" << std::hex << packet.completion_signal.handle << std::dec << "\n";
+
+        // Decode and print command buffer info
+        auto [cmd_buffer_addr, cmd_buffer_size] = decode_buffer_info(packet);
+        oss << "\nDecoded Command Buffer:\n";
+        oss << "  Address: 0x" << std::hex << cmd_buffer_addr << std::dec << "\n";
+        oss << "  Size: " << cmd_buffer_size << " bytes\n";
+        std::cerr << oss.str();
+
+        // Helper lambda to print buffer contents
+        auto print_buffer = [&](const char* buffer_name, void* buffer_ptr, uint32_t buffer_size) {
+            if(buffer_ptr != nullptr && buffer_size > 0) {
+                const uint32_t* data = reinterpret_cast<const uint32_t*>(buffer_ptr);
+
+                oss << "  " << buffer_name << " CPU Address: 0x" << std::hex
+                    << reinterpret_cast<uintptr_t>(data) << std::dec << "\n";
+                oss << "  " << buffer_name << " Size: " << buffer_size << " bytes\n";
+
+                size_t word_count = buffer_size / sizeof(uint32_t);
+
+                oss << "  " << buffer_name << " Contents:\n";
+                for(size_t i = 0; i < word_count; ++i) {
+                    if(i % 8 == 0) {
+                        oss << "    0x" << std::hex << std::setw(8) << std::setfill('0')
+                            << (i * sizeof(uint32_t)) << std::dec << ": ";
+                    }
+                    oss << "0x" << std::hex << std::setw(8) << std::setfill('0')
+                        << data[i] << std::dec << " ";
+                    if((i + 1) % 8 == 0) oss << "\n";
+                }
+                if(word_count % 8 != 0) oss << "\n";
+                if(buffer_size / sizeof(uint32_t) > 16) {
+                    oss << "    ... (truncated)\n";
+                }
+            } else {
+                oss << "  [" << buffer_name << " not available]\n";
+            }
+        };
+
+        // Print both command buffer and output buffer
+        print_buffer("Command Buffer", aql_packet->command_buffer_ptr, aql_packet->command_buffer_size);
+        print_buffer("Output Buffer", aql_packet->output_buffer_ptr, aql_packet->output_buffer_size);
+        oss << "================================\n";
+    };
+
+    // Print all three packets with their decoded command buffers
+    print_packet(aql_packet->packets.start_packet, "START PACKET");
+    print_packet(aql_packet->packets.stop_packet, "STOP PACKET");
+    print_packet(aql_packet->packets.read_packet, "READ PACKET");
+
+    oss << "==============================\n";
+    return oss.str();
+}
+
 namespace rocprofiler
 {
 AmdExtTable&
@@ -153,12 +234,15 @@ TEST(aql_profile, packet_generation_single)
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
-        auto                   metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
-        CounterPacketConstruct pkt(agent.get_rocp_agent()->id, metrics);
-        auto                   test_pkt =
-            pkt.construct_packet(rocprofiler::get_api_table(), rocprofiler::get_ext_table());
+        ROCP_INFO << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
+        for (auto metric : rocprofiler::findDeviceMetrics(agent, {})) {
+            CounterPacketConstruct pkt(agent.get_rocp_agent()->id, {metric});
+            auto                   test_pkt =
+                pkt.construct_packet(rocprofiler::get_api_table(), rocprofiler::get_ext_table());
 
-        EXPECT_TRUE(test_pkt);
+            EXPECT_TRUE(test_pkt);
+            std::cerr << print_construct_packet_result(test_pkt);
+        }
     }
 
     hsa_shut_down();
