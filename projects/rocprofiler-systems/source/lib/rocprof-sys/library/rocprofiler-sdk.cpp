@@ -947,7 +947,7 @@ get_ompt_standard_cb_storage()
 auto&
 get_ompt_parallel_cb_storage()
 {
-    // uintptr_t -> codeptr_ra (cb definition)
+    // uintptr_t -> parallel_data (cb definition)
     static auto _v = std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
     return _v;
 }
@@ -1011,13 +1011,13 @@ ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
 {
     auto* payload_data =
         static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
-    const void* codeptr_ra_address = payload_data->args.parallel_begin.codeptr_ra;
+    const void* parallel_data_address = payload_data->args.parallel_begin.parallel_data;
 
     auto args = function_args_t{};
     rocprofiler_iterate_callback_tracing_kind_operation_args(
         record, iterate_args_callback, 1, &args);
     get_ompt_parallel_cb_storage().emplace(
-        reinterpret_cast<uintptr_t>(codeptr_ra_address),
+        reinterpret_cast<uintptr_t>(parallel_data_address),
         rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
 }
 
@@ -1029,10 +1029,10 @@ ompt_pop_parallel_callback(
 {
     auto* payload_data =
         static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
-    const void* codeptr_ra_address = payload_data->args.parallel_end.codeptr_ra;
+    const void* parallel_data_address = payload_data->args.parallel_end.parallel_data;
 
     auto it = get_ompt_parallel_cb_storage().find(
-        reinterpret_cast<uintptr_t>(codeptr_ra_address));
+        reinterpret_cast<uintptr_t>(parallel_data_address));
     if(it == get_ompt_parallel_cb_storage().end())
     {
         auto args = function_args_t{};
@@ -1058,7 +1058,7 @@ ompt_finalize_orphan_events()
 {
     auto empty_call_stack =
         std::optional<std::vector<tim::unwind::processed_entry>>{ std::nullopt };
-    for(const auto& [codeptr_ra, stored_data] : get_ompt_parallel_cb_storage())
+    for(const auto& [parallel_data, stored_data] : get_ompt_parallel_cb_storage())
     {
         ompt_cache_orphan_event(stored_data, empty_call_stack);
     }
