@@ -2310,11 +2310,16 @@ def amdsmi_get_gpu_vbios_info(
             processor_handle, ctypes.byref(vbios_info))
     )
 
+    boot_firmware = vbios_info.boot_firmware.decode("utf-8")
+    if boot_firmware == "":
+        boot_firmware = "N/A"
+
     return {
         "name": vbios_info.name.decode("utf-8"),
         "build_date": vbios_info.build_date.decode("utf-8"),
         "part_number": vbios_info.part_number.decode("utf-8"),
         "version": vbios_info.version.decode("utf-8"),
+        "boot_firmware": boot_firmware,
     }
 
 

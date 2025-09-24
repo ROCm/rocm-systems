@@ -23,6 +23,7 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
 
+#include <cstdint>
 #include <memory>
 #include <map>
 #include <vector>

@@ -3931,28 +3931,42 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
         info->build_date[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         strncpy(info->part_number, reinterpret_cast<char *>(vbios.vbios_pn),
                 AMDSMI_MAX_STRING_LENGTH);
+        // Navi devices still interpret vbios version from drm vbios_ver_str
         strncpy(info->version, reinterpret_cast<char *>(vbios.vbios_ver_str),
                 AMDSMI_MAX_STRING_LENGTH);
     } else {
-        // get vbios version string from rocm_smi
+        // get sysfs vbios_version string which is known as the part number
         char vbios_version[AMDSMI_MAX_STRING_LENGTH];
         status = rsmi_wrapper(rsmi_dev_vbios_version_get, processor_handle, 0,
-                vbios_version,
-                AMDSMI_MAX_STRING_LENGTH);
+                              vbios_version, AMDSMI_MAX_STRING_LENGTH);
 
-        // ignore the errors so that it can populate as many fields as possible.
+        // fail if cannot get vbios version from sysfs
         if (status == AMDSMI_STATUS_SUCCESS) {
-            strncpy(info->version,
-                vbios_version, AMDSMI_MAX_STRING_LENGTH);
+            strncpy(info->part_number, vbios_version, AMDSMI_MAX_STRING_LENGTH);
         }
     }
     libdrm.unload();
+
+    // get vbios build string from rocm_smi which translates to ifwi version
+    char vbios_build_number[AMDSMI_MAX_STRING_LENGTH];
+    amdsmi_status_t build_status;
+    build_status = rsmi_wrapper(rsmi_dev_vbios_build_number_get, processor_handle, 0,
+                                vbios_build_number, AMDSMI_MAX_STRING_LENGTH);
+
+    // Continue if sysfs doesn't exist
+    if (build_status == AMDSMI_STATUS_SUCCESS) {
+        // This device has an ifwi version so swap the version and boot_firmware
+        strncpy(info->boot_firmware, info->version, AMDSMI_MAX_STRING_LENGTH);
+        strncpy(info->version, vbios_build_number, AMDSMI_MAX_STRING_LENGTH);
+    }
+
     ss << __PRETTY_FUNCTION__
        << " | drmCommandWrite returned: " << strerror(errno) << "\n"
        << " | vbios name: " << info->name << "\n"
        << " | vbios build date: " << info->build_date << "\n"
        << " | vbios part number: " << info->part_number << "\n"
        << " | vbios version: " << info->version << "\n"
+       << " | vbios boot_firmware: " << info->boot_firmware<< "\n"
        << " | Returning: " << smi_amdgpu_get_status_string(status, false);
     LOG_INFO(ss);
     return status;
@@ -4807,8 +4821,8 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     }
 
 
-    uint32_t device_counter(AMDSMI_MAX_DEVICES);
-    amdsmi_processor_handle device_list[AMDSMI_MAX_DEVICES];
+    uint32_t device_counter(AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP);
+    amdsmi_processor_handle device_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP];
     for (auto socket_idx = uint32_t(0); socket_idx < socket_counter; ++socket_idx) {
         if (auto api_status = amdsmi_get_processor_handles(socket_list[socket_idx], &device_counter, device_list);
             (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
@@ -4856,14 +4870,14 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     /*
      *  Note: The link topology table is sorted by the number of hops and link weight.
      */
-    topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES] = {nullptr};
+    topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP] = {nullptr};
     topology_nearest_info->count = static_cast<uint32_t>(link_topology_order.size());
     auto topology_nearest_counter = uint32_t(0);
     while (!link_topology_order.empty()) {
         auto link_info = link_topology_order.top();
         link_topology_order.pop();
 
-        if (topology_nearest_counter < AMDSMI_MAX_DEVICES) {
+        if (topology_nearest_counter < (AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP)) {
             topology_nearest_info->processor_list[topology_nearest_counter++] = link_info.target_processor_handle;
         }
     }

@@ -583,10 +583,12 @@ class AMDSMICommands():
                     if isinstance(value, str):
                         if value.strip() == '':
                             vbios_info[key] = "N/A"
-                static_dict['vbios'] = vbios_info
+                static_dict['ifwi'] = vbios_info
+                # Remove boot_firmware since it's not used
+                del static_dict['ifwi']['boot_firmware']
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict['vbios'] = "N/A"
-                logging.debug("Failed to get vbios info for gpu %s | %s", gpu_id, e.get_error_info())
+                static_dict['ifwi'] = "N/A"
+                logging.debug("Failed to get vbios/ifwi info for gpu %s | %s", gpu_id, e.get_error_info())
         if 'limit' in current_platform_args:
             if args.limit:
                 # Power limits
@@ -6126,6 +6128,9 @@ class AMDSMICommands():
 
             self.logger.table_header += 'PCIE_BW'.rjust(12)
 
+        # initialize dual_csv_format; applicable to process only
+        dual_csv_output = False
+
         # Store process list separately
         if args.process:
             # Populate initial processes
@@ -6365,8 +6370,6 @@ class AMDSMICommands():
         # Store typical output for all commands (XCP data will be handled separately, eg. violation status)
         if not args.violation:
             self.logger.store_output(args.gpu, 'values', monitor_values)
-        # intialize dual_csv_format; applicable to process only
-        dual_csv_output = False
 
         # Now handling the single gpu case only
         if multiple_devices:

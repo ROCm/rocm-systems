@@ -3924,6 +3924,35 @@ rsmi_status_t
 rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
 
 /**
+ *  @brief Get the VBIOS Build string
+ *
+ *  @details Given a device ID @p dv_ind, and a pointer to a char buffer,
+ *  @p vbios, this function will write the VBIOS Build string (up to @p len
+ *  characters) for device @p dv_ind to @p vbios. The caller must ensure that
+ *  it is safe to write at least @p len characters to @p vbios.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] vbios_build_number A pointer to a buffer of char's to which the VBIOS
+ *  Build will be written
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @param[in] len The number of char's pointed to by @p vbios which can safely
+ *  be written to by this function.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build_number, uint32_t len);
+
+/**
  *  @brief Get the firmware versions for a device
  *
  *  @details Given a device ID @p dv_ind, and a pointer to a uint64_t,

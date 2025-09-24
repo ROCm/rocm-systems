@@ -104,6 +104,7 @@ enum DevInfoTypes {
   kDevUsage,
   kDevPowerODVoltage,
   kDevVBiosVer,
+  kDevVBiosBuild,
   kDevPCIEThruPut,
   kDevErrCntSDMA,
   kDevErrCntUMC,

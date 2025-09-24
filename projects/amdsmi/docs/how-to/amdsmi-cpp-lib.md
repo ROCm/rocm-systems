@@ -68,7 +68,7 @@ driver and make sure that any resources held by AMD SMI are released.
 1. A simple "Hello World" type program that displays the temperature of detected
    devices.
 
-   ```note
+   ```{note}
    Sample build example:
    $ g++ -I/opt/rocm/include <file_name>.cc -L/opt/rocm/lib -lamd_smi -o <filename>
 
@@ -158,7 +158,7 @@ driver and make sure that any resources held by AMD SMI are released.
 
 2. A sample program that displays the power of detected CPUs.
 
-   ```note
+   ```{note}
    Sample build example:
    $ g++ -DENABLE_ESMI -I/opt/rocm/include <file_name>.cc -L/opt/rocm/lib -lamd_smi -o <filename>
 

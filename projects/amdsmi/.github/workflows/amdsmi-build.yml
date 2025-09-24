@@ -28,7 +28,7 @@ jobs:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --privileged --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
 
     steps:
       - uses: actions/checkout@v4
@@ -142,7 +142,7 @@ jobs:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --privileged --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
 
     steps:
       - uses: actions/checkout@v4
@@ -370,7 +370,7 @@ jobs:
           - AlmaLinux8
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --privileged --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
 
     steps:
       - uses: actions/checkout@v4
@@ -572,7 +572,7 @@ jobs:
           - AlmaLinux8
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --privileged --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
 
     steps:
       - uses: actions/checkout@v4
