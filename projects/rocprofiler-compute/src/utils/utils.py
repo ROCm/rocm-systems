@@ -24,6 +24,7 @@
 ##############################################################################
 
 import argparse
+import ctypes
 import glob
 import io
 import json
@@ -31,15 +32,19 @@ import locale
 import logging
 import os
 import re
+import select
 import selectors
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import Any, Dict, Generator, Optional, Union, cast
 
 import pandas as pd
 import yaml
@@ -292,22 +297,33 @@ def capture_subprocess_output(
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
+    sanitized_env = (
+        None
+        if new_env is None
+        else {
+            k: ":".join(str(i) for i in v) if isinstance(v, list) else str(v)
+            for k, v in new_env.items()
+        }
+    )
+
     process = (
         subprocess.Popen(
             subprocess_args,
             bufsize=1,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
         )
-        if new_env == None
+        if sanitized_env == None
         else subprocess.Popen(
             subprocess_args,
             bufsize=1,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            env=new_env,
+            env=sanitized_env,
         )
     )
 
@@ -319,6 +335,8 @@ def capture_subprocess_output(
             # Because the process' output is line buffered, there's only ever one
             # line to read when this function is called
             line = stream.readline()
+            if not line:
+                return
             buf.write(line)
             if enable_logging:
                 if profileMode:
@@ -334,6 +352,43 @@ def capture_subprocess_output(
     if process.stdout is not None:
         selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
+    def forward_input() -> None:
+        """
+        Forward the keyboard input from the terminal to the inside subprocess
+        """
+
+        try:
+            sys.stdin.fileno()
+        except (io.UnsupportedOperation, AttributeError):
+            # Stdin can't be used in select; skip input forwarding
+            return
+
+        if sys.stdin.isatty():
+            for line in sys.stdin:
+                if process.poll() is not None:
+                    break
+                process.stdin.write(line)
+                process.stdin.flush()
+        else:
+            while process.poll() is None:
+                try:
+                    rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+                except (io.UnsupportedOperation, AttributeError):
+                    break
+                if rlist:
+                    line = sys.stdin.readline()
+                    if not line:
+                        break
+                    process.stdin.write(line)
+                    process.stdin.flush()
+        try:
+            process.stdin.close()
+        except Exception:
+            console_warning("forward_input: the stdin did not close properly!")
+
+    input_thread = threading.Thread(target=forward_input, daemon=True)
+    input_thread.start()
+
     # Loop until subprocess is terminated
     while process.poll() is None:
         # Wait for events and handle them with their registered callbacks
@@ -341,6 +396,8 @@ def capture_subprocess_output(
         for key, mask in events:
             callback = key.data
             callback(key.fileobj, mask)
+
+    input_thread.join(timeout=1)
 
     # Get process return code
     return_code = process.wait()
@@ -693,6 +750,13 @@ def run_prof(
     fbase = fpath.stem
     console_debug(f"pmc file: {fpath.name}")
 
+    is_mode_live_attach = (
+        isinstance(profiler_options, list) and "--pid" in profiler_options
+    ) or (
+        isinstance(profiler_options, dict)
+        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
+    )
+
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
         options = cast(dict[str, Union[str, list[str]]], profiler_options)
@@ -707,6 +771,11 @@ def run_prof(
             options["ROCPROF_AGENT_INDEX"] = "absolute"
         else:
             options = ["-A", "absolute"] + options
+    else:
+        if is_mode_live_attach:
+            console_error(
+                "The live attach/detach only supports rocprofv3 or rocprofiler-sdk"
+            )
 
     new_env = os.environ.copy()
 
@@ -754,14 +823,66 @@ def run_prof(
     time_1 = time.time()
 
     if rocprof_cmd == "rocprofiler-sdk":
-        app_cmd = options.pop("APP_CMD")
+        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         for key, value in options.items():
             new_env[key] = value
         console_debug(f"rocprof sdk env vars: {new_env}")
-        console_debug(f"rocprof sdk user provided command: {app_cmd}")
-        success, output = capture_subprocess_output(
-            app_cmd, new_env=new_env, profileMode=True
-        )
+
+        if is_mode_live_attach:
+
+            @contextmanager
+            def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
+                """
+                Temporarily change the environment variable of this application.
+                """
+                original_env = os.environ.copy()
+                os.environ.update({k: str(v) for k, v in env_vars.items()})
+                try:
+                    yield
+                finally:
+                    os.environ.clear()
+                    os.environ.update(original_env)
+
+            with temporary_env(new_env):
+                libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
+                c_lib = ctypes.CDLL(libname)
+                if c_lib is None:
+                    console_error(f"Error opening {libname}")
+                c_lib.attach.argtypes = [ctypes.c_uint]
+
+                pid = options["ROCPROF_ATTACH_PID"]
+                if pid is None:
+                    console_error(
+                        "Mode of attach/detach must have setup for process ID"
+                    )
+
+                c_lib.attach(int(pid))
+                duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+                if duration is None:
+                    console_log(
+                        f"\033[93mAttach to process with ID {pid} is successful, "
+                        "Press Enter to detach...\033[0m"
+                    )
+                    input()
+                else:
+                    console_log(
+                        f"\033[93mAttach to process with ID {pid} is successful, "
+                        f"detach will happen in {duration} milliseconds...\033[0m"
+                    )
+                    time.sleep(int(duration) / 1000)
+                c_lib.detach()
+
+        else:
+            if app_cmd is None:
+                console_error(
+                    "APP_CMD, the workload's execuatble must be provided "
+                    "when not in live attach mode"
+                )
+
+            console_debug(f"rocprof sdk user provided command: {app_cmd}")
+            success, output = capture_subprocess_output(
+                app_cmd, new_env=new_env, profileMode=True
+            )
     else:
         # print in readable format using shlex
         console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + options)}")
@@ -780,7 +901,7 @@ def run_prof(
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
-    if not success:
+    if (not is_mode_live_attach) and (not success):
         if loglevel > logging.INFO:
             for line in output.splitlines():
                 console_error(line, exit=False)

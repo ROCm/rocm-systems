@@ -1056,14 +1056,13 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   // Make sure the slot is free for usage
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
-    // Active spin - no yield
+    amd::Os::yield();
   }
 
   // Add blocking command if the original value of read index was behind of the queue size.
   // Note: direct dispatch relies on the slot stall above to keep the forward progress
   // of the app if a dispatched kernel requires some CPU input for completion
-  if (blocking || (!AMD_DIRECT_DISPATCH &&
-                   (index - hsa_queue_load_read_index_relaxed(gpu_queue_)) >= sw_queue_size)) {
+  if (blocking) {
     if (packet->completion_signal.handle == 0) {
       packet->completion_signal = Barriers().ActiveSignal();
     }
@@ -1202,7 +1201,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
     // Make sure the slot is free for usage
     while ((startIndex - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
-      // Active spin - no yield
+      amd::Os::yield();
     }
 
     fence_dirty_ = true;
@@ -3691,8 +3690,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   if (!kernel.parameters().deviceKernelArgs() || gpuKernel.isInternalKernel()) {
     // Allocate buffer to hold kernel arguments
     if (isGraphCapture) {
-      argBuffer = command_->getKernArgOffset(gpuKernel.KernargSegmentByteSize(),
-                                             gpuKernel.KernargSegmentAlignment());
+      argBuffer = command_->getGraphKernArg(gpuKernel.KernargSegmentByteSize(),
+                                            gpuKernel.KernargSegmentAlignment());
       command_->SetKernelName(gpuKernel.getDemangledName().c_str());
     } else {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,

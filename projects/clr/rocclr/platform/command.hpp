@@ -341,7 +341,7 @@ class Command : public Event {
     return packet;
   }
 
-  address getKernArgOffset(int size, int alignment) {
+  address getGraphKernArg(int size, int alignment) {
     return graphKernArgMgr_->AllocKernArg(size, alignment);
   }
 
