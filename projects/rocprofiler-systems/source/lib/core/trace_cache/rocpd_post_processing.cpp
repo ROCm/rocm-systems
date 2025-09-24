@@ -859,7 +859,7 @@ rocpd_post_processing::rocpd_insert_thread_id(info::thread&        t_info,
                                               const node_info&     n_info,
                                               const info::process& process_info) const
 {
-    const auto& extended_info = thread_info::get(t_info.thread_id, SequentTID);
+    const auto& extended_info = thread_info::get(t_info.thread_id, SystemTID);
     if(extended_info.has_value())
     {
         t_info.start = extended_info->get_start();
