@@ -40,7 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 80198e080271a2013073fc1d3dd03672a3214779 # 2025-09-22 commit
+          ref: 7afbe45f7eaa4f2e9abcb9cd7f1c4042a2d7b638 # 2025-09-24 commit
 
       - name: Runner Health Settings
         run: |
