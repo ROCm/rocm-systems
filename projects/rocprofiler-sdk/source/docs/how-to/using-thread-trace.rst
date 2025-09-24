@@ -105,9 +105,13 @@ The following table lists the parameters relevant to thread tracing:
 | att-gpu-index            | Integer |         |           | Comma-separated list of integers. If enabled, only the GPU   |
 |                          | (List)  |         |           | indexes in the list will be profiled by thread trace.        |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-consecutive-kernels  | Integer | 0 or    |           | If set with a number greater than 0, the specified number of |
-|                          |         | greater |           | consecutive targeted kernels will be profiled and compiled   |
-|                          |         |         |           | into a single ATT file.                                      |
+| att-consecutive-kernels  | Integer | >=0     |           | Starting at the targeted kernel, enables thread trace for the|
+|                          |         |         |           | next N kernel dispatches, sharing a single ATT file,         |
+|                          |         |         |           | stats.csv and UI dir. See --kernel-include-regex and         |
+|                          |         |         |           | --kernel-iteration-range. If multiple targeted kernels       |
+|                          |         |         |           | overlap, the count for N next dispatches starts again from 0.|
+|                          |         |         |           | Recommended use with --att-gpu-index due to thread trace     |
+|                          |         |         |           | being enabled for all GPUs.                                  |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
 For AMD Instinct accelerators, enable perfmon streaming using:
@@ -159,7 +163,7 @@ If the subsequent kernels are targeted kernels, the profiler will then profile a
 new targeted kernel, so it is possible for a generated ATT file to have more than ``n`` kernels profiled.
 All the profiled kernels are then compiled into a single ATT file.
 If a new targeted kernel is encountered after the ``rocprofv3`` tool has finished profiling a batch of kernels,
-the profiler will restart profiling when encountering a new targeted kernel and create another ATT file with multiple kernels. 
+the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels. 
 
 .. _output-files:
 
