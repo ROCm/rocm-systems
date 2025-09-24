@@ -171,6 +171,26 @@ bool PrintfDbg::allocate(bool realloc) {
   return (nullptr != dbgBuffer_) ? true : false;
 }
 
+bool PrintfDbgHSA::createCleanupResource() {
+  // Create a resource for cleanup value
+  if (!cleanValue_.create(Resource::Remote)) return false;
+  uint32_t* value = reinterpret_cast<uint32_t*>(cleanValue_.map(nullptr));
+  if (!value) return false;
+
+  *value = 0;
+  cleanValue_.unmap(nullptr);
+  return true;
+}
+
+bool PrintfDbgHSA::cleanUpDbgBuffer(VirtualGPU& gpu) const {
+  // clear contents of debug buffer
+  if (!cleanValue_.partialMemCopyTo(gpu, amd::Coord3D(0, 0, 0), amd::Coord3D(0, 0, 0),
+                                    amd::Coord3D(dbgBuffer_->size(), 0, 0), *dbgBuffer_)) {
+    return false;
+  }
+  return true;
+}
+
 bool PrintfDbg::checkFloat(const std::string& fmt) const {
   switch (fmt[fmt.size() - 1]) {
     case 'e':
@@ -719,6 +739,8 @@ bool PrintfDbgHSA::output(VirtualGPU& gpu, bool printfEnabled,
     }
 
     dev().xferRead().release(gpu, *xferBufRead_);
+
+    if (!cleanUpDbgBuffer(gpu)) return false;
   }
 
   return true;

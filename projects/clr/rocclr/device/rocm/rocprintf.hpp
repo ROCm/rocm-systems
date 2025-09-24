@@ -101,6 +101,8 @@ class PrintfDbg : public amd::HeapObject {
                        size_t& i                        //!< index to the data in the buffer
   ) const;
 
+  void cleanUpDbgBuffer() const;
+
  private:
   //! Disable copy constructor
   PrintfDbg(const PrintfDbg&);

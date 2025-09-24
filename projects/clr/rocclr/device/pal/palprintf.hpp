@@ -157,7 +157,8 @@ class PrintfDbg : public amd::HeapObject {
 class PrintfDbgHSA : public PrintfDbg {
  public:
   //! Default constructor
-  PrintfDbgHSA(Device& device, FILE* file = NULL) : PrintfDbg(device, file) {}
+  PrintfDbgHSA(Device& device, FILE* file = NULL) : PrintfDbg(device, file),
+                                                    cleanValue_(device, 4) {}
 
   //! Initializes the debug buffer before kernel's execution
   bool init(VirtualGPU& gpu,    //!< Virtual GPU object
@@ -170,12 +171,21 @@ class PrintfDbgHSA : public PrintfDbg {
               const std::vector<device::PrintfInfo>& printfInfo  //!< printf info
   );
 
+  //! create cleanup resource for debug buffer
+  bool createCleanupResource();
+
+  //! Clean up debug buffer after flushing the contents.
+  bool cleanUpDbgBuffer(VirtualGPU& gpu) const;
+
  private:
   //! Disable copy constructor
   PrintfDbgHSA(const PrintfDbgHSA&);
 
   //! Disable assignment
   PrintfDbgHSA& operator=(const PrintfDbgHSA&);
+
+  //! Resource to clear debug buffer
+  Memory cleanValue_;
 };
 
 /*@}*/  // namespace amd::pal

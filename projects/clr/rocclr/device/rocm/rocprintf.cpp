@@ -60,6 +60,11 @@ bool PrintfDbg::allocate(bool realloc) {
   return (nullptr != dbgBuffer_) ? true : false;
 }
 
+void PrintfDbg::cleanUpDbgBuffer() const {
+  if (!dbgBuffer_) return;
+  memset(dbgBuffer_, 0, dbgBuffer_size_);
+}
+
 bool PrintfDbg::checkFloat(const std::string& fmt) const {
   switch (fmt[fmt.size() - 1]) {
     case 'e':
@@ -525,6 +530,8 @@ bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled,
       dbgBufferPtr += sb / sizeof(uint32_t);
       sb = 0;
     }
+
+    cleanUpDbgBuffer();
   }
 
   return true;

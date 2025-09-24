@@ -990,6 +990,11 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
     return false;
   }
 
+  if (!printfDbgHSA_->createCleanupResource()) {
+    LogError("Could not create cleanup resource for debug buffer!");
+    return false;
+  }
+
   tsCache_ = new TimeStampCache(*this);
   if (nullptr == tsCache_) {
     LogError("Could not create TimeStamp cache!");
