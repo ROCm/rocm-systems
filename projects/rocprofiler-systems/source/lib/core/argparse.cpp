@@ -167,10 +167,16 @@ remove_env(parser_data& _data, std::string_view _env_var)
 std::string
 get_rocprofsys_root(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
+    char*       _tmp = realpath("/proc/self/exe", nullptr);
+    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
+
+    if(_tmp) free(_tmp);
+
     auto _pos = _exe.find_last_of('/');
     auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
+
+    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
+
     return rocprofsys::common::join("/", _dir, "..");
 }
 
