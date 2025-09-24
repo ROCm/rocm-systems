@@ -795,6 +795,13 @@ For attachment profiling of running processes:
     )
 
     att_options.add_argument(
+        "--att-consecutive-kernels",
+        help="Consecutive kernels to profile with ATT. Default 0",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
         "--att-buffer-size",
         help="Thread trace buffer size. Default 256MB",
         default=None,
@@ -1625,6 +1632,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SIMD_SELECT",
                 int_auto(args.att_simd_select),
+                overwrite=True,
+            )
+        if args.att_consecutive_kernels:
+            update_env(
+                "ROCPROF_ATT_CONSECUTIVE_KERNELS",
+                int_auto(args.att_consecutive_kernels),
                 overwrite=True,
             )
         if args.att_serialize_all:
