@@ -161,6 +161,22 @@ auto bindings = std::array<gotcha_binding_t, 4>{
 void
 activate_gotcha_bindings()
 {
+#if defined(GOTCHA_INIT) && GOTCHA_INIT > 0
+    // initialize gotcha
+    gotcha_init_config_t gotcha_cfg = {
+        .size = sizeof(gotcha_init_config_t), .dl_open_bind = 0, .dl_sym_bind = 0};
+    gotcha_init(&gotcha_cfg);
+#endif
+
+    // this ensures that the sqlite3 module is imported and the sqlite3_open_v2 and sqlite3_close_v2
+    // in lib-dynload/_sqlite3.cpython-*.so are remapped to the gotcha bindings.
+    // this is needed to ensure that the sqlite3 connections are captured by gotcha
+    {
+        auto sqlite3_mod = py::module_::import("sqlite3");
+        auto ret         = sqlite3_mod.attr("connect")(":memory:");
+        ret.attr("close")();
+    }
+
     // activate the gotcha wrappers
     auto _err = gotcha_wrap(bindings.data(), bindings.size(), "rocpd.sqlite3");
     ROCP_WARNING_IF(_err != GOTCHA_SUCCESS) << "gotcha error for rocpd.sqlite3";

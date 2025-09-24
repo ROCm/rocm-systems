@@ -989,7 +989,6 @@
         "Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again",
         "====================================================",
          "==================SWDEV-555665==================================",
-        "Unit_hipMemVmm_Uncached",
         "Unit_TexObjectCreate_TypePitch2D",
         "Unit_hipTexRefSetGetMipmappedArray",
         "Unit_test_generic_target_only_in_regular_fatbin",
@@ -1006,6 +1005,10 @@
         "Unit_hipStreamBeginCapture_StreamSync_OngoingCapture",
         "Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread",
         "Unit_hipStreamBeginCapture_CapturingFromWithinStrms",
+        "====================================================",
+        "==================SWDEV-556645==================================",
+        "Unit_hipGraphNodeSetEnabled_Functional_KernelNode",
+        "Unit_TexObjectCreate_TypePitch2D_IncompleteInit",
         "====================================================",
     #endif
         "=== Following tests disabled as it should be a local perf test",

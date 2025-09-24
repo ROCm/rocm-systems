@@ -49,14 +49,12 @@ from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
 from utils.specs import MachineSpecs
 from utils.utils import (
     add_counter_extra_config_input_yaml,
-    capture_subprocess_output,
     convert_metric_id_to_panel_info,
     detect_rocprof,
     get_submodules,
     is_tcc_channel_counter,
     mibench,
     parse_sets_yaml,
-    using_v3,
 )
 
 
@@ -370,8 +368,7 @@ class OmniSoC_Base:
         # Handle TCC channel counters: if hw_counter_matches has elems ending with '['
         # Expand and interleve the TCC channel counters
         # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
-        num_xcd_for_pmc_file = int(self._mspec.num_xcd) if using_v3() else 1
-
+        num_xcd_for_pmc_file = int(self._mspec.num_xcd)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
@@ -387,18 +384,6 @@ class OmniSoC_Base:
     def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
-
-        if not using_v3():
-            # Counters not supported in rocprof v1 / v2
-            counters = counters - {
-                "SQ_INSTS_VALU_MFMA_F8",
-                "SQ_INSTS_VALU_MFMA_MOPS_F8",
-                "SQC_DCACHE_INFLIGHT_LEVEL",
-                "SQC_ICACHE_INFLIGHT_LEVEL",
-                "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
-                "SQ_VMEM_TA_ADDR_FIFO_FULL",
-                "SQ_VMEM_TA_CMD_FIFO_FULL",
-            }
 
         # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)
         if self.__arch in ("gfx940", "gfx941", "gfx942"):
@@ -467,49 +452,22 @@ class OmniSoC_Base:
 
         if rocprof_cmd != "rocprofiler-sdk":
             console_warning(
-                "rocprof v1/v2/v3 interfaces will be removed in favor of "
-                "rocprofiler-sdk interface in a future release. To use "
-                "rocprofiler-sdk, set ROCPROF to 'rocprofiler-sdk' and "
-                "optionally provide the path to librocprofiler-sdk.so via "
-                "--rocprofiler-sdk-library-path."
+                "rocprofv3 interface is deprecated and will be removed "
+                "in a future release."
             )
 
         rocprof_counters: set[str] = set()
 
-        if rocprof_cmd.endswith("rocprof"):
-            for list_type in ["--list-basic", "--list-derived"]:
-                command = [rocprof_cmd, list_type]
-                success, output = capture_subprocess_output(
-                    command, enable_logging=False
-                )
-                # return code should be 1 so success should be False
-                if success:
-                    console_error(
-                        "Failed to list rocprof supported counters using command: "
-                        f"{command}"
-                    )
+        if not (
+            str(rocprof_cmd).endswith("rocprofv3")
+            or str(rocprof_cmd) == "rocprofiler-sdk"
+        ):
+            console_error(
+                f"Incompatible profiler: {rocprof_cmd}. "
+                "Supported profilers include: "
+                f"{get_submodules('rocprof_compute_profile')}"
+            )
 
-                for line in output.splitlines():
-                    if "gpu-agent" in line:
-                        counters, _ = self.parse_counters_text(
-                            line.split(":")[1].strip()
-                        )
-                        rocprof_counters.update(counters)
-        elif rocprof_cmd.endswith("rocprofv2"):
-            command = [rocprof_cmd, "--list-counters"]
-            success, output = capture_subprocess_output(command, enable_logging=False)
-            # return code should be 1 so success should be False
-            if success:
-                console_error(
-                    "Failed to list rocprof supported counters using command: "
-                    f"{command}"
-                )
-
-            for line in output.splitlines():
-                if "gfx" in line:
-                    counters, _ = self.parse_counters_text(line.split(":")[2].strip())
-                    rocprof_counters.update(counters)
-        elif rocprof_cmd.endswith("rocprofv3") or rocprof_cmd == "rocprofiler-sdk":
             # Point to counter definition
             old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
             os.environ["ROCPROFILER_METRICS_PATH"] = str(
@@ -539,12 +497,6 @@ class OmniSoC_Base:
                 del os.environ["ROCPROFILER_METRICS_PATH"]
             else:
                 os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
-
-        else:
-            console_error(
-                f"Incompatible profiler: {rocprof_cmd}. Supported profilers include: "
-                f"{get_submodules('rocprof_compute_profile')}"
-            )
 
         return rocprof_counters
 
@@ -601,14 +553,7 @@ class OmniSoC_Base:
                     CounterFile(counter + ".txt", self.__perfmon_config)
                 )
                 output_files[-1].add(counter)
-
-                if using_v3():
-                    # v3 does not support SQ_ACCUM_PREV_HIRES. Use custom counters
-                    # defined in counter_defs.yaml that utilize accumulate(),
-                    # with _ACCUM suffix.
-                    output_files[-1].add(f"{counter}_ACCUM")
-                else:
-                    output_files[-1].add("SQ_ACCUM_PREV_HIRES")
+                output_files[-1].add(f"{counter}_ACCUM")
                 accu_file_count += 1
 
         file_count = 0
@@ -709,12 +654,12 @@ class OmniSoC_Base:
                     for ctr in f.blocks[block_name].elements
                 ]:
                     pmc.append(ctr)
-                    if using_v3() and is_tcc_channel_counter(ctr):
+                    # Add TCC channel counters definitions
+                    if is_tcc_channel_counter(ctr):
                         counter_name = ctr.split("[")[0]
                         idx = int(ctr.split("[")[1].split("]")[0])
                         xcd_idx = idx // int(self._mspec.l2_banks)
                         channel_idx = idx % int(self._mspec.l2_banks)
-
                         expression = (
                             f"select({counter_name},"
                             f"[DIMENSION_XCC=[{xcd_idx}], "
@@ -743,16 +688,6 @@ class OmniSoC_Base:
                 if counter_def:
                     with open(file_name_yaml, "w") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
-
-        # Add a timestamp file
-        # TODO: Does v3 need this?
-        if not using_v3():
-            timestamp_file = workload_perfmon_dir / "timestamps.txt"
-            with open(timestamp_file, "w") as fd:
-                fd.write("pmc:\n\n")
-                fd.write("gpu:\n")
-                fd.write("range:\n")
-                fd.write("kernel:\n")
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
