@@ -1160,13 +1160,17 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rccl_api = static_cast<rcclApiFuncTable*>(tables[0]);
 
-        // Here 41 represents number of rccl functions in rccl, with broken ABI.
-        if(NCCL_VERSION_CODE < 22703 && rccl_api->size >= (41 * sizeof(void*)) + sizeof(uint64_t))
+#if ROCPROFILER_SDK_COMPUTE_VERSION(RCCL_API_TRACE_VERSION_MAJOR,                                  \
+                                    0,                                                             \
+                                    RCCL_API_TRACE_VERSION_PATCH) >= 1
+        if((NCCL_VERSION_CODE < 22703 || RCCL_API_TRACE_VERSION_PATCH == 1) &&
+           rccl_api->size > offsetof(rcclApiFuncTable, ncclAllReduceWithBias_fn) + sizeof(void*))
         {
-            ROCP_CI_LOG(WARNING) << fmt::format(
-                "ABI mismatch between rccl and SDK. Can't do RCCL Trace update, RCCL.");
+            ROCP_CI_LOG(WARNING) << fmt::format("ABI mismatch between rccl and rocprofiler-SDK, "
+                                                "won't do RCCL Trace. Update, RCCL.");
         }
         else
+#endif
         {
             // any internal modifications to the rcclApiFuncTable need to be done before we make the
             // copy or else those modifications will be lost when RCCL API tracing is enabled
