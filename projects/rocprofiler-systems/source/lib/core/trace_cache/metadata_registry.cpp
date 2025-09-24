@@ -289,31 +289,32 @@ get_category_names()
 }
 
 auto&
-get_operation_names()
+get_modified_operations()
 {
     static auto _v = std::map<category, operations>{};
     return _v;
 }
 
 void
-overwrite_names(metadata_registry& registry_ref, rocprofiler_callback_tracing_kind_t cat,
-                std::initializer_list<std::pair<int, std::string_view>> overrides)
+overwrite_cb_names(metadata_registry&                                      registry_ref,
+                   rocprofiler_callback_tracing_kind_t                     cat,
+                   std::initializer_list<std::pair<int, std::string_view>> overrides)
 {
     auto& category_names = get_category_names();
-    auto& modified       = get_operation_names();
+    auto& modified_ops   = get_modified_operations();
 
     auto extract_operations = [&registry_ref](category cat) -> operations {
         auto        items           = registry_ref.m_callback_tracing_info.items();
         const auto* target_category = items[static_cast<size_t>(cat)];
 
         auto       operations_data = target_category->items();
-        operations operations_copy;
-        operations_copy.reserve(operations_data.size());
+        operations operation_names;
+        operation_names.reserve(operations_data.size());
 
-        for(const auto& [op_idx, op_name_ptr] : operations_data)
-            operations_copy.push_back(*op_name_ptr);
+        for(const auto& [op_idx, op_name] : operations_data)
+            operation_names.push_back(*op_name);
 
-        return operations_copy;
+        return operation_names;
     };
 
     static std::once_flag category_names_init_flag;
@@ -328,11 +329,11 @@ overwrite_names(metadata_registry& registry_ref, rocprofiler_callback_tracing_ki
         }
     });
 
-    assert(modified.find(cat) == modified.end() &&
+    assert(modified_ops.find(cat) == modified_ops.end() &&
            "Overwriting a previously overwritten entry is forbidden");
 
-    assert((modified.empty() || cat < modified.begin()->first) &&
-           "Category must have a smaller enum value than all previously modified "
+    assert((modified_ops.empty() || cat < modified_ops.begin()->first) &&
+           "Category must have a smaller enum value than all previously modified_ops "
            "categories");
 
     // Store operations of all following categories
@@ -341,28 +342,28 @@ overwrite_names(metadata_registry& registry_ref, rocprofiler_callback_tracing_ki
         i < ROCPROFILER_CALLBACK_TRACING_LAST;
         i = static_cast<category>(static_cast<int>(i) + 1))
     {
-        if(modified.find(i) != modified.end()) break;
-        modified[i] = extract_operations(i);
+        if(modified_ops.find(i) != modified_ops.end()) break;
+        modified_ops[i] = extract_operations(i);
     }
 
-    auto operations_copy = extract_operations(cat);
+    auto operation_names = extract_operations(cat);
     for(const auto& [index, new_value] : overrides)
-        operations_copy[index] = new_value;
+        operation_names[index] = new_value;
 
-    modified[cat] = std::move(operations_copy);
+    modified_ops[cat] = std::move(operation_names);
 }
 
 void
-overwrite_names_finalize(metadata_registry& registry_ref)
+overwrite_cb_names_fini(metadata_registry& registry_ref)
 {
-    auto& modified = get_operation_names();
-    if(modified.empty()) return;
+    auto& modified_ops = get_modified_operations();
+    if(modified_ops.empty()) return;
     auto& category_names = get_category_names();
 
-    for(category i = modified.begin()->first; i < ROCPROFILER_CALLBACK_TRACING_LAST;
+    for(category i = modified_ops.begin()->first; i < ROCPROFILER_CALLBACK_TRACING_LAST;
         i          = static_cast<category>(static_cast<int>(i) + 1))
     {
-        auto        it             = modified.find(i);
+        auto        it             = modified_ops.find(i);
         const auto& operations_vec = it->second;
         registry_ref.m_callback_tracing_info.emplace(i, category_names.at(i).data());
         for(size_t op_idx = 0; op_idx < operations_vec.size(); ++op_idx)
@@ -376,13 +377,13 @@ overwrite_names_finalize(metadata_registry& registry_ref)
 
 metadata_registry::metadata_registry()
 {
-    overwrite_names(*this, ROCPROFILER_CALLBACK_TRACING_OMPT,
-                    { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
-                      { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
-                      { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
-                      { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } });
+    overwrite_cb_names(*this, ROCPROFILER_CALLBACK_TRACING_OMPT,
+                       { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
+                         { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
+                         { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
+                         { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } });
 
-    overwrite_names_finalize(*this);
+    overwrite_cb_names_fini(*this);
 }
 
 rocprofiler::sdk::buffer_name_info_t<const char*>

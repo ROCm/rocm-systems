@@ -218,9 +218,10 @@ struct metadata_registry
 private:
     friend class cache_manager;
     metadata_registry();
-    friend void overwrite_names(metadata_registry&, rocprofiler_callback_tracing_kind_t,
-                                std::initializer_list<std::pair<int, std::string_view>>);
-    friend void overwrite_names_finalize(metadata_registry&);
+    friend void overwrite_cb_names(
+        metadata_registry&, rocprofiler_callback_tracing_kind_t,
+        std::initializer_list<std::pair<int, std::string_view>>);
+    friend void                         overwrite_cb_names_fini(metadata_registry&);
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
