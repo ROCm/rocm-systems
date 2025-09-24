@@ -1160,21 +1160,30 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rccl_api = static_cast<rcclApiFuncTable*>(tables[0]);
 
-        // any internal modifications to the rcclApiFuncTable need to be done before we make the
-        // copy or else those modifications will be lost when RCCL API tracing is enabled
-        // because the RCCL API tracing invokes the function pointers from the copy below
-        rocprofiler::rccl::copy_table(rccl_api, lib_instance);
+        // Here 41 represents number of rccl functions in rccl, with broken ABI.
+        if(NCCL_VERSION_CODE < 22703 && rccl_api->size >= (41 * sizeof(void*)) + sizeof(uint64_t))
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "ABI mismatch between rccl and SDK. Can't do RCCL Trace update, RCCL.");
+        }
+        else
+        {
+            // any internal modifications to the rcclApiFuncTable need to be done before we make the
+            // copy or else those modifications will be lost when RCCL API tracing is enabled
+            // because the RCCL API tracing invokes the function pointers from the copy below
+            rocprofiler::rccl::copy_table(rccl_api, lib_instance);
 
-        // install rocprofiler API wrappers
-        rocprofiler::rccl::update_table(rccl_api);
+            // install rocprofiler API wrappers
+            rocprofiler::rccl::update_table(rccl_api);
 
-        // Tracing notifications the runtime has initialized
-        rocprofiler::runtime_init::initialize(
-            ROCPROFILER_RUNTIME_INITIALIZATION_RCCL, lib_version, lib_instance);
+            // Tracing notifications the runtime has initialized
+            rocprofiler::runtime_init::initialize(
+                ROCPROFILER_RUNTIME_INITIALIZATION_RCCL, lib_version, lib_instance);
 
-        // allow tools to install API wrappers
-        rocprofiler::intercept_table::notify_intercept_table_registration(
-            ROCPROFILER_RCCL_TABLE, lib_version, lib_instance, std::make_tuple(rccl_api));
+            // allow tools to install API wrappers
+            rocprofiler::intercept_table::notify_intercept_table_registration(
+                ROCPROFILER_RCCL_TABLE, lib_version, lib_instance, std::make_tuple(rccl_api));
+        }
     }
     else if(std::string_view{name} == "rocdecode")
     {
