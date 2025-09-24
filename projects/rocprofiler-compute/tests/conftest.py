@@ -23,8 +23,10 @@
 
 ##############################################################################
 
+import os
 import subprocess
 from importlib.machinery import SourceFileLoader
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -45,7 +47,9 @@ def pytest_addoption(parser):
     parser.addoption(
         "--rocprofiler-sdk-library-path",
         type=str,
-        default="/opt/rocm/lib/librocprofiler-sdk.so",
+        default=str(
+            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+        ),
         help="Path to the rocprofiler-sdk library",
     )
 
