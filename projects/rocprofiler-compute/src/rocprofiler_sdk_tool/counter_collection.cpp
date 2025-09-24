@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "counter_collection.hpp"
+#include "tmp_file.hpp"
 
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -70,6 +71,13 @@ get_client_ctx()
 {
     static rocprofiler_context_id_t ctx{0};
     return ctx;
+}
+
+tmp_file&
+get_tmp_file()
+{
+    static tmp_file file{std::string("/home/amdtest/abhinab/iteration_multiplexing/projects/rocprofiler-compute/tmp/rocprofiler_compute_counter_collection.tmp")};
+    return file;
 }
 
 // agent_profiles
@@ -131,15 +139,32 @@ record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     ss << "Dispatch_Id=" << dispatch_data.dispatch_info.dispatch_id
        << ", Kernel_id=" << dispatch_data.dispatch_info.kernel_id
        << ", Corr_Id=" << dispatch_data.correlation_id.internal << ": ";
-    // for(size_t i = 0; i < record_count; ++i)
-    //     ss << "(Id: " << record_data[i].id << " Value [D]: " << record_data[i].counter_value
-    //        << "),";
+    for(size_t i = 0; i < record_count; ++i)
+        ss << "(Id: " << record_data[i].id << " Value [D]: " << record_data[i].counter_value
+           << "),";
 
     auto* tool = static_cast<tool_data_t*>(callback_data_args);
     if(!tool || !tool->output_stream) throw std::runtime_error{"nullptr to output stream"};
 
     auto _lk = std::unique_lock{tool->mut};
     *tool->output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+
+    auto serialized_records      = std::vector<std::pair<rocprofiler_counter_id_t, double>>{};
+    serialized_records.reserve(record_count);
+
+    for(size_t count = 0; count < record_count; ++count)
+    {
+        auto _counter_id = rocprofiler_counter_id_t{};
+        ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
+                         "query record counter id");
+        serialized_records.emplace_back(
+            std::make_pair(_counter_id, record_data[count].counter_value));
+    }
+
+    if(!serialized_records.empty())
+    {
+        get_tmp_file().write(serialized_records);
+    }
 }
 
 /**
@@ -151,7 +176,7 @@ record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                 rocprofiler_counter_config_id_t*             config,
-                rocprofiler_user_data_t* /*user_data*/,
+                rocprofiler_user_data_t* user_data,
                 void* /*callback_data_args*/)
 {
     static std::shared_mutex                                             m_mutex       = {};

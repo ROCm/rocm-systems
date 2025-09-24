@@ -14,7 +14,9 @@ endif()
 
 find_package(rocprofiler-sdk REQUIRED
     HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
+find_package(fmt REQUIRED)
 
 add_library(rocprofiler-sdk-tool-for-compute SHARED)
-target_sources(rocprofiler-sdk-tool-for-compute PRIVATE counter_collection.cpp counter_collection.hpp)
+target_sources(rocprofiler-sdk-tool-for-compute PRIVATE counter_collection.cpp counter_collection.hpp tmp_file.cpp tmp_file.hpp)
 target_link_libraries(rocprofiler-sdk-tool-for-compute PRIVATE rocprofiler-sdk::rocprofiler-sdk)
+target_link_libraries(rocprofiler-sdk-tool-for-compute INTERFACE fmt::fmt)
