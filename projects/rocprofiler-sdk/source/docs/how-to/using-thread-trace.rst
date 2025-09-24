@@ -150,7 +150,7 @@ To enable thread trace for multiple kernel instances, use the ``kernel-iteration
 It's recommended to use ``kernel-include-regex`` parameter to filter the desired kernel names instead of tracing everything.
 
 Typically, each kernel profile has its own ATT file output.
-To compile multiple kernel profiles into a single output file, use the ``att-consecutive-kernels `` parameter.
+To compile multiple kernel profiles into a single output file, use the ``att-consecutive-kernels`` parameter.
 When using this parameter, the ``rocprofv3`` tool begins profiling kernels after encountering a targeted kernel.
 The tool then continues profiling subsequent kernels until a total of ``n`` kernels are profiled including the initial targeted kernel
 where ``n`` is the non-negative integer passed to ``att-consecutive-kernels``.
