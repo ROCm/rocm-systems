@@ -170,8 +170,8 @@ if __name__ == "__main__":
     # Convert arguments to lowercase, but preserve case for folder path values
     processed_argv = []
     # Arguments that should preserve case
-    case_sensitive_args = ['--folder', '--file', '--gpu', '--cpu', '--core', '--profile']
-    case_sensitive_prefixes = ['--folder=', '--file=', '--gpu=', '--cpu=', '--core=', '--profile=']
+    case_sensitive_args = ['--folder', '--file', '--gpu', '--cpu', '--core', '--profile', '--cper-file']
+    case_sensitive_prefixes = ['--folder=', '--file=', '--gpu=', '--cpu=', '--core=', '--profile=', '--cper-file=']
 
     preserve_case_for_next = False
     for i, arg in enumerate(sys.argv):

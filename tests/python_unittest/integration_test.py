@@ -60,6 +60,17 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
+    def _print_vbios_info(self, vbios_info):
+        print(f"  vbios_info['part_number'] is: {vbios_info['part_number']}")
+        print(f"  vbios_info['build_date'] is: {vbios_info['build_date']}")
+        print(f"  vbios_info['name'] is: {vbios_info['name']}")
+        print(f"  vbios_info['version'] is: {vbios_info['version']}")
+        if 'boot_firmware' in vbios_info:
+            print(f"  vbios_info['boot_firmware'] is: {vbios_info['boot_firmware']}")
+        else:
+            print("  vbios_info['boot_firmware'] is: N/A")
+        return
+
     def test_asic_kfd_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
@@ -251,14 +262,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  vbios_info['part_number'] is: {}".format(
-                vbios_info['part_number']))
-            print("  vbios_info['build_date'] is: {}".format(
-                vbios_info['build_date']))
-            print("  vbios_info['version'] is: {}".format(
-                vbios_info['version']))
-            print("  vbios_info['name'] is: {}".format(
-                vbios_info['name']))
+            self._print_vbios_info(vbios_info)
             try:
                 print("\n###Test amdsmi_get_gpu_device_uuid \n")
                 uuid = amdsmi.amdsmi_get_gpu_device_uuid(processor)
@@ -1001,7 +1005,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Utilization count for {} is: {}".format(
                 utilization_count[3]['type'], utilization_count[3]['value']))
         print("\n")
-        
 
     def test_vbios_info(self):
 
@@ -1017,16 +1020,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  vbios_info['part_number'] is: {}".format(
-                vbios_info['part_number']))
-            print("  vbios_info['build_date'] is: {}".format(
-                vbios_info['build_date']))
-            print("  vbios_info['name'] is: {}".format(
-                vbios_info['name']))
-            print("  vbios_info['version'] is: {}".format(
-                vbios_info['version']))
+            self._print_vbios_info(vbios_info)
         print("\n")
-        
 
     def test_vendor_name(self):
 
@@ -1044,7 +1039,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 continue
             print("  Vendor name is: {}".format(vendor_name))
         print("\n")
-        
 
     # @unittest.SkipTest
     def test_accelerator_partition_profile(self):

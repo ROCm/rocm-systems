@@ -291,8 +291,8 @@ static const std::map<processor_type_t, std::string>
 static const std::map<amdsmi_link_type_t, std::string>
   link_type_map = {
   {AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"},
-  {AMDSMI_LINK_TYPE_XGMI, "XGMI"},
   {AMDSMI_LINK_TYPE_PCIE, "PCIE"},
+  {AMDSMI_LINK_TYPE_XGMI, "XGMI"},
   {AMDSMI_LINK_TYPE_NOT_APPLICABLE, "NOT_APPLICABLE"},
   {AMDSMI_LINK_TYPE_UNKNOWN, "UNKNOWN"}
 };
@@ -1101,11 +1101,11 @@ int main() {
             ret = amdsmi_get_gpu_vbios_info(processor_handles[device_index], &vbios_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_vbios_info:\n");
-            printf("\tVBios Name: %s\n", vbios_info.name);
-            printf("\tBuild Date: %s\n", vbios_info.build_date);
-            printf("\tPart Number: %s\n", vbios_info.part_number);
-            printf("\tVBios Version String: %s\n\n",
-                   vbios_info.version);
+            printf("\tVBIOS/IFWI Name: %s\n", vbios_info.name);
+            printf("\tVBIOS/IFWI Build Date: %s\n", vbios_info.build_date);
+            printf("\tVBIOS/IFWI Part Number: %s\n", vbios_info.part_number);
+            printf("\tVBIOS/IFWI Version String: %s\n\n", vbios_info.version);
+            printf("\tVBIOS/IFWI Boot Firmware: %s\n\n", vbios_info.boot_firmware);
 
             // Get Cache info
             amdsmi_gpu_cache_info_t cache_info = {};
@@ -1959,8 +1959,8 @@ int main() {
             // Get nearest GPUs
             const char *topology_link_type_str[] = {
                 "AMDSMI_LINK_TYPE_INTERNAL",
-                "AMDSMI_LINK_TYPE_XGMI",
                 "AMDSMI_LINK_TYPE_PCIE",
+                "AMDSMI_LINK_TYPE_XGMI",
                 "AMDSMI_LINK_TYPE_NOT_APPLICABLE",
                 "AMDSMI_LINK_TYPE_UNKNOWN",
             };

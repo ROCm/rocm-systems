@@ -4658,13 +4658,46 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
   DEVICE_MUTEX
   int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &val_str);
 
-  if (ret != 0) {
+  if (ret != RSMI_STATUS_SUCCESS) {
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   uint32_t ln = static_cast<uint32_t>(val_str.copy(vbios, len));
 
   vbios[std::min(len - 1, ln)] = '\0';
+
+  if (len < (val_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build, uint32_t len) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+  CHK_SUPPORT_NAME_ONLY(vbios_build)
+
+  if (len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string val_str;
+
+  DEVICE_MUTEX
+  int ret = dev->readDevInfo(amd::smi::kDevVBiosBuild, &val_str);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return amd::smi::ErrnoToRsmiStatus(ret);
+  }
+
+  uint32_t ln = static_cast<uint32_t>(val_str.copy(vbios_build, len));
+
+  vbios_build[std::min(len - 1, ln)] = '\0';
 
   if (len < (val_str.size() + 1)) {
     return RSMI_STATUS_INSUFFICIENT_SIZE;
