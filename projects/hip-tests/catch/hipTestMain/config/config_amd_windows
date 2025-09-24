@@ -989,7 +989,6 @@
         "Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again",
         "====================================================",
          "==================SWDEV-555665==================================",
-        "Unit_hipMemVmm_Uncached",
         "Unit_TexObjectCreate_TypePitch2D",
         "Unit_hipTexRefSetGetMipmappedArray",
         "Unit_test_generic_target_only_in_regular_fatbin",
