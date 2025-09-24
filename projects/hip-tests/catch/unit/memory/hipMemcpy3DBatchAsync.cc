@@ -29,14 +29,17 @@
  * Perform Batch of 3D copies.
  */
 // Helper to check array content
+template<typename T>
 void checkArrayContent(hipArray_t array, size_t width, size_t height,
-                       size_t depth, char expected) {
-  std::vector<char> hostBuf(width * height * depth);
+                       size_t depth, T expected) {
+  std::vector<T> hostBuf(width * height * depth, 0);
   hipMemcpy3DParms copyParms{};
   copyParms.srcArray = array;
-  copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), width, width, height);
+  copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), width * sizeof(T), width, height);
   copyParms.extent = make_hipExtent(width, height, depth);
   copyParms.kind = hipMemcpyDeviceToHost;
+  copyParms.srcPos = make_hipPos(0,0,0);
+  copyParms.dstPos = make_hipPos(0,0,0);
   HIP_CHECK(hipMemcpy3D(&copyParms));
   for (size_t i = 0; i < width * height * depth; ++i) {
     INFO("Array FAILURE at Index: " << i << "\nval : " << hostBuf[i]
@@ -64,23 +67,33 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, float) {
+  constexpr auto kfloatval1 = -1.5;
+  constexpr auto kfloatval2 = 2.25;
+  constexpr auto kfloatval3 = -0.75;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : 10;
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : 7;
+  const TestType val3 = std::is_floating_point_v<TestType> ? kfloatval3 : 3;
+
   constexpr int numOps = 4;
-  hipStream_t stream = NULL;
+  constexpr int numW = 16;
+  constexpr int numH = 16;
+  constexpr int depth = 10;
+  const size_t width = numW * sizeof(TestType);
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  hipExtent extent = make_hipExtent(16, 16, 4);
-  size_t elements_3d =
-      extent.width * extent.height * extent.depth;
+  hipExtent extent = make_hipExtent(numW *sizeof(TestType), numH, depth);
+  size_t elements_3d = numW * numH * depth;
 
   // Source Pointers
-  std::vector<char> srcPtr1(elements_3d, 'a');
-  std::vector<char> srcPtr2(elements_3d, 'b');
-  std::vector<char> srcPtr3(elements_3d, 'c');
+  std::vector<TestType> srcPtr1(elements_3d, val1);
+  std::vector<TestType> srcPtr2(elements_3d, val2);
+  std::vector<TestType> srcPtr3(elements_3d, val3);
 
   // Device Pointers
   void *dstPtr1, *dstPtr2;
-  HIP_CHECK(hipMalloc(&dstPtr1, elements_3d));
-  HIP_CHECK(hipMalloc(&dstPtr2, elements_3d));
+  HIP_CHECK(hipMalloc(&dstPtr1, elements_3d * sizeof(TestType)));
+  HIP_CHECK(hipMalloc(&dstPtr2, elements_3d * sizeof(TestType)));
 
   // Prepare batch ops array
   hipMemcpy3DBatchOp ops[numOps];
@@ -90,7 +103,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
   ops[0].src.op.ptr.ptr = srcPtr1.data();
   ops[0].src.op.ptr.rowLength = extent.width;
   ops[0].src.op.ptr.layerHeight = extent.height;
-  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[0].src.op.ptr.locHint.id = 0;
   ops[0].dst.type = hipMemcpyOperandTypePointer;
   ops[0].dst.op.ptr.ptr = dstPtr1;
@@ -130,7 +143,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
   ops[2].dst.op.ptr.ptr = srcPtr2.data();
   ops[2].dst.op.ptr.rowLength = extent.width;
   ops[2].dst.op.ptr.layerHeight = extent.height;
-  ops[2].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[2].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[2].dst.op.ptr.locHint.id = 0;
   ops[2].extent = extent;
   ops[2].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -141,13 +154,13 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
   ops[3].src.op.ptr.ptr = srcPtr2.data();
   ops[3].src.op.ptr.rowLength = extent.width;
   ops[3].src.op.ptr.layerHeight = extent.height;
-  ops[3].src.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[3].src.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[3].src.op.ptr.locHint.id = 0;
   ops[3].dst.type = hipMemcpyOperandTypePointer;
-  ops[3].dst.op.ptr.ptr = srcPtr2.data();
+  ops[3].dst.op.ptr.ptr = srcPtr3.data();
   ops[3].dst.op.ptr.rowLength = extent.width;
   ops[3].dst.op.ptr.layerHeight = extent.height;
-  ops[3].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[3].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[3].dst.op.ptr.locHint.id = 0;
   ops[3].extent = extent;
   ops[3].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -162,7 +175,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
   // Validation
   for (size_t i = 0; i < elements_3d; ++i) {
     INFO("Array FAILURE at Index: " << i << "\nval : " << srcPtr2[i]);
-    REQUIRE(srcPtr2[i] == 'a');
+    REQUIRE(srcPtr3[i] == val1);
   }
 
   // Cleanup
@@ -191,35 +204,42 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps") {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char, int, float) {
   CHECK_IMAGE_SUPPORT
+  constexpr auto kfloatval1 = -1.5;
+  constexpr auto kfloatval2 = 2.25;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : 10;
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : 7;
   constexpr int numOps = 5;
-  hipStream_t stream = NULL;
+  constexpr int numW = 16;
+  constexpr int numH = 16;
+  constexpr int depth = 10;
+  size_t width = numW * sizeof(TestType);
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  hipExtent extent = make_hipExtent(16, 16, 4);
+  hipExtent extent = make_hipExtent(numW, numH, depth);
   size_t elements_3d =
       extent.width * extent.height * extent.depth;
 
   // Host Pointers
-  std::vector<char> srcPtr1(elements_3d, 'a');
-  std::vector<char> srcPtr2(elements_3d, 'b');
+  std::vector<TestType> srcPtr1(elements_3d, val1);
+  std::vector<TestType> srcPtr2(elements_3d, val2);
 
   // Device Pointer
   void *dstPtr;
-  HIP_CHECK(hipMalloc(&dstPtr, elements_3d));
+  HIP_CHECK(hipMalloc(&dstPtr, elements_3d * sizeof(TestType)));
 
   // Dev Arrays
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<char>();
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<TestType>();
   hipArray_t array1, array2, array3;
   HIP_CHECK(hipMalloc3DArray(&array1, &channelDesc, extent, 0));
   HIP_CHECK(hipMalloc3DArray(&array2, &channelDesc, extent, 0));
   HIP_CHECK(hipMalloc3DArray(&array3, &channelDesc, extent, 0));
 
-  // Fill dev Array with 'b'
-  std::vector<char> tmpHost(elements_3d);
-  memset(tmpHost.data(), 'b', elements_3d);
+  // Fill dev Array with val2
+  std::vector<TestType> tmpHost(elements_3d, val2);
   hipMemcpy3DParms fillParms{};
-  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width,
+  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width * sizeof(TestType),
                                         extent.width, extent.height);
   fillParms.dstArray = array1;
   fillParms.extent = extent;
@@ -234,7 +254,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps") {
   ops[0].src.op.ptr.ptr = srcPtr1.data();
   ops[0].src.op.ptr.rowLength = extent.width;
   ops[0].src.op.ptr.layerHeight = extent.height;
-  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[0].src.op.ptr.locHint.id = 0;
   ops[0].dst.type = hipMemcpyOperandTypeArray;
   ops[0].dst.op.array.array = array1;
@@ -290,7 +310,7 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps") {
   ops[4].dst.op.ptr.ptr = srcPtr2.data();
   ops[4].dst.op.ptr.rowLength = extent.width;
   ops[4].dst.op.ptr.layerHeight = extent.height;
-  ops[4].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+  ops[4].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[4].dst.op.ptr.locHint.id = 0;
   ops[4].extent = extent;
   ops[4].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -303,11 +323,11 @@ TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps") {
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Check Random Array data
-  checkArrayContent(array2, extent.width, extent.height, extent.depth, 'a');
+  checkArrayContent<TestType>(array2, extent.width, extent.height, extent.depth, val1);
   // Check Final data.
   for (size_t i = 0; i < elements_3d; ++i) {
     INFO("Pointer Copy Failure at Index: " << i << "\nval : " << srcPtr2[i]);
-    REQUIRE(srcPtr2[i] == 'a');
+    REQUIRE(srcPtr2[i] == val1);
   }
 
   // Cleanup
