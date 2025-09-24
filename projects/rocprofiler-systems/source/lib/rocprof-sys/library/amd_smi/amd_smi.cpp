@@ -27,6 +27,8 @@
 // THE SOFTWARE.
 
 #include "core/agent.hpp"
+#include "core/benchmark/benchmark.hpp"
+#include "core/benchmark/category.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cache_utility.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -520,6 +522,7 @@ void
 sample()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+    benchmark::start(benchmark::category::amd_smi_sample);
     if(amd_smi::get_state() != State::Active)
     {
         return;
@@ -560,6 +563,7 @@ sample()
             m_gpu_processors.erase(device_to_remove);
         }
     }
+    benchmark::end(benchmark::category::amd_smi_sample);
 }
 
 void
@@ -817,7 +821,7 @@ shutdown()
     ROCPROFSYS_VERBOSE_F(1, "Shutting down amd-smi...\n");
 
     // TODO shutdown smi
-
+    benchmark::show_results();
     is_initialized() = false;
 }
 

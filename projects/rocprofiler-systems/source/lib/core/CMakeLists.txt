@@ -97,6 +97,7 @@ add_subdirectory(components)
 add_subdirectory(containers)
 add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
+add_subdirectory(benchmark)
 
 target_include_directories(
     rocprofiler-systems-core-library
