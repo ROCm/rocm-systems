@@ -79,6 +79,7 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} PRIVATE
+    rt
     PkgConfig::DRM
     PkgConfig::DRM_AMDGPU
     Threads::Threads

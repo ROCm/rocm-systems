@@ -45,7 +45,8 @@ configure_file("src/${ROCM_SMI_TARGET}Config.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h")
 
 add_library(${ROCM_SMI_TARGET} ${CMN_SRC_LIST} ${CMN_INC_LIST})
-target_link_libraries(${ROCM_SMI_TARGET} PRIVATE 
+target_link_libraries(${ROCM_SMI_TARGET} PRIVATE
+    rt
     PkgConfig::DRM
     PkgConfig::DRM_AMDGPU
     Threads::Threads
