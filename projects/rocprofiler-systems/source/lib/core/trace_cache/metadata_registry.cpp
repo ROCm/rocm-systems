@@ -284,6 +284,8 @@ metadata_registry::overwrite_cb_names(
         std::pair<rocprofiler_callback_tracing_kind_t, std::map<int, std::string_view>>>
         categories_info)
 {
+    if(categories_info.size() == 0) return;
+
     using category   = rocprofiler_callback_tracing_kind_t;
     using operations = std::vector<std::string_view>;
 
@@ -361,11 +363,15 @@ metadata_registry::overwrite_cb_names(
 
 metadata_registry::metadata_registry()
 {
-    overwrite_cb_names({ { ROCPROFILER_CALLBACK_TRACING_OMPT,
-                           { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
-                             { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
-                             { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
-                             { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } } });
+    overwrite_cb_names({
+#    if(ROCPROFILER_VERSION >= 600)
+        { ROCPROFILER_CALLBACK_TRACING_OMPT,
+          { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
+            { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
+            { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
+            { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
+#    endif
+    });
 }
 
 rocprofiler::sdk::buffer_name_info_t<const char*>
