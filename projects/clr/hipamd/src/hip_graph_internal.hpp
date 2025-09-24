@@ -424,7 +424,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     return (std::to_string(id_) + "\n" + label_);
   }
   unsigned int GetEnabled() const { return isEnabled_; }
-  void SetEnabled(unsigned int isEnabled) { isEnabled_ = isEnabled; }
+  void SetEnabled(unsigned int isEnabled);
   // Returns true if capture is enabled for the current node.
   virtual bool GraphCaptureEnabled() {
     bool isGraphCapture = false;
@@ -777,6 +777,11 @@ class Graph {
   void DecrementMemAllocNodeCount() { memalloc_nodes_--; }
   //! returns device object
   hip::Device* Device() { return device_; }
+  //! Virtual method to handle node enable/disable changes
+  virtual void OnNodeEnabledChanged(GraphNode* node, bool isEnabled) {
+    // Default implementation does nothing
+    // GraphExec will override this to handle packetBatches_ updates
+  }
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
@@ -861,6 +866,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node);
+  // Handle packetBatches_ updates when nodes are enabled/disabled
+  hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled);
   // Kenrel arg manger is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
@@ -873,6 +880,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph);
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  // Override to handle packetBatches_ updates when nodes are enabled/disabled
+  void OnNodeEnabledChanged(GraphNode* node, bool isEnabled) override {
+    auto err = UpdatePacketBatchesForNodeEnableDisable(node, isEnabled);
+  }
 
  protected:
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
