@@ -30,8 +30,17 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cache_utility.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "core/utility.hpp"
+#include "library/amd_smi/processor.hpp"
+#include <algorithm>
 #include <amd_smi/amdsmi.h>
 #include <cstdint>
+#include <exception>
+#include <ios>
+#include <memory>
+#include <ostream>
+#include <regex>
+#include <vector>
 #if defined(NDEBUG)
 #    undef NDEBUG
 #endif
@@ -45,7 +54,7 @@
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
-#include "library/amd_smi.hpp"
+#include "library/amd_smi/amd_smi.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -63,18 +72,146 @@
 #include <string>
 #include <sys/resource.h>
 
-#define ROCPROFSYS_AMD_SMI_CALL(...)                                                     \
-    ::rocprofsys::amd_smi::check_error(__FILE__, __LINE__, __VA_ARGS__)
+#include "amd_smi_driver.hpp"
+#include "service.hpp"
 
 namespace rocprofsys
 {
 namespace amd_smi
 {
-using bundle_t          = std::deque<data>;
-using sampler_instances = thread_data<bundle_t, category::amd_smi>;
-
 namespace
 {
+
+std::shared_ptr<service<amd_smi_driver_factory>> m_smi_service;
+using processor_vector_t = service<amd_smi_driver_factory>::processor_vector_t;
+processor_vector_t m_gpu_processors;
+
+union enabled_metrics
+{
+    struct
+    {
+        uint16_t current_socket_power : 1;
+        uint16_t average_socket_power : 1;
+        uint16_t memory_usage         : 1;
+        uint16_t hotspot_temperature  : 1;
+        uint16_t edge_temperature     : 1;
+        uint16_t gfx_activity         : 1;
+        uint16_t umc_activity         : 1;
+        uint16_t mm_activity          : 1;
+        uint16_t vcn_activity         : 1;
+        uint16_t jpeg_activity        : 1;
+    } fields;
+    uint16_t value;
+};
+
+constexpr uint16_t enable_all_metrics  = 0xffff;
+constexpr uint16_t disable_all_metrics = 0x0000;
+
+std::set<size_t>
+parse_numeric_range(const std::string& input_range)
+{
+    std::set<size_t> result{};
+
+    auto get_range_values = [](auto& token, const auto& range_delimiter_position) {
+        size_t begin = std::stoi(std::string{ token.begin(), range_delimiter_position });
+        size_t end = std::stoi(std::string{ range_delimiter_position + 1, token.end() });
+
+        if(begin > end)
+        {
+            std::swap(begin, end);
+        }
+
+        return std::pair<size_t, size_t>{ begin, end };
+    };
+
+    // validate input string
+    const std::regex validator{ R"(^\d+(?:-\d+)?(?:[;,]\d+(?:[-:]\d+)?)*$)" };
+
+    if(!std::regex_match(input_range, validator))
+    {
+        ROCPROFSYS_VERBOSE(0, "Failed to parse gpu input list: %s\n",
+                           input_range.c_str());
+        return result;
+    }
+
+    std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
+    std::sregex_iterator it(input_range.begin(), input_range.end(), tokenizer);
+    std::sregex_iterator end;
+
+    for(; it != end; ++it)
+    {
+        auto token = it->str();
+        auto delimiter_position =
+            std::find_if(token.begin(), token.end(),
+                         [](const auto& c) { return c == ':' || c == '-'; });
+
+        if(delimiter_position != token.end())
+        {
+            auto [begining, end] = get_range_values(token, delimiter_position);
+            for(auto i = begining; i <= end; ++i)
+            {
+                result.insert(i);
+            }
+        }
+        else
+        {
+            size_t value = std::stoi(token);
+            result.insert(value);
+        }
+    }
+
+    return result;
+}
+
+processor_vector_t
+filter_devices(const processor_vector_t& processors, const std::string& filter)
+{
+    if(filter == "all" || filter == "on")
+    {
+        return processors;
+    }
+
+    if(filter == "none" || filter == "off")
+    {
+        return {};
+    }
+
+    auto enabled_devices = parse_numeric_range(filter);
+
+    processor_vector_t filtered_processors;
+    for(const auto& processor : processors)
+    {
+        if(enabled_devices.count(processor->get_index()) > 0)
+        {
+            filtered_processors.emplace_back(processor);
+        }
+    }
+
+    return filtered_processors;
+}
+
+enabled_metrics
+get_enabled_metrics()
+{
+    auto _settings = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
+    if(*_settings == "none")
+    {
+        enabled_metrics _metrics;
+        _metrics.value = disable_all_metrics;
+        return _metrics;
+    }
+
+    if(*_settings == "all")
+    {
+        enabled_metrics _metrics;
+        _metrics.value = enable_all_metrics;
+        return _metrics;
+    }
+
+    enabled_metrics _metrics;
+    return _metrics;
+};
+
 void
 metadata_initialize_category()
 {
@@ -275,56 +412,11 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     }
 }
 
-auto&
-get_settings(uint32_t _dev_id)
-{
-    static auto _v = std::unordered_map<uint32_t, amd_smi::settings>{};
-    return _v[_dev_id];
-}
-
 bool&
 is_initialized()
 {
     static bool _v = false;
     return _v;
-}
-
-amdsmi_version_t&
-get_version()
-{
-    static amdsmi_version_t _v = {};
-
-    if(_v.major == 0 && _v.minor == 0)
-    {
-        auto _err = amdsmi_get_lib_version(&_v);
-        if(_err != AMDSMI_STATUS_SUCCESS)
-            ROCPROFSYS_THROW(
-                "amdsmi_get_version failed. No version information available.");
-    }
-
-    return _v;
-}
-
-void
-check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option = nullptr)
-{
-    if(_code == AMDSMI_STATUS_SUCCESS)
-        return;
-    else if(_code == AMDSMI_STATUS_NOT_SUPPORTED && _option)
-    {
-        *_option = false;
-        return;
-    }
-
-    const char* _msg = nullptr;
-    auto        _err = amdsmi_status_code_to_string(_code, &_msg);
-    if(_err != AMDSMI_STATUS_SUCCESS)
-        ROCPROFSYS_THROW(
-            "amdsmi_status_code_to_string failed. No error message available. "
-            "Error code %i originated at %s:%i\n",
-            static_cast<int>(_code), _file, _line);
-    ROCPROFSYS_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
-                     _msg);
 }
 
 std::atomic<State>&
@@ -402,217 +494,71 @@ serialize_xcp_metrics(const bool& use_vcn_activity, const bool& use_jpeg_activit
 }
 
 size_t
-serialize_settings(uint32_t _device_id)
+serialize_settings()
 {
-    auto           settings = get_settings(_device_id);
-    std::bitset<8> settings_bits;
-    settings_bits.reset();
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::busy),
-        settings.busy);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::temp),
-        settings.temp);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::power),
-        settings.power);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::mem_usage),
-        settings.mem_usage);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::vcn_activity),
-        settings.vcn_activity);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::jpeg_activity),
-        settings.jpeg_activity);
-    return settings_bits.to_ulong();
+    return static_cast<size_t>(get_enabled_metrics().value);
 }
 
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
 
-size_t                           data::device_count     = 0;
-std::set<uint32_t>               data::device_list      = {};
-std::unique_ptr<data::promise_t> data::polling_finished = {};
-
-data::data(uint32_t _dev_id) { sample(_dev_id); }
-
-void
-data::sample(uint32_t _device_id)
-{
-    if(is_child_process()) return;
-
-    auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
-    assert(_timestamp < std::numeric_limits<int64_t>::max());
-    amdsmi_gpu_metrics_t _gpu_metrics;
-    bool                 _vcn_or_jpeg_activity_enabled = false;
-
-    auto _state = get_state().load();
-
-    if(_state != State::Active) return;
-
-    m_dev_id = _device_id;
-    m_ts     = _timestamp;
-
-#define ROCPROFSYS_AMDSMI_GET(OPTION, FUNCTION, ...)                                     \
-    if(OPTION)                                                                           \
-    {                                                                                    \
-        try                                                                              \
-        {                                                                                \
-            ROCPROFSYS_AMD_SMI_CALL(FUNCTION(__VA_ARGS__), &OPTION);                     \
-        } catch(std::runtime_error & _e)                                                 \
-        {                                                                                \
-            ROCPROFSYS_VERBOSE_F(                                                        \
-                0, "[%s] Exception: %s. Disabling future samples from amd-smi...\n",     \
-                #FUNCTION, _e.what());                                                   \
-            get_state().store(State::Disabled);                                          \
-        }                                                                                \
-    }
-
-    amdsmi_processor_handle sample_handle = gpu::get_handle_from_id(_device_id);
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).busy, amdsmi_get_gpu_activity,
-                          sample_handle, &m_busy_perc);
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).temp, amdsmi_get_temp_metric,
-                          sample_handle, AMDSMI_TEMPERATURE_TYPE_JUNCTION,
-                          AMDSMI_TEMP_CURRENT, &m_temp);
-#if(AMDSMI_LIB_VERSION_MAJOR == 2 && AMDSMI_LIB_VERSION_MINOR == 0) ||                   \
-    (AMDSMI_LIB_VERSION_MAJOR == 25 && AMDSMI_LIB_VERSION_MINOR == 2)
-    // This was a transient change in the AMD SMI API. It was never officially released.
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).power, amdsmi_get_power_info,
-                          sample_handle, 0, &m_power)
-#else
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).power, amdsmi_get_power_info,
-                          sample_handle, &m_power)
-#endif
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).mem_usage, amdsmi_get_gpu_memory_usage,
-                          sample_handle, AMDSMI_MEM_TYPE_VRAM, &m_mem_usage);
-    _vcn_or_jpeg_activity_enabled =
-        get_settings(m_dev_id).vcn_activity || get_settings(m_dev_id).jpeg_activity;
-    ROCPROFSYS_AMDSMI_GET(_vcn_or_jpeg_activity_enabled, amdsmi_get_gpu_metrics_info,
-                          sample_handle, &_gpu_metrics);
-
-    // Process metrics if either VCN or JPEG activity is enabled
-    if(_vcn_or_jpeg_activity_enabled)
-    {
-        // Helper lambda to fill busy metrics from a source array
-        auto fill_busy_metrics = [](auto& dest, const auto& src) {
-            for(const auto& val : src)
-            {
-                if(val != UINT16_MAX) dest.push_back(val);
-            }
-        };
-
-        if(gpu::is_vcn_activity_supported(m_dev_id) &&
-           gpu::is_jpeg_activity_supported(m_dev_id))
-        {
-            // Both VCN and JPEG are supported - create one entry with both metrics
-            xcp_metrics_t metrics;
-            fill_busy_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity);
-            fill_busy_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity);
-            if(!metrics.vcn_busy.empty() || !metrics.jpeg_busy.empty())
-                m_xcp_metrics.push_back(metrics);
-        }
-        else if(gpu::is_vcn_activity_supported(m_dev_id))
-        {
-            // Only VCN is supported
-            xcp_metrics_t metrics;
-            fill_busy_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity);
-            if(!metrics.vcn_busy.empty()) m_xcp_metrics.push_back(metrics);
-        }
-        else if(gpu::is_jpeg_activity_supported(m_dev_id))
-        {
-            // Only JPEG is supported
-            xcp_metrics_t metrics;
-            fill_busy_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity);
-            if(!metrics.jpeg_busy.empty()) m_xcp_metrics.push_back(metrics);
-        }
-        else
-        {
-            // Neither is supported - use XCP stats
-            // Each XCP gets one entry with both its VCN and JPEG metrics
-            for(const auto& xcp : _gpu_metrics.xcp_stats)
-            {
-                xcp_metrics_t metrics;
-                fill_busy_metrics(metrics.vcn_busy, xcp.vcn_busy);
-                fill_busy_metrics(metrics.jpeg_busy, xcp.jpeg_busy);
-                if(!metrics.vcn_busy.empty() || !metrics.jpeg_busy.empty())
-                    m_xcp_metrics.push_back(metrics);
-            }
-        }
-    }
-#undef ROCPROFSYS_AMDSMI_GET
-
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::amd_smi_sample, serialize_settings(m_dev_id), _device_id,
-        _timestamp, m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
-        m_busy_perc.mm_activity, m_power.current_socket_power, m_temp, m_mem_usage,
-        serialize_xcp_metrics(gpu::is_vcn_activity_supported(m_dev_id),
-                              gpu::is_jpeg_activity_supported(m_dev_id), _gpu_metrics));
-}
-
-void
-data::print(std::ostream& _os) const
-{
-    std::stringstream _ss{};
-
-#if ROCPROFSYS_USE_ROCM > 0
-    _ss << "device: " << m_dev_id << ", gpu busy: = " << m_busy_perc.gfx_activity
-        << "%, mm busy: = " << m_busy_perc.mm_activity
-        << "%, umc busy: = " << m_busy_perc.umc_activity << "%, temp = " << m_temp
-        << ", current power = " << m_power.current_socket_power
-        << ", memory usage = " << m_mem_usage;
-#endif
-    _os << _ss.str();
-}
-
-namespace
-{
-std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
-}
-
 void
 config()
 {
-    _bundle_data.resize(data::device_count, nullptr);
-    for(size_t i = 0; i < data::device_count; ++i)
-    {
-        if(data::device_list.count(i) > 0)
-        {
-            _bundle_data.at(i) = &sampler_instances::get()->at(i);
-            if(!*_bundle_data.at(i))
-                *_bundle_data.at(i) = unique_ptr_t<bundle_t>{ new bundle_t{} };
-        }
-    }
-    data::get_initial().resize(data::device_count);
-    for(auto itr : data::device_list)
-        data::get_initial().at(itr).sample(itr);
-
     metadata_initialize_category();
 
-    for(const auto& _dev_id : data::device_list)
-    {
-        metadata_initialize_smi_tracks(_dev_id);
-        metadata_initialize_smi_pmc(_dev_id);
-    }
+    std::for_each(m_gpu_processors.begin(), m_gpu_processors.end(),
+                  [](const auto& device) {
+                      auto device_index = device->get_index();
+                      metadata_initialize_smi_tracks(device_index);
+                      metadata_initialize_smi_pmc(device_index);
+                  });
 }
 
 void
 sample()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
-
-    // TODO: Reorganize amd_smi::data and sampling mechanism not to store same data in
-    // bundle_data and in trace_cache
-
-    for(auto itr : data::device_list)
+    if(amd_smi::get_state() != State::Active)
     {
-        if(amd_smi::get_state() != State::Active) continue;
-        ROCPROFSYS_DEBUG_F("Polling amd-smi for device %u...\n", itr);
-        auto& _data = *_bundle_data.at(itr);
-        if(!_data) continue;
-        _data->emplace_back(data{ itr });
-        ROCPROFSYS_DEBUG_F("    %s\n", TIMEMORY_JOIN("", _data->back()).c_str());
+        return;
+    }
+
+    for(auto& processor : m_gpu_processors)
+    {
+        auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
+        assert(_timestamp < std::numeric_limits<int64_t>::max());
+
+        try
+        {
+            auto _smi_metrics       = processor->get_smi_metrics();
+            auto _supported_metrics = processor->get_supported_metrics();
+
+            auto _power = _supported_metrics.current_socket_power
+                              ? _smi_metrics.current_socket_power
+                              : _smi_metrics.average_socket_power;
+            auto _temp  = _supported_metrics.hotspot_temperature
+                              ? static_cast<int32_t>(_smi_metrics.hotspot_temperature)
+                              : static_cast<int32_t>(_smi_metrics.edge_temperature);
+
+            trace_cache::get_buffer_storage().store(
+                trace_cache::entry_type::amd_smi_sample,
+                static_cast<size_t>(get_enabled_metrics().value), 0, _timestamp,
+                _smi_metrics.gfx_activity, _smi_metrics.umc_activity,
+                _smi_metrics.mm_activity, _power, _temp, _smi_metrics.memory_usage,
+                std::vector<uint8_t>(40));
+        } catch(const std::runtime_error& e)
+        {
+            ROCPROFSYS_WARNING(
+                0,
+                "Reading metrics failed for device with ID %zu. Error: %s. "
+                "Disabling device!\n",
+                processor->get_index(), e.what());
+            auto device_to_remove =
+                std::find(m_gpu_processors.begin(), m_gpu_processors.end(), processor);
+            m_gpu_processors.erase(device_to_remove);
+        }
     }
 }
 
@@ -621,39 +567,7 @@ set_state(State _v)
 {
     amd_smi::get_state().store(_v);
 }
-
-std::vector<data>&
-data::get_initial()
-{
-    static std::vector<data> _v{};
-    return _v;
-}
-
-bool
-data::setup()
-{
-    perfetto_counter_track<data>::init();
-    amd_smi::set_state(State::PreInit);
-    return true;
-}
-
-bool
-data::shutdown()
-{
-    amd_smi::set_state(State::Finalized);
-    return true;
-}
-
-#define GPU_METRIC(COMPONENT, ...)                                                       \
-    if constexpr(tim::trait::is_available<COMPONENT>::value)                             \
-    {                                                                                    \
-        auto* _val = _v.get<COMPONENT>();                                                \
-        if(_val)                                                                         \
-        {                                                                                \
-            _val->set_value(itr.__VA_ARGS__);                                            \
-            _val->set_accum(itr.__VA_ARGS__);                                            \
-        }                                                                                \
-    }
+/*
 
 void
 data::post_process(uint32_t _dev_id)
@@ -695,7 +609,7 @@ data::post_process(uint32_t _dev_id)
         double _umcbusy = itr.m_busy_perc.umc_activity;
         double _mmbusy  = itr.m_busy_perc.mm_activity;
         double _temp    = itr.m_temp;
-        double _power   = itr.m_power.current_socket_power;
+        double _power   = itr.m_power;
         double _usage   = itr.m_mem_usage / static_cast<double>(units::megabyte);
 
         auto setup_perfetto_counter_tracks = [&]() {
@@ -858,7 +772,7 @@ data::post_process(uint32_t _dev_id)
         }
     }
 }
-
+*/
 //--------------------------------------------------------------------------------------//
 
 void
@@ -870,119 +784,27 @@ setup()
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    if(!gpu::initialize_amdsmi())
-    {
-        ROCPROFSYS_WARNING_F(0,
-                             "AMD SMI is not available. Disabling AMD SMI sampling...");
-        return;
-    }
-
-    amdsmi_version_t _version = get_version();
-    ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n", _version.major,
-                         _version.minor, _version.release, _version.build);
-
-    data::device_count = gpu::device_count();
-
-    auto _devices_v = get_sampling_gpus();
-    for(auto& itr : _devices_v)
-        itr = tolower(itr);
-    if(_devices_v == "off")
-        _devices_v = "none";
-    else if(_devices_v == "on")
-        _devices_v = "all";
-    bool _all_devices = _devices_v.find("all") != std::string::npos || _devices_v.empty();
-    bool _no_devices  = _devices_v.find("none") != std::string::npos;
-
-    std::set<uint32_t> _devices = {};
-    auto               _emplace = [&_devices](auto idx) {
-        if(idx < data::device_count) _devices.emplace(idx);
-    };
-
-    if(_all_devices)
-    {
-        for(uint32_t i = 0; i < data::device_count; ++i)
-            _emplace(i);
-    }
-    else if(!_no_devices)
-    {
-        auto _enabled = tim::delimit(_devices_v, ",; \t");
-        for(auto&& itr : _enabled)
-        {
-            if(itr.find_first_not_of("0123456789-") != std::string::npos)
-            {
-                ROCPROFSYS_THROW("Invalid GPU specification: '%s'. Only numerical values "
-                                 "(e.g., 0) or ranges (e.g., 0-7) are permitted.",
-                                 itr.c_str());
-            }
-
-            if(itr.find('-') != std::string::npos)
-            {
-                auto _v = tim::delimit(itr, "-");
-                ROCPROFSYS_CONDITIONAL_THROW(_v.size() != 2,
-                                             "Invalid GPU range specification: '%s'. "
-                                             "Required format N-M, e.g. 0-4",
-                                             itr.c_str());
-                for(auto i = std::stoul(_v.at(0)); i < std::stoul(_v.at(1)); ++i)
-                    _emplace(i);
-            }
-            else
-            {
-                _emplace(std::stoul(itr));
-            }
-        }
-    }
-
-    data::device_list = _devices;
-
-    auto _metrics = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
-
     try
     {
-        for(auto itr : _devices)
-        {
-            // Enable selected metrics only
-            if((_metrics && !_metrics->empty()) && (*_metrics != "all"))
-            {
-                using key_pair_t     = std::pair<std::string_view, bool&>;
-                const auto supported = std::unordered_map<std::string_view, bool&>{
-                    key_pair_t{ "busy", get_settings(itr).busy },
-                    key_pair_t{ "temp", get_settings(itr).temp },
-                    key_pair_t{ "power", get_settings(itr).power },
-                    key_pair_t{ "mem_usage", get_settings(itr).mem_usage },
-                    key_pair_t{ "vcn_activity", get_settings(itr).vcn_activity },
-                    key_pair_t{ "jpeg_activity", get_settings(itr).jpeg_activity },
-                };
+        m_smi_service = std::make_shared<service<amd_smi_driver_factory>>();
 
-                // Initialize all metrics to false
-                for(auto& it : supported)
-                    it.second = false;
+        auto _version = m_smi_service->get_version();
+        ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n",
+                             _version.numeric_representation.major,
+                             _version.numeric_representation.minor,
+                             _version.numeric_representation.release,
+                             _version.string_representation.c_str());
 
-                // Parse list of metrics enabled by the user
-                if(*_metrics != "none")
-                {
-                    for(const auto& metric : tim::delimit(*_metrics, ",;:\t\n "))
-                    {
-                        auto iitr = supported.find(metric);
-                        if(iitr == supported.end())
-                            ROCPROFSYS_FAIL_F("unsupported amd-smi metric: %s\n",
-                                              metric.c_str());
-                        ROCPROFSYS_VERBOSE_F(
-                            1, "Enabling amd-smi metric '%s' on device [%u]\n",
-                            metric.c_str(), itr);
-                        iitr->second = true;
-                    }
-                }
-            }
-        }
-
+        m_gpu_processors =
+            m_smi_service->get_processors([](const processor_vector_t& processors) {
+                auto devices_in_use = get_sampling_gpus();
+                return filter_devices(processors, devices_in_use);
+            });
         is_initialized() = true;
-        data::setup();
-
     } catch(std::runtime_error& _e)
     {
         ROCPROFSYS_VERBOSE(0, "Exception thrown when initializing amd-smi: %s\n",
                            _e.what());
-        data::device_list = {};
     }
 }
 
@@ -994,36 +816,15 @@ shutdown()
     if(!is_initialized()) return;
     ROCPROFSYS_VERBOSE_F(1, "Shutting down amd-smi...\n");
 
-    try
-    {
-        if(data::shutdown())
-        {
-            ROCPROFSYS_AMD_SMI_CALL(amdsmi_shut_down());
-        }
-    } catch(std::runtime_error& _e)
-    {
-        ROCPROFSYS_VERBOSE(0, "Exception thrown when shutting down amd-smi: %s\n",
-                           _e.what());
-    }
+    // TODO shutdown smi
 
     is_initialized() = false;
 }
 
 void
 post_process()
-{
-    for(auto itr : data::device_list)
-    {
-        ROCPROFSYS_VERBOSE(2, "Post-processing amd-smi data for device: %d", itr);
-        data::post_process(itr);
-    }
-}
+{}
 
-uint32_t
-device_count()
-{
-    return gpu::device_count();
-}
 }  // namespace amd_smi
 }  // namespace rocprofsys
 

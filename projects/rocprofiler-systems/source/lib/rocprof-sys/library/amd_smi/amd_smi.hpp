@@ -28,27 +28,12 @@
 
 #pragma once
 
-#include "core/common.hpp"
 #include "core/components/fwd.hpp"
-#include "core/defines.hpp"
 #include "core/state.hpp"
-#include "library/thread_data.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
 #endif
-
-#include <chrono>
-#include <cstdint>
-#include <deque>
-#include <future>
-#include <limits>
-#include <memory>
-#include <ratio>
-#include <thread>
-#include <tuple>
-#include <type_traits>
-
 namespace rocprofsys
 {
 namespace amd_smi
@@ -69,79 +54,6 @@ void
 post_process();
 
 void set_state(State);
-
-struct settings
-{
-    bool busy          = true;
-    bool temp          = true;
-    bool power         = true;
-    bool mem_usage     = true;
-    bool vcn_activity  = true;
-    bool jpeg_activity = true;
-};
-
-struct data
-{
-    using msec_t    = std::chrono::milliseconds;
-    using usec_t    = std::chrono::microseconds;
-    using nsec_t    = std::chrono::nanoseconds;
-    using promise_t = std::promise<void>;
-
-    using timestamp_t = int64_t;
-    using power_t     = uint32_t;
-    using busy_perc_t = uint32_t;
-    using mem_usage_t = uint64_t;
-    using temp_t      = int64_t;
-
-    struct xcp_metrics_t
-    {
-        std::vector<uint16_t> vcn_busy;
-        std::vector<uint16_t> jpeg_busy;
-    };
-
-    ROCPROFSYS_DEFAULT_OBJECT(data)
-
-    explicit data(uint32_t _dev_id);
-
-    void sample(uint32_t _dev_id);
-    void print(std::ostream& _os) const;
-
-    static void post_process(uint32_t _dev_id);
-
-    uint32_t                   m_dev_id      = std::numeric_limits<uint32_t>::max();
-    timestamp_t                m_ts          = 0;
-    temp_t                     m_temp        = 0;
-    mem_usage_t                m_mem_usage   = 0;
-    std::vector<xcp_metrics_t> m_xcp_metrics = {};
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_engine_usage_t m_busy_perc = {};
-    amdsmi_power_info_t   m_power     = {};
-#else
-    std::vector<busy_perc_t> m_busy_perc = {};
-    std::vector<power_t>     m_power     = {};
-#endif
-
-    friend std::ostream& operator<<(std::ostream& _os, const data& _v)
-    {
-        _v.print(_os);
-        return _os;
-    }
-
-private:
-    friend void rocprofsys::amd_smi::setup();
-    friend void rocprofsys::amd_smi::config();
-    friend void rocprofsys::amd_smi::sample();
-    friend void rocprofsys::amd_smi::shutdown();
-    friend void rocprofsys::amd_smi::post_process();
-
-    static size_t                        device_count;
-    static std::set<uint32_t>            device_list;
-    static std::unique_ptr<promise_t>    polling_finished;
-    static std::vector<data>&            get_initial();
-    static std::unique_ptr<std::thread>& get_thread();
-    static bool                          setup();
-    static bool                          shutdown();
-};
 
 #if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
 

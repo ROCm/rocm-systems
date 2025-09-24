@@ -20,7 +20,6 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ptl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
@@ -41,7 +40,6 @@ if(ROCPROFSYS_USE_ROCM)
         PRIVATE
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
     )
     add_subdirectory(rocprofiler-sdk)
 endif()
@@ -50,6 +48,9 @@ add_subdirectory(causal)
 add_subdirectory(components)
 add_subdirectory(coverage)
 add_subdirectory(tracing)
+if(ROCPROFSYS_USE_ROCM)
+    add_subdirectory(amd_smi)
+endif()
 
 set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/mpi_gotcha.cpp

@@ -23,7 +23,7 @@
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
-#include "library/amd_smi.hpp"
+#include "library/amd_smi/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
 #include "library/runtime.hpp"
 

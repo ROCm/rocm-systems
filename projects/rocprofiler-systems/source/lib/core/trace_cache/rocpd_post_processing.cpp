@@ -60,7 +60,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #    else
     return code_object.rocp_agent.handle;
@@ -164,7 +164,7 @@ rocpd_post_processing::get_memory_copy_callback() const
     };
 }
 
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
+#if (ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
 postprocessing_callback
 rocpd_post_processing::get_memory_allocate_callback() const
 {
@@ -470,13 +470,17 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
 
         using pos = trace_cache::amd_smi_sample::settings_positions;
         std::bitset<8> settings_bits(_amd_smi.settings);
-        bool           is_busy_enabled = settings_bits.test(static_cast<int>(pos::busy));
-        bool           is_temp_enabled = settings_bits.test(static_cast<int>(pos::temp));
-        bool is_power_enabled          = settings_bits.test(static_cast<int>(pos::power));
+        // TODO: Hardcoded!
+        settings_bits.set();
+        bool is_busy_enabled      = settings_bits.test(static_cast<int>(pos::busy));
+        bool is_temp_enabled      = settings_bits.test(static_cast<int>(pos::temp));
+        bool is_power_enabled     = settings_bits.test(static_cast<int>(pos::power));
         bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
 
-        bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
-        bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
+        bool is_vcn_enabled =
+            false;  // settings_bits.test(static_cast<int>(pos::vcn_activity));
+        bool is_jpeg_enabled =
+            false;  // settings_bits.test(static_cast<int>(pos::jpeg_activity));
 
         insert_event_and_sample(
             is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
@@ -651,7 +655,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
     parser.register_type_callback(entry_type::kernel_dispatch,
                                   get_kernel_dispatch_callback());
     parser.register_type_callback(entry_type::memory_copy, get_memory_copy_callback());
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     parser.register_type_callback(entry_type::memory_alloc,
                                   get_memory_allocate_callback());
 #    endif

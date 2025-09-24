@@ -100,7 +100,7 @@ struct memory_copy_sample : storage_parsed_type_base
     size_t stream_handle;
 };
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 struct memory_allocate_sample : storage_parsed_type_base
 {
     // Timing fields
@@ -204,7 +204,7 @@ struct amd_smi_sample : storage_parsed_type_base
     uint32_t             umc_activity;
     uint32_t             mm_activity;
     uint32_t             power;
-    int64_t              temperature;
+    int32_t              temperature;
     size_t               mem_usage;
     std::vector<uint8_t> xcp_activity;
 };
@@ -229,7 +229,7 @@ enum class entry_type : uint32_t
     region                = 0x0002,
     kernel_dispatch       = 0x0003,
     memory_copy           = 0x0004,
-#if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
+#if (ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
     memory_alloc = 0x0005,
 #endif
     amd_smi_sample   = 0x0006,
