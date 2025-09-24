@@ -35,62 +35,66 @@ THE SOFTWARE.
 #include <iostream>
 #include <string>
 
-struct CaptureStream {
-  int saved_fd;
-  int orig_fd;
-  int temp_fd;
-
-  char tempname[13] = "mytestXXXXXX";
-
-  explicit CaptureStream(FILE* original) {
-    orig_fd = fileno(original);
-    saved_fd = dup(orig_fd);
-
-    if ((temp_fd = mkstemp(tempname)) == -1) {
+class CaptureStream {
+ public:
+  CaptureStream() {
+    if (pipe2(pipe, 0) == -1) {
       error(0, errno, "Error");
       assert(false);
     }
 
-    fflush(nullptr);
-    if (dup2(temp_fd, orig_fd) == -1) {
+    orig_fd = dup(fileno(stdout));
+    if (orig_fd == -1) {
       error(0, errno, "Error");
       assert(false);
     }
-    if (close(temp_fd) != 0) {
-      error(0, errno, "Error");
-      assert(false);
-    }
-  }
-
-  void restoreStream() {
-    if (saved_fd == -1) return;
-    fflush(nullptr);
-    if (dup2(saved_fd, orig_fd) == -1) {
-      error(0, errno, "Error");
-      assert(false);
-    }
-    if (close(saved_fd) != 0) {
-      error(0, errno, "Error");
-      assert(false);
-    }
-    saved_fd = -1;
-  }
-
-  const char* getTempFilename() { return (const char*)tempname; }
-
-  std::ifstream getCapturedData() {
-    restoreStream();
-    std::ifstream temp(tempname);
-    return temp;
   }
 
   ~CaptureStream() {
-    restoreStream();
-    if (remove(tempname) != 0) {
+    close(orig_fd);
+    close(pipe[READ]);
+    close(pipe[WRITE]);
+  }
+
+  void beginCapture() {
+    fflush(stdout);
+    if (dup2(pipe[WRITE], fileno(stdout)) == -1) {
       error(0, errno, "Error");
       assert(false);
     }
   }
+
+  void endCapture() {
+    // End Capture
+    fflush(stdout);
+    if (dup2(orig_fd, fileno(stdout)) == -1) {
+      error(0, errno, "Error");
+      assert(false);
+    }
+    result.clear();
+
+    // Get string
+    const int bufSize = 2048;
+    char buf[bufSize];
+    int bytesRead = 0;
+    bytesRead = read(pipe[READ], &buf, bufSize);
+    
+    if (bytesRead < 0) {
+      error(0, errno, "Error reading from pipe");
+      assert(false);
+      result.clear();
+    } else {
+      result = std::string(buf, bytesRead);
+    }
+  }
+
+  std::string getCapturedData() { return result; }
+
+ private:
+  enum PIPES { READ, WRITE };
+  int pipe[2] = {0, 0};
+  int orig_fd;
+  std::string result;
 };
 
 #endif  // _STRESSTEST_PRINTF_COMMON_H_
