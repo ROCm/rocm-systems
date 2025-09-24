@@ -227,6 +227,8 @@ bool extractBuildLog(comgr_helper::ComgrDataSetUniqueHandle& dataSet, std::strin
     return false;
   }
 
+  LogPrintfInfo("extractBuildLog count : %d", count);
+
   std::vector<char> log;
   if (count > 0) {
     if (!extractByteCodeBinary(dataSet, AMD_COMGR_DATA_KIND_LOG, log)) return false;
@@ -237,34 +239,42 @@ bool extractBuildLog(comgr_helper::ComgrDataSetUniqueHandle& dataSet, std::strin
 
 bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataSet,
                            const amd_comgr_data_kind_t dataKind, std::vector<char>& bin) {
-  amd_comgr_data_t binaryDataHandle;
-
-  if (amd::Comgr::action_data_get_data(inDataSet.get(), dataKind, 0, &binaryDataHandle) !=
-      AMD_COMGR_STATUS_SUCCESS) {
+  // extract all data from dataSet
+  size_t count;
+  if (amd::Comgr::action_data_count(inDataSet.get(), dataKind, &count) != AMD_COMGR_STATUS_SUCCESS) {
     return false;
   }
-  comgr_helper::ComgrDataUniqueHandle binaryData(binaryDataHandle);
-  size_t binarySize = 0;
-  if (amd::Comgr::get_data(binaryData.get(), &binarySize, NULL) != AMD_COMGR_STATUS_SUCCESS) {
-    return false;
-  }
+  for (auto idx = 0; idx < count; idx++) {
+    amd_comgr_data_t binaryDataHandle;
 
-  size_t bufSize = (dataKind == AMD_COMGR_DATA_KIND_LOG) ? binarySize + 1 : binarySize;
+    if (amd::Comgr::action_data_get_data(inDataSet.get(), dataKind, idx, &binaryDataHandle) !=
+        AMD_COMGR_STATUS_SUCCESS) {
+      return false;
+    }
+    comgr_helper::ComgrDataUniqueHandle binaryData(binaryDataHandle);
+    size_t binarySize = 0;
+    if (amd::Comgr::get_data(binaryData.get(), &binarySize, NULL) != AMD_COMGR_STATUS_SUCCESS) {
+      return false;
+    }
 
-  char* binary = new char[bufSize];
-  if (amd::Comgr::get_data(binaryData.get(), &binarySize, binary) != AMD_COMGR_STATUS_SUCCESS) {
+    size_t bufSize = (dataKind == AMD_COMGR_DATA_KIND_LOG) ? binarySize + 1 : binarySize;
+
+    char* binary = new char[bufSize];
+    if (amd::Comgr::get_data(binaryData.get(), &binarySize, binary) != AMD_COMGR_STATUS_SUCCESS) {
+      delete[] binary;
+      return false;
+    }
+
+
+    if (dataKind == AMD_COMGR_DATA_KIND_LOG) {
+      binary[binarySize] = '\0';
+    }
+
+    std::vector<char> temp_bin;
+    temp_bin.assign(binary, binary + binarySize);
+    bin = temp_bin;
     delete[] binary;
-    return false;
   }
-
-  if (dataKind == AMD_COMGR_DATA_KIND_LOG) {
-    binary[binarySize] = '\0';
-  }
-
-  std::vector<char> temp_bin;
-  temp_bin.assign(binary, binary + binarySize);
-  bin = temp_bin;
-  delete[] binary;
 
   return true;
 }
@@ -454,9 +464,15 @@ bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
 
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                      const std::string& isa, std::vector<std::string>& linkOptions,
-                     std::string& buildLog, std::vector<char>& LinkedLLVMBitcode) {
+                     std::string& buildLog, std::vector<char>& LinkedLLVMBitcode, bool spirv_bc) {
   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle action;
+  amd_comgr_action_kind_t action_kind = AMD_COMGR_ACTION_LINK_BC_TO_BC;
+  amd_comgr_data_kind_t data_kind = AMD_COMGR_DATA_KIND_BC;
+  if (spirv_bc) {
+    action_kind = AMD_COMGR_ACTION_LINK_SPIRV_TO_SPIRV;
+    data_kind = AMD_COMGR_DATA_KIND_SPIRV;
+  }
 
   if (!createAction(action, linkOptions, isa, lang)) {
     return false;
@@ -467,7 +483,7 @@ bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
     return false;
   }
 
-  if (amd::Comgr::do_action(AMD_COMGR_ACTION_LINK_BC_TO_BC, action.get(), linkInputs.get(),
+  if (amd::Comgr::do_action(action_kind, action.get(), linkInputs.get(),
                             output.get()) != AMD_COMGR_STATUS_SUCCESS) {
     return false;
   }
@@ -476,7 +492,7 @@ bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
     return false;
   }
 
-  if (!extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, LinkedLLVMBitcode)) {
+  if (!extractByteCodeBinary(output, data_kind, LinkedLLVMBitcode)) {
     return false;
   }
 
@@ -502,6 +518,14 @@ bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInpu
     return false;
   }
 
+  size_t count;
+  if (auto res = amd::Comgr::action_data_count(output, AMD_COMGR_DATA_KIND_BC, &count);
+      res != AMD_COMGR_STATUS_SUCCESS) {
+    return false;
+  }
+
+  LogPrintfInfo("DATA KIND BC : Count : %d", count);
+
   if (!extractBuildLog(output, buildLog)) {
     return false;
   }
@@ -525,6 +549,7 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
     return false;
   }
 
+  amd_comgr_action_kind_t action_kind = AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE;
   // If SPIRV bitcode was processed, make sure we link device libs to it
   if (spirv_bc) {
     if (amd::Comgr::action_info_set_device_lib_linking(codegenAction.get(), true) !=
@@ -532,13 +557,14 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
       LogError("Can not link device libs to action");
       return false;
     }
+    action_kind = AMD_COMGR_ACTION_CODEGEN_SPIRV_TO_RELOCATABLE;
   }
 
   if (relocatableData.Create() != AMD_COMGR_STATUS_SUCCESS) {
     return false;
   }
 
-  if (amd::Comgr::do_action(AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, codegenAction.get(),
+  if (amd::Comgr::do_action(action_kind, codegenAction.get(),
                             linkInputs.get(), relocatableData.get()) != AMD_COMGR_STATUS_SUCCESS) {
     extractBuildLog(relocatableData, buildLog);
     return false;
@@ -1114,32 +1140,16 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
   if (!findIsa()) {
     return false;
   }
-
-  if (data_kind_ == AMD_COMGR_DATA_KIND_SPIRV) {
-    // Convert SPIRV Unbundled code object to LLVM Bitcode
-    std::vector<char> llvmbc_from_spirv;
-    if (!helpers::convertSPIRVToLLVMBC(link_input_, isa_, link_options_, build_log_,
-                                       llvmbc_from_spirv)) {
-      LogError("Error in hip Linker: unable to convert SPIRV to BC");
-      return false;
-    }
-
-    std::string linkedFileName = "LLVMBitcodeFromSPIRV.bc";
-    if (!helpers::addCodeObjData(link_input_, llvmbc_from_spirv, linkedFileName,
-                                 AMD_COMGR_DATA_KIND_BC)) {
-      LogError("Error in hip Linker: unable to add linked LLVM bitcode");
-      return false;
-    }
-  }
-
+  // link BC_TO_BC or SPV_TO_SPV using comgr
   std::vector<char> llvm_bitcode;
-  if (!helpers::linkLLVMBitcode(link_input_, isa_, link_options_, build_log_, llvm_bitcode)) {
+  if (!helpers::linkLLVMBitcode(link_input_, isa_, link_options_, build_log_, llvm_bitcode,
+                                data_kind_ == AMD_COMGR_DATA_KIND_SPIRV)) {
     LogError("Error in hip linker: unable to add device libs to linked bitcode");
     return false;
   }
 
   std::string linkedFileName = "LLVMBitcode.bc";
-  if (!helpers::addCodeObjData(exec_input_, llvm_bitcode, linkedFileName, AMD_COMGR_DATA_KIND_BC)) {
+  if (!helpers::addCodeObjData(exec_input_, llvm_bitcode, linkedFileName, data_kind_)) {
     LogError("Error in hip linker: unable to add linked bitcode");
     return false;
   }

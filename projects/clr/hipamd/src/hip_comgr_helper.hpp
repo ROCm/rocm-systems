@@ -102,7 +102,7 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
                       std::string& buildLog, std::vector<char>& LLVMBitcode);
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                      const std::string& isa, std::vector<std::string>& linkOptions,
-                     std::string& buildLog, std::vector<char>& LinkedLLVMBitcode);
+                     std::string& buildLog, std::vector<char>& LinkedLLVMBitcode, bool spirv_bc = false);
 bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                       const std::string& isa, std::vector<std::string>& exeOptions,
                       std::string& buildLog, std::vector<char>& executable, bool spirv_bc = false);
