@@ -3955,10 +3955,10 @@ typedef struct hip_api_data_s {
       hipLibrary_t* library;
       hipLibrary_t library__val;
       const void* image;
-      hipJitOption** jitOptions;
+      hipJitOption* jitOptions;
       void** jitOptionsValues;
       unsigned int numJitOptions;
-      hipLibraryOption** libraryOptions;
+      hipLibraryOption* libraryOptions;
       void** libraryOptionValues;
       unsigned int numLibraryOptions;
     } hipLibraryLoadData;
@@ -3967,10 +3967,10 @@ typedef struct hip_api_data_s {
       hipLibrary_t library__val;
       const char* fname;
       char fname__val;
-      hipJitOption** jitOptions;
+      hipJitOption* jitOptions;
       void** jitOptionsValues;
       unsigned int numJitOptions;
-      hipLibraryOption** libraryOptions;
+      hipLibraryOption* libraryOptions;
       void** libraryOptionValues;
       unsigned int numLibraryOptions;
     } hipLibraryLoadFromFile;
@@ -6659,10 +6659,10 @@ typedef struct hip_api_data_s {
   {                                                                                                \
     cb_data.args.hipLibraryLoadData.library = (hipLibrary_t*)library;                              \
     cb_data.args.hipLibraryLoadData.image = (const void*)image;                                    \
-    cb_data.args.hipLibraryLoadData.jitOptions = (hipJitOption**)jitOptions;                       \
+    cb_data.args.hipLibraryLoadData.jitOptions = (hipJitOption*)jitOptions;                        \
     cb_data.args.hipLibraryLoadData.jitOptionsValues = (void**)jitOptionsValues;                   \
     cb_data.args.hipLibraryLoadData.numJitOptions = (unsigned int)numJitOptions;                   \
-    cb_data.args.hipLibraryLoadData.libraryOptions = (hipLibraryOption**)libraryOptions;           \
+    cb_data.args.hipLibraryLoadData.libraryOptions = (hipLibraryOption*)libraryOptions;            \
     cb_data.args.hipLibraryLoadData.libraryOptionValues = (void**)libraryOptionValues;             \
     cb_data.args.hipLibraryLoadData.numLibraryOptions = (unsigned int)numLibraryOptions;           \
   };
@@ -6671,10 +6671,10 @@ typedef struct hip_api_data_s {
   {                                                                                                \
     cb_data.args.hipLibraryLoadFromFile.library = (hipLibrary_t*)library;                          \
     cb_data.args.hipLibraryLoadFromFile.fname = (const char*)fname;                                \
-    cb_data.args.hipLibraryLoadFromFile.jitOptions = (hipJitOption**)jitOptions;                   \
+    cb_data.args.hipLibraryLoadFromFile.jitOptions = (hipJitOption*)jitOptions;                    \
     cb_data.args.hipLibraryLoadFromFile.jitOptionsValues = (void**)jitOptionsValues;               \
     cb_data.args.hipLibraryLoadFromFile.numJitOptions = (unsigned int)numJitOptions;               \
-    cb_data.args.hipLibraryLoadFromFile.libraryOptions = (hipLibraryOption**)libraryOptions;       \
+    cb_data.args.hipLibraryLoadFromFile.libraryOptions = (hipLibraryOption*)libraryOptions;        \
     cb_data.args.hipLibraryLoadFromFile.libraryOptionValues = (void**)libraryOptionValues;         \
     cb_data.args.hipLibraryLoadFromFile.numLibraryOptions = (unsigned int)numLibraryOptions;       \
   };
