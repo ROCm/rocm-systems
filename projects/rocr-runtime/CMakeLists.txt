@@ -45,7 +45,7 @@ cmake_minimum_required(VERSION 3.7)
 
 # Set the project name
 project("rocr")
-set( CORE_TARGET "rocr" )
+set( CORE_TARGET "hsa-rocr" )
 set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
 set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
@@ -343,7 +343,7 @@ include(CPack)
 # Group binary and dev component to single package
 if(NOT BUILD_SHARED_LIBS)
     cpack_add_component_group("static")
-    set( STATIC_COMP_TYPE "STATIC" )
+    set( COMP_TYPE "static" )
     cpack_add_component(binary  GROUP static)
     cpack_add_component(dev GROUP static)
 endif()
