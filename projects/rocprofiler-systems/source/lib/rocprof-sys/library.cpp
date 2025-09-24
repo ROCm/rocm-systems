@@ -119,6 +119,22 @@ namespace
 auto _timemory_manager  = tim::manager::instance();
 auto _timemory_settings = tim::settings::shared_instance();
 
+void
+set_metadata_process_start_timestamp(int64_t _ts)
+{
+    auto process_info  = trace_cache::get_metadata_registry().get_process_info();
+    process_info.start = _ts;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+void
+set_metadata_process_end_timestamp(int64_t _ts)
+{
+    auto process_info = trace_cache::get_metadata_registry().get_process_info();
+    process_info.end  = _ts;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
 bool
 ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
 {
@@ -703,6 +719,8 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         if(get_state() == State::Active) rocprofsys_finalize_hidden();
     });
 
+    set_metadata_process_start_timestamp(comp::wall_clock::record());
+
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(
         get_debug_env() || get_verbose_env() > 2,
         "mode: %s | is binary rewrite: %s | command: %s\n", _mode,
@@ -744,6 +762,8 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
+    set_metadata_process_end_timestamp(comp::wall_clock::record());
+
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback

@@ -725,7 +725,8 @@ rocpd_post_processing::post_process_metadata()
 
     auto process_info = m_metadata.get_process_info();
     data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid, 0,
-                                        0, 0, 0, process_info.command.c_str(), "{}");
+                                        0, process_info.start, process_info.end,
+                                        process_info.command.c_str(), "{}");
 
     const auto& agents  = m_agent_manager.get_agents();
     int         counter = 0;

@@ -64,6 +64,8 @@ to_json(const info::process& process)
     result["pid"]     = process.pid;
     result["ppid"]    = process.ppid;
     result["command"] = process.command;
+    result["start"]   = process.start;
+    result["end"]     = process.end;
     return result;
 }
 
@@ -74,6 +76,8 @@ from_json_process(const nlohmann::json& _json)
     p.pid     = _json["pid"].get<pid_t>();
     p.ppid    = _json["ppid"].get<pid_t>();
     p.command = _json["command"].get<std::string>();
+    p.start   = _json["start"].get<int32_t>();
+    p.end     = _json["end"].get<int32_t>();
     return p;
 }
 
