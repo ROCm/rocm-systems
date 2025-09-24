@@ -402,6 +402,48 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def write_pc_sampling_csv(importData, config) -> None:
+    """Write PC sampling data to a CSV file."""
+
+    # Host trap PC sampling data
+    host_trap_query = """
+        SELECT
+            guid,
+            timestamp AS Sample_Timestamp,
+            exec_mask AS Exec_Mask,
+            dispatch_id AS Dispatch_Id,
+            instruction AS Instruction,
+            instruction_comment AS Instruction_Comment,
+            correlation_id AS Correlation_Id
+        FROM "pc_sampling"
+        WHERE sampling_method = 'host_trap'
+        ORDER BY
+            timestamp ASC
+    """
+    write_sql_query_to_csv(importData, config, host_trap_query, "pc_sampling_host_trap")
+
+    # Stochastic PC sampling data
+    stochastic_query = """
+        SELECT
+            guid,
+            timestamp AS Sample_Timestamp,
+            exec_mask AS Exec_Mask,
+            dispatch_id AS Dispatch_Id,
+            instruction AS Instruction,
+            instruction_comment AS Instruction_Comment,
+            correlation_id AS Correlation_Id,
+            wave_issued AS Wave_Issued_Instruction,
+            inst_type AS Instruction_Type,
+            snapshot_stall_reason AS Stall_Reason,
+            wave_count AS Wave_Count
+        FROM "pc_sampling"
+        WHERE sampling_method = 'stochastic'
+        ORDER BY
+            timestamp ASC
+    """
+    write_sql_query_to_csv(importData, config, stochastic_query, "pc_sampling_stochastic")
+
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
@@ -411,6 +453,7 @@ def write_csv(importData, config):
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+    write_pc_sampling_csv(importData, config)
 
 
 def execute(input, config=None, window_args=None, **kwargs):
