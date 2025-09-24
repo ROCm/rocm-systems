@@ -33,6 +33,7 @@ env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
   PYTHON_VENV_NAME: "rocprofiler-systems"
   PYTHON_VENV_ACTIVATE: "rocprofiler-systems/bin/activate"
 
@@ -104,9 +105,9 @@ jobs:
       - name: Install Latest Nightly ROCm
         run: |
           set -e
-          ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
-          tar -xf ${{ env.ROCM_PATH }}-${ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${ROCM_VERSION}
-          ln -s ${{ env.ROCM_PATH }}-${ROCM_VERSION} ${{ env.ROCM_PATH }}
+          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
