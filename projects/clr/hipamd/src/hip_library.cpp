@@ -143,7 +143,7 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fname,
 hipError_t hipLibraryUnload(hipLibrary_t library) {
   HIP_INIT_API(hipLibraryUnload, library);
   if (library == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   auto l = reinterpret_cast<hip::LibraryContainer*>(library);
   delete l;
