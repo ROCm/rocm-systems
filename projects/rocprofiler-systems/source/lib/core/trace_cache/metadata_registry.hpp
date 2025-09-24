@@ -57,6 +57,8 @@ struct process
     pid_t       pid;  // < Unique
     pid_t       ppid;
     std::string command;
+    uint32_t    start;
+    uint32_t    end;
 };
 
 template <typename Category>
