@@ -70,7 +70,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROFILER_LIBRARY_CTOR": "1",
             "LD_PRELOAD": ":".join(ld_preload),
             "ROCP_TOOL_LIBRARIES": rocprofiler_sdk_tool_path,
-            "LD_LIBRARY_PATH": rocm_libdir,
+            "LD_LIBRARY_PATH": str(rocm_libdir),
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
             "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
