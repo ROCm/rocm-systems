@@ -116,6 +116,12 @@ set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE S
 
 generic_package()
 
+## Dependencies
+find_package(Threads REQUIRED)
+pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+
+
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti")
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
