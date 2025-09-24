@@ -45,6 +45,7 @@
 #include <regex>
 #include <sstream>
 
+#include "config/amd_smi_config.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "shared_mutex.h"  // NOLINT
@@ -680,7 +681,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     }
 
     amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-    amdsmi_status_t status = libdrm_amdgpu_.load("libdrm_amdgpu.so");
+    amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
     if (status != AMDSMI_STATUS_SUCCESS) {
       libdrm_amdgpu_.unload();
       return status;

@@ -47,13 +47,15 @@ configure_file("src/${ROCM_SMI_TARGET}Config.in"
 add_library(${ROCM_SMI_TARGET} ${CMN_SRC_LIST} ${CMN_INC_LIST})
 target_link_libraries(${ROCM_SMI_TARGET} PRIVATE
     rt
-    PkgConfig::DRM
-    PkgConfig::DRM_AMDGPU
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
-target_include_directories(${ROCM_SMI_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                      ${PROJECT_SOURCE_DIR}/common/shared_mutex)
+target_include_directories(${ROCM_SMI_TARGET} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/common/shared_mutex
+    ${DRM_INCLUDE_DIRS}
+    ${DRM_AMDGPU_INCLUDE_DIRS}
+)
 
 # use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${ROCM_SMI_TARGET} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"

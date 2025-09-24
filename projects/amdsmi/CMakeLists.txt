@@ -116,11 +116,49 @@ set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE S
 
 generic_package()
 
-## Dependencies
+# Dependencies
 find_package(Threads REQUIRED)
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
+# Configuration
+function(get_imported_soname target out_var)
+    get_target_property(link_libs ${target} INTERFACE_LINK_LIBRARIES)
+    set(result)
+    foreach(link_lib ${link_libs})
+        if(result)
+            message(FATAL_ERROR "Target ${target} has multiple link libraries: ${link_libs}")
+        endif()
+        execute_process(
+            COMMAND objdump -p "${link_lib}"
+            OUTPUT_VARIABLE OBJDUMP_OUTPUT
+            RESULT_VARIABLE OBJDUMP_RESULT
+        )
+        if(OBJDUMP_RESULT EQUAL 0)
+            string(REGEX MATCH "SONAME +([^ \n]+)" SONAME_MATCH "${OBJDUMP_OUTPUT}")
+            if(SONAME_MATCH)
+                set(SONAME_OF_MY_PKG "${CMAKE_MATCH_1}")
+                message(STATUS "SONAME of my_package_name: ${SONAME_OF_MY_PKG}")
+            else()
+                message(FATAL_ERROR "Could not find SONAME in objdump output for ${link_lib}")
+            endif()
+            set(result "${SONAME_OF_MY_PKG}")
+        else()
+            message(FATAL_ERROR "objdump failed for ${link_lib}")
+        endif()
+    endforeach()
+    if(NOT result)
+        message(FATAL_ERROR "Could not find SONAME for target ${target} libs: ${link_libs}")
+    endif()
+    set("${out_var}" "${result}" PARENT_SCOPE)
+endfunction()
+
+get_imported_soname(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"
+    @ONLY
+)
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti")
@@ -190,8 +228,13 @@ if(ENABLE_ESMI_LIB)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
-                    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi ${ESMI_INC_DIR})
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include 
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex                
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi 
+    ${ESMI_INC_DIR}
+)
 
 set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_device.cc"

@@ -80,13 +80,17 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} PRIVATE
     rt
-    PkgConfig::DRM
-    PkgConfig::DRM_AMDGPU
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
-target_include_directories(${AMD_SMI} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
-                                              ${PROJECT_SOURCE_DIR}/common/shared_mutex ${ACA_INC_DIR})
+target_include_directories(${AMD_SMI} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR} 
+    ${PROJECT_SOURCE_DIR}/rocm_smi/include
+    ${PROJECT_SOURCE_DIR}/common/shared_mutex 
+    ${ACA_INC_DIR}
+    ${DRM_INCLUDE_DIRS}
+    ${DRM_AMDGPU_INCLUDE_DIRS}                                          
+)
 
 # use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${AMD_SMI} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
