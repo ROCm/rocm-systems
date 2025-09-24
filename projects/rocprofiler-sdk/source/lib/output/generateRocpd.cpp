@@ -1311,213 +1311,213 @@ write_rocpd(
             }
         };
 
-    auto insert_memory_alloc_data =
-        [&conn, &tool_metadata, &category_ids, &string_entries, node_id, this_ppid, this_pid](
-            const auto& _gen) {
-            auto address_to_agent_and_size =
-                std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+    auto insert_memory_alloc_data = [&conn,
+                                     &tool_metadata,
+                                     &category_ids,
+                                     &string_entries,
+                                     node_id,
+                                     this_ppid,
+                                     this_pid](const auto& _gen) {
+        auto address_to_agent_and_size =
+            std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
 
-            for(auto pitr : _gen)
+        for(auto pitr : _gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+            for(auto itr : _gen.get(pitr))
             {
-                auto _deferred = sql::deferred_transaction{conn};
-                for(auto itr : _gen.get(pitr))
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
+
+                auto _kind = tool_metadata.buffer_names.at(itr.kind);
+                auto _name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+
+                auto _type  = std::string{};
+                auto _level = std::string{};
+
+                auto _emit_warning = [_kind, _name]() {
+                    ROCP_CI_LOG(WARNING)
+                        << fmt::format("rocpd does not know how to classify memory allocation "
+                                       "of kind={} and operation={}",
+                                       _kind,
+                                       _name);
+                };
+
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
                 {
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
-
-                    auto _kind = tool_metadata.buffer_names.at(itr.kind);
-                    auto _name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
-
-                    auto _type  = std::string{};
-                    auto _level = std::string{};
-
-                    auto _emit_warning = [_kind, _name]() {
-                        ROCP_CI_LOG(WARNING)
-                            << fmt::format("rocpd does not know how to classify memory allocation "
-                                           "of kind={} and operation={}",
-                                           _kind,
-                                           _name);
-                    };
-
-                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
+                    auto _operation =
+                        static_cast<rocprofiler_memory_allocation_operation_t>(itr.operation);
+                    if(_operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE)
                     {
-                        auto _operation =
-                            static_cast<rocprofiler_memory_allocation_operation_t>(itr.operation);
-                        if(_operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE)
-                        {
-                            _type  = "ALLOC";
-                            _level = "REAL";
-                        }
-                        else if(_operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
-                        {
-                            _type  = "ALLOC";
-                            _level = "VIRTUAL";
-                        }
-                        else if(_operation == ROCPROFILER_MEMORY_ALLOCATION_FREE)
-                        {
-                            _type  = "FREE";
-                            _level = "REAL";
-                        }
-                        else if(_operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_FREE)
-                        {
-                            _type  = "FREE";
-                            _level = "VIRTUAL";
-                        }
-                        else
-                        {
-                            _emit_warning();
-                            continue;
-                        }
+                        _type  = "ALLOC";
+                        _level = "REAL";
                     }
-                    else if(itr.kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+                    else if(_operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
                     {
-                        auto _operation =
-                            static_cast<rocprofiler_scratch_memory_operation_t>(itr.operation);
-                        if(_operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
-                        {
-                            _type  = "ALLOC";
-                            _level = "SCRATCH";
-                        }
-                        else if(_operation == ROCPROFILER_SCRATCH_MEMORY_FREE)
-                        {
-                            _type  = "FREE";
-                            _level = "SCRATCH";
-                        }
-                        else if(_operation == ROCPROFILER_SCRATCH_MEMORY_ASYNC_RECLAIM)
-                        {
-                            _type  = "RECLAIM";
-                            _level = "SCRATCH";
-                        }
-                        else
-                        {
-                            _emit_warning();
-                            continue;
-                        }
+                        _type  = "ALLOC";
+                        _level = "VIRTUAL";
+                    }
+                    else if(_operation == ROCPROFILER_MEMORY_ALLOCATION_FREE)
+                    {
+                        _type  = "FREE";
+                        _level = "REAL";
+                    }
+                    else if(_operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_FREE)
+                    {
+                        _type  = "FREE";
+                        _level = "VIRTUAL";
                     }
                     else
                     {
                         _emit_warning();
                         continue;
                     }
-
-                    auto _stream_id =
-                        get_stream_id(extract_stream_field(itr).value_or(null_stream_id));
-                    auto _queue_id = get_queue_id(extract_queue_field(itr).value_or(null_queue_id));
-                    auto _address  = extract_address_field(itr);
-                    auto _allocation_size = extract_allocation_size_field(itr);
-                    auto _flags           = extract_flags_field(itr);
-                    auto _node_id         = std::optional<uint64_t>{};
-                    auto _address_value   = (_address) ? std::make_optional(_address->value)
-                                                       : std::optional<uint64_t>{};
-                    auto _extdata         = (_flags)
-                                                ? std::make_optional(get_json_string([&_flags](auto& ar) {
-                                              ar(cereal::make_nvp("flags", *_flags));
-                                          }))
-                                                : std::optional<std::string>{};
-
-                    if(itr.agent_id != null_agent_id)
+                }
+                else if(itr.kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+                {
+                    auto _operation =
+                        static_cast<rocprofiler_scratch_memory_operation_t>(itr.operation);
+                    if(_operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
                     {
-                        if(const auto* _agent = tool_metadata.get_agent(itr.agent_id); _agent)
-                            _node_id = _agent->node_id;
+                        _type  = "ALLOC";
+                        _level = "SCRATCH";
+                    }
+                    else if(_operation == ROCPROFILER_SCRATCH_MEMORY_FREE)
+                    {
+                        _type  = "FREE";
+                        _level = "SCRATCH";
+                    }
+                    else if(_operation == ROCPROFILER_SCRATCH_MEMORY_ASYNC_RECLAIM)
+                    {
+                        _type  = "RECLAIM";
+                        _level = "SCRATCH";
+                    }
+                    else
+                    {
+                        _emit_warning();
+                        continue;
+                    }
+                }
+                else
+                {
+                    _emit_warning();
+                    continue;
+                }
+
+                auto _stream_id = get_stream_id(extract_stream_field(itr).value_or(null_stream_id));
+                auto _queue_id  = get_queue_id(extract_queue_field(itr).value_or(null_queue_id));
+                auto _address   = extract_address_field(itr);
+                auto _allocation_size = extract_allocation_size_field(itr);
+                auto _flags           = extract_flags_field(itr);
+                auto _node_id         = std::optional<uint64_t>{};
+                auto _address_value =
+                    (_address) ? std::make_optional(_address->value) : std::optional<uint64_t>{};
+                auto _extdata = (_flags) ? std::make_optional(get_json_string([&_flags](auto& ar) {
+                    ar(cereal::make_nvp("flags", *_flags));
+                }))
+                                         : std::optional<std::string>{};
+
+                if(itr.agent_id != null_agent_id)
+                {
+                    if(const auto* _agent = tool_metadata.get_agent(itr.agent_id); _agent)
+                        _node_id = _agent->node_id;
+                    else
+                    {
+                        ROCP_CI_LOG(ERROR)
+                            << fmt::format("nullptr to rocprofiler_agent_id_t{}.handle={}{}",
+                                           '{',
+                                           itr.agent_id.handle,
+                                           '}');
+                    }
+                }
+
+                // memory allocation counter track
+                struct free_memory_information
+                {
+                    rocprofiler_timestamp_t start_timestamp = 0;
+                    rocprofiler_timestamp_t end_timestamp   = 0;
+                    rocprofiler_address_t   address         = {.handle = 0};
+                };
+
+                if(_type == "ALLOC" && _allocation_size && _node_id)  // alloc operation
+                {
+                    address_to_agent_and_size.emplace(
+                        _address.value_or(rocprofiler_address_t{.handle = 0}),
+                        rocprofiler::agent::index_and_size{_node_id.value(),
+                                                           _allocation_size.value()});
+                }
+                else if(_type == "FREE" && _address)  // free operation
+                {
+                    if(address_to_agent_and_size.count(_address.value()) == 0)
+                    {
+                        if(_address->handle == 0)
+                        {
+                            // Freeing null pointers is expected behavior and is occurs in HSA
+                            // functions like hipStreamDestroy
+                            ROCP_INFO << "null pointer freed due to HSA operation";
+                        }
                         else
                         {
-                            ROCP_CI_LOG(ERROR)
-                                << fmt::format("nullptr to rocprofiler_agent_id_t{}.handle={}{}",
-                                               '{',
-                                               itr.agent_id.handle,
-                                               '}');
-                        }
-                    }
-
-                    // memory allocation counter track
-                    struct free_memory_information
-                    {
-                        rocprofiler_timestamp_t start_timestamp = 0;
-                        rocprofiler_timestamp_t end_timestamp   = 0;
-                        rocprofiler_address_t   address         = {.handle = 0};
-                    };
-
-                    auto _node_id = std::optional<uint64_t>{};
-                    if(_type == "ALLOC")
-                    {
-                        _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
-                        address_to_agent_and_size.emplace(
-                            rocprofiler_address_t{.handle = _address.handle},
-                            rocprofiler::agent::index_and_size{_node_id.value(), _allocation_size});
-                    }
-                    else if(_type == "FREE")
-                    {
-                        if(address_to_agent_and_size.count(_address) == 0)
-                        {
-                            if(_address.handle == 0)
-                            {
-                                // Freeing null pointers is expected behavior and is occurs in HSA
-                                // functions like hipStreamDestroy
-                                ROCP_INFO << "null pointer freed due to HSA operation";
-                            }
-                            else
-                            {
-                                // Following should not occur
-                                ROCP_INFO << "Unpaired free operation occurred";
-                            }
-                        }
-                        else
-                        {
-                            auto [agent_abs_index, size] = address_to_agent_and_size[_address];
-                            _node_id                     = agent_abs_index;
-                            _allocation_size             = 0;
+                            // Following should not occur
+                            ROCP_INFO << "Unpaired free operation occurred";
                         }
                     }
                     else
                     {
-                        ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
+                        auto [agent_abs_index, size] = address_to_agent_and_size[_address.value()];
+                        _node_id                     = agent_abs_index;
+                        _allocation_size             = 0;
                     }
+                }
+                else
+                {
+                    ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
+                }
 
-                    auto evt_id = create_event(
-                        conn,
-                        {
-                            insert_value("category_id", category_ids.at(itr.kind)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.ancestor),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                        });
+                auto evt_id = create_event(
+                    conn,
+                    {
+                        insert_value("category_id", category_ids.at(itr.kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.ancestor),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
 
-                    auto track_id = get_track_id(conn,
-                                                 track_data{
-                                                     .nid       = node_id,
-                                                     .ppid      = this_ppid,
-                                                     .pid       = this_pid,
-                                                     .tid       = itr.thread_id,
-                                                     .agent_id  = _node_id,
-                                                     .queue_id  = _queue_id,
-                                                     .stream_id = _stream_id,
-                                                     .name_id   = std::nullopt,
-                                                     .extdata   = std::nullopt,
-                                                 });
-
-                    auto start_id =
-                        get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                    auto end_id = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
-
-                    auto stmt =
-                        get_insert_statement("rocpd_memory_allocate{{uuid}}",
-                                             {
-                                                 insert_value("track_id", track_id),
-                                                 insert_value("start_id", start_id),
-                                                 insert_value("end_id", end_id),
-                                                 insert_value("name_id", string_entries.at(_name)),
-                                                 insert_value("type", _type),
-                                                 insert_value("level", _level),
-                                                 insert_value("event_id", evt_id),
-                                                 insert_value("address", _address_value),
-                                                 insert_value("size", _allocation_size),
-                                                 insert_value("extdata", _extdata),
+                auto track_id = get_track_id(conn,
+                                             track_data{
+                                                 .nid       = node_id,
+                                                 .ppid      = this_ppid,
+                                                 .pid       = this_pid,
+                                                 .tid       = itr.thread_id,
+                                                 .agent_id  = _node_id,
+                                                 .queue_id  = _queue_id,
+                                                 .stream_id = _stream_id,
+                                                 .name_id   = std::nullopt,
+                                                 .extdata   = std::nullopt,
                                              });
 
-                    execute_raw_sql_statements(conn, stmt);
-                }
+                auto start_id = get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                auto end_id   = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+
+                auto stmt =
+                    get_insert_statement("rocpd_memory_allocate{{uuid}}",
+                                         {
+                                             insert_value("track_id", track_id),
+                                             insert_value("start_id", start_id),
+                                             insert_value("end_id", end_id),
+                                             insert_value("name_id", string_entries.at(_name)),
+                                             insert_value("type", _type),
+                                             insert_value("level", _level),
+                                             insert_value("event_id", evt_id),
+                                             insert_value("address", _address_value),
+                                             insert_value("size", _allocation_size),
+                                             insert_value("extdata", _extdata),
+                                         });
+
+                execute_raw_sql_statements(conn, stmt);
             }
-        };
+        }
+    };
 
     // new string entries argument types and names can be added to _metadata
     auto insert_api_data =
