@@ -51,9 +51,10 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
 ARG GPU_TYPE=""
 ARG GPU_TARBALL=""
 RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
+        VERSION=$(echo "$GPU_TARBALL" | sed -nE 's/.*([0-9]\.[0-9]\.[0-9]).*/\1/p'); \
         python3 -m pip install -U awscli; \
-        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request; \
-        mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
     fi
 
 WORKDIR /home
