@@ -210,7 +210,7 @@ metadata_registry::get_string_list() const
     return result;
 }
 
-#if ROCPROFSYS_USE_ROCM
+#if ROCPROFSYS_USE_ROCM > 0
 
 void
 metadata_registry::add_code_object(
