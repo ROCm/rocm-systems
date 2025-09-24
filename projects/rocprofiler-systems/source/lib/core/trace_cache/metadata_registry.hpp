@@ -218,10 +218,6 @@ struct metadata_registry
 private:
     friend class cache_manager;
     metadata_registry();
-    friend void overwrite_cb_names(
-        metadata_registry&, rocprofiler_callback_tracing_kind_t,
-        std::initializer_list<std::pair<int, std::string_view>>);
-    friend void                         overwrite_cb_names_fini(metadata_registry&);
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
@@ -246,6 +242,10 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+    void overwrite_cb_names(
+        std::initializer_list<std::pair<rocprofiler_callback_tracing_kind_t,
+                                        std::map<int, std::string_view>>>
+            categories_info);
 #endif
 };
 
