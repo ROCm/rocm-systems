@@ -23,28 +23,34 @@
 
 ##############################################################################
 
+from typing import Any
+
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
+from utils import schema
 from utils.logger import console_error
 from utils.utils import format_scientific_notation_if_needed
 
+# Constants for display formatting
+DEFAULT_MAX_LENGTH = 6
+DEFAULT_PRECISION = 1
+DEFAULT_SCIENTIFIC_WIDTH = 8
 
-def insert_chart_data(mem_data, base_data):
+
+def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> G:
     if len(mem_data) != 1:
         console_error("Memory Chart config doesn't follow expected formatting")
 
     table_config = mem_data[0]["metric_table"]
-
     original_df = base_data.dfs[table_config["id"]]
-
     display_columns = original_df.columns.values.tolist().copy()
     display_df = original_df[display_columns]
 
     alias = display_df["Metric"].values
     values = display_df["Value"].values
 
-    memchart_values = {}
+    memchart_values: dict[str, Any] = {}
     for i in range(0, len(alias)):
         memchart_values[alias[i]] = values[i]
 
@@ -521,7 +527,9 @@ def insert_chart_data(mem_data, base_data):
     )
 
 
-def get_memchart(mem_data, base_data):
+def get_memchart(
+    mem_data: list[dict[str, Any]], base_data: schema.Workload
+) -> html.Section:
     return html.Section(
         id="memchart",
         children=[
@@ -2039,7 +2047,7 @@ def get_memchart(mem_data, base_data):
     )
 
 
-def format_value_for_display(value, max_length=6):
+def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str:  # noqa: ANN401
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 
@@ -2068,13 +2076,15 @@ def format_value_for_display(value, max_length=6):
     if isinstance(value, str):
         try:
             if "." in value:
-                # when dot is in the string, we know it's a float number and convert with "float"
+                # when dot is in the string, we know it's a
+                # float number and convert with "float"
                 value = float(value)
             else:
                 # without dot, we assume it's an integer and convert with "int"
                 value = int(value)
         except ValueError:
-            # when conversion fails, the string is neither legit float or int, then assume it's invalid and display "N/A"
+            # when conversion fails, the string is neither legit float or int,
+            # then assume it's invalid and display "N/A"
             return "N/A"
 
     if isinstance(value, (int, float)):
@@ -2095,8 +2105,8 @@ def format_value_for_display(value, max_length=6):
         sci = format_scientific_notation_if_needed(
             abs_val,
             align=">",
-            width_align=8,
-            precision=1,
+            width_align=DEFAULT_SCIENTIFIC_WIDTH,
+            precision=DEFAULT_PRECISION,
             fmt_type_align="e",
             max_length=max_length,
         ).strip()
@@ -2108,7 +2118,7 @@ def format_value_for_display(value, max_length=6):
             value = normal
 
         if is_negative:
-            value = "-" + value
+            value = f"-{value}"
 
     else:
         value = str(value)
@@ -2121,11 +2131,11 @@ def format_value_for_display(value, max_length=6):
             exponent = value[e_index:]
             max_mantissa_len = max_length - len(exponent)
             if max_mantissa_len < 1:
-                value = exponent[: max_length - 1] + "…"
+                value = f"{exponent[: max_length - 1]}…"
             else:
                 truncated_mantissa = mantissa[:max_mantissa_len]
                 value = truncated_mantissa + exponent
         else:
-            value = value[: max_length - 1] + "…"
+            value = f"{value[: max_length - 1]}…"
 
     return value

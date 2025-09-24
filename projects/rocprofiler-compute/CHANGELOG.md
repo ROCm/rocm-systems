@@ -5,6 +5,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## Unreleased
 
 ### Added
+* Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
+  * Use '--attach-pid' to specify the target process ID.
+  * Use '--attach-duration-msec' to specify time duration.
 
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
 
@@ -13,6 +16,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Show description of metrics during analysis
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the
   ROCm Compute Profiler CLI output.
+* `--set` filtering option in profile mode to enable single-pass counter collection for predefined subsets of metrics.
+* `--list-sets` filtering option in profile mode to list the sets available for single pass counter collection
 
 * Add missing counters based on register specification which enables missing metrics
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
@@ -55,6 +60,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Data-Return Busy
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
+
+* Roofline support for Debian 12 and Azure Linux 3.0.
 
 ### Changed
 
@@ -120,6 +127,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
   * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
 
+* Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
+  * Use ROCPROF=rocprofv3 to use rocprofv3 interface
+
 ### Removed
 
 * Usage of `rocm-smi` in favor of `amd-smi`.
@@ -142,6 +152,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Updated Roofline plots to handle and apply kernel filtering.
 
 ### Known issues
+
+* MI300A/X L2-Fabric 64B read counter may display negative values - The rocprof-compute metric 17.6.1 (Read 64B) can report negative values due to incorrect calculation when TCC_BUBBLE_sum + TCC_EA0_RDREQ_32B_sum exceeds TCC_EA0_RDREQ_sum.
+  * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
 ### Upcoming changes
 

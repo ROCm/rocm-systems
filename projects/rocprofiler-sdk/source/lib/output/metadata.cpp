@@ -696,19 +696,22 @@ metadata::get_marker_message(uint64_t corr_id) const
 }
 
 std::string_view
-metadata::get_kernel_name(uint64_t kernel_id, uint64_t rename_id) const
+metadata::get_kernel_name(uint64_t kernel_id, bool rename_kernel, uint64_t rename_id) const
 {
-    auto string_entry = kernel_rename_map.rlock(
-        [](auto& _data, uint64_t _val) {
-            for(const auto& itr : _data)
-                if(itr.second == _val) return itr.first;
-            return std::string_view{};
-        },
-        rename_id);
-    if(!string_entry.empty())
+    if(rename_kernel)
     {
-        if(const auto* _name = common::get_string_entry(string_entry))
-            return std::string_view{*_name};
+        auto string_entry = kernel_rename_map.rlock(
+            [](auto& _data, uint64_t _val) {
+                for(const auto& itr : _data)
+                    if(itr.second == _val) return itr.first;
+                return std::string_view{};
+            },
+            rename_id);
+        if(!string_entry.empty())
+        {
+            if(const auto* _name = common::get_string_entry(string_entry))
+                return std::string_view{*_name};
+        }
     }
 
     const auto* _kernel_data = get_kernel_symbol(kernel_id);

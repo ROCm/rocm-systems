@@ -102,6 +102,7 @@ static constexpr PalDevice supportedPalDevices[] = {
     {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::HawkPoint2},
     {11, 5, 0, Pal::GfxIpLevel::GfxIp11_5, "gfx1150", Pal::AsicRevision::Strix1},
     {11, 5, 1, Pal::GfxIpLevel::GfxIp11_5, "gfx1151", Pal::AsicRevision::StrixHalo},
+    {12, 0, 0, Pal::GfxIpLevel::GfxIp12, "gfx1200", Pal::AsicRevision::Navi44},
     {12, 0, 1, Pal::GfxIpLevel::GfxIp12, "gfx1201", Pal::AsicRevision::Navi48},
 };
 
@@ -2528,7 +2529,7 @@ void Device::svmFree(void* ptr) const {
 void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   constexpr bool kForceAlloc = true;
-  amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, kParent, kForceAlloc);
+  amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, -1, kParent, kForceAlloc);
   assert(mem != nullptr);
   return mem->getSvmPtr();
 }
@@ -2549,7 +2550,8 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
-bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) {
+bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                          VmmLocationType access_location) {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
   if (amd_mem_obj == nullptr) {
     // If the amd_mem_obj is null, the check if this is a valid va_addr, but not-mapped,

@@ -36,6 +36,10 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
+#if HT_LINUX
+#include <sys/resource.h>
+#endif
+
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()
 #else
@@ -258,6 +262,28 @@ static inline bool IsGfx11() {
     return true;
   else
     return false;
+#else
+  std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
+  assert(false);
+#endif
+}
+
+static inline bool IsNavi4X() {
+#if HT_NVIDIA
+  return false;
+#elif HT_AMD
+  int device = -1;
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  std::string arch = std::string(props.gcnArchName);
+  if (arch.find("gfx1200") != std::string::npos ||
+      arch.find("gfx1201") != std::string::npos) {
+    // gfx1200 = Navi44, gfx1201 = Navi48
+    return true;
+  } else {
+    return false;
+  }
 #else
   std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
   assert(false);
@@ -634,3 +660,29 @@ class BlockingContext {
     }                                                                                              \
     HIP_CHECK(hipStreamDestroy(stream));                                                           \
   }
+
+// Manage core dumps in specific tests which require it disabled (e.g., hipGetLastErrorOnAbort.cc)
+#if HT_LINUX
+#define DISABLE_CORE_DUMPS()                                                                       \
+  struct rlimit core_limit;                                                                        \
+  bool rlimit_saved = false;                                                                       \
+  if (getrlimit(RLIMIT_CORE, &core_limit) == 0) {                                                  \
+    if (core_limit.rlim_cur != 0) {                                                                \
+      struct rlimit new_limit;                                                                     \
+      new_limit.rlim_cur = 0;                                                                      \
+      new_limit.rlim_max = core_limit.rlim_max;                                                    \
+      if (setrlimit(RLIMIT_CORE, &new_limit) == 0) {                                               \
+        rlimit_saved = true;                                                                       \
+      }                                                                                            \
+    }                                                                                              \
+  }
+
+#define RESTORE_CORE_DUMPS()                                                                       \
+  if (rlimit_saved) {                                                                              \
+    setrlimit(RLIMIT_CORE, &core_limit);                                                           \
+    rlimit_saved = false;                                                                          \
+  }
+#else
+#define DISABLE_CORE_DUMPS()
+#define RESTORE_CORE_DUMPS()
+#endif
