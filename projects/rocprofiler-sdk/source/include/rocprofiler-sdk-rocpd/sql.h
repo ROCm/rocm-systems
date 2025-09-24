@@ -26,7 +26,6 @@
 #include <rocprofiler-sdk-rocpd/types.h>
 
 #include <stdint.h>
-#include <cstdint>
 
 ROCPD_EXTERN_C_INIT
 
