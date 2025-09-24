@@ -861,6 +861,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node);
+  // Handle node enable/disable changes that may affect packet batches
+  hipError_t HandleNodeEnabledChange(hip::GraphNode* node);
+  // Helper function to update packets for a node in a batch
+  hipError_t UpdateNodePacketsInBatch(hip::GraphNode* node);
   // Kenrel arg manger is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
@@ -895,11 +899,25 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       : packets(std::move(p)), kernelNames(std::move(k)), capturedNodeCount(nodeCount) {}
   };
 
+  //! Structure to map nodes to their batch and offset information
+  struct NodeBatchInfo {
+    size_t batchIndex;        // Index in packetBatches_
+    size_t packetStartOffset; // Start offset within the batch's packets vector
+    size_t packetCount;       // Number of packets for this node
+    size_t nodeIndex;         // Index in topoOrder_ for verification
+
+    NodeBatchInfo() : batchIndex(0), packetStartOffset(0), packetCount(0), nodeIndex(0) {}
+    NodeBatchInfo(size_t batchIdx, size_t startOffset, size_t pktCount, size_t nodeIdx)
+      : batchIndex(batchIdx), packetStartOffset(startOffset), packetCount(pktCount), nodeIndex(nodeIdx) {}
+  };
+
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
   //! Each batch contains packets from consecutive captured nodes
   std::vector<PacketBatch> packetBatches_;
   //! Track which nodes were successfully captured (true) vs need individual execution (false)
   std::vector<bool> nodeCaptureStatus_;
+  //! Map from node pointer to its batch information for efficient updates
+  std::unordered_map<hip::GraphNode*, NodeBatchInfo> nodeToBatchMap_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {

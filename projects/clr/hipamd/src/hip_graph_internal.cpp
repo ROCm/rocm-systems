@@ -401,8 +401,9 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   nodeCaptureStatus_.clear();
   nodeCaptureStatus_.resize(topoOrder_.size(), false);
 
-  // Clear previous batches
+  // Clear previous batches and node mapping
   packetBatches_.clear();
+  nodeToBatchMap_.clear();
 
   // Process nodes and create batches of consecutive captured nodes
   for (size_t i = 0; i < topoOrder_.size(); ++i) {
@@ -425,8 +426,14 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       // Collect packets from consecutive captured nodes
       size_t j = i;
       size_t capturedNodeCount = 0;
+      size_t currentBatchIndex = packetBatches_.size(); // Index of the batch we're about to create
+
       while (j < topoOrder_.size() && topoOrder_[j]->GraphCaptureEnabled()) {
         auto& currentNode = topoOrder_[j];
+
+        // Store the current packet count before adding new packets
+        size_t packetStartOffset = currentBatch.size();
+
         status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &currentBatch,
                                                              &currentKernelNames);
 
@@ -434,6 +441,18 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           LogError("Packet capture failed");
           return status;
         }
+
+        // Calculate how many packets this node generated
+        size_t packetCount = currentBatch.size() - packetStartOffset;
+
+        // Map this node to its batch and offset information
+        nodeToBatchMap_[currentNode] = NodeBatchInfo(
+          currentBatchIndex,    // Index of the batch we're about to create
+          packetStartOffset,    // Offset where this node's packets start
+          packetCount,          // Number of packets for this node
+          j                     // Node index in topoOrder_
+        );
+
         // Mark this node as successfully captured
         nodeCaptureStatus_[j] = true;
         ++j;
@@ -490,11 +509,95 @@ hipError_t GraphExec::CaptureAQLPackets() {
 }
 
 // ================================================================================================
+hipError_t GraphExec::UpdateNodePacketsInBatch(hip::GraphNode* node) {
+  hipError_t status = hipSuccess;
+
+  // Check if this node is in a batch
+  auto it = nodeToBatchMap_.find(node);
+  if (it != nodeToBatchMap_.end()) {
+    // Node is in a batch, update the packet in the batch
+    const NodeBatchInfo& batchInfo = it->second;
+
+    if (batchInfo.batchIndex < packetBatches_.size()) {
+      PacketBatch& batch = packetBatches_[batchInfo.batchIndex];
+
+      // Capture new packet for this node
+      std::vector<uint8_t*> newPackets;
+      std::vector<std::string> newKernelNames;
+
+      status = node->CaptureAndFormPacket(GetKernelArgManager(), &newPackets, &newKernelNames);
+      if (status != hipSuccess) {
+        return status;
+      }
+
+      // Replace the old packets with new ones
+      // Important: Node update should not impact packetCount so there is no need
+      // to resize the batch
+      if (batchInfo.packetStartOffset + batchInfo.packetCount <= batch.packets.size()) {
+        // Replace with new packets
+        for (size_t i = 0; i < newPackets.size() && i < batchInfo.packetCount; ++i) {
+          batch.packets[batchInfo.packetStartOffset + i] = newPackets[i];
+          batch.kernelNames[batchInfo.packetStartOffset + i] = newKernelNames[i];
+        }
+
+        // If new packet count is different, we need to handle the size mismatch
+        if (newPackets.size() != batchInfo.packetCount) {
+          LogWarning("Packet count mismatch during update - some packets may not be updated");
+        }
+      } else {
+        LogError("Invalid packet offset in batch update");
+        return hipErrorInvalidValue;
+      }
+    } else {
+      LogError("Invalid batch index in node mapping");
+      return hipErrorInvalidValue;
+    }
+  }
+
+  return status;
+}
+
+// ================================================================================================
 hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
   hipError_t status = hipSuccess;
   if (max_streams_ == 1) {
-    status = node->CaptureAndFormPacket(kernArgManager_);
+    // Try to update packets in batch first
+    status = UpdateNodePacketsInBatch(node);
+    if (status != hipSuccess) {
+      return status;
+    }
+
+    // If node is not in a batch, use the original approach
+    auto it = nodeToBatchMap_.find(node);
+    if (it == nodeToBatchMap_.end()) {
+      // Node is not in a batch
+      status = node->CaptureAndFormPacket(kernArgManager_);
+    }
   }
+  return status;
+}
+
+// ================================================================================================
+hipError_t GraphExec::HandleNodeEnabledChange(hip::GraphNode* node) {
+  hipError_t status = hipSuccess;
+
+  if (max_streams_ == 1) {
+    // Check if this node is in a batch
+    auto it = nodeToBatchMap_.find(node);
+    if (it != nodeToBatchMap_.end()) {
+      // Node is in a batch - we need to handle the enabled/disabled state
+      if (node->GetEnabled()) {
+        // Node was enabled - re-capture its packets and update the batch
+        status = UpdateNodePacketsInBatch(node);
+        if (status != hipSuccess) {
+          return status;
+        }
+      }
+    } else {
+      // Node is not in a batch - no special handling needed
+    }
+  }
+
   return status;
 }
 
@@ -531,13 +634,38 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
       // Node was successfully captured - find which batch it belongs to
       // and dispatch the entire batch
       if (batchIndex < packetBatches_.size()) {
-        // Dispatch this batch
-        bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
-            packetBatches_[batchIndex].packets, packetBatches_[batchIndex].kernelNames, accumulate);
-        if (!batchStatus) {
-          status = hipErrorUnknown;
-          accumulate->release();
-          return status;
+        // Check if all nodes in this batch are still enabled
+        bool allNodesEnabled = true;
+        size_t batchStartNode = i;
+        size_t batchEndNode = i + packetBatches_[batchIndex].capturedNodeCount;
+
+        for (size_t nodeIdx = batchStartNode; nodeIdx < batchEndNode && nodeIdx < topoOrder_.size(); ++nodeIdx) {
+          if (!topoOrder_[nodeIdx]->GetEnabled()) {
+            allNodesEnabled = false;
+            break;
+          }
+        }
+
+        if (allNodesEnabled) {
+          // All nodes in batch are enabled - dispatch the entire batch
+          bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
+              packetBatches_[batchIndex].packets, packetBatches_[batchIndex].kernelNames, accumulate);
+          if (!batchStatus) {
+            status = hipErrorUnknown;
+            accumulate->release();
+            return status;
+          }
+        } else {
+          // Some nodes in batch are disabled - execute nodes individually
+          for (size_t nodeIdx = batchStartNode; nodeIdx < batchEndNode && nodeIdx < topoOrder_.size(); ++nodeIdx) {
+            auto& batchNode = topoOrder_[nodeIdx];
+            if (batchNode->GetEnabled()) {
+              // Execute this node individually
+              batchNode->SetStream(hip_stream);
+              status = batchNode->CreateCommand(batchNode->GetQueue());
+              batchNode->EnqueueCommands(hip_stream);
+            }
+          }
         }
 
         // Skip all consecutive captured nodes that belong to this batch

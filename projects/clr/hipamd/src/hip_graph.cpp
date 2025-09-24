@@ -3084,6 +3084,13 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
     HIP_RETURN(hipErrorInvalidValue);
   }
   clonedNode->SetEnabled(isEnabled);
+
+  // Handle packet batch updates if needed
+  hipError_t status = graphExec->HandleNodeEnabledChange(clonedNode);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+
   HIP_RETURN(hipSuccess);
 }
 
