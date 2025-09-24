@@ -1,0 +1,208 @@
+/**
+ * @file gfx12_creator.c
+ * @brief GFX12-specific architecture creation implementation
+ */
+
+#include "aql_structures.h"
+#include "arch_creator_common.h"
+
+#ifdef __KERNEL__
+#include <linux/string.h>
+#include <linux/slab.h>
+#include <linux/errno.h>
+#else
+#include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+#endif
+
+/* GFX12 Register Offsets - from Rust offset.rs */
+#define mmGRBM_GFX_INDEX                    49664
+#define mmCP_PERFMON_CNTL                   55304
+#define mmCOMPUTE_PERFCOUNT_ENABLE          11787
+#define mmSQ_PERFCOUNTER_CTRL               55776
+#define mmSQ_PERFCOUNTER_CTRL2              55778
+
+/* CPC registers */
+#define mmCPC_PERFCOUNTER0_SELECT           55305
+#define mmCPC_PERFCOUNTER0_LO               53254
+#define mmCPC_PERFCOUNTER0_HI               53255
+#define mmCPC_PERFCOUNTER1_SELECT           55299
+#define mmCPC_PERFCOUNTER1_LO               53252
+#define mmCPC_PERFCOUNTER1_HI               53253
+
+/* SQ registers */
+#define mmSQ_PERFCOUNTER0_SELECT            55744
+#define mmSQ_PERFCOUNTER0_LO                53696
+#define mmSQ_PERFCOUNTER1_LO                53698
+#define mmSQ_PERFCOUNTER2_SELECT            55746
+#define mmSQ_PERFCOUNTER2_LO                53700
+#define mmSQ_PERFCOUNTER4_SELECT            55748
+#define mmSQ_PERFCOUNTER6_SELECT            55750
+#define mmSQ_PERFCOUNTER8_SELECT            55752
+#define mmSQ_PERFCOUNTER10_SELECT           55754
+#define mmSQ_PERFCOUNTER12_SELECT           55756
+#define mmSQ_PERFCOUNTER14_SELECT           55758
+#define mmSQ_PERFCOUNTER3_LO                53702
+#define mmSQ_PERFCOUNTER4_LO                53704
+#define mmSQ_PERFCOUNTER5_LO                53706
+#define mmSQ_PERFCOUNTER6_LO                53708
+#define mmSQ_PERFCOUNTER7_LO                53710
+
+/* Block info constants - from Rust block_info.rs */
+#define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
+#define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
+#define GFX12_SQ_COUNTER_BLOCK_NUM_COUNTERS       8
+#define GFX12_SQ_COUNTER_BLOCK_MAX_EVENT          0xFF  /* Placeholder - actual from enums */
+
+/* Counter block attributes - from Rust enums */
+#define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
+#define GFX12_COUNTER_BLOCK_SPM_GLOBAL_ATTR       0x1000
+
+/* GFX12 Architecture parameters - from Rust demo.rs */
+#define GFX12_NUM_XCC           1
+#define GFX12_NUM_SE            4
+#define GFX12_NUM_SA            2
+#define GFX12_NUM_CU            64
+#define GFX12_NUM_WGP_PER_SA    4
+
+/* Create CPC block info for GFX12 */
+static block_info_t* create_gfx12_cpc_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize CPC counter registers - based on Rust implementation */
+    create_counter_reg_info(&counter_regs[0], mmCPC_PERFCOUNTER0_SELECT, 0,
+                           mmCPC_PERFCOUNTER0_LO, mmCPC_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmCPC_PERFCOUNTER1_SELECT, 0,
+                           mmCPC_PERFCOUNTER1_LO, mmCPC_PERFCOUNTER1_HI);
+
+    /* Create dimensions for CPC block - global block with no SE/SA dependencies */
+    block->dimension_count = 1;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_XCC, .dim = HARDWARE_DIM_XCC};
+
+    block->name = "CPC";
+    block->id = HW_IP_BLOCK_CPC;
+    block->instance_count = 1;
+    block->event_id_max = GFX12_CPC_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR | GFX12_COUNTER_BLOCK_SPM_GLOBAL_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
+/* Create SQ block info for GFX12 */
+static block_info_t* create_gfx12_sq_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_SQ_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize SQ counter registers - based on Rust implementation */
+    create_counter_reg_info(&counter_regs[0], mmSQ_PERFCOUNTER0_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER0_LO, 0);
+    create_counter_reg_info(&counter_regs[1], mmSQ_PERFCOUNTER2_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER1_LO, 0);
+    create_counter_reg_info(&counter_regs[2], mmSQ_PERFCOUNTER4_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER2_LO, 0);
+    create_counter_reg_info(&counter_regs[3], mmSQ_PERFCOUNTER6_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER3_LO, 0);
+    create_counter_reg_info(&counter_regs[4], mmSQ_PERFCOUNTER8_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER4_LO, 0);
+    create_counter_reg_info(&counter_regs[5], mmSQ_PERFCOUNTER10_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER5_LO, 0);
+    create_counter_reg_info(&counter_regs[6], mmSQ_PERFCOUNTER12_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER6_LO, 0);
+    create_counter_reg_info(&counter_regs[7], mmSQ_PERFCOUNTER14_SELECT, mmSQ_PERFCOUNTER_CTRL,
+                           mmSQ_PERFCOUNTER7_LO, 0);
+
+    /* Create dimensions for SQ block - SE dependent block */
+    /* Based on experiments: total dimensions multiply to 32 (4 SE × 2 SA × 4 WGP = 32) */
+    block->dimension_count = 3;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_SE, .dim = HARDWARE_DIM_SE};
+    block->dimensions[1] = (dimension_t){.size = GFX12_NUM_SA, .dim = HARDWARE_DIM_SA};
+    block->dimensions[2] = (dimension_t){.size = GFX12_NUM_WGP_PER_SA, .dim = HARDWARE_DIM_WGP};
+
+    block->name = "SQ";
+    block->id = HW_IP_BLOCK_SQ;
+    block->instance_count = 1;
+    block->event_id_max = GFX12_SQ_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_SQ_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 9; /* SPM_SE_BLOCK_NAME_SQG from Rust */
+
+    return block;
+}
+
+/* Create GFX12 architecture - based on Rust demo.rs values */
+arch_t* create_gfx12_arch(void) {
+    arch_t* arch = ALLOC(sizeof(arch_t));
+    if (!arch) return NULL;
+
+    /* Initialize architecture fields - from Rust demo.rs */
+    arch->type = ARCH_TYPE_GFX12;
+    arch->num_xcc = GFX12_NUM_XCC;
+    arch->num_se = GFX12_NUM_SE;
+    arch->num_sa = GFX12_NUM_SA;
+    arch->num_cu = GFX12_NUM_CU;
+    arch->num_wgp_per_sa = GFX12_NUM_WGP_PER_SA;
+    arch->command = NULL; /* Will be allocated as needed */
+
+    /* Initialize block map */
+    memset(&arch->block_map, 0, sizeof(block_info_map_t));
+
+    /* Create and add block info entries */
+    block_info_t* cpc_block = create_gfx12_cpc_block();
+    block_info_t* sq_block = create_gfx12_sq_block();
+
+    if (!cpc_block || !sq_block) {
+        FREE(arch);
+        if (cpc_block) {
+            FREE(cpc_block->dimensions);
+            FREE(cpc_block->counter_reg_info);
+            FREE(cpc_block);
+        }
+        if (sq_block) {
+            FREE(sq_block->dimensions);
+            FREE(sq_block->counter_reg_info);
+            FREE(sq_block);
+        }
+        return NULL;
+    }
+
+    /* Add blocks to the map */
+    arch->block_map.blocks[HW_IP_BLOCK_CPC] = cpc_block;
+    arch->block_map.blocks[HW_IP_BLOCK_SQ] = sq_block;
+    arch->block_map.block_count = 2;
+
+    return arch;
+}
