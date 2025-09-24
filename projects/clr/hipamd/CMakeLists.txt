@@ -47,8 +47,7 @@ option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Release,Debug,RelWithDebInfo>:ProgramDatabase>")
 endif()
 
 # Set default HIPCC_BIN_DIR to /opt/rocm/bin

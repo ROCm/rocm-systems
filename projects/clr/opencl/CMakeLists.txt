@@ -14,8 +14,7 @@ option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 
 # Add flags to generate PDB files with full symbolic information
 if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Release,Debug,RelWithDebInfo>:ProgramDatabase>")
 endif()
 
 # Address sanitizer options
