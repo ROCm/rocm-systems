@@ -623,6 +623,8 @@ add_custom_target(
         --include-package-data=plotly --include-package=kaleido
         --include-package-data=kaleido --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
+        --include-package=rocprof_compute_profile
+        --include-package-data=rocprof_compute_profile
         --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
         --include-package=utils --include-package-data=utils rocprof-compute
