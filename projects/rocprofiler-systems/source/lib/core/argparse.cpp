@@ -165,27 +165,33 @@ remove_env(parser_data& _data, std::string_view _env_var)
 }
 
 std::string
+get_rocprofsys_root(void)
+{
+    char*       _tmp = realpath("/proc/self/exe", nullptr);
+    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
+
+    if(_tmp) free(_tmp);
+
+    auto _pos = _exe.find_last_of('/');
+    auto _dir = std::string{ "./" };
+
+    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
+
+    return rocprofsys::common::join("/", _dir, "..");
+}
+
+std::string
 get_internal_libpath(const std::string& _lib)
 {
-    auto _exe = filepath::realpath("/proc/self/exe", nullptr, false);
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = filepath::get_cwd();
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return filepath::realpath(rocprofsys::common::join("/", _dir, "..", "lib", _lib),
-                              nullptr, false);
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "lib", _lib);
 }
+
 std::string
 get_internal_script_path(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir =
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems");
-
-    return _script_dir;
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 }  // namespace
@@ -238,6 +244,9 @@ init_parser(parser_data& _data)
 
     auto _libexecpath = get_realpath(get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
+
+    auto _rootpath = get_realpath(get_rocprofsys_root());
+    update_env(_data, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
 
     return _data;
 }

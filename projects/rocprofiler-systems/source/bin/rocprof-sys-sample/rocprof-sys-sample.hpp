@@ -47,6 +47,9 @@ std::vector<char*>
 get_initial_environment();
 
 std::string
+get_rocprofsys_root(void);
+
+std::string
 get_internal_libpath(const std::string& _lib);
 
 std::string
