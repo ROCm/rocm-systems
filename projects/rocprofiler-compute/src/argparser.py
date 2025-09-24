@@ -147,6 +147,28 @@ Examples:
         "--target", type=str, default=None, help=argparse.SUPPRESS
     )
     profile_group.add_argument(
+        "--attach-pid",
+        type=str,
+        dest="attach_pid",
+        metavar="",
+        default=None,
+        required=False,
+        help="\t\t\tProcess id to be attached for profiling.",
+    )
+    profile_group.add_argument(
+        "--attach-duration-msec",
+        type=str,
+        dest="attach_duration_msec",
+        metavar="",
+        default=None,
+        required=False,
+        help=(
+            "\t\t\tWhen --attach-pid is used, it specifies the attach duration "
+            "in milliseconds. If not set, detachment occurs when "
+            '"Enter" key is pressed.'
+        ),
+    )
+    profile_group.add_argument(
         "-p",
         "--path",
         metavar="",
@@ -163,7 +185,7 @@ Examples:
         metavar="",
         type=str,
         dest="subpath",
-        default="gpu",
+        default="gpu_model",
         required=False,
         help=(
             "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
