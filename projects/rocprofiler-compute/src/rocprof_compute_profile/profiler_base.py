@@ -109,7 +109,7 @@ class RocProfCompute_Base:
                     "Please verify."
                 )
             args.remaining = " ".join(args.remaining)
-        else:
+        elif not args.attach_pid:
             console_error(
                 "Profiling command required. Pass application executable after -- "
                 "at the end of options.\n"
@@ -357,6 +357,9 @@ class RocProfCompute_Base:
         args = self.get_args()
         console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
 
+        if args.attach_pid:
+            args.remaining = ""
+
         self._filter_blocks = self._soc.profiling_setup()
 
         # Write profiling configuration as yaml file
@@ -472,6 +475,22 @@ class RocProfCompute_Base:
             ):
                 options = self.get_profiler_options(str(fname), self._soc)
                 start_time = time.time()
+
+                # Only 1-run case is permitted for attach/detach
+                if (isinstance(options, list) and "--pid" in options) or (
+                    isinstance(options, dict)
+                    and (options.get("ROCPROF_ATTACH_PID") is not None)
+                ):
+                    if total_runs > 1:
+                        console_error(
+                            f"Cannot attach process for profiling as the requested "
+                            f"performance counters exceed the collection capacity of "
+                            f"single pass counter collection. The current setup of "
+                            f"requested counter blocks needs {total_runs} number of "
+                            f'passes. Please use "--block" or "--set" '
+                            f"to adjust or reduce the requested performance metrics!"
+                        )
+
                 run_prof(
                     fname=str(fname),
                     profiler_options=options,

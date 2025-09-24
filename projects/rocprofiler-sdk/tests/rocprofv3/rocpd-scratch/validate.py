@@ -1,7 +1,8 @@
-##############################################################################
+#!/usr/bin/env python3
+
 # MIT License
 #
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +22,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-##############################################################################
+import sys
+import pytest
 
-from pathlib import Path
 
-# NB: Creating a new module to share global vars across modules
-rocprof_compute_home = Path(__file__).resolve().parent
-PROJECT_NAME = "rocprofiler-compute"
+def test_perfetto_data(pftrace_data, json_data):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-HIDDEN_COLUMNS = ["coll_level"]
-HIDDEN_COLUMNS_CLI = ["Description", "coll_level"]
-HIDDEN_COLUMNS_TUI = ["coll_level"]
-HIDDEN_SECTIONS = [1900, 2000]
+    rocprofv3.test_perfetto_data(
+        pftrace_data,
+        json_data,
+        ("scratch_memory",),
+    )
 
-TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
+
+if __name__ == "__main__":
+    exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
+    sys.exit(exit_code)
