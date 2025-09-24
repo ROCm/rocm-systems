@@ -113,11 +113,7 @@ class RocProfCompute:
 
     def detect_profiler(self) -> None:
         profiler_mode = detect_rocprof(self.__args)
-        if str(profiler_mode).endswith("rocprof"):
-            self.__profiler_mode = "rocprofv1"
-        elif str(profiler_mode).endswith("rocprofv2"):
-            self.__profiler_mode = "rocprofv2"
-        elif str(profiler_mode).endswith("rocprofv3"):
+        if str(profiler_mode).endswith("rocprofv3"):
             self.__profiler_mode = "rocprofv3"
         elif str(profiler_mode) == "rocprofiler-sdk":
             self.__profiler_mode = "rocprofiler-sdk"
@@ -303,16 +299,32 @@ class RocProfCompute:
 
         sys.exit(0)
 
+        profiler_classes = {
+            "rocprofv3": (
+                "rocprof_compute_profile.profiler_rocprof_v3",
+                "rocprof_v3_profiler",
+            ),
+            "rocprofiler-sdk": (
+                "rocprof_compute_profile.profiler_rocprofiler_sdk",
+                "rocprofiler_sdk_profiler",
+            ),
+        }
+
+        if self.__profiler_mode not in profiler_classes:
+            console_error("Unsupported profiler")
+
+        module_name, class_name = profiler_classes[self.__profiler_mode]
+        module = importlib.import_module(module_name)
+        profiler_class = getattr(module, class_name)
+
+        return profiler_class(
+            self.__args,
+            self.__profiler_mode,
+            self.__soc[self.__mspec.gpu_arch],
+        )
+
     def create_profiler(self) -> object:
         profiler_classes = {
-            "rocprofv1": (
-                "rocprof_compute_profile.profiler_rocprof_v1",
-                "rocprof_v1_profiler",
-            ),
-            "rocprofv2": (
-                "rocprof_compute_profile.profiler_rocprof_v2",
-                "rocprof_v2_profiler",
-            ),
             "rocprofv3": (
                 "rocprof_compute_profile.profiler_rocprof_v3",
                 "rocprof_v3_profiler",

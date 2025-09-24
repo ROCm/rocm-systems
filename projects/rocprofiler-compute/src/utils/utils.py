@@ -58,7 +58,6 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
 
 rocprof_cmd = ""
 rocprof_args = ""
@@ -144,40 +143,6 @@ def add_counter_extra_config_input_yaml(
     return data
 
 
-def extract_counter_info_extra_config_input_yaml(
-    data: dict[str, Any], counter_name: str
-) -> Optional[dict]:
-    """
-    Extract the full counter dictionary from 'data' for the given counter_name.
-
-    Args:
-        data (dict): The source YAML dict.
-        counter_name (str): The counter to find.
-
-    Returns:
-        Optional[dict]: The full counter dict if found, else None.
-    """
-    counters = data.get("rocprofiler-sdk", {}).get("counters", [])
-    for counter in counters:
-        if counter.get("name") == counter_name:
-            return counter
-    return None
-
-
-def using_v1() -> bool:
-    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprof")
-
-
-def using_v3() -> bool:
-    return "ROCPROF" not in os.environ.keys() or (
-        "ROCPROF" in os.environ.keys()
-        and (
-            os.environ["ROCPROF"].endswith("rocprofv3")
-            or os.environ["ROCPROF"] == "rocprofiler-sdk"
-        )
-    )
-
-
 def get_version(rocprof_compute_home: Path) -> dict[str, str]:
     """Return ROCm Compute Profiler versioning info"""
 
@@ -240,7 +205,8 @@ def detect_rocprof(args: argparse.Namespace) -> str:
     """Detect loaded rocprof version. Resolve path and set cmd globally."""
     global rocprof_cmd
 
-    if os.environ.get("ROCPROF") == "rocprofiler-sdk":
+    # Default is rocprofiler-sdk
+    if os.environ.get("ROCPROF", "rocprofiler-sdk") == "rocprofiler-sdk":
         if not Path(args.rocprofiler_sdk_library_path).exists():
             console_error(
                 "Could not find rocprofiler-sdk library at "
@@ -249,45 +215,22 @@ def detect_rocprof(args: argparse.Namespace) -> str:
         rocprof_cmd = "rocprofiler-sdk"
         console_debug(f"rocprof_cmd is {rocprof_cmd}")
         console_debug(f"rocprofiler_sdk_path is {args.rocprofiler_sdk_library_path}")
-        return rocprof_cmd
-
-    # detect rocprof
-    if not "ROCPROF" in os.environ.keys():
-        # default rocprof
-        rocprof_cmd = "rocprofv3"
     else:
+        # If ROCPROF is not set to rocprofiler-sdk
         rocprof_cmd = os.environ["ROCPROF"]
-
-    # resolve rocprof path
-    rocprof_path = shutil.which(rocprof_cmd)
-
-    if not rocprof_path:
-        rocprof_cmd = "rocprofv3"
-        console_warning(
-            f"Unable to resolve path to {rocprof_cmd} binary. Reverting to default."
-        )
         rocprof_path = shutil.which(rocprof_cmd)
         if not rocprof_path:
             console_error(
-                "Please verify installation or set ROCPROF environment variable "
-                "with full path."
+                f"Unable to resolve path to {rocprof_cmd} binary. "
+                "Please verify installation or set ROCPROF "
+                "environment variable with full path."
             )
-    else:
-        # Resolve any sym links in file path
         rocprof_path = str(Path(rocprof_path.rstrip("\n")).resolve())
+        console_debug(f"rocprof_cmd is {str(rocprof_cmd)}")
         console_debug(f"ROC Profiler: {rocprof_path}")
-
-    console_debug(f"rocprof_cmd is {rocprof_cmd}")
     return rocprof_cmd
 
 
-# TODO: v1/v2 function, to be removed
-def store_app_cmd(args: argparse.Namespace) -> None:
-    global rocprof_args
-    rocprof_args = args
-
-
-@demarcate
 def capture_subprocess_output(
     subprocess_args: list[str],
     new_env: Optional[dict[str, str]] = None,
@@ -766,47 +709,40 @@ def run_prof(
         default_options = ["-i", fname]
         options = default_options + cast(list[str], profiler_options)
 
-    if using_v3():
-        if rocprof_cmd == "rocprofiler-sdk":
-            options["ROCPROF_AGENT_INDEX"] = "absolute"
-        else:
-            options = ["-A", "absolute"] + options
+    if rocprof_cmd == "rocprofiler-sdk":
+        options["ROCPROF_AGENT_INDEX"] = "absolute"
     else:
-        if is_mode_live_attach:
-            console_error(
-                "The live attach/detach only supports rocprofv3 or rocprofiler-sdk"
-            )
+        options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
 
-    if using_v3():
-        # Counter definitions
-        with open(
-            config.rocprof_compute_home
-            / "rocprof_compute_soc"
-            / "profile_configs"
-            / "counter_defs.yaml",
-        ) as file:
-            counter_defs = yaml.safe_load(file)
-        # Extra counter definitions
-        if fpath.with_suffix(".yaml").exists():
-            with open(fpath.with_suffix(".yaml")) as file:
-                counter_defs["rocprofiler-sdk"]["counters"].extend(
-                    yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
-                )
-        # Write counter definitions to a temporary file
-        tmpfile_path = (
-            Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
-            / "counter_defs.yaml"
-        )
-        with open(tmpfile_path, "w") as tmpfile:
-            yaml.dump(counter_defs, tmpfile, default_flow_style=False, sort_keys=False)
-        # Set counter definitions
-        new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
-        console_debug(
-            "Adding env var for counter definitions: "
-            f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
-        )
+    # Counter definitions
+    with open(
+        config.rocprof_compute_home
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "counter_defs.yaml",
+    ) as file:
+        counter_defs = yaml.safe_load(file)
+    # Extra counter definitions
+    if Path(fname).with_suffix(".yaml").exists():
+        with open(Path(fname).with_suffix(".yaml")) as file:
+            counter_defs["rocprofiler-sdk"]["counters"].extend(
+                yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
+            )
+    # Write counter definitions to a temporary file
+    tmpfile_path = (
+        Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
+        / "counter_defs.yaml"
+    )
+    with open(tmpfile_path, "w") as tmpfile:
+        yaml.dump(counter_defs, tmpfile, default_flow_style=False, sort_keys=False)
+    # Set counter definitions
+    new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
+    console_debug(
+        "Adding env var for counter definitions: "
+        f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
+    )
 
     # set required env var for >= mi300
     if mspec.gpu_model.lower() not in (
@@ -910,92 +846,59 @@ def run_prof(
     results_files: list[str] = []
 
     if format_rocprof_output == "rocpd":
-        if rocprof_cmd == "rocprofiler-sdk" or rocprof_cmd.endswith("v3"):
-            # Write results_fbase.csv
-            rocpd_data.convert_db_to_csv(
-                glob.glob(f"{workload_dir}/out/pmc_1/*/*.db")[0],
-                f"{workload_dir}/results_{fbase}.csv",
+        # Write results_fbase.csv
+        rocpd_data.convert_db_to_csv(
+            glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
+            workload_dir + f"/results_{fbase}.csv",
+        )
+        if retain_rocpd_output:
+            shutil.copyfile(
+                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
+                workload_dir + "/" + fbase + ".db",
             )
-            if retain_rocpd_output:
-                shutil.copyfile(
-                    glob.glob(f"{workload_dir}/out/pmc_1/*/*.db")[0],
-                    f"{workload_dir}/{fbase}.db",
-                )
-                console_warning(
-                    f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
-                )
-            # Remove temp directory
-            shutil.rmtree(f"{workload_dir}/out")
-            return
-        else:
-            console_error(
-                "rocpd output format is only supported with "
-                "rocprofiler-sdk or rocprofv3."
+            console_warning(
+                f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
             )
-    elif rocprof_cmd.endswith("v2"):
-        # rocprofv2 has separate csv files for each process
-        results_files = glob.glob(f"{workload_dir}/out/pmc_1/results_*.csv")
+        # Remove temp directory
+        shutil.rmtree(workload_dir + "/" + "out")
+        return
 
-        if len(results_files) == 0:
-            return
+    # rocprofv3 requires additional processing for each process
+    results_files = process_rocprofv3_output(
+        format_rocprof_output, workload_dir, is_timestamps
+    )
 
-        # Combine results into single CSV file
-        combined_results = pd.concat(
-            [pd.read_csv(f) for f in results_files], ignore_index=True
-        )
-
-        # Overwrite column to ensure unique IDs.
-        combined_results["Dispatch_ID"] = range(0, len(combined_results))
-
-        combined_results.to_csv(
-            f"{workload_dir}/out/pmc_1/results_{fbase}.csv", index=False
-        )
-    elif rocprof_cmd.endswith("v3") or rocprof_cmd == "rocprofiler-sdk":
-        # rocprofv3 requires additional processing for each process
-        results_files = process_rocprofv3_output(
-            format_rocprof_output, workload_dir, is_timestamps
-        )
-
-        if rocprof_cmd == "rocprofiler-sdk":
+    if rocprof_cmd == "rocprofiler-sdk":
+        # TODO: as rocprofv3 --kokkos-trace feature improves,
+        # rocprof-compute should make updates accordingly
+        if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
+            process_hip_trace_output(workload_dir, fbase)
+    else:
+        if "--kokkos-trace" in options:
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
-            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-                process_hip_trace_output(workload_dir, fbase)
-        else:
-            if "--kokkos-trace" in options:
-                # TODO: as rocprofv3 --kokkos-trace feature improves,
-                # rocprof-compute should make updates accordingly
-                process_kokkos_trace_output(workload_dir, fbase)
-            elif "--hip-trace" in options:
-                process_hip_trace_output(workload_dir, fbase)
+            process_kokkos_trace_output(workload_dir, fbase)
+        elif "--hip-trace" in options:
+            process_hip_trace_output(workload_dir, fbase)
 
-        if not results_files:
-            console_warning(
-                f"Cannot write results for {fbase}.csv due to no counter "
-                "csv files generated."
-            )
-            return
-
-        # Combine results into single CSV file
+    # Combine results into single CSV file
+    if results_files:
         combined_results = pd.concat(
             [pd.read_csv(f) for f in results_files], ignore_index=True
         )
-
-        # Overwrite column to ensure unique IDs.
-        combined_results["Dispatch_ID"] = range(0, len(combined_results))
-
-        combined_results.to_csv(
-            f"{workload_dir}/out/pmc_1/results_{fbase}.csv", index=False
+    else:
+        console_warning(
+            f"Cannot write results for {fbase}.csv due to no counter "
+            "csv files generated."
         )
+        return
 
-    if not using_v3() and not using_v1():
-        # flatten tcc for applicable mi300 input
-        f = f"{workload_dir}/out/pmc_1/results_{fbase}.csv"
-        xcds = mi_gpu_specs.get_num_xcds(
-            mspec.gpu_arch, mspec.gpu_model, mspec.compute_partition
-        )
-        df = flatten_tcc_info_across_xcds(f, xcds, int(mspec.l2_banks))
-        df.to_csv(f, index=False)
+    # Overwrite column to ensure unique IDs.
+    combined_results["Dispatch_ID"] = range(0, len(combined_results))
+
+    combined_results.to_csv(
+        workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
+    )
 
     if Path(f"{workload_dir}/out").exists():
         # copy and remove out directory if needed
@@ -1226,26 +1129,6 @@ def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
         )
 
 
-def replace_timestamps(workload_dir: str) -> None:
-    ts_path = Path(workload_dir) / "timestamps.csv"
-    if not ts_path.is_file():
-        return
-
-    df_stamps = pd.read_csv(ts_path)
-    if "Start_Timestamp" in df_stamps.columns and "End_Timestamp" in df_stamps.columns:
-        # Update timestamps for all *.csv output files
-        for fname in glob.glob(f"{workload_dir}/*.csv"):
-            if Path(fname).name != "sysinfo.csv":
-                df_pmc_perf = pd.read_csv(fname)
-                df_pmc_perf["Start_Timestamp"] = df_stamps["Start_Timestamp"]
-                df_pmc_perf["End_Timestamp"] = df_stamps["End_Timestamp"]
-                df_pmc_perf.to_csv(fname, index=False)
-    else:
-        console_warning(
-            "Incomplete profiling data detected. Unable to update timestamps.\n"
-        )
-
-
 @demarcate
 def gen_sysinfo(
     workload_name: str,
@@ -1381,62 +1264,6 @@ def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
         my_args += "--quiet"
 
     subprocess.run(my_args, check=True)
-
-
-def flatten_tcc_info_across_xcds(
-    file: str, xcds: int, tcc_channel_per_xcd: int
-) -> pd.DataFrame:
-    """
-    Flatten TCC per channel counters across all XCDs in partition.
-    NB: This func highly depends on the default behavior of rocprofv2 on MI300,
-        which might be broken anytime in the future!
-    """
-    df_orig = pd.read_csv(file)
-
-    ### prepare column headers
-    tcc_cols_orig = []
-    non_tcc_cols_orig = []
-    for c in df_orig.columns.to_list():
-        if "TCC" in c:
-            tcc_cols_orig.append(c)
-        else:
-            non_tcc_cols_orig.append(c)
-
-    cols = non_tcc_cols_orig[:]
-    tcc_cols_in_group: dict[int, list[str]] = {i: [] for i in range(xcds)}
-
-    for col in tcc_cols_orig:
-        for i in range(xcds):
-            # filter the channel index only
-            p = re.compile(r"\[(\d+)\]")
-
-            # pick up the 1st element only
-            def replacement(match: re.Match[str]) -> str:
-                return f"[{int(match.group(1)) + i * tcc_channel_per_xcd}]"
-
-            tcc_cols_in_group[i].append(re.sub(pattern=p, repl=replacement, string=col))
-
-    for i in range(xcds):
-        cols += tcc_cols_in_group[i]
-
-    df = pd.DataFrame(columns=cols)
-
-    ### Rearrange data with extended column names
-    for idx in range(0, len(df_orig.index), xcds):
-        # assume the front none TCC columns are the same for all XCCs
-        df_non_tcc = df_orig.iloc[idx].filter(regex=r"^(?!.*TCC).*$")
-        flatten_list = df_non_tcc.tolist()
-
-        # extract all tcc from one dispatch
-        # NB: assuming default contiguous order might not be safe!
-        df_tcc_all = df_orig.iloc[idx : (idx + xcds)].filter(regex="TCC")
-
-        for idx, row in df_tcc_all.iterrows():
-            flatten_list += row.tolist()
-        # NB: It is not the best perf to append a row once a time
-        df.loc[len(df.index)] = flatten_list
-
-    return df
 
 
 def get_submodules(package_name: str) -> list[str]:
