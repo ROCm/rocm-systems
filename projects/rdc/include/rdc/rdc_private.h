@@ -1,3 +1,5 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #ifndef INCLUDE_RDC_RDC_PRIVATE_H_
 #define INCLUDE_RDC_RDC_PRIVATE_H_
