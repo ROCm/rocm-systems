@@ -31,27 +31,27 @@ typedef enum {
 } hardware_dimensions_t;
 
 typedef enum {
-    HW_IP_BLOCK_ATC,
-    HW_IP_BLOCK_CPC,     /* Add missing CPC */
-    HW_IP_BLOCK_CPF,
-    HW_IP_BLOCK_CPG,
-    HW_IP_BLOCK_DB,
-    HW_IP_BLOCK_EA,
-    HW_IP_BLOCK_GDS,
-    HW_IP_BLOCK_GRBM,
-    HW_IP_BLOCK_GL2C,
-    HW_IP_BLOCK_PA_SC,
-    HW_IP_BLOCK_PA_SU,
-    HW_IP_BLOCK_RMI,
-    HW_IP_BLOCK_SPI,
-    HW_IP_BLOCK_SQ,
-    HW_IP_BLOCK_SX,
-    HW_IP_BLOCK_TA,
-    HW_IP_BLOCK_TCP,
-    HW_IP_BLOCK_TD,
-    HW_IP_BLOCK_TCA,
-    HW_IP_BLOCK_TCC,
-    HW_IP_BLOCK_UMC,
+    HW_IP_BLOCK_ATC,     /* Address Translation Cache */
+    HW_IP_BLOCK_CPC,     /* Command Processor Compute */
+    HW_IP_BLOCK_CPF,     /* Command Processor Fetcher */
+    HW_IP_BLOCK_CPG,     /* Command Processor Graphics */
+    HW_IP_BLOCK_DB,      /* Depth Buffer */
+    HW_IP_BLOCK_EA,      /* Efficiency Arbiter */
+    HW_IP_BLOCK_GDS,     /* Global Data Store */
+    HW_IP_BLOCK_GRBM,    /* Graphics Register Bus Manager */
+    HW_IP_BLOCK_GL2C,    /* Graphics L2 Cache C */
+    HW_IP_BLOCK_PA_SC,   /* Primitive Assembly - Scan Converter */
+    HW_IP_BLOCK_PA_SU,   /* Primitive Assembly - Setup Unit */
+    HW_IP_BLOCK_RMI,     /* Render Backend Memory Interface */
+    HW_IP_BLOCK_SPI,     /* Shader Processor Input */
+    HW_IP_BLOCK_SQ,      /* Shader Processor (Sequencer) */
+    HW_IP_BLOCK_SX,      /* Shader Export */
+    HW_IP_BLOCK_TA,      /* Texture Addresser */
+    HW_IP_BLOCK_TCP,     /* Texture Cache Processor */
+    HW_IP_BLOCK_TD,      /* Texture Data */
+    HW_IP_BLOCK_TCA,     /* Texture Cache Arbiter */
+    HW_IP_BLOCK_TCC,     /* Texture Cache Controller */
+    HW_IP_BLOCK_UMC,     /* Unified Memory Controller */
     HW_IP_BLOCK_SDMA,
     HW_IP_BLOCK_LAST
 } hardware_ip_block_t;
