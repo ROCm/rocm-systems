@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 5, "Block map has 5 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 6, "Block map has 6 blocks");
 
         free_arch(arch);
     }
@@ -362,6 +362,85 @@ static void test_counter_allocation(void) {
     }
 }
 
+/* Test TA block configuration */
+static void test_gfx12_ta_block(void) {
+    printf("\n=== Testing GFX12 TA Block ===\n");
+
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for TA block test");
+
+    if (arch) {
+        block_info_t* ta_block = arch->block_map.blocks[HW_IP_BLOCK_TA];
+        TEST_ASSERT(ta_block != NULL, "TA block exists");
+
+        if (ta_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(ta_block->name, "TA") == 0, "TA block name is correct");
+            TEST_ASSERT(ta_block->id == HW_IP_BLOCK_TA, "TA block type correct");
+            TEST_ASSERT(ta_block->counter_count == 2, "TA block has 2 counters");
+            TEST_ASSERT(ta_block->event_id_max == 254, "TA block max event ID is 254");
+            TEST_ASSERT(ta_block->instance_count == 2, "TA block has 2 instances");
+
+            /* Validate WGP dimensions - TA is a WGP-level block with 4 dimensions */
+            TEST_ASSERT(ta_block->dimensions != NULL, "TA block dimensions exist");
+            TEST_ASSERT(ta_block->dimension_count == 4, "TA block has 4 dimensions");
+            if (ta_block->dimensions && ta_block->dimension_count >= 4) {
+                TEST_ASSERT(ta_block->dimensions[0].dim == HARDWARE_DIM_XCC, "TA dimension 0 is XCC");
+                TEST_ASSERT(ta_block->dimensions[0].size == 1, "TA XCC dimension size is 1");
+                TEST_ASSERT(ta_block->dimensions[1].dim == HARDWARE_DIM_SE, "TA dimension 1 is SE");
+                TEST_ASSERT(ta_block->dimensions[1].size == 4, "TA SE dimension size is 4");
+                TEST_ASSERT(ta_block->dimensions[2].dim == HARDWARE_DIM_SA, "TA dimension 2 is SA");
+                TEST_ASSERT(ta_block->dimensions[2].size == 2, "TA SA dimension size is 2");
+                TEST_ASSERT(ta_block->dimensions[3].dim == HARDWARE_DIM_WGP, "TA dimension 3 is WGP");
+                TEST_ASSERT(ta_block->dimensions[3].size == 4, "TA WGP dimension size is 4");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(ta_block->counter_reg_info != NULL, "TA block counter registers exist");
+            if (ta_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &ta_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &ta_block->counter_reg_info[1];
+
+                /* Counter 0 registers - from aqlprofile reference */
+                TEST_ASSERT(reg0->select_addr == 15040, "TA counter 0 select register (0x3ac0)");
+                TEST_ASSERT(reg0->control_addr == 0, "TA counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 12992, "TA counter 0 lo register (0x32c0)");
+                TEST_ASSERT(reg0->register_addr_hi == 12993, "TA counter 0 hi register (0x32c1)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 15042, "TA counter 1 select register (0x3ac2)");
+                TEST_ASSERT(reg1->control_addr == 0, "TA counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 12994, "TA counter 1 lo register (0x32c2)");
+                TEST_ASSERT(reg1->register_addr_hi == 12995, "TA counter 1 hi register (0x32c3)");
+
+                /* Test counter allocation simulation */
+                reg0->allocation.state = COUNTER_STATE_ALLOCATED;
+                reg0->allocation.event_id = 0x42; /* Valid TA event */
+                reg0->allocation.instance_id = 0; /* First instance */
+                reg0->allocation.user_id = 5678;
+                reg0->allocation.allocation_time = 2000;
+
+                TEST_ASSERT(reg0->allocation.state == COUNTER_STATE_ALLOCATED, "TA counter allocated state");
+                TEST_ASSERT(reg0->allocation.event_id == 0x42, "TA counter event ID set");
+                TEST_ASSERT(reg0->allocation.instance_id == 0, "TA counter instance ID set");
+                TEST_ASSERT(reg0->allocation.user_id == 5678, "TA counter user ID set");
+                TEST_ASSERT(reg0->allocation.allocation_time == 2000, "TA counter allocation time set");
+
+                /* Simulate counter release */
+                reg0->allocation.state = COUNTER_STATE_FREE;
+                reg0->allocation.event_id = 0;
+                reg0->allocation.instance_id = 0;
+                reg0->allocation.user_id = 0;
+                reg0->allocation.allocation_time = 0;
+
+                TEST_ASSERT(reg0->allocation.state == COUNTER_STATE_FREE, "TA counter freed state");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test invalid architecture name */
 static void test_invalid_arch(void) {
     printf("\n=== Testing Invalid Architecture ===\n");
@@ -404,6 +483,7 @@ int main(void) {
     test_gfx12_grbm_block();
     test_gfx12_gl2c_block();
     test_gfx12_spi_block();
+    test_gfx12_ta_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();

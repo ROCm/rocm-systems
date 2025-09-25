@@ -91,6 +91,14 @@
 #define mmSPI_PERFCOUNTER5_LO               12683
 #define mmSPI_PERFCOUNTER5_HI               12682
 
+/* TA registers */
+#define mmTA_PERFCOUNTER0_SELECT            15040  /* 0x3ac0 */
+#define mmTA_PERFCOUNTER0_LO                12992  /* 0x32c0 */
+#define mmTA_PERFCOUNTER0_HI                12993  /* 0x32c1 */
+#define mmTA_PERFCOUNTER1_SELECT            15042  /* 0x3ac2 */
+#define mmTA_PERFCOUNTER1_LO                12994  /* 0x32c2 */
+#define mmTA_PERFCOUNTER1_HI                12995  /* 0x32c3 */
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
@@ -104,6 +112,9 @@
 #define GFX12_SPI_COUNTER_BLOCK_NUM_COUNTERS      6
 #define GFX12_SPI_COUNTER_BLOCK_MAX_EVENT         318
 #define GFX12_SPI_COUNTER_BLOCK_NUM_INSTANCES     1
+#define GFX12_TA_COUNTER_BLOCK_NUM_COUNTERS       2
+#define GFX12_TA_COUNTER_BLOCK_MAX_EVENT          254
+#define GFX12_TA_COUNTER_BLOCK_NUM_INSTANCES      2
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -349,6 +360,58 @@ static block_info_t* create_gfx12_spi_block(void) {
     return block;
 }
 
+/* Create TA block info for GFX12 */
+static block_info_t* create_gfx12_ta_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_TA_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize TA counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmTA_PERFCOUNTER0_SELECT, 0,
+                           mmTA_PERFCOUNTER0_LO, mmTA_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmTA_PERFCOUNTER1_SELECT, 0,
+                           mmTA_PERFCOUNTER1_LO, mmTA_PERFCOUNTER1_HI);
+
+    /* Allocate dimensions - TA is a WGP block with XCC+SE+SA+WGP structure (4 dimensions) */
+    dimension_t* dimensions = ALLOC_ARRAY(dimension_t, 4);
+    if (!dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize WGP dimensions - based on aqlprofile CounterBlockWgpAttr */
+    dimensions[0].dim = HARDWARE_DIM_XCC;
+    dimensions[0].size = GFX12_NUM_XCC;
+    dimensions[1].dim = HARDWARE_DIM_SE;
+    dimensions[1].size = GFX12_NUM_SE;
+    dimensions[2].dim = HARDWARE_DIM_SA;
+    dimensions[2].size = GFX12_NUM_SA;
+    dimensions[3].dim = HARDWARE_DIM_WGP;
+    dimensions[3].size = GFX12_NUM_WGP_PER_SA;
+
+    /* Initialize TA block */
+    block->name = "TA";
+    block->id = HW_IP_BLOCK_TA;
+    block->instance_count = GFX12_TA_COUNTER_BLOCK_NUM_INSTANCES; /* 2 instances */
+    block->event_id_max = GFX12_TA_COUNTER_BLOCK_MAX_EVENT; /* 254 */
+    block->counter_count = GFX12_TA_COUNTER_BLOCK_NUM_COUNTERS; /* 2 counters */
+    block->dimensions = dimensions;
+    block->dimension_count = 4; /* XCC, SE, SA, WGP */
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -372,8 +435,9 @@ arch_t* create_gfx12_arch(void) {
     block_info_t* grbm_block = create_gfx12_grbm_block();
     block_info_t* gl2c_block = create_gfx12_gl2c_block();
     block_info_t* spi_block = create_gfx12_spi_block();
+    block_info_t* ta_block = create_gfx12_ta_block();
 
-    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block) {
+    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -400,6 +464,11 @@ arch_t* create_gfx12_arch(void) {
             FREE(spi_block->counter_reg_info);
             FREE(spi_block);
         }
+        if (ta_block) {
+            FREE(ta_block->dimensions);
+            FREE(ta_block->counter_reg_info);
+            FREE(ta_block);
+        }
         return NULL;
     }
 
@@ -409,7 +478,8 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_GRBM] = grbm_block;
     arch->block_map.blocks[HW_IP_BLOCK_GL2C] = gl2c_block;
     arch->block_map.blocks[HW_IP_BLOCK_SPI] = spi_block;
-    arch->block_map.block_count = 5;
+    arch->block_map.blocks[HW_IP_BLOCK_TA] = ta_block;
+    arch->block_map.block_count = 6;
 
     return arch;
 }
