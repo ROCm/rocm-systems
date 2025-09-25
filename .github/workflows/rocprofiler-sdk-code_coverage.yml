@@ -197,7 +197,6 @@ jobs:
             --slave   /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
