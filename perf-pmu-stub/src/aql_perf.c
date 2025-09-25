@@ -445,7 +445,7 @@ int aql_perf_session_initialize(struct aql_perf_session *session)
     if (session->num_gpus > 0) {
         const char *arch_name = get_arch_name_from_gpu_sysfs(session->gpu_ids[0]);
         if (arch_name) {
-            session->arch = (struct arch_t *)arch_create_by_name(arch_name);
+            session->arch = arch_create_by_name(arch_name);
             if (!session->arch) {
                 aql_err("Session %llu: Failed to create architecture %s for GPU %u",
                         session->session_id, arch_name, session->gpu_ids[0]);
