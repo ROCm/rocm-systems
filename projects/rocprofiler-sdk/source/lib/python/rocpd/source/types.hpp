@@ -482,7 +482,16 @@ struct pmc_info
 
 namespace cereal
 {
-#define LOAD_DATA_FIELD(FIELD)       ar(make_nvp(#FIELD, data.FIELD))
+#define LOAD_DATA_FIELD(FIELD) ar(make_nvp(#FIELD, data.FIELD))
+#define LOAD_DATA_FIELD_OPTIONAL(FIELD)                                                            \
+    try                                                                                            \
+    {                                                                                              \
+        ar(make_nvp(#FIELD, data.FIELD));                                                          \
+    } catch(const cereal::Exception&)                                                              \
+    {                                                                                              \
+        /* Skip optional filed */                                                                  \
+        data.FIELD = decltype(data.FIELD){};                                                       \
+    }
 #define LOAD_DATA_NAMED(NAME, FIELD) ar(make_nvp(NAME, data.FIELD))
 #define LOAD_DATA_VALUE(NAME, ARG)   ar(make_nvp(NAME, ARG))
 
@@ -637,13 +646,7 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::region::decoded_extdata& data)
 {
-    try
-    {
-        LOAD_DATA_FIELD(message);
-    } catch(const cereal::Exception&)
-    {
-        // extdata:message is not present in the region table
-    }
+    LOAD_DATA_FIELD_OPTIONAL(message);
 }
 
 template <typename ArchiveT>
@@ -669,13 +672,7 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::sample::decoded_extdata& data)
 {
-    try
-    {
-        LOAD_DATA_FIELD(message);
-    } catch(const cereal::Exception&)
-    {
-        // extdata:message is not present in the sample table
-    }
+    LOAD_DATA_FIELD_OPTIONAL(message);
 }
 
 template <typename ArchiveT>
