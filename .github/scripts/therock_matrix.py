@@ -6,7 +6,8 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/hipcub": "prim",
     "projects/rocrand": "rand",
-    "projects/hiprand": "rand"
+    "projects/hiprand": "rand",
+    "shared/": "clr",
 }
 
 project_map = {
@@ -20,4 +21,9 @@ project_map = {
         "project_to_test": "rocrand, hiprand",
         "subtree_checkout": "projects/rocrand\nprojects/hiprand",
     },
+    "clr": {
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_HIP_RUNTIME=ON '-DTHEROCK_AMDGPU_FAMILIES=gfx115X-all;gfx120X-all'",
+        "project_to_test": "clr, hip, hip-tests",
+        "subtree_checkout": "projects/clr\nprojects/hip\nprojects/hip-tests",
+    }
 }
