@@ -36,12 +36,24 @@ void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
   auto key = std::make_pair(name, device);
   if (kernels_.find(key) == kernels_.end()) {
     kernels_.insert(std::make_pair(std::make_pair(name, device), k));
-    if (!hip::PlatformState::instance().RegisterLibraryFunction(k)) {
+    auto lib = reinterpret_cast<hipLibrary_t>(this);
+    if (!hip::PlatformState::instance().RegisterLibraryFunction(k, lib)) {
       LogPrintfInfo("Already registered: %p", k);
     }
   }
 }
-
+hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
+  if (maxKernels > 0 && kernels_.empty()) {
+    return hipErrorInvalidValue;
+  }
+  auto count = 0;
+  for (const auto& it : kernels_) {
+    if (count < maxKernels) {
+     k[count++] = it.second;
+    }
+  }
+  return hipSuccess;
+}
 hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
   auto device_id = hip::ihipGetDevice();
   if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
@@ -175,6 +187,33 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
     HIP_RETURN(ret);
   }
   ret = l->Kernel(kernel, kname);
+  HIP_RETURN(ret);
+}
+
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetLibrary, library, kernel);
+  if (library == nullptr || kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (!hip::PlatformState::instance().GetLibraryFunction(kernel, library)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  HIP_INIT_API(hipLibraryEnumerateKernels, kernels, numKernels, library);
+  if (kernels == nullptr || library == nullptr || numKernels == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto l = reinterpret_cast<hip::LibraryContainer*>(library);
+
+  auto ret = l->EnumerateKernels(kernels, numKernels);
+
   HIP_RETURN(ret);
 }
 }  // namespace hip

@@ -516,3 +516,5 @@ hipLibraryLoadFromFile
 hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
+hipKernelGetLibrary
+hipLibraryEnumerateKernels

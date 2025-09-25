@@ -638,6 +638,8 @@ global:
     hipLibraryUnload;
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
+    hipKernelGetLibrary;
+    hipLibraryEnumerateKernels;
 local:
     *;
 } hip_7.1;
