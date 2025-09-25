@@ -40,6 +40,16 @@ THE SOFTWARE.
 #include <sys/resource.h>
 #endif
 
+#if !defined(__HIP_ATOMIC_BACKWARD_COMPAT)
+#define __HIP_ATOMIC_BACKWARD_COMPAT 1
+#endif
+
+#if defined(__has_extension) && __has_extension(clang_atomic_attributes) && __HIP_ATOMIC_BACKWARD_COMPAT
+#define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY [[clang::atomic(fine_grained_memory, remote_memory)]]
+#else
+#define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY
+#endif
+
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()
 #else
@@ -386,6 +396,30 @@ inline bool isP2PSupported(int& d1, int& d2) {
     }
   }
   return supported;
+}
+
+inline bool checkConcurrentKernels(int num_devices) {
+  for (auto i = 0; i < num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int concurrent_kernels = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
+    if (!concurrent_kernels) {
+      return false;
+    }
+  }
+  if (num_devices > 1) {
+    HIP_CHECK(hipSetDevice(0));
+  }
+  return true;
+}
+
+inline bool isXnackOn() {
+  hipDeviceProp_t prop;
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  std::string gfxName(prop.gcnArchName);
+  return gfxName.find("xnack+") != std::string::npos;
 }
 
 inline bool areWarpMatchFunctionsSupported() {
