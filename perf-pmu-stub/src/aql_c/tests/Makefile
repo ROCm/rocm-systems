@@ -1,34 +1,62 @@
-# Makefile for PM4 packet tests (userspace)
+# Makefile for AQL C userspace tests
 CC = gcc
 CFLAGS = -Wall -Wextra -g -std=c99 -DDEBUG
 INCLUDES = -I..
 
-# Test targets
-TEST_SOURCES = test_pm4_packets.c
-TEST_OBJECTS = test_pm4_packets.o
+# Test executables
+TESTS = test_pm4 test_counter_registry
+
+# PM4 test sources
+TEST_PM4_SOURCES = test_pm4_packets.c
+TEST_PM4_OBJECTS = test_pm4_packets.o
 PM4_SOURCES = ../pm4_packets.c
 PM4_OBJECTS = ../pm4_packets.o
 
-# Main test executable
-test_pm4: $(TEST_OBJECTS) $(PM4_OBJECTS)
+# Counter registry test sources
+TEST_COUNTER_SOURCES = test_counter_registry.c
+TEST_COUNTER_OBJECTS = test_counter_registry.o
+COUNTER_SOURCES = ../counter_registry.c ../gfx12_events.c
+COUNTER_OBJECTS = ../counter_registry.o ../gfx12_events.o
+
+# Build all tests
+all: $(TESTS)
+
+# PM4 test executable
+test_pm4: $(TEST_PM4_OBJECTS) $(PM4_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^
 	@echo "Test executable created: test_pm4"
 
-# Compile test source
+# Counter registry test executable
+test_counter_registry: $(TEST_COUNTER_OBJECTS) $(COUNTER_OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $^
+	@echo "Test executable created: test_counter_registry"
+
+# Compile test sources
 test_pm4_packets.o: test_pm4_packets.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-# Compile PM4 packets source (userspace mode)
+test_counter_registry.o: test_counter_registry.c
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile library sources (userspace mode)
 ../pm4_packets.o: ../pm4_packets.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
+../counter_registry.o: ../counter_registry.c
+	$(CC) $(CFLAGS) $(INCLUDES) -DUSERSPACE_BUILD -c $< -o $@
+
+../gfx12_events.o: ../gfx12_events.c
+	$(CC) $(CFLAGS) $(INCLUDES) -DUSERSPACE_BUILD -c $< -o $@
+
 # Run tests
-run-tests: test_pm4
+run-tests: $(TESTS)
 	@echo "Running PM4 packet tests..."
 	./test_pm4
+	@echo "Running counter registry tests..."
+	./test_counter_registry
 
 # Clean targets
 clean:
-	rm -f *.o ../*.o test_pm4
+	rm -f *.o ../*.o $(TESTS)
 
-.PHONY: run-tests clean
+.PHONY: all run-tests clean

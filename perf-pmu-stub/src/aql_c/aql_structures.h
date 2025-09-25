@@ -40,6 +40,7 @@ typedef enum {
     HW_IP_BLOCK_DB,
     HW_IP_BLOCK_EA,
     HW_IP_BLOCK_GDS,
+    HW_IP_BLOCK_GL2C,    /* Add GL2C block */
     HW_IP_BLOCK_GRBM,
     HW_IP_BLOCK_PA_SC,
     HW_IP_BLOCK_PA_SU,
