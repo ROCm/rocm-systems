@@ -130,7 +130,7 @@ get_stream_id(hipStream_t stream)
     }
     return get_stream_map()->rlock(
         [](const stream_map_t& _data, hipStream_t _stream) {
-            ROCP_ERROR_IF(_data.count(_stream) == 0)
+            ROCP_WARNING_IF(_data.count(_stream) == 0)
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
@@ -232,7 +232,7 @@ FuncT create_write_functor(RetT (*func)(Args...))
         {
             if(stream)
             {
-                tracer_data.stream_id        = add_stream(*stream);
+                tracer_data.stream_id        = get_stream_id(*stream);
                 tracer_data.stream_value.ptr = *stream;
             }
             tracing::execute_phase_none_callbacks(callback_contexts,

@@ -52,7 +52,7 @@ set_tests_properties(
         ENVIRONMENT
         "${attachment-env}"
         FAIL_REGULAR_EXPRESSION
-        "failed to retrieve stream ID|ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         FIXTURES_SETUP
         rocprofv3-test-attachment-attach-once
         DISABLED
