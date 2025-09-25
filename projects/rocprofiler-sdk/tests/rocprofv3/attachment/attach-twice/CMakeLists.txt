@@ -44,19 +44,18 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-twice-execute
-    PROPERTIES
-        TIMEOUT
-        120
-        LABELS
-        "integration-tests"
-        ENVIRONMENT
-        "${attachment-env}"
-        FAIL_REGULAR_EXPRESSION
-        "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        FIXTURES_SETUP
-        rocprofv3-test-attachment-attach-twice
-        DISABLED
-        "${IS_DISABLED}")
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${attachment-env}"
+               FAIL_REGULAR_EXPRESSION
+               "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-attachment-attach-twice
+               DISABLED
+               "${IS_DISABLED}")
 
 # Validate the output from the reattached profiling (CSV)
 add_test(

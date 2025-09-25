@@ -44,19 +44,18 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-once-execute
-    PROPERTIES
-        TIMEOUT
-        60
-        LABELS
-        "integration-tests"
-        ENVIRONMENT
-        "${attachment-env}"
-        FAIL_REGULAR_EXPRESSION
-        "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        FIXTURES_SETUP
-        rocprofv3-test-attachment-attach-once
-        DISABLED
-        "${IS_DISABLED}")
+    PROPERTIES TIMEOUT
+               60
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${attachment-env}"
+               FAIL_REGULAR_EXPRESSION
+               "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-attachment-attach-once
+               DISABLED
+               "${IS_DISABLED}")
 
 # Validate the output from the attached profiling
 add_test(
