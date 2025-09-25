@@ -113,6 +113,14 @@
 #define mmTCP_PERFCOUNTER3_LO               13126  /* 0x3346 */
 #define mmTCP_PERFCOUNTER3_HI               13127  /* 0x3347 */
 
+/* TD registers */
+#define mmTD_PERFCOUNTER0_SELECT            15296  /* 0x3bc0 */
+#define mmTD_PERFCOUNTER0_LO                13248  /* 0x33c0 */
+#define mmTD_PERFCOUNTER0_HI                13249  /* 0x33c1 */
+#define mmTD_PERFCOUNTER1_SELECT            15298  /* 0x3bc2 */
+#define mmTD_PERFCOUNTER1_LO                13250  /* 0x33c2 */
+#define mmTD_PERFCOUNTER1_HI                13251  /* 0x33c3 */
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
@@ -132,6 +140,9 @@
 #define GFX12_TCP_COUNTER_BLOCK_NUM_COUNTERS      4
 #define GFX12_TCP_COUNTER_BLOCK_MAX_EVENT         99
 #define GFX12_TCP_COUNTER_BLOCK_NUM_INSTANCES     2
+#define GFX12_TD_COUNTER_BLOCK_NUM_COUNTERS       2
+#define GFX12_TD_COUNTER_BLOCK_MAX_EVENT          127
+#define GFX12_TD_COUNTER_BLOCK_NUM_INSTANCES      2
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -485,6 +496,58 @@ static block_info_t* create_gfx12_tcp_block(void) {
     return block;
 }
 
+/* Create TD block info for GFX12 */
+static block_info_t* create_gfx12_td_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_TD_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize TD counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmTD_PERFCOUNTER0_SELECT, 0,
+                           mmTD_PERFCOUNTER0_LO, mmTD_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmTD_PERFCOUNTER1_SELECT, 0,
+                           mmTD_PERFCOUNTER1_LO, mmTD_PERFCOUNTER1_HI);
+
+    /* Allocate dimensions - TD is a WGP block with XCC+SE+SA+WGP structure (4 dimensions) */
+    dimension_t* dimensions = ALLOC_ARRAY(dimension_t, 4);
+    if (!dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize WGP dimensions - based on aqlprofile CounterBlockWgpAttr */
+    dimensions[0].dim = HARDWARE_DIM_XCC;
+    dimensions[0].size = GFX12_NUM_XCC;
+    dimensions[1].dim = HARDWARE_DIM_SE;
+    dimensions[1].size = GFX12_NUM_SE;
+    dimensions[2].dim = HARDWARE_DIM_SA;
+    dimensions[2].size = GFX12_NUM_SA;
+    dimensions[3].dim = HARDWARE_DIM_WGP;
+    dimensions[3].size = GFX12_NUM_WGP_PER_SA;
+
+    /* Initialize TD block */
+    block->name = "TD";
+    block->id = HW_IP_BLOCK_TD;
+    block->instance_count = GFX12_TD_COUNTER_BLOCK_NUM_INSTANCES; /* 2 instances */
+    block->event_id_max = GFX12_TD_COUNTER_BLOCK_MAX_EVENT; /* 127 */
+    block->counter_count = GFX12_TD_COUNTER_BLOCK_NUM_COUNTERS; /* 2 counters */
+    block->dimensions = dimensions;
+    block->dimension_count = 4; /* XCC, SE, SA, WGP */
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -510,8 +573,9 @@ arch_t* create_gfx12_arch(void) {
     block_info_t* spi_block = create_gfx12_spi_block();
     block_info_t* ta_block = create_gfx12_ta_block();
     block_info_t* tcp_block = create_gfx12_tcp_block();
+    block_info_t* td_block = create_gfx12_td_block();
 
-    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block) {
+    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -548,6 +612,11 @@ arch_t* create_gfx12_arch(void) {
             FREE(tcp_block->counter_reg_info);
             FREE(tcp_block);
         }
+        if (td_block) {
+            FREE(td_block->dimensions);
+            FREE(td_block->counter_reg_info);
+            FREE(td_block);
+        }
         return NULL;
     }
 
@@ -559,7 +628,8 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_SPI] = spi_block;
     arch->block_map.blocks[HW_IP_BLOCK_TA] = ta_block;
     arch->block_map.blocks[HW_IP_BLOCK_TCP] = tcp_block;
-    arch->block_map.block_count = 7;
+    arch->block_map.blocks[HW_IP_BLOCK_TD] = td_block;
+    arch->block_map.block_count = 8;
 
     return arch;
 }

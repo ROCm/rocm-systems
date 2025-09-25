@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 7, "Block map has 7 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 8, "Block map has 8 blocks");
 
         free_arch(arch);
     }
@@ -316,6 +316,63 @@ static void test_gfx12_spi_block(void) {
                 TEST_ASSERT(reg5->register_addr_lo == 12683, "SPI counter 5 LO address");
                 TEST_ASSERT(reg5->register_addr_hi == 12682, "SPI counter 5 HI address");
                 TEST_ASSERT(reg5->control_addr == 0, "SPI counter 5 has no control address");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
+/* Test GFX12 TD block configuration */
+static void test_gfx12_td_block(void) {
+    printf("\n=== Testing GFX12 TD Block ===\n");
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for TD block test");
+
+    if (arch) {
+        block_info_t* td_block = arch->block_map.blocks[HW_IP_BLOCK_TD];
+        TEST_ASSERT(td_block != NULL, "TD block exists");
+
+        if (td_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(td_block->name, "TD") == 0, "TD block name is correct");
+            TEST_ASSERT(td_block->id == HW_IP_BLOCK_TD, "TD block type correct");
+            TEST_ASSERT(td_block->counter_count == 2, "TD block has 2 counters");
+            TEST_ASSERT(td_block->event_id_max == 127, "TD block max event ID is 127");
+            TEST_ASSERT(td_block->instance_count == 2, "TD block has 2 instances");
+
+            /* Validate WGP dimensions - TD is a WGP-level block with 4 dimensions */
+            TEST_ASSERT(td_block->dimensions != NULL, "TD block dimensions exist");
+            TEST_ASSERT(td_block->dimension_count == 4, "TD block has 4 dimensions");
+
+            if (td_block->dimensions && td_block->dimension_count >= 4) {
+                TEST_ASSERT(td_block->dimensions[0].dim == HARDWARE_DIM_XCC, "TD dimension 0 is XCC");
+                TEST_ASSERT(td_block->dimensions[0].size == 1, "TD XCC dimension size is 1");
+                TEST_ASSERT(td_block->dimensions[1].dim == HARDWARE_DIM_SE, "TD dimension 1 is SE");
+                TEST_ASSERT(td_block->dimensions[1].size == 4, "TD SE dimension size is 4");
+                TEST_ASSERT(td_block->dimensions[2].dim == HARDWARE_DIM_SA, "TD dimension 2 is SA");
+                TEST_ASSERT(td_block->dimensions[2].size == 2, "TD SA dimension size is 2");
+                TEST_ASSERT(td_block->dimensions[3].dim == HARDWARE_DIM_WGP, "TD dimension 3 is WGP");
+                TEST_ASSERT(td_block->dimensions[3].size == 4, "TD WGP dimension size is 4");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(td_block->counter_reg_info != NULL, "TD block counter registers exist");
+            if (td_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &td_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &td_block->counter_reg_info[1];
+
+                /* Counter 0 registers - based on estimated addresses */
+                TEST_ASSERT(reg0->select_addr == 15296, "TD counter 0 select register (0x3bc0)");
+                TEST_ASSERT(reg0->control_addr == 0, "TD counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 13248, "TD counter 0 lo register (0x33c0)");
+                TEST_ASSERT(reg0->register_addr_hi == 13249, "TD counter 0 hi register (0x33c1)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 15298, "TD counter 1 select register (0x3bc2)");
+                TEST_ASSERT(reg1->control_addr == 0, "TD counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 13250, "TD counter 1 lo register (0x33c2)");
+                TEST_ASSERT(reg1->register_addr_hi == 13251, "TD counter 1 hi register (0x33c3)");
             }
         }
 
@@ -578,6 +635,7 @@ int main(void) {
     test_gfx12_spi_block();
     test_gfx12_ta_block();
     test_gfx12_tcp_block();
+    test_gfx12_td_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
