@@ -99,7 +99,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
   p.fn = CpuCallback;
   p.userData = nullptr;
   HIP_CHECK(hipGraphAddHostNode(&cpuGraphNode, graph, nullptr, 0, &p));
-
+  HIP_CHECK(hipGraphDestroy(graph));
   addGpuKernel<<<1, 1, 0, stream>>>(i_d);
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -795,8 +795,6 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
   HipTest::initArrays(&A_d1, &B_d1, &C_d1, &A_h1, &B_h1, &C_h1, SIZE, false);
 
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d1, A_h1, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d1, B_h1, Nbytes, hipMemcpyHostToDevice, stream));

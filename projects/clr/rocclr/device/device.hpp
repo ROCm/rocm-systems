@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1351,10 +1351,11 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool isFenceDirty() const = 0;
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
-  //! Dispatch captured AQL packet
-  virtual bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                 amd::AccumulateCommand* vcmd = nullptr) = 0;
 
+  //! Dispatches multiple AQL packets in a single batch operation
+  virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                                      const std::vector<std::string>& kernelNames,
+                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1396,7 +1397,8 @@ class MemObjMap : public AllStatic {
     size_t psize;                              ///< Total size of the device memory allocation
     size_t poffset;                            ///< Offset within the allocation
     int owners_process_id;                     ///< ID of the process that owns the allocation
-    char reserved[LP64_SWITCH(20, 12)];        ///< Reserved for future extensions
+    int owners_device_id;                      ///< ID of the device that owns the allocation
+    char reserved[LP64_SWITCH(16, 8)];        ///< Reserved for future extensions
 
     bool operator<(const IpcMemHandle& h) const {
       int cmp = std::memcmp(ipc_handle, h.ipc_handle, AMD_IPC_MEM_HANDLE_SIZE);
