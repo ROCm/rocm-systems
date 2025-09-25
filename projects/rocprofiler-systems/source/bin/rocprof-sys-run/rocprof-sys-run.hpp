@@ -32,6 +32,14 @@
 #include <string_view>
 #include <vector>
 
+enum update_mode : int
+{
+    UPD_REPLACE = 0x1,
+    UPD_PREPEND = 0x2,
+    UPD_APPEND  = 0x3,
+    UPD_WEAK    = 0x4,
+};
+
 using parser_data_t = rocprofsys::argparse::parser_data;
 
 void

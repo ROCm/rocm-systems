@@ -43,6 +43,7 @@
 #include <string_view>
 #include <unistd.h>
 #include <vector>
+
 namespace color = tim::log::color;
 using namespace timemory::join;
 using tim::get_env;
@@ -131,51 +132,12 @@ get_initial_environment()
     update_env(_env, "LD_LIBRARY_PATH", tim::filepath::dirname(_dl_libpath), UPD_APPEND);
     update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
 
-    // libomptarget discovery
-    auto rocm_dir  = get_env<std::string>("ROCM_PATH", "/opt/rocm", false);
-    auto rocmv_dir = get_env<std::string>("ROCmVersion_DIR", "", false);
-
-    // strip one trailing slash if present
-    auto strip = [](std::string s) {
-        if(!s.empty() && s.back() == '/') s.pop_back();
-        return s;
-    };
-    rocm_dir  = strip(rocm_dir);
-    rocmv_dir = strip(rocmv_dir);
-
-    // build candidate libdirs
-    std::vector<std::string> llvm_candidates = {
-        rocmv_dir.empty() ? std::string{} : rocmv_dir + "/llvm/lib",
-        rocmv_dir.empty() ? std::string{} : rocmv_dir + "/lib",
-        rocm_dir + "/llvm/lib",
-        rocm_dir + "/lib/llvm/lib",
-        "/opt/rocm/llvm/lib",
-        "/opt/rocm/lib/llvm/lib",
-    };
-
-    // to check if libomptarget.so exist and is readable
-    auto has_libomptarget = [](const std::string& dir) -> bool {
-        if(dir.empty()) return false;
-        std::string path = dir + "/libomptarget.so";
-        return (::access(path.c_str(), R_OK) == 0);
-    };
-
-    bool added_llvm_dir = false;
-
-    for(const auto& dir : llvm_candidates)
+    // Discover LLVM libdir containing libomptarget.so and append to LD_LIBRARY_PATH
+    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose > 0);
+       !llvm_dir.empty())
     {
-        if(has_libomptarget(dir))
-        {
-            update_env(_env, "LD_LIBRARY_PATH", dir, UPD_APPEND);
-            if(verbose >= 1)
-                stream(std::cerr, color::info()) << "Using LLVM libdir: " << dir << "\n";
-            added_llvm_dir = true;
-            break;
-        }
+        update_env(_env, "LD_LIBRARY_PATH", llvm_dir, UPD_APPEND);
     }
-    if(verbose >= 1 && !added_llvm_dir)
-        stream(std::cerr, color::warning())
-            << "libomptarget.so not found in candidate LLVM libdirs\n";
 
     auto _mode = get_env<std::string>("ROCPROFSYS_MODE", "sampling", false);
 
