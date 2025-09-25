@@ -248,7 +248,7 @@ union CopyMetadata {
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
 class GraphKernelArgManager {
  public:
-  virtual address AllocKernArg(size_t size, size_t alignment) = 0;
+  virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
 };
 
 /*! \brief An operation that is submitted to a command queue.
@@ -341,8 +341,8 @@ class Command : public Event {
     return packet;
   }
 
-  address getGraphKernArg(int size, int alignment) {
-    return graphKernArgMgr_->AllocKernArg(size, alignment);
+  address getGraphKernArg(int size, int alignment, int devId) {
+    return graphKernArgMgr_->AllocKernArg(size, alignment, devId);
   }
 
   //! Overload new/delete for fast commands allocation/destruction
