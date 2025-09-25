@@ -61,6 +61,9 @@ extern bool debug_enable;
 #define aql_info(fmt, ...) \
     printk(KERN_INFO "AQL_PERF: " fmt, ##__VA_ARGS__)
 
+#define aql_warn(fmt, ...) \
+    printk(KERN_WARNING "AQL_PERF: WARNING: " fmt, ##__VA_ARGS__)
+
 #define aql_err(fmt, ...) \
     printk(KERN_ERR "AQL_PERF: ERROR: " fmt, ##__VA_ARGS__)
 
