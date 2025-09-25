@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 13, "Block map has 13 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 14, "Block map has 14 blocks");
 
         free_arch(arch);
     }
@@ -712,6 +712,70 @@ static void test_gfx12_pa_su_block(void) {
     }
 }
 
+static void test_gfx12_gds_block(void) {
+    printf("\n=== Testing GFX12 GDS Block ===\n");
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for GDS block test");
+
+    if (arch) {
+        block_info_t* gds_block = arch->block_map.blocks[HW_IP_BLOCK_GDS];
+        TEST_ASSERT(gds_block != NULL, "GDS block exists");
+
+        if (gds_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(gds_block->name, "GDS") == 0, "GDS block name is correct");
+            TEST_ASSERT(gds_block->id == HW_IP_BLOCK_GDS, "GDS block type correct");
+            TEST_ASSERT(gds_block->counter_count == 4, "GDS block has 4 counters");
+            TEST_ASSERT(gds_block->event_id_max == 121, "GDS block max event ID is 121");
+            TEST_ASSERT(gds_block->instance_count == 1, "GDS block has 1 instance");
+
+            /* Validate XCC dimensions - GDS is a XCC block with 1 dimension */
+            TEST_ASSERT(gds_block->dimensions != NULL, "GDS block dimensions exist");
+            TEST_ASSERT(gds_block->dimension_count == 1, "GDS block has 1 dimension");
+
+            if (gds_block->dimensions && gds_block->dimension_count >= 1) {
+                TEST_ASSERT(gds_block->dimensions[0].dim == HARDWARE_DIM_XCC, "GDS dimension 0 is XCC");
+                TEST_ASSERT(gds_block->dimensions[0].size == 1, "GDS XCC dimension size is 1");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(gds_block->counter_reg_info != NULL, "GDS block counter registers exist");
+            if (gds_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &gds_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &gds_block->counter_reg_info[1];
+                counter_reg_info_t* reg2 = &gds_block->counter_reg_info[2];
+                counter_reg_info_t* reg3 = &gds_block->counter_reg_info[3];
+
+                /* Counter 0 registers */
+                TEST_ASSERT(reg0->select_addr == 14352, "GDS counter 0 select register (0x3810)");
+                TEST_ASSERT(reg0->control_addr == 0, "GDS counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 12816, "GDS counter 0 lo register (0x3210)");
+                TEST_ASSERT(reg0->register_addr_hi == 12817, "GDS counter 0 hi register (0x3211)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 14354, "GDS counter 1 select register (0x3812)");
+                TEST_ASSERT(reg1->control_addr == 0, "GDS counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 12818, "GDS counter 1 lo register (0x3212)");
+                TEST_ASSERT(reg1->register_addr_hi == 12819, "GDS counter 1 hi register (0x3213)");
+
+                /* Counter 2 registers */
+                TEST_ASSERT(reg2->select_addr == 14356, "GDS counter 2 select register (0x3814)");
+                TEST_ASSERT(reg2->control_addr == 0, "GDS counter 2 no control register");
+                TEST_ASSERT(reg2->register_addr_lo == 12820, "GDS counter 2 lo register (0x3214)");
+                TEST_ASSERT(reg2->register_addr_hi == 12821, "GDS counter 2 hi register (0x3215)");
+
+                /* Counter 3 registers */
+                TEST_ASSERT(reg3->select_addr == 14358, "GDS counter 3 select register (0x3816)");
+                TEST_ASSERT(reg3->control_addr == 0, "GDS counter 3 no control register");
+                TEST_ASSERT(reg3->register_addr_lo == 12822, "GDS counter 3 lo register (0x3216)");
+                TEST_ASSERT(reg3->register_addr_hi == 12823, "GDS counter 3 hi register (0x3217)");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -973,6 +1037,7 @@ int main(void) {
     test_gfx12_db_block();
     test_gfx12_pa_sc_block();
     test_gfx12_pa_su_block();
+    test_gfx12_gds_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
