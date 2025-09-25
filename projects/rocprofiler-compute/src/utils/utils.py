@@ -45,7 +45,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union, cast, dict
+from typing import Any, Optional, Union, cast
 
 import pandas as pd
 import yaml
