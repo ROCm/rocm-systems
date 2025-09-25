@@ -3323,6 +3323,11 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int* count;
         hipLibrary_t  library;
     } hipLibraryGetKernelCount;
+    struct
+    {
+        hipStream_t dst;
+        hipStream_t src;
+    } hipStreamCopyAttributes;
 #endif
 } rocprofiler_hip_api_args_t;
 

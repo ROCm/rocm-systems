@@ -626,6 +626,7 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryUnload, hipLibraryUnload, hipLibraryUnload_fn, library);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetKernel, hipLibraryGetKernel, hipLibraryGetKernel_fn, pKernel, library, name);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetKernelCount, hipLibraryGetKernelCount, hipLibraryGetKernelCount_fn, count, library);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamCopyAttributes, hipStreamCopyAttributes, hipStreamCopyAttributes_fn, dst, src);
 #endif
 // clang-format on
 
