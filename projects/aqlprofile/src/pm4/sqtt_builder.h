@@ -343,9 +343,9 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
           builder.BuildWriteWaitIdlePacket(cmd_buffer);
           // Program the thread trace mode register, mode ON
           builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_MODE_ADDR,
-                                          Primitives::sqtt_mode_on_value(config->buffer_num > 1));
+                                          Primitives::sqtt_mode_on_value(!config->buffer_data.empty()));
 
-          if (config->buffer_num > 1)
+          if (!config->buffer_data.empty())
           {
             builder.BuildWriteWaitIdlePacket(cmd_buffer);
             uint64_t buf2_addr = reinterpret_cast<uint64_t>(config->buffer_data.at(0));
@@ -361,7 +361,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       SetGRBMToBroadcast(cmd_buffer);
     } else {
       // Not implemented
-      if (config->buffer_num > 1) abort();
+      if (!config->buffer_data.empty()) abort();
 
       SetGRBMToBroadcast(cmd_buffer);
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
@@ -641,7 +641,6 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
   void GetStatusPacket(CmdBuffer* cmd_buffer, TraceConfig* config, uint32_t* addr, int se_id) override
   {
-    assert(se_id == 0);
     int se_per_xcc = se_number_total / GetXCCNumber();
     XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
     Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
@@ -656,7 +655,6 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
   void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, int se_id) override
   {
-    assert(se_id == 0);
     int se_per_xcc = se_number_total / GetXCCNumber();
     uint64_t base_addr = reinterpret_cast<uint64_t>(addr);
 

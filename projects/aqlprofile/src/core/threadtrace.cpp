@@ -192,6 +192,7 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
   trace_config.perfMASK = ~0u;
   trace_config.se_mask = 0x1;
   trace_config.enable_rt_timestamp = true;
+  size_t buffer_num = 1;
 
   const size_t se_number_total = pm4_factory->GetShaderEnginesNumber();
   uint64_t buffer_size = DEFAULT_TRACE_BUFFER_SIZE;
@@ -225,7 +226,7 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
           break;
         case AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS:
           if (p->value < 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-          trace_config.buffer_num = p->value;
+          buffer_num = p->value;
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK:
           trace_config.perfMASK = p->value;
@@ -248,11 +249,11 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
   memorymgr->CreateTraceControlBuf(control_size + THREAD_TRACE_PREFIX_SIZE);
   memorymgr->CreateOutputBuf(buffer_size);
 
-  if (trace_config.buffer_num > 1)
+  if (buffer_num > 1)
   {
     if (trace_config.se_mask != 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-    for (int64_t i=1; i<trace_config.buffer_num; i++)
+    for (int64_t i=1; i<buffer_num; i++)
       trace_config.buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
 
     // First == Last buf for ring
