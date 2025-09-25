@@ -153,21 +153,21 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
  public:
   GraphKernelArgManager() : amd::ReferenceCountedObject() {}
   ~GraphKernelArgManager() {
-    //! Release the kernel arg pools
-    if (device_ != nullptr) {
-      for (auto& element : kernarg_graph_) {
-        device_->hostFree(element.kernarg_pool_addr_, element.kernarg_pool_size_);
+    for (auto kernarg : kernarg_graph_) {
+      //! Release the kernel arg pools
+      for (auto& element : kernarg.second) {
+        kernarg.first->hostFree(element.kernarg_pool_addr_, element.kernarg_pool_size_);
       }
-      kernarg_graph_.clear();
+      kernarg.second.clear();
     }
   }
 
-  // Allocate kernel arg pool on device for the given size.
+  //! Allocate kernel arg pool on device for the given size.
   bool AllocGraphKernargPool(size_t pool_size, amd::Device* device);
 
   // Allocate kernel args from current chunck for given size and alignment.
   // If kernel arg pool is full allocate new chunck and alloc kern args from new pool.
-  address AllocKernArg(size_t size, size_t alignment) override;
+  address AllocKernArg(size_t size, size_t alignment, int devId) override;
 
   // Do HDP flush/When HDP flush register is invalid fallback to Readback
   void ReadBackOrFlush();
@@ -181,8 +181,8 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
     size_t kernarg_pool_offset_;  //! Current offset in the kernel arg alloc
   };
   bool device_kernarg_pool_ = false;  //! Indicate if kernel pool in device mem
-  amd::Device* device_ = nullptr;     //! Device from where kernel arguments are allocated
-  std::vector<KernelArgPoolGraph> kernarg_graph_;  //! Vector of allocated kernarg pool
+  std::unordered_map<amd::Device*, std::vector<KernelArgPoolGraph>>
+      kernarg_graph_;  //! Vector of allocated kernarg pool per device
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
@@ -870,7 +870,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
   static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
-  void GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph);
+  void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
 

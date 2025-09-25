@@ -3691,7 +3691,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     // Allocate buffer to hold kernel arguments
     if (isGraphCapture) {
       argBuffer = command_->getGraphKernArg(gpuKernel.KernargSegmentByteSize(),
-                                            gpuKernel.KernargSegmentAlignment());
+                                            gpuKernel.KernargSegmentAlignment(), dev().index());
       command_->SetKernelName(gpuKernel.getDemangledName().c_str());
     } else {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
