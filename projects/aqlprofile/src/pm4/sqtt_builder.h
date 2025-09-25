@@ -337,7 +337,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       SetGRBMToBroadcast(cmd_buffer);
     } else {
       // Not implemented
-      if (config->buffer_num > 1) abort();
+      if (!config->buffer_data.empty()) abort();
 
       SetGRBMToBroadcast(cmd_buffer);
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
