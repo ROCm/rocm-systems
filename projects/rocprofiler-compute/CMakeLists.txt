@@ -388,19 +388,22 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
 )
 
-add_test(
-    NAME test_profile_kokkos
-    COMMAND
-        ${Python3_EXECUTABLE} -m pytest -m kokkos --junitxml=tests/test_profile_kokkos.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
+if(ENABLE_KOKKOS)
+    add_test(
+        NAME test_profile_kokkos
+        COMMAND
+            ${Python3_EXECUTABLE} -m pytest -m kokkos
+            --junitxml=tests/test_profile_kokkos.xml ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    )
 
-# Set environment variable for kokkos test
-set_tests_properties(
-    test_profile_kokkos
-    PROPERTIES ENVIRONMENT "USE_MOCK_KOKKOS=${USE_MOCK_KOKKOS}"
-)
+    # Set environment variable for kokkos test
+    set_tests_properties(
+        test_profile_kokkos
+        PROPERTIES ENVIRONMENT "USE_MOCK_KOKKOS=${USE_MOCK_KOKKOS}"
+    )
+endif()
 
 set_tests_properties(
     test_profile_kernel_execution
