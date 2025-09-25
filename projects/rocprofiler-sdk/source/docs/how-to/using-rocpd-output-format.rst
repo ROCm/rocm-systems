@@ -399,13 +399,13 @@ rocpd2summary - Statistical Analysis Tool
 .. code-block:: bash
 
    # Include all available domains
-   rocpd2summary -i profile.db --region-categories HIP ROCR MARKERS KERNEL
+   rocpd2summary -i profile.db --region-categories HIP HSA MARKERS KERNEL
 
    # Focus on GPU kernel analysis only
    rocpd2summary -i profile.db --region-categories KERNEL
 
    # Exclude markers to speed up processing
-   rocpd2summary -i profile.db --region-categories HIP ROCR KERNEL
+   rocpd2summary -i profile.db --region-categories HIP HSA KERNEL
 
 **Advanced Analysis Options:**
 
@@ -422,16 +422,17 @@ rocpd2summary - Statistical Analysis Tool
 
 **Report Content:**
 - **Kernel Statistics:** Execution time distributions, call frequencies, grid/block sizes
-- **API Timing:** HIP/ROCr function call durations and frequencies
+- **API Timing:** HIP/HSA function call durations and frequencies
 - **Memory Analysis:** Transfer patterns, bandwidth utilization, allocation statistics  
 - **Device Utilization:** GPU occupancy patterns and idle time analysis
 - **Synchronization Overhead:** Barrier and synchronization point analysis
 
 **Output Files:**
-- ``summary_kernel.{format}`` - GPU kernel execution summary
-- ``summary_hip_api.{format}`` - HIP API call statistics
-- ``summary_rocr_api.{format}`` - ROCr runtime API analysis
-- ``summary_memory.{format}`` - Memory operation statistics
+- ``kernels_summary.{format}`` - GPU kernel execution summary
+- ``hip_summary.{format}`` - HIP API call statistics
+- ``hsa_summary.{format}`` - HSA runtime API analysis
+- ``memory_summary.{format}`` - Memory operation statistics
+- ``markers_summary.{format}`` - Marker event analysis
 
 Summary
 +++++++
@@ -579,14 +580,14 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
 
    # Aggregate analysis across multiple profiling sessions
    rocpd query -i session1.db session2.db session3.db \
-               --query "SELECT kernel_name, AVG(duration_ns) FROM kernels GROUP BY kernel_name"
+               --query "SELECT name, AVG(duration) FROM kernels GROUP BY name"
    
    # Cross-rank performance comparison for MPI applications
    rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank
    
    # Multi-node scaling analysis
    rocpd query -i node_*.db \
-               --query "SELECT COUNT(*) as total_kernels, SUM(duration_ns) as total_time FROM kernels"
+               --query "SELECT COUNT(*) as total_kernels, SUM(duration) as total_time FROM kernels"
 
 **Distributed Computing Workflows**
 
@@ -602,7 +603,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    
    # Analyze load balancing across ranks
    rocpd query -i results_rank_*.db \
-               --query "SELECT pid, COUNT(*) as kernel_count, AVG(duration_ns) as avg_duration FROM kernels GROUP BY pid"
+               --query "SELECT pid, COUNT(*) as kernel_count, AVG(duration) as avg_duration FROM kernels GROUP BY pid"
 
 **Multi-GPU Scaling Analysis:**
 
@@ -613,7 +614,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    
    # Aggregate device utilization analysis
    rocpd query -i multi_gpu_results.db \
-               --query "SELECT device_id, COUNT(*) as operations, SUM(duration_ns) as total_time FROM kernels GROUP BY device_id"
+               --query "SELECT device_id, COUNT(*) as operations, SUM(duration) as total_time FROM kernels GROUP BY device_id"
    
    # Cross-device performance comparison
    rocpd summary -i multi_gpu_results.db --domain-summary
@@ -631,7 +632,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    
    # Analyze performance trends over time
    rocpd query -i profile_hour_*.db \
-               --query "SELECT AVG(duration_ns) as avg_kernel_time, COUNT(*) as kernel_count FROM kernels" \
+               --query "SELECT AVG(duration) as avg_kernel_time, COUNT(*) as kernel_count FROM kernels" \
                --format csv -o performance_trends
 
 **Comparative Analysis:**
@@ -640,7 +641,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
 
    # Compare baseline vs optimized performance
    rocpd query -i baseline.db optimized.db \
-               --query "SELECT kernel_name, AVG(duration_ns) as avg_time FROM kernels GROUP BY kernel_name ORDER BY avg_time DESC"
+               --query "SELECT kernel, AVG(duration) as avg_time FROM kernels GROUP BY name ORDER BY avg_time DESC"
    
    # Generate comparative summary reports
    rocpd summary -i baseline.db optimized.db --format html -o comparison_report
@@ -720,7 +721,7 @@ rocpd query - SQL Query Engine
 Database Schema and Views
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-rocpd databases provide comprehensive views for analysis:
+rocpd databases provide comprehensive views for analysis.  In general, any queries should be built using the `data_views`:
 
 **Core Data Views:**
 
@@ -735,8 +736,8 @@ rocpd databases provide comprehensive views for analysis:
    SELECT * FROM top_kernels;
    
    -- API trace information
-   SELECT * FROM hip_api_trace;
-   SELECT * FROM rocr_api_trace;
+   SELECT * FROM regions_and_samples WHERE category LIKE 'HIP_%';
+   SELECT * FROM regions_and_samples WHERE category LIKE 'RCCL_%;
    
    -- Performance counters
    SELECT * FROM counters_collection;
@@ -751,7 +752,7 @@ rocpd databases provide comprehensive views for analysis:
    
    -- Marker and region data
    SELECT * FROM regions;
-   SELECT * FROM markers;
+   SELECT * FROM regions_and_samples WHERE category LIKE 'MARKERS_%';
 
 **Summary and Analysis Views:**
 
@@ -762,15 +763,10 @@ rocpd databases provide comprehensive views for analysis:
    
    -- Memory bandwidth analysis
    SELECT * FROM memory_copy_summary;
-   
-   -- API call frequency statistics
-   SELECT * FROM api_call_statistics;
-   
-   -- Device utilization metrics
-   SELECT * FROM device_utilization;
+
 
 Basic Query Examples
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 **Simple Data Exploration:**
 
@@ -780,7 +776,7 @@ Basic Query Examples
    rocpd query -i profile.db --query "SELECT * FROM rocpd_info_agents"
    
    # Show top 10 longest-running kernels
-   rocpd query -i profile.db --query "SELECT kernel_name, duration_ns FROM kernels ORDER BY duration_ns DESC LIMIT 10"
+   rocpd query -i profile.db --query "SELECT name, duration FROM kernels ORDER BY duration DESC LIMIT 10"
    
    # Count total number of kernel dispatches
    rocpd query -i profile.db --query "SELECT COUNT(*) as total_kernels FROM kernels"
@@ -795,7 +791,7 @@ Basic Query Examples
    
    # Cross-session performance comparison
    rocpd query -i baseline.db optimized.db \
-               --query "SELECT kernel_name, AVG(duration_ns) as avg_duration FROM kernels GROUP BY kernel_name"
+               --query "SELECT name, AVG(duration) as avg_duration FROM kernels GROUP BY name"
 
 **Advanced Analytics:**
 
@@ -804,29 +800,33 @@ Basic Query Examples
    # Kernel performance analysis with statistics
    rocpd query -i profile.db --query "
    SELECT 
-       kernel_name,
+       name,
        COUNT(*) as dispatch_count,
-       MIN(duration_ns) as min_duration,
-       AVG(duration_ns) as avg_duration,
-       MAX(duration_ns) as max_duration,
-       SUM(duration_ns) as total_duration
+       MIN(duration) as min_duration,
+       AVG(duration) as avg_duration,
+       MAX(duration) as max_duration,
+       SUM(duration) as total_duration
    FROM kernels 
-   GROUP BY kernel_name 
+   GROUP BY name 
    ORDER BY total_duration DESC"
 
 **Memory Transfer Analysis:**
 
 .. code-block:: bash
 
-   # Memory copy performance by direction
+   # Memory copy analysis by direction
    rocpd query -i profile.db --query "
    SELECT 
-       copy_kind,
+       name,
+       src_agent_type,
+       src_agent_abs_index,
+       dst_agent_type,
+       dst_agent_abs_index,
        COUNT(*) as transfer_count,
-       SUM(size_bytes) as total_bytes,
-       AVG(bandwidth_gb_per_sec) as avg_bandwidth
+       SUM(size) as total_bytes,
+       SUM(duration) as total_duration
    FROM memory_copies 
-   GROUP BY copy_kind 
+   GROUP BY src_agent_abs_index 
    ORDER BY total_bytes DESC"
 
 Output Format Options
@@ -879,7 +879,7 @@ Output Format Options
 .. code-block:: bash
 
    # Generate PDF report with monospace formatting
-   rocpd query -i profile.db --query "SELECT kernel_name, duration_ns FROM top_kernels" --format pdf -o kernel_report
+   rocpd query -i profile.db --query "SELECT name, duration FROM top_kernels" --format pdf -o kernel_report
 
 Script-Based Analysis
 ~~~~~~~~~~~~~~~~~~~~~
@@ -893,18 +893,18 @@ Execute complex SQL scripts with view definitions and custom analysis logic:
    -- Create temporary views for complex analysis
    CREATE TEMP VIEW kernel_stats AS
    SELECT 
-       kernel_name,
+       name,
        COUNT(*) as dispatch_count,
-       AVG(duration_ns) as avg_duration,
-       STDDEV(duration_ns) as duration_stddev
+       AVG(duration) as avg_duration,
+       STDDEV(duration) as duration_stddev
    FROM kernels 
-   GROUP BY kernel_name;
+   GROUP BY name;
    
    CREATE TEMP VIEW performance_outliers AS
    SELECT k.*, ks.avg_duration, ks.duration_stddev
    FROM kernels k
-   JOIN kernel_stats ks ON k.kernel_name = ks.kernel_name
-   WHERE ABS(k.duration_ns - ks.avg_duration) > 2 * ks.duration_stddev;
+   JOIN kernel_stats ks ON k.name = ks.name
+   WHERE ABS(k.duration - ks.avg_duration) > 2 * ks.duration_stddev;
 
 **Execute Script with Query:**
 
@@ -1013,9 +1013,9 @@ rocpd databases support custom SQL functions for advanced analysis:
    # Use built-in rocpd functions
    rocpd query -i profile.db --query "
    SELECT 
-       kernel_name,
+       name,
        rocpd_get_string(name_id, 0, nid, pid) as full_kernel_name,
-       duration_ns
+       duration
    FROM kernels 
    WHERE rocpd_get_string(name_id, 0, nid, pid) LIKE '%gemm%'"
 
