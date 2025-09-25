@@ -232,7 +232,7 @@ FuncT create_write_functor(RetT (*func)(Args...))
         {
             if(stream)
             {
-                tracer_data.stream_id        = get_stream_id(*stream);
+                tracer_data.stream_id        = add_stream(*stream);
                 tracer_data.stream_value.ptr = *stream;
             }
             tracing::execute_phase_none_callbacks(callback_contexts,
