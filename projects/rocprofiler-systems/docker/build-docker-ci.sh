@@ -3,6 +3,7 @@
 set -e
 
 : ${USER:=$(whoami)}
+: ${TYPE:="base"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=24.04}
 : ${NJOBS=$(nproc)}
@@ -11,6 +12,8 @@ set -e
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
+: ${GPU_TYPE:=""}
+: ${GPU_TARBALL:=""}
 
 verbose-run()
 {
@@ -45,6 +48,7 @@ usage()
     print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
+    print_default_option type "[base|gfxXXX]" "Type of image to create" "${TYPE}"
 }
 
 send-error()
@@ -68,6 +72,11 @@ do
         -h|--help)
             usage
             exit 0
+            ;;
+        "--type")
+            shift
+            TYPE=${1}
+            reset-last
             ;;
         "--distro")
             shift
@@ -97,6 +106,16 @@ do
         "--boost-version")
             shift
             BOOST_VERSION=${1}
+            reset-last
+            ;;
+        "--gpu-type")
+            shift
+            GPU_TYPE=${1}
+            reset-last
+            ;;
+        "--gpu-tarball")
+            shift
+            GPU_TARBALL=${1}
             reset-last
             ;;
         --user|-u)
@@ -156,19 +175,21 @@ do
     verbose-run docker build . \
         ${PULL} \
         -f ${DOCKER_FILE} \
-        --tag ${USER}/rocprofiler-systems:ci-base-${DISTRO}-${VERSION} \
+        --tag ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg NJOBS=${NJOBS} \
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
-        --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION}
+        --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION} \
+        --build-arg GPU_TYPE=${GPU_TYPE} \
+        --build-arg GPU_TARBALL=${GPU_TARBALL} 
 done
 
 if [ "${PUSH}" -gt 0 ]; then
     for VERSION in ${VERSIONS}
     do
-        verbose-run docker push ${USER}/rocprofiler-systems:ci-base-${DISTRO}-${VERSION}
+        verbose-run docker push ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION}
     done
 fi
 

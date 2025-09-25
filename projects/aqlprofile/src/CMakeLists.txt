@@ -25,8 +25,19 @@ set ( LIB_SRC
 )
 
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${API_PATH} ${LIB_DIR}/core/include)
-target_link_libraries( ${TARGET_LIB} PRIVATE pthread hsa-runtime64::hsa-runtime64 )
+add_library (aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
+target_include_directories ( ${TARGET_LIB}
+  PRIVATE ${LIB_DIR}
+          ${API_PATH}
+          ${LIB_DIR}/core/include
+)
+target_link_libraries( ${TARGET_LIB}
+  PRIVATE
+    pthread
+    hsa-runtime64::hsa-runtime64
+  PUBLIC
+    aqlprofile::headers
+)
 
 ## Generating definitions
 set ( SCRIPT_DIR "${ROOT_DIR}/script" )
@@ -73,4 +84,11 @@ add_custom_target( mygen
   COMMAND sh -xc "sed 's/_GPU_BLOCKINFO_H_/SRC_DEF_GPU_BLOCK_INFO_H_/' ${BINFO_DEF} >>${BINFO_HEADER}"
 )
 
+
 add_subdirectory(src/core)
+if(AQLPROFILE_BUILD_TESTS)
+  enable_testing()
+  include(CTest)
+  add_subdirectory(src/util/tests)
+  add_subdirectory(src/pm4/tests)
+endif()
