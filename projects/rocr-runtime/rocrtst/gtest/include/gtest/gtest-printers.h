@@ -212,6 +212,13 @@ template <typename Char, typename CharTraits, typename T>
 // magic needed for implementing UniversalPrinter won't work.
 namespace testing_internal {
 
+#ifdef _MSC_VER
+// Specialized version for nullptr_t to resolve MSVC operator<< ambiguity
+inline void DefaultPrintNonContainerTo(const std::nullptr_t&, ::std::ostream* os) {
+  *os << "(null)";
+}
+#endif
+
 // Used to print a value that is not an STL-style container when the
 // user doesn't define PrintTo() for it.
 template <typename T>

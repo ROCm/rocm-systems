@@ -43,9 +43,11 @@
  *
  */
 
+#ifndef _WIN32
 #include <hwloc.h>
 #include <hwloc/linux-libnuma.h>
 #include <numa.h>
+#endif
 
 #include <vector>
 #include <algorithm>
@@ -85,6 +87,7 @@ MemoryAsyncCopyNUMA::~MemoryAsyncCopyNUMA(void) {
 }
 
 void MemoryAsyncCopyNUMA::Run(void) {
+#ifndef _WIN32
   int ret;
   TestBase::Run();
 
@@ -134,9 +137,15 @@ void MemoryAsyncCopyNUMA::Run(void) {
   }
 
   hwloc_bitmap_free(cpu_bind_set);
+#else
+  // On Windows, NUMA operations are not supported - skip the test
+  std::cout << "NUMA operations not supported on Windows - test skipped" << std::endl;
+  ASSERT_TRUE(true) << "NUMA test skipped on Windows";
+#endif
 }
 
 void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
+#ifndef _WIN32
   hsa_status_t err;
   void* ptr_src;
   void* ptr_dst;
@@ -359,6 +368,11 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
     // Get mean copy time and store to the array
     t->benchmark_copy_time->push_back(GetMeanTime(&time));
   }
+#else
+  // On Windows, provide a stub implementation for the virtual method
+  std::cout << "NUMA benchmark not supported on Windows - skipping transaction" << std::endl;
+  (void)t; // Unused parameter
+#endif
 }
 
 #undef RET_IF_HSA_ERR

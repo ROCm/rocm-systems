@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2025, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,25 +43,46 @@
  *
  */
 
-#include "common/os.h"
-#include <stdlib.h>
-#include "windows/windows_compat.h"
+// Windows getopt.h stub header
+// This provides getopt definitions for compilation compatibility
 
-namespace rocrtst {
+#ifndef _GETOPT_H_STUB
+#define _GETOPT_H_STUB
 
-void SetEnv(const char* env_var_name, const char* env_var_value) {
-  int err = setenv(env_var_name, env_var_value, 1);
+#ifndef _WIN32
+#include_next <getopt.h>
+#else
 
-  if (0 != err) {
-    printf("Set environment variable failed!\n");
-    exit(1);
-  }
+// getopt variables
+extern char *optarg;
+extern int optind;
+extern int opterr;
+extern int optopt;
 
-  return;
+// getopt_long support
+struct option {
+    const char *name;
+    int has_arg;
+    int *flag;
+    int val;
+};
+
+#define no_argument       0
+#define required_argument 1
+#define optional_argument 2
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int getopt(int argc, char * const argv[], const char *optstring);
+int getopt_long(int argc, char * const argv[], const char *optstring,
+                const struct option *longopts, int *longindex);
+
+#ifdef __cplusplus
 }
+#endif
 
-char* GetEnv(const char* env_var_name) {
-  return getenv(env_var_name);
-}
+#endif // _WIN32
 
-}  // namespace rocrtst
+#endif // _GETOPT_H_STUB

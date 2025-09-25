@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2025, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,25 +43,45 @@
  *
  */
 
-#include "common/os.h"
-#include <stdlib.h>
-#include "windows/windows_compat.h"
+#ifndef SYS_MMAN_H_WINDOWS_STUB
+#define SYS_MMAN_H_WINDOWS_STUB
 
-namespace rocrtst {
+// Windows stub for sys/mman.h - POSIX memory mapping functions
+// This header provides stubs for Windows compatibility
 
-void SetEnv(const char* env_var_name, const char* env_var_value) {
-  int err = setenv(env_var_name, env_var_value, 1);
+#ifndef _WIN32
+#include_next <sys/mman.h>
+#else
+#include <windows.h>
+#include <sys/types.h>  // For standard type definitions including off_t
 
-  if (0 != err) {
-    printf("Set environment variable failed!\n");
-    exit(1);
-  }
+// mmap flags
+#define PROT_READ     0x1
+#define PROT_WRITE    0x2
+#define PROT_EXEC     0x4
+#define PROT_NONE     0x0
 
-  return;
+#define MAP_SHARED    0x01
+#define MAP_PRIVATE   0x02
+#define MAP_FIXED     0x10
+#define MAP_ANONYMOUS 0x1000
+#define MAP_ANON      MAP_ANONYMOUS
+
+#define MAP_FAILED    ((void *) -1)
+
+// Function declarations for Windows mmap implementation
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Note: limited functionality.
+void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset);
+int munmap(void* addr, size_t length);
+
+#ifdef __cplusplus
 }
+#endif
 
-char* GetEnv(const char* env_var_name) {
-  return getenv(env_var_name);
-}
+#endif // _WIN32
 
-}  // namespace rocrtst
+#endif // SYS_MMAN_H_WINDOWS_STUB

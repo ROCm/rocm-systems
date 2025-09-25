@@ -84,7 +84,7 @@ namespace rocrtst {
 // Clean up some of the common handles and memory used by BaseRocR code, then
 // shut down hsa. Restore HSA_ENABLE_INTERRUPT to original value, if necessary
 hsa_status_t CommonCleanUp(BaseRocR* test) {
-  hsa_status_t err;
+  hsa_status_t err = HSA_STATUS_SUCCESS;
 
   assert(test != nullptr);
 
@@ -125,7 +125,6 @@ hsa_status_t CommonCleanUp(BaseRocR* test) {
   }
 
   SetEnv("HSA_ENABLE_INTERRUPT", intr_val.c_str());
-
   return err;
 }
 

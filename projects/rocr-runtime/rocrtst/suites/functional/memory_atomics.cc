@@ -333,7 +333,7 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
     err = hsa_amd_memory_async_copy(g_gpuRefData, gpuAgent, device_ptr,
                                     gpuAgent, kMemoryAllocSize, 0, NULL, copy_signal);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    while (hsa_signal_wait_acquire(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1), HSA_WAIT_STATE_ACTIVE)) {}
+    while (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1), HSA_WAIT_STATE_ACTIVE)) {}
   }
 
 
@@ -478,7 +478,7 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
     err = hsa_amd_memory_async_copy(device_ptr, gpuAgent, g_gpuRefData,
                                     gpuAgent, kMemoryAllocSize, 0, NULL, copy_signal);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    while (hsa_signal_wait_acquire(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1), HSA_WAIT_STATE_ACTIVE)) { }
+    while (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1), HSA_WAIT_STATE_ACTIVE)) { }
   }
 
   // compare results with expected results

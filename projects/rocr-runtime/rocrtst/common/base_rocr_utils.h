@@ -52,6 +52,8 @@
 #include "common/base_rocr.h"
 #include "hsa/hsa.h"
 
+#include "windows/windows_compat.h"
+
 namespace rocrtst {
 
 /// Locate kernel code object file and return path suitable for use with open().

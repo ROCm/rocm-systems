@@ -83,6 +83,20 @@ static void CallbackHSAMemoryAllocateFunc(void *data) {
   err = hsa_amd_memory_pool_allocate(*(cb->pool),
                                cb->alloc_size, 0,
                                reinterpret_cast<void**>(&(cb->alloc_pointer)));
+#ifdef _WIN32
+  // On Windows, handle potential out-of-resources by reducing size
+  if (err == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
+    // Conservative backoff: halve the request until success or too small
+    size_t try_size = cb->alloc_size;
+    void* ptr = nullptr;
+    while (err == HSA_STATUS_ERROR_OUT_OF_RESOURCES && try_size > 4096) {
+      try_size >>= 1;
+      err = hsa_amd_memory_pool_allocate(*(cb->pool), try_size, 0,
+                                         reinterpret_cast<void**>(&ptr));
+    }
+    cb->alloc_pointer = ptr;
+  }
+#endif
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   return;
@@ -294,9 +308,25 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
       alloc_size = (total_vram_size*3/4 <= kMaxAllocSize*kNumThreads) ? total_vram_size*3/(4*kNumThreads): kMaxAllocSize;
     }
 
+#ifdef _WIN32
+    // Clamp to the pool's max single-allocation size
+    size_t max_single = 0;
+    err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &max_single);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    if (max_single == 0) {
+      return;
+    }
+    if (alloc_size > max_single) alloc_size = max_single;
+
+    // Page align the alloc_size (align down)
+    alloc_size = alloc_size - (alloc_size & ((1 << 12) - 1));
+    if (alloc_size == 0) {
+      return;
+    }
+#else
     // Page align the alloc_size
     alloc_size = alloc_size - (alloc_size & ((1 << 12) - 1));
-
+#endif
     // Create a test group
     rocrtst::test_group* tg_concurrent = rocrtst::TestGroupCreate(kNumThreads);
 

@@ -45,9 +45,7 @@
 
 
 #include "common/helper_funcs.h"
-#ifndef _WIN32
 #include <unistd.h>
-#endif
 #include <assert.h>
 #include <cmath>
 #include <iostream>

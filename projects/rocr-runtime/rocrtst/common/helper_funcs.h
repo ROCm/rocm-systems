@@ -53,6 +53,8 @@
 #include <vector>
 #include <stdint.h>
 
+#include "windows/windows_compat.h"
+
 #if defined(__GNUC__)
 #define __forceinline __inline__ __attribute__((always_inline))
 #endif

@@ -5,8 +5,10 @@
  */
 
 #include <hwloc.h>
+#ifndef _WIN32
 #include <hwloc/linux-libnuma.h>
 #include <numa.h>
+#endif
 
 #include <vector>
 #include <algorithm>

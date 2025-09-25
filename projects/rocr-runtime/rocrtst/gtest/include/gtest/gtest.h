@@ -1617,6 +1617,11 @@ class EqHelper<true> {
 // with gcc 4.
 //
 // INTERNAL IMPLEMENTATION - DO NOT USE IN A USER PROGRAM.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4267) // conversion warnings that affect template resolution
+#pragma warning(disable: 4018) // signed/unsigned comparison issues
+#endif
 #define GTEST_IMPL_CMP_HELPER_(op_name, op)\
 template <typename T1, typename T2>\
 AssertionResult CmpHelper##op_name(const char* expr1, const char* expr2, \
@@ -1645,6 +1650,10 @@ GTEST_IMPL_CMP_HELPER_(LT, < );
 GTEST_IMPL_CMP_HELPER_(GE, >= );
 // Implements the helper function for {ASSERT|EXPECT}_GT
 GTEST_IMPL_CMP_HELPER_(GT, > );
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #undef GTEST_IMPL_CMP_HELPER_
 

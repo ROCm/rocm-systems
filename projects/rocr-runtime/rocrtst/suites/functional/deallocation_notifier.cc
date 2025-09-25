@@ -69,12 +69,12 @@
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
 
-struct callback_status {
+struct callback_data {
   int callback_status = 0;
   void* released_ptr = nullptr;
 };
 
-static callback_status notifiers[2];
+static callback_data notifiers[2];
 static hsa_amd_memory_pool_t pool;
 
 #define REGISTER(ptr, callback, i)                                                                 \
@@ -171,12 +171,12 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
 
   // Attempt register on null address.  Should fail.
   void* ptr = nullptr;
-  status = hsa_amd_register_deallocation_callback(ptr, call, (void*)0xDEADBEEF);
+  status = hsa_amd_register_deallocation_callback(ptr, call, (void*)0xDEADBEEFULL);
   ASSERT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, status) << "Register deallocation callback error.";
 
   // Attempt register on bad address (ie one not known to ROCr).  Should fail.
   ptr = malloc(4096);
-  status = hsa_amd_register_deallocation_callback(ptr, call, (void*)0xDEADBEEF);
+  status = hsa_amd_register_deallocation_callback(ptr, call, (void*)0xDEADBEEFULL);
   free(ptr);
   ASSERT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, status) << "Register deallocation callback error.";
 

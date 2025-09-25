@@ -45,9 +45,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#ifdef _WIN32
+#include "windows/windows_compat.h"
+#else
 #include <sys/mman.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#endif
 
 #include <cassert>
 #include <iostream>
@@ -385,7 +390,7 @@ int main(int argc, char** argv) {
     volatile hsa_amd_ipc_signal_t signal_handle;
   };
 
-  // Allocate linux shared memory.
+  // Allocate shared memory.
   Shared* shared = (Shared*)mmap(nullptr, sizeof(Shared), PROT_READ | PROT_WRITE,
                                  MAP_SHARED | MAP_ANONYMOUS, -1, 0);
   if (shared == MAP_FAILED) {
@@ -397,11 +402,52 @@ int main(int argc, char** argv) {
   volatile int* token = &shared->token;
   *token = 0;
   bool processOne;
+  pid_t child = -1;
 
+#ifdef _WIN32
+  // Check if we're the child process
+  if (is_child_process_win32(argc, argv)) {
+    processOne = false;
+    fprintf(stdout, "Second process running.\n");
+
+    while (*token == 0) {
+      sched_yield();
+    }
+
+    CheckAndSetToken(token, 0);
+    // Wait for handshake
+    while (*token == 0) {
+      sched_yield();
+    }
+    CheckAndSetToken(token, 0);
+    fprintf(stdout, "Handshake complete.\n");
+  } else {
+    // We're the parent process, spawn child
+    child = fork();
+    if (child == -1) {
+      printf("Process creation failed. Exiting.\n");
+      munmap(shared, sizeof(Shared));
+      return -1;
+    }
+    processOne = true;
+
+    // Signal to other process we are waiting, and then wait...
+    *token = 1;
+    while (*token == 1) {
+      sched_yield();
+    }
+
+    fprintf(stdout, "Second process observed, handshake...\n");
+    *token = 1;
+    while (*token == 1) {
+      sched_yield();
+    }
+  }
+#else
   // Spawn second process and verify communication
-  int child = fork();
+  child = fork();
   if (child == -1) {
-    printf("fork failed.  Exiting.\n");
+    printf("fork failed. Exiting.\n");
     return -1;
   }
   if (child != 0) {
@@ -434,6 +480,7 @@ int main(int argc, char** argv) {
     CheckAndSetToken(token, 0);
     fprintf(stdout, "Handshake complete.\n");
   }
+#endif
 
   hsa_status_t err;
 
@@ -526,10 +573,10 @@ int main(int argc, char** argv) {
 
     PROCESS_LOG("Allocated buffer and filled it with 1's. Wait for P1...\n");
     hsa_signal_value_t ret =
-        hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_NE, 1, -1, HSA_WAIT_STATE_BLOCKED);
+        hsa_signal_wait_scacquire(ipc_signal, HSA_SIGNAL_CONDITION_NE, 1, -1, HSA_WAIT_STATE_BLOCKED);
 
     if (ret != 2) {
-      hsa_signal_store_release(ipc_signal, -1);
+      hsa_signal_store_screlease(ipc_signal, -1);
       return -1;
     }
 
@@ -584,7 +631,7 @@ int main(int argc, char** argv) {
       "Confirmed P0 filled buffer with 1; P1 re-filled buffer with 2\n");
     PROCESS_LOG("PASSED on P1\n");
 
-    hsa_signal_store_release(ipc_signal, 2);
+    hsa_signal_store_screlease(ipc_signal, 2);
 
     err = hsa_amd_ipc_memory_detach(ptr);
     RET_IF_HSA_ERR(err);

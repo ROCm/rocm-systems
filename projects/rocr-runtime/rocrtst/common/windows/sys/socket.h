@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2025, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,25 +43,13 @@
  *
  */
 
-#include "common/os.h"
-#include <stdlib.h>
-#include "windows/windows_compat.h"
+#ifndef _SOCKET_H_STUB
+#define _SOCKET_H_STUB
 
-namespace rocrtst {
+#ifndef _WIN32
+#include_next <sys/socket.h>
+#endif
 
-void SetEnv(const char* env_var_name, const char* env_var_value) {
-  int err = setenv(env_var_name, env_var_value, 1);
+// For Windows, this header file exists to avoid compilation errors.
 
-  if (0 != err) {
-    printf("Set environment variable failed!\n");
-    exit(1);
-  }
-
-  return;
-}
-
-char* GetEnv(const char* env_var_name) {
-  return getenv(env_var_name);
-}
-
-}  // namespace rocrtst
+#endif // _SOCKET_H_STUB

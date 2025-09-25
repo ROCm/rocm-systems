@@ -89,7 +89,14 @@
 // utilities and boilerplate code, rather than the example app. itself.
 //
 
+#ifdef _WIN32
+#include "common/windows/windows_compat.h"
+#else
 #include <sys/mman.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sched.h>
+#endif
 
 #include <algorithm>
 #include <vector>
@@ -122,20 +129,16 @@ struct callback_args {
 }
 
 // Fork safe ASSERT_EQ.
-#define MSG(y, msg, ...) msg
-#define Y(y, ...) y
-
-#define FORK_ASSERT_EQ(x, ...)                                                    \
-  if ((x) != (Y(__VA_ARGS__))) {                                                  \
-    if ((x) != (Y(__VA_ARGS__))) {                                                \
-      std::cout << MSG(__VA_ARGS__, "");                                          \
-      if (parentProcess_) {                                                       \
-        shared_->parent_status = -1;                                              \
-      } else {                                                                    \
-        shared_->child_status = -1;                                               \
-      }                                                                           \
-      ASSERT_EQ(x, Y(__VA_ARGS__));                                               \
+#define FORK_ASSERT_EQ(expected, actual, ...)                                     \
+  if ((expected) != (actual)) {                                                   \
+    std::cout << #actual << " expected: " << (expected) << " actual: " << (actual) << std::endl; \
+    std::cout << "" __VA_ARGS__ << std::endl;                                     \
+    if (parentProcess_) {                                                         \
+      shared_->parent_status = -1;                                               \
+    } else {                                                                      \
+      shared_->child_status = -1;                                                \
     }                                                                             \
+    ASSERT_EQ(expected, actual);                                                  \
   }
 
 #define USR_TRIGGERED_FAILURE(x, y, z)                                            \
@@ -208,7 +211,16 @@ void IPCTest::SetUp(void) {
 
   // Spawn second process and verify communication
   child_ = 0;
+#ifdef _WIN32
+  // On Windows, check if we're the child process using environment variable
+  const char* child_marker = getenv("ROCR_IPC_CHILD_PROCESS");
+  if (child_marker == nullptr) {
+    // We're the parent process, spawn child
+    child_ = fork();
+  }
+#else
   child_ = fork();
+#endif
   ASSERT_NE(-1, child_) << "fork failed";
   std::atomic<int> * token = &shared_->token;
   if (child_ != 0) {
@@ -317,7 +329,7 @@ void IPCTest::ChildProcessImpl() {
   if (shared_->token != 1) {
     shared_->token = -1;
   }
-  FORK_ASSERT_EQ(1, shared_->token, "Child: Error detected in signaling token\n");
+  FORK_ASSERT_EQ(1, shared_->token, "Child: Error detected in signaling token");
   PROCESS_LOG("Child: Waking upon signal from parent process\n");
 
   // List of devices involved in test. Gpu device is used
@@ -369,7 +381,7 @@ void IPCTest::ChildProcessImpl() {
   // Signal parent process to wake up and continue.
   // The next time parent process updates ipc_signal, SignalCallbackHandler will
   // be called
-  hsa_signal_store_release(ipc_signal, 2);
+  hsa_signal_store_relaxed(ipc_signal, 2);
 
   // Wait for SignalCallbackHandler to be called
   while (child_cb_data.token <= 0)
@@ -379,11 +391,11 @@ void IPCTest::ChildProcessImpl() {
   PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", fourth_val_);
 
   // Signal parent process to wake up and continue
-  hsa_signal_store_release(ipc_signal, 4);
+  hsa_signal_store_relaxed(ipc_signal, 4);
 
   hsa_signal_value_t ret = 1;
   while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0, timeout_, HSA_WAIT_STATE_BLOCKED);
+    ret = hsa_signal_wait_relaxed(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0, timeout_, HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }
@@ -480,7 +492,7 @@ void IPCTest::ParentProcessImpl() {
   // value to TWO (2). Check signal value is per expectation
   hsa_signal_value_t ret = 1;
   while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
+    ret = hsa_signal_wait_relaxed(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }
@@ -500,7 +512,7 @@ void IPCTest::ParentProcessImpl() {
   hsa_signal_store_relaxed(ipc_signal, 3);
 
   while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_, HSA_WAIT_STATE_BLOCKED);
+    ret = hsa_signal_wait_relaxed(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_, HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }

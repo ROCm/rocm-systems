@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2025, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,25 +43,59 @@
  *
  */
 
-#include "common/os.h"
-#include <stdlib.h>
-#include "windows/windows_compat.h"
+// Windows unistd.h stub header
+// This provides minimal unistd definitions for compilation compatibility
 
-namespace rocrtst {
+#ifndef _UNISTD_H_STUB
+#define _UNISTD_H_STUB
 
-void SetEnv(const char* env_var_name, const char* env_var_value) {
-  int err = setenv(env_var_name, env_var_value, 1);
+#ifndef _WIN32
+#include_next <unistd.h>
+#else
+#include <windows.h>
+#include <io.h>
+#include <process.h>
+#include <direct.h>
 
-  if (0 != err) {
-    printf("Set environment variable failed!\n");
-    exit(1);
-  }
+// POSIX function mappings for Windows
+#define close _close
+#define read _read
+#define write _write
+#define open _open
+#define lseek _lseek
+#define getcwd _getcwd
+#define chdir _chdir
+#define rmdir _rmdir
+#define unlink _unlink
+#define getpid _getpid
 
-  return;
+// POSIX constants
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
+#define STDIN_FILENO 0
+
+// Access modes
+#define R_OK 4
+#define W_OK 2
+#define X_OK 1
+#define F_OK 0
+
+// File type constants
+#define S_IRUSR 0400
+#define S_IWUSR 0200
+#define S_IXUSR 0100
+
+// Define pid_t for Windows - use intptr_t (pointer-sized signed integer)
+typedef intptr_t pid_t;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+pid_t fork(void);
+#ifdef __cplusplus
 }
+#endif
 
-char* GetEnv(const char* env_var_name) {
-  return getenv(env_var_name);
-}
+#endif // _WIN32
 
-}  // namespace rocrtst
+#endif // _UNISTD_H_STUB

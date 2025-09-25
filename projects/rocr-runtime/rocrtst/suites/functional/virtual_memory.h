@@ -48,6 +48,7 @@
 #include <atomic>
 
 #include "common/base_rocr.h"
+#include "common/windows/windows_compat.h"
 #include "hsa/hsa.h"
 #include "suites/test_common/test_base.h"
 
@@ -136,7 +137,7 @@ class VirtMemoryTestInterProcess : public TestBase {
   int SendDmaBufFd(int socket, int dmabuf_fd);
   int ReceiveDmaBufFd(int socket);
 
-  int child_;
+  pid_t child_;
   SharedVirtMem* shared_;
   bool parentProcess_;
   size_t min_gpu_mem_granule; /* Minimum granularity */

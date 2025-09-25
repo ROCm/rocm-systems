@@ -160,7 +160,11 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
   struct dev_data_t* dev_data = NULL;
 
   /* Set up host_data */
-  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&host_data, sizeof(host_data_t), 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  #ifdef WIN32
+    ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&host_data, sizeof(host_data_t), 0, 0));
+  #else
+    ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&host_data, sizeof(host_data_t), 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  #endif
   ASSERT_NE(host_data, nullptr);
 
   /* Verify that pointer info for unmapped VA's return expected values */
@@ -189,7 +193,11 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
   ASSERT_SUCCESS(hsa_amd_svm_attributes_set(host_data, sizeof(host_data_t), host_attrs.data(), host_attrs.size()));
 
   /* Set up dev_data */
-  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&dev_data, sizeof(dev_data_t), 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  #ifdef WIN32
+    ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&dev_data, sizeof(dev_data_t), 0, 0));
+  #else
+    ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&dev_data, sizeof(dev_data_t), 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  #endif
   ASSERT_NE(dev_data, nullptr);
 
   std::vector<hsa_amd_svm_attribute_pair_t> dev_attrs;

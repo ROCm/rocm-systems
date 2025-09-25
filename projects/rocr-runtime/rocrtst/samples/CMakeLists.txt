@@ -43,18 +43,105 @@ cmake_minimum_required(VERSION 3.5.0)
 set(PROJECT_NAME "sample64")
 project (${PROJECT_NAME})
 
+if ( NOT DEFINED BUILD_SHARED_LIBS )
+  set ( BUILD_SHARED_LIBS ON )
+endif()
+
 set(DEFAULT_TARGET "gfx803")
 
 #############################
 # COMMON AREA
 #############################
-#
-# Currently support for Windows platform is not present
-#
 if(WIN32)
-  message("This sample is not supported on Windows platform")
-  return()
-endif()
+  # C++20 standard for designated initializers in MSVC
+  set(CMAKE_CXX_STANDARD 20)
+
+  # Determine ROCRTST_ROOT relative to samples directory
+  get_filename_component(ROCRTST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+  # Set runtime library flags based on BUILD_SHARED_LIBS
+  if(BUILD_SHARED_LIBS)
+    # Dynamic runtime for shared libraries
+    set(CMAKE_CXX_FLAGS_DEBUG "/MDd")     # Dynamic runtime for debug
+    set(CMAKE_CXX_FLAGS_RELEASE "/MD")    # Dynamic runtime for release
+    set(CMAKE_C_FLAGS_DEBUG "/MDd")       # Dynamic runtime for debug
+    set(CMAKE_C_FLAGS_RELEASE "/MD")      # Dynamic runtime for release
+  else()
+    # Static runtime for static libraries
+    set(CMAKE_CXX_FLAGS_DEBUG "/MTd")     # Static runtime for debug
+    set(CMAKE_CXX_FLAGS_RELEASE "/MT")    # Static runtime for release
+    set(CMAKE_C_FLAGS_DEBUG "/MTd")       # Static runtime for debug
+    set(CMAKE_C_FLAGS_RELEASE "/MT")      # Static runtime for release
+  endif()
+
+  # Add common directory for base_rocr utilities (same as main rocrtst)
+  include_directories(${ROCRTST_ROOT}/common)
+  include_directories(${ROCRTST_ROOT}/common/windows)
+  include_directories(${ROCRTST_ROOT})
+
+  # Set the gtest framework name (same as main rocrtst)
+  set(GOOGLE_TEST_FRWK_NAME "google-test-frwk64")
+
+  # Use the existing gtest from rocrtst (same as main rocrtst)
+  add_subdirectory(${ROCRTST_ROOT}/gtest "${PROJECT_BINARY_DIR}/gtest" EXCLUDE_FROM_ALL)
+  include_directories(${ROCRTST_ROOT}/gtest/include)
+
+  # Use HSA headers from installation directly
+  include_directories("${HSA_PATH}/include")
+
+  # Use the real HSA library if provided
+  if(DEFINED HSA_LIBRARY AND EXISTS "${HSA_LIBRARY}")
+    message(STATUS "Using HSA library: ${HSA_LIBRARY}")
+
+    # Set up sample libraries with HSA runtime and additional ROCm libraries
+    set(SAMPLE_LIBS ${GOOGLE_TEST_FRWK_NAME} ws2_32
+        "${HSA_LIBRARY}"
+        ${AMD_ROCR_EXTRA_LIB})
+  else()
+    message(FATAL_ERROR "HSA_LIBRARY not defined or does not exist: ${HSA_LIBRARY}")
+  endif()
+
+  # Common source files from rocrtst (following main rocrtst approach)
+  set(COMMON_SOURCES
+      ${ROCRTST_ROOT}/common/base_rocr.cc
+      ${ROCRTST_ROOT}/common/base_rocr_utils.cc
+      ${ROCRTST_ROOT}/common/common.cc
+      ${ROCRTST_ROOT}/common/os.cc
+      ${ROCRTST_ROOT}/common/rocr.cc
+      ${ROCRTST_ROOT}/common/hsatimer.cc
+      ${ROCRTST_ROOT}/common/helper_funcs.cc
+      ${ROCRTST_ROOT}/common/concurrent_utils.cc
+      ${ROCRTST_ROOT}/common/windows/windows_compat.cc
+      ${ROCRTST_ROOT}/common/windows/mman.cc
+    )
+
+  # Configure samples based on compatibility
+  set(COMPATIBLE_SAMPLES "rocrinfo" "ipc")
+  set(EXPERIMENTAL_SAMPLES "async_mem_copy")
+
+  # Build each compatible sample
+  foreach(SAMPLE_NAME ${COMPATIBLE_SAMPLES} ${EXPERIMENTAL_SAMPLES})
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${SAMPLE_NAME}")
+      # Find the main source file for this sample
+      file(GLOB SAMPLE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${SAMPLE_NAME}/*.cc" "${CMAKE_CURRENT_SOURCE_DIR}/${SAMPLE_NAME}/*.cpp")
+
+      if(SAMPLE_SOURCES)
+          add_executable(${SAMPLE_NAME} ${SAMPLE_SOURCES} ${COMMON_SOURCES})
+          target_link_libraries(${SAMPLE_NAME} ${SAMPLE_LIBS})
+
+          # Add sample-specific include directories
+          target_include_directories(${SAMPLE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/${SAMPLE_NAME})
+      endif()
+    endif()
+  endforeach()
+
+# Add install rules for sample executables
+install(TARGETS rocrinfo ipc async_mem_copy
+        RUNTIME DESTINATION bin)
+
+else()
+
+# Linux platform support
 
 #
 # Process input variables
@@ -287,3 +374,5 @@ install(TARGETS ${SAMPLE_EXE}
         ARCHIVE DESTINATION ${PROJECT_BINARY_DIR}/lib
         LIBRARY DESTINATION ${PROJECT_BINARY_DIR}/lib
         RUNTIME DESTINATION ${PROJECT_BINARY_DIR}/bin)
+
+endif()  # End of WIN32/Linux platform selection

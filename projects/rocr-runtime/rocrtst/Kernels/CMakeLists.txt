@@ -22,8 +22,7 @@ cmake_minimum_required(VERSION 2.8.0)
 #
 
 if(WIN32)
-  message("Windows platform is not supported")
-  return()
+  message(STATUS "Building kernels for Windows platform")
 endif()
 
 #

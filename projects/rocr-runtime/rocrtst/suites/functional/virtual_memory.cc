@@ -72,18 +72,17 @@
 
 // Fork safe ASSERT_EQ.
 #define MSG(y, msg, ...) msg
-#define Y(y, ...) y
 
-#define FORK_ASSERT_EQ(x, ...)                                                                     \
-  if ((x) != (Y(__VA_ARGS__))) {                                                                   \
-    if ((x) != (Y(__VA_ARGS__))) {                                                                 \
+#define FORK_ASSERT_EQ(expected, actual, ...)                                                      \
+  if ((expected) != (actual)) {                                                                    \
+    if ((expected) != (actual)) {                                                                  \
       std::cout << MSG(__VA_ARGS__, "");                                                           \
       if (parentProcess_) {                                                                        \
         shared_->parent_status = -1;                                                               \
       } else {                                                                                     \
         shared_->child_status = -1;                                                                \
       }                                                                                            \
-      ASSERT_EQ(x, Y(__VA_ARGS__));                                                                \
+      ASSERT_EQ(expected, actual);                                                                 \
     }                                                                                              \
   }
 
@@ -191,11 +190,11 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   /* Set RO Access to all GPUs */
   {
     int descIndex = 0;
-    hsa_amd_memory_access_desc_t desc[gpus.size()];
+    std::vector<hsa_amd_memory_access_desc_t> desc(gpus.size());
     for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
       desc[descIndex++] = {HSA_ACCESS_PERMISSION_RO, *gpuIt};
     }
-    ASSERT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * granule_size, desc, gpus.size()));
+    ASSERT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * granule_size, desc.data(), gpus.size()));
   }
 
   /* Verity pointer info accessible agents on mapped addresses */

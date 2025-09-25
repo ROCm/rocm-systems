@@ -66,6 +66,7 @@ void* TestHSAShutdownFunction(void* args) {
     std::cout << "Failed" << std::endl;
   }
   pthread_exit(NULL);
+  return NULL; // This line will never be reached but satisfies MSVC
 }
 
 static const int NumOfThreads = 1000;  // Number of thread to be created

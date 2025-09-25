@@ -47,6 +47,7 @@
 #define ROCRTST_SUITES_FUNCTIONAL_IPC_H_
 
 #include <sys/types.h>
+#include "common/windows/windows_compat.h"
 #include <unistd.h>
 #include <atomic>
 
@@ -110,7 +111,7 @@ class IPCTest : public TestBase {
   uint32_t fourth_val_ = 0x04;
   uint32_t fifth_val_ = 0x05;
 
-  int child_;
+  pid_t child_;
   Shared* shared_;
   bool parentProcess_;
   size_t gpu_mem_granule;

@@ -123,6 +123,7 @@ void QueueValidation::SetUp(void) {
 
   TestBase::SetUp();
 
+#ifndef _WIN32
   /* The queue exceptions will trigger a coredump. Set the limit to 0 to disable  */
   if (getrlimit(RLIMIT_CORE, &rlimit_)) {
     perror("Could not get system rlimit\n");
@@ -136,6 +137,7 @@ void QueueValidation::SetUp(void) {
     if (setrlimit(RLIMIT_CORE, &rlimit_set))
       perror("Could not set core file size\n");
   }
+#endif
 
   err = rocrtst::SetDefaultAgents(this);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -173,9 +175,11 @@ void QueueValidation::DisplayResults(void) const {
 }
 
 void QueueValidation::Close() {
+#ifndef _WIN32
   /* Restore rlimit to initial value before test - do not error if fails */
   if (setrlimit(RLIMIT_CORE, &rlimit_))
       perror("Could not set core file size\n");
+#endif
 
   // This will close handles opened within rocrtst utility calls and call
   // hsa_shut_down(), so it should be done after other hsa cleanup

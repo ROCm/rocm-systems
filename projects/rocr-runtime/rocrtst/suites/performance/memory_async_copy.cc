@@ -44,8 +44,10 @@
  */
 
 #include <hwloc.h>
-#include <hwloc/linux-libnuma.h>
+#ifndef _WIN32
 #include <numa.h>
+#include <hwloc/linux-libnuma.h>
+#endif
 
 #include <vector>
 #include <algorithm>
@@ -144,7 +146,11 @@ MemoryAsyncCopy::~MemoryAsyncCopy(void) {
 void MemoryAsyncCopy::SetUp(void) {
   TestBase::SetUp();
 
+#ifndef _WIN32
   hwloc_topology_init(&topology_);
+#else
+  topology_ = nullptr;
+#endif
 
   FindTopology();
 
@@ -601,6 +607,7 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
 }
 
 void MemoryAsyncCopy::Close() {
+#ifndef _WIN32
   if (cpu_hwl_numa_nodeset_ != nullptr) {
     hwloc_bitmap_free(cpu_hwl_numa_nodeset_);
     cpu_hwl_numa_nodeset_ = nullptr;
@@ -613,6 +620,7 @@ void MemoryAsyncCopy::Close() {
   while (hsa_shut_down() == HSA_STATUS_SUCCESS)
     ;
   hsa_init();
+#endif
 
   TestBase::Close();
 }
@@ -720,6 +728,8 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
     close(fd);
     is_dxg = true;
   }
+
+#ifndef _WIN32
   hwloc_obj_t gpu_numa_node = nullptr;
   if ((agent_bdf_id != kDtifBdfId) && !is_dxg) {
     hwloc_obj_t gpu_hwl_dev;
@@ -797,6 +807,28 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   } else {
     ptr->set_gpu_local_agent1(agent);
   }
+#else
+  // On Windows, treat all GPUs as local (no NUMA topology detection)
+  if (ptr->gpu_local_agent1().handle == 0) {
+    ptr->set_gpu_local_agent1(agent);
+  } else if (ptr->gpu_local_agent2().handle == 0) {
+    ptr->set_gpu_local_agent2(agent);
+  } else {
+    // If we have two local agents, this one becomes remote
+    if (ptr->gpu_remote_agent().handle == 0) {
+      ptr->set_gpu_remote_agent(agent);
+    }
+  }
+
+  // Continue searching until we have found all possible GPUs
+  // Break only when we have found at least two local GPUs and one remote,
+  // or we've exhausted all agents
+  if (ptr->gpu_local_agent1().handle != 0 &&
+      ptr->gpu_local_agent2().handle != 0 &&
+      ptr->gpu_remote_agent().handle != 0) {
+    return HSA_STATUS_INFO_BREAK;
+  }
+#endif
 
   return HSA_STATUS_SUCCESS;
 }
@@ -831,6 +863,7 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
                                                            &cpu_numa_node_id);
   RET_IF_HSA_ERR(err);
 
+#ifndef _WIN32
   struct bitmask *numa_node_mask = numa_allocate_nodemask();
   cpu_nodeset = hwloc_bitmap_alloc();
 
@@ -846,6 +879,11 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   }
 
   ptr->set_cpu_hwl_numa_nodeset(cpu_nodeset);
+#else
+  // On Windows, we don't have hwloc - just set a placeholder
+  cpu_nodeset = nullptr;
+  ptr->set_cpu_hwl_numa_nodeset(cpu_nodeset);
+#endif
 
   err = hsa_iterate_agents(GetGPUAgents, data);
 
@@ -854,7 +892,9 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   }
 
   if (ptr->gpu_local_agent1().handle == 0) {
+#ifndef _WIN32
     hwloc_bitmap_free(ptr->cpu_hwl_numa_nodeset());
+#endif
     ptr->set_cpu_hwl_numa_nodeset(nullptr);
 
     if (ptr->gpu_local_agent2().handle != 0) {
@@ -898,10 +938,12 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 void MemoryAsyncCopy::FindTopology() {
   hsa_status_t err;
 
+#ifndef _WIN32
   hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM |
                                          HWLOC_TOPOLOGY_FLAG_IO_DEVICES);
 
   hwloc_topology_load(topology_);
+#endif
 
   err = hsa_iterate_agents(GetAgentInfo, this);
 

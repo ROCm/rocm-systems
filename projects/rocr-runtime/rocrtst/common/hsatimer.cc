@@ -44,7 +44,12 @@
  */
 
 #include "common/hsatimer.h"
+#ifdef _WIN32
+#include "common/windows/windows_compat.h"
+#include <intrin.h>
+#else
 #include <x86intrin.h>
+#endif
 
 namespace rocrtst {
 

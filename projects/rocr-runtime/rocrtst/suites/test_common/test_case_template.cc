@@ -247,6 +247,12 @@ void TestExample::SetUp(void) {
     uint64_t printf_buffer;
     uint64_t default_queue;
     uint64_t completion_action;
+#ifdef _WIN32
+    // The padding can be sued as pointer for Multi-gird synchronization
+    // Search "Pointer argument used for Multi-gird synchronization." in llvm document
+    // May be applicable for Linux soon
+    uint64_t padding;
+#endif
   } local_args;
 
   local_args.dstArray = reinterpret_cast<uint32_t *>(dst_buffer_);
@@ -258,6 +264,9 @@ void TestExample::SetUp(void) {
   local_args.printf_buffer = 0;
   local_args.default_queue = 0;
   local_args.completion_action = 0;
+#ifdef _WIN32
+  local_args.padding = 0;
+#endif
 
   err = rocrtst::AllocAndSetKernArgs(this, &local_args, sizeof(local_args));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);

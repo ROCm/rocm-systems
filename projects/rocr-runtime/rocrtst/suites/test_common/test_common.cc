@@ -53,7 +53,9 @@
 
 #include "suites/test_common/test_base.h"
 #include "suites/test_common/test_common.h"
+#ifndef _WIN32
 #include "amd_smi/amdsmi.h"
+#endif
 
 static const struct option long_options[] = {
   {"iterations", required_argument, nullptr, 'i'},
@@ -136,6 +138,11 @@ static std::string IntegerToString(T intVal, bool hex = true) {
 }
 
 int DumpMonitorInfo() {
+#ifdef _WIN32
+  // AMD SMI monitoring not supported on Windows
+  std::cout << "AMD SMI monitoring not supported on Windows" << std::endl;
+  return 0;
+#else
   int ret = 0;
   uint64_t value_u64;
   uint16_t value_u16;
@@ -302,4 +309,5 @@ int DumpMonitorInfo() {
   }
   std::cout << delim << std::endl;
   return dump_ret;
+#endif // _WIN32
 }

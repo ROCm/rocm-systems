@@ -150,7 +150,11 @@ void System::Shutdown() {
 CodeObject::CodeObject(std::string filename, Device& agent) : agent(agent.agent) {
   hsa_status_t err;
 
+#ifdef _WIN32
+  file = open(filename.c_str(), O_RDONLY | O_BINARY);
+#else
   file = open(filename.c_str(), O_RDONLY);
+#endif
   if(file == -1) {
     throw std::runtime_error("Could not open file.\n");
   }
@@ -232,7 +236,7 @@ bool SubmitPacket(hsa_queue_t* queue, Aql& pkt) {
   __atomic_store_n(&dst.header.raw, header, __ATOMIC_RELEASE);
   pkt.header.raw = header;
 
-  hsa_queue_store_write_index_release(queue, write+1);
+  hsa_queue_store_write_index_screlease(queue, write+1);
   hsa_signal_store_screlease(queue->doorbell_signal, write);
 
   return true;
