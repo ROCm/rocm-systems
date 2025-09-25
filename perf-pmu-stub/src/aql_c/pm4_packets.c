@@ -168,8 +168,8 @@ int pm4_append_set_uconfig_reg(pm4_buffer_t *buffer,
     /* Calculate register offset from UCONFIG base */
     offset = (uint16_t)((reg_offset - UCONFIG_SPACE_START) & 0xFFFF);
 
-    /* Build packet matching Rust SetUConfigReg structure */
-    packet[0] = PM4_TYPE_3_HEADER(PM4_SET_UCONFIG_REG_OPCODE, 1);  /* size=2-1 */
+    /* Build packet matching aqlprofile SetUConfigReg structure */
+    packet[0] = PM4_TYPE_3_HEADER(PM4_SET_UCONFIG_REG_OPCODE, 12);  /* 3 DWORDs = 12 bytes */
     packet[1] = offset & 0xFFFF;  /* reg_offset in lower 16 bits */
     packet[2] = value;
 
@@ -198,7 +198,7 @@ int pm4_append_write_sh_reg(pm4_buffer_t *buffer,
             ((index & 0xF) << 28);          /* bits 28-31: index */
 
     /* Build packet */
-    packet[0] = PM4_TYPE_3_HEADER(PM4_WRITE_SH_REG_OPCODE, 1);  /* size=2-1 */
+    packet[0] = PM4_TYPE_3_HEADER(PM4_WRITE_SH_REG_OPCODE, 12);  /* 3 DWORDs = 12 bytes */
     packet[1] = word1;
     packet[2] = value;
 
@@ -219,8 +219,8 @@ int pm4_append_event_write(pm4_buffer_t *buffer,
     event.bits.event_type = event_type & 0x3F;
     event.bits.event_index = event_index & 0xF;
 
-    /* Build packet matching Rust EventWrite */
-    packet[0] = PM4_TYPE_3_HEADER(PM4_EVENT_WRITE_OPCODE, 0);  /* size=1-1 */
+    /* Build packet matching aqlprofile EventWrite */
+    packet[0] = PM4_TYPE_3_HEADER(PM4_EVENT_WRITE_OPCODE, 8);  /* 2 DWORDs = 8 bytes */
     packet[1] = event.raw & 0xFFFF;  /* Only lower 16 bits used */
 
     return pm4_buffer_append(buffer, packet, 2);
@@ -237,8 +237,8 @@ int pm4_append_copy_data(pm4_buffer_t *buffer,
     if (!buffer)
         return -1;
 
-    /* Build packet matching Rust CopyDataPacket */
-    packet[0] = PM4_TYPE_3_HEADER(PM4_COPY_DATA_OPCODE, 4);  /* size=5-1 */
+    /* Build packet matching aqlprofile CopyData */
+    packet[0] = PM4_TYPE_3_HEADER(PM4_COPY_DATA_OPCODE, 24);  /* 6 DWORDs = 24 bytes */
     packet[1] = flags.raw;
     packet[2] = src_reg_lo;
     packet[3] = src_reg_hi;
@@ -265,8 +265,8 @@ int pm4_append_acquire_mem(pm4_buffer_t *buffer,
                                       &coher_size_lo, &coher_size_hi,
                                       &coher_base_lo, &coher_base_hi);
 
-    /* Build packet matching Rust FlushCachePacket */
-    packet[0] = PM4_TYPE_3_HEADER(PM4_ACQUIRE_MEM_OPCODE, 6);  /* size=7-1 */
+    /* Build packet matching aqlprofile AcquireMem */
+    packet[0] = PM4_TYPE_3_HEADER(PM4_ACQUIRE_MEM_OPCODE, 32);  /* 8 DWORDs = 32 bytes */
     packet[1] = 0;  /* Reserved */
     packet[2] = coher_size_lo;
     packet[3] = coher_size_hi & 0xFF;  /* Only 8 bits for size_hi */

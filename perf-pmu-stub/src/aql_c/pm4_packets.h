@@ -32,9 +32,21 @@
 /* Event types */
 #define VGT_EVENT_TYPE_CS_PARTIAL_FLUSH  0x07
 
-/* PM4 packet header construction */
-#define PM4_TYPE_3_HEADER(opcode, count) \
-    (3u << 30 | ((opcode) & 0xFF) << 8 | ((count) & 0x3FFF) << 16)
+/* PM4 packet header construction
+ *
+ * IMPORTANT: This uses the same count calculation as aqlprofile implementation:
+ * count = (packet_size_bytes / 4) - 2
+ *
+ * This is intentionally different from the AMD PM4 specification which would use:
+ * count = total_dwords - 1 (number of DWORDs following the header)
+ *
+ * For a 3-DWORD packet (header + 2 data DWORDs):
+ * - AMD spec would use: count = 3 - 1 = 2
+ * - aqlprofile uses: count = 12/4 - 2 = 1
+ * - We match aqlprofile for compatibility: count = 1
+ */
+#define PM4_TYPE_3_HEADER(opcode, packet_size_bytes) \
+    (3u << 30 | ((opcode) & 0xFF) << 8 | (((packet_size_bytes / 4) - 2) & 0x3FFF) << 16)
 
 /**
  * PM4 command buffer structure
