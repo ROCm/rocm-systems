@@ -17,9 +17,9 @@ ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
 ENV PATH="/usr/local/bin:${PATH}"
-ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
-ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
-ENV CMAKE_PREFIX_PATH="/usr/local"
+ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LIBRARY_PATH:-}"
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH:-}"
+ENV CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
