@@ -39,3 +39,33 @@ arch_t* arch_create_by_name(const char* arch_name) {
     /* Unknown architecture */
     return NULL;
 }
+
+/* Architecture destruction function */
+void arch_destroy(arch_t* arch) {
+    if (!arch) return;
+
+    /* Free block information */
+    for (uint32_t i = 0; i < HW_IP_BLOCK_LAST; i++) {
+        if (arch->block_map.blocks[i]) {
+            /* Free counter register info arrays */
+            if (arch->block_map.blocks[i]->counter_reg_info) {
+                FREE(arch->block_map.blocks[i]->counter_reg_info);
+            }
+
+            /* Free dimensions arrays */
+            if (arch->block_map.blocks[i]->dimensions) {
+                FREE(arch->block_map.blocks[i]->dimensions);
+            }
+
+            FREE(arch->block_map.blocks[i]);
+        }
+    }
+
+    /* Free command buffer */
+    if (arch->command) {
+        FREE(arch->command);
+    }
+
+    /* Free the architecture structure itself */
+    FREE(arch);
+}

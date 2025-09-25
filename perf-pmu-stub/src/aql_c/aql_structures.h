@@ -476,7 +476,8 @@ const block_delay_info_t* gpu_block_info_get_delay_info(const gpu_block_info_t* 
 uint32_t gpu_block_info_get_spm_block_id(const gpu_block_info_t* self);
 */
 
-/* Architecture creation function - uncommented for implementation */
+/* Architecture creation and destruction functions */
 arch_t* arch_create_by_name(const char* arch_name);
+void arch_destroy(arch_t* arch);
 
 #endif /* AQL_STRUCTURES_H */

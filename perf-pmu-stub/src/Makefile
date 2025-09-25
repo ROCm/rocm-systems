@@ -1,15 +1,10 @@
 # Standard kernel module Makefile
 obj-m := pmu_stub.o
 
-# Include PMU stub, KFD test, AQL integration, and AQL C sources
+# Include PMU stub, KFD test, and minimal AQL integration
 pmu_stub-y := pmu_main.o pmu_events.o kfd_test.o \
               aql_perf.o aql_packet_ops.o aql_error_recovery.o aql_pmu_integration.o \
-              aql_c/aql_cmd_buffer.o \
-              aql_c/aql_packet.o \
-              aql_c/aql_arch_detect.o \
-              aql_c/aql_gfx9_ops.o \
-              aql_c/aql_gfx12_ops.o \
-              aql_c/aql_pmc_interface.o
+              aql_c/aql_pmc_interface.o aql_c/arch_creator.o aql_c/gfx12_creator.o
 
 # Kernel version and build directory
 KVERSION := $(shell uname -r)

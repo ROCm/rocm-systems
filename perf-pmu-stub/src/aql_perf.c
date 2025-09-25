@@ -20,6 +20,7 @@
 
 #include "aql_perf.h"
 #include "pmu_stub.h"
+#include "aql_c/arch_creator.h"
 
 /* External KFD functions */
 extern int kfd_alloc_device(struct file *filep, struct kfd_process *p,
@@ -133,6 +134,146 @@ struct counter_descriptor *aql_perf_find_counter_descriptor(uint32_t counter_id)
     return NULL;
 }
 
+/* GPU Architecture Detection */
+
+/**
+ * gfx_version_to_arch_name - Convert GFX target version to architecture name
+ * @gfx_target_version: GFX target version from KFD
+ *
+ * Returns: Architecture name string or NULL if unknown
+ */
+static const char* gfx_version_to_arch_name(uint32_t gfx_target_version)
+{
+    if (gfx_target_version >= 120000 && gfx_target_version < 130000)
+        return "gfx12";
+    else if (gfx_target_version >= 110000 && gfx_target_version < 120000)
+        return "gfx11";
+    else if (gfx_target_version >= 100000 && gfx_target_version < 110000)
+        return "gfx10";
+    else if (gfx_target_version >= 90000 && gfx_target_version < 100000)
+        return "gfx9";
+    else if (gfx_target_version >= 80000 && gfx_target_version < 90000)
+        return "gfx8";
+    else if (gfx_target_version >= 70000 && gfx_target_version < 80000)
+        return "gfx7";
+
+    return NULL;
+}
+
+/**
+ * get_arch_name_from_gpu_sysfs - Get GPU architecture name from sysfs
+ * @gpu_id: GPU ID to query
+ *
+ * Returns: Architecture name string or NULL on failure
+ */
+static const char* get_arch_name_from_gpu_sysfs(uint32_t gpu_id)
+{
+    char sysfs_path[128];
+    struct file *fp;
+    loff_t pos = 0;
+    char *buffer;
+    ssize_t bytes_read;
+    char *line, *next_line;
+    uint32_t gfx_target_version = 0;
+    const char *arch_name = NULL;
+    int node_id;
+
+    aql_debug("Looking for GPU ID %u in KFD topology nodes", gpu_id);
+
+    /* Iterate through topology nodes to find the one with matching gpu_id */
+    for (node_id = 0; node_id < 32; node_id++) {
+        /* First, check if this node has the target GPU ID */
+        snprintf(sysfs_path, sizeof(sysfs_path),
+                 "/sys/class/kfd/kfd/topology/nodes/%d/gpu_id", node_id);
+
+        fp = filp_open(sysfs_path, O_RDONLY, 0);
+        if (IS_ERR(fp))
+            continue;
+
+        buffer = kzalloc(16, GFP_KERNEL);
+        if (!buffer) {
+            filp_close(fp, NULL);
+            continue;
+        }
+
+        pos = 0;
+        bytes_read = kernel_read(fp, buffer, 15, &pos);
+        filp_close(fp, NULL);
+
+        if (bytes_read > 0) {
+            buffer[bytes_read] = '\0';
+            uint32_t node_gpu_id = simple_strtoul(buffer, NULL, 10);
+            kfree(buffer);
+
+            if (node_gpu_id == gpu_id) {
+                aql_debug("Found GPU ID %u at topology node %d", gpu_id, node_id);
+
+                /* Found the right node, now read properties */
+                snprintf(sysfs_path, sizeof(sysfs_path),
+                         "/sys/class/kfd/kfd/topology/nodes/%d/properties", node_id);
+
+                fp = filp_open(sysfs_path, O_RDONLY, 0);
+                if (IS_ERR(fp)) {
+                    aql_err("Failed to open properties file for node %d", node_id);
+                    break;
+                }
+
+                buffer = kzalloc(4096, GFP_KERNEL);
+                if (!buffer) {
+                    filp_close(fp, NULL);
+                    break;
+                }
+
+                pos = 0;
+                bytes_read = kernel_read(fp, buffer, 4095, &pos);
+                filp_close(fp, NULL);
+
+                if (bytes_read > 0) {
+                    buffer[bytes_read] = '\0';
+
+                    /* Parse for gfx_target_version */
+                    line = buffer;
+                    while (line && *line) {
+                        next_line = strchr(line, '\n');
+                        if (next_line)
+                            *next_line = '\0';
+
+                        if (strncmp(line, "gfx_target_version ", 19) == 0) {
+                            gfx_target_version = simple_strtoul(line + 19, NULL, 10);
+                            aql_debug("GPU %u has gfx_target_version=%u",
+                                      gpu_id, gfx_target_version);
+                            break;
+                        }
+
+                        line = next_line ? next_line + 1 : NULL;
+                    }
+                }
+
+                kfree(buffer);
+                break;
+            }
+        } else {
+            kfree(buffer);
+        }
+    }
+
+    /* Convert gfx_target_version to architecture name */
+    if (gfx_target_version > 0) {
+        arch_name = gfx_version_to_arch_name(gfx_target_version);
+        if (arch_name) {
+            aql_debug("GPU %u mapped to architecture %s (gfx_target_version=%u)",
+                      gpu_id, arch_name, gfx_target_version);
+        } else {
+            aql_warn("GPU %u has unknown gfx_target_version=%u",
+                     gpu_id, gfx_target_version);
+        }
+    } else {
+        aql_err("Failed to find gfx_target_version for GPU %u", gpu_id);
+    }
+
+    return arch_name;
+}
+
 /* Session Management */
 
 /**
@@ -165,6 +306,12 @@ static void aql_perf_session_release(struct aql_perf_session *session)
     kfree(session->packet_data);
     kfree(session->counters.descriptors);
     kfree(session->counters.counter_masks);
+
+    /* Free architecture */
+    if (session->arch) {
+        arch_destroy(session->arch);
+        session->arch = NULL;
+    }
 
     aql_debug("Session %llu fully released", session->session_id);
     kfree(session);
@@ -291,6 +438,32 @@ int aql_perf_session_initialize(struct aql_perf_session *session)
     if (ret) {
         aql_err("Session %llu: GPU memory allocation failed: %d",
                 session->session_id, ret);
+        goto error;
+    }
+
+    /* Detect and create GPU architecture */
+    if (session->num_gpus > 0) {
+        const char *arch_name = get_arch_name_from_gpu_sysfs(session->gpu_ids[0]);
+        if (arch_name) {
+            session->arch = arch_create_by_name(arch_name);
+            if (!session->arch) {
+                aql_err("Session %llu: Failed to create architecture %s for GPU %u",
+                        session->session_id, arch_name, session->gpu_ids[0]);
+                ret = -ENOTSUP;
+                goto error;
+            }
+            aql_info("Session %llu: Created architecture %s for GPU %u",
+                     session->session_id, arch_name, session->gpu_ids[0]);
+        } else {
+            aql_err("Session %llu: Failed to determine architecture for GPU %u",
+                    session->session_id, session->gpu_ids[0]);
+            ret = -ENOTSUP;
+            goto error;
+        }
+    } else {
+        aql_err("Session %llu: No GPUs available for architecture detection",
+                session->session_id);
+        ret = -ENODEV;
         goto error;
     }
 
