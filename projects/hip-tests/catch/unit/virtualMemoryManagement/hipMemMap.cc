@@ -89,7 +89,7 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
   // Allocate a physical memory chunk
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate num_buf virtual address ranges
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
@@ -100,12 +100,12 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
     // Set access to GPU 0
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
     square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
         reinterpret_cast<int*>(ptrA));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
     HIP_CHECK(hipMemUnmap(ptrA, size_mem));
@@ -155,7 +155,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   // Allocate a physical memory chunk
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate num_buf virtual address ranges
-  hipDeviceptr_t ptrA[num_buf];
+  void* ptrA[num_buf];
   for (int buf = 0; buf < num_buf; buf++) {
     HIP_CHECK(hipMemAddressReserve(&ptrA[buf], size_mem, 0, 0, 0));
   }
@@ -168,12 +168,12 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemMap(ptrA[buf], size_mem, 0, handle, 0));
     // Set access to GPU 0
     HIP_CHECK(hipMemSetAccess(ptrA[buf], size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(ptrA[buf], A_h.data(), buffer_size));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA[buf], buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA[buf]), A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA[buf]), buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
     square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
         reinterpret_cast<int*>(ptrA[buf]));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA[buf], buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA[buf]), buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
     HIP_CHECK(hipMemUnmap(ptrA[buf], size_mem));
@@ -225,7 +225,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   // Allocate a physical memory chunk
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate num_buf virtual address ranges
-  hipDeviceptr_t ptrA[num_buf];
+  void* ptrA[num_buf];
   for (int buf = 0; buf < num_buf; buf++) {
     HIP_CHECK(hipMemAddressReserve(&ptrA[buf], size_mem, 0, 0, 0));
   }
@@ -241,12 +241,12 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
     HIP_CHECK(hipMemSetAccess(ptrA[buf], size_mem, &accessDesc, 1));
   }
   // Copy data to VMM via ptrA[0]
-  HIP_CHECK(hipMemcpyHtoD(ptrA[0], A_h.data(), buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA[0]), A_h.data(), buffer_size));
   // Validate the data contained in VMM using ptrA[0], ptrA[1],
   // ......, ptrA[num_buf-1]
   for (int buf = 0; buf < num_buf; buf++) {
     std::fill(B_h.begin(), B_h.end(), initializer);
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA[buf], buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA[buf]), buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
   }
 
@@ -307,7 +307,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
     // Allocate a physical memory chunk
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
     // Allocate devicecount virtual address ranges
-    std::vector<hipDeviceptr_t> ptrA(devicecount);
+    std::vector<void*> ptrA(devicecount);
     for (int devY = 0; devY < devicecount; devY++) {
       HIP_CHECK(hipMemAddressReserve(&ptrA[devY], size_mem, 0, 0, 0));
     }
@@ -323,8 +323,10 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
       HIP_CHECK(hipMemMap(ptrA[devY], size_mem, 0, handle, 0));
       // Set access to GPU 0
       HIP_CHECK(hipMemSetAccess(ptrA[devY], size_mem, &accessDesc, 1));
-      HIP_CHECK(hipMemcpyHtoD(ptrA[devY], A_h.data(), buffer_size));
-      HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA[devY], buffer_size));
+      HIP_CHECK(
+          hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA[devY]), A_h.data(), buffer_size));
+      HIP_CHECK(
+          hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA[devY]), buffer_size));
       REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
       HIP_CHECK(hipMemUnmap(ptrA[devY], size_mem));
     }
@@ -378,7 +380,7 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemCreate(&handle[buf], size_mem, &prop, 0));
   }
   // Allocate num_buf virtual address ranges
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
@@ -390,13 +392,13 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle[buf], 0));
     // Set access to GPU 0
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
 #if HT_NVIDIA
     square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
         reinterpret_cast<int*>(ptrA));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
 #endif
@@ -460,7 +462,7 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
     HIP_CHECK(hipMemCreate(&handle[dev], size_mem, &prop, 0));
   }
   // Allocate devicecount virtual address ranges
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   // Map ptrA to physical chunk
   SECTION("Set Access of VMM to Different GPU") {
@@ -475,8 +477,8 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
       std::fill(B_h.begin(), B_h.end(), initializer);
       HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle[dev], 0));
       HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-      HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-      HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+      HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+      HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
       HIP_CHECK(hipMemUnmap(ptrA, size_mem));
       REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
     }
@@ -490,8 +492,8 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
       std::fill(B_h.begin(), B_h.end(), initializer);
       HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle[dev], 0));
       HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-      HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-      HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+      HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+      HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
       HIP_CHECK(hipMemUnmap(ptrA, size_mem));
       REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
     }
@@ -541,7 +543,7 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   // Allocate a bigger physical memory chunk of size_mem
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range of size twice size_mem
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, 2 * size_mem, 0, 0, 0));
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
@@ -550,8 +552,8 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   std::fill(B_h.begin(), B_h.end(), initializer);
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
   HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   // Release resources
@@ -587,14 +589,14 @@ TEST_CASE("Unit_hipMemMap_negative") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
 
   SECTION("nullptr to ptrA") {
-    REQUIRE(hipMemMap((hipDeviceptr_t) nullptr, size_mem, 0, handle, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemMap(nullptr, size_mem, 0, handle, 0) == hipErrorInvalidValue);
   }
 
   SECTION("pass zero to size") {
