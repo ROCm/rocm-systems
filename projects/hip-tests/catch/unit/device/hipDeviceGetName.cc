@@ -179,6 +179,25 @@ TEST_CASE("Unit_hipDeviceGetName_PartialFill") {
 #if HT_AMD
 #define BUFFER_LEN 512
 
+static inline std::vector<int> parseVisibleDevices() {
+  std::vector<int> res;
+  auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+  if (env_res == nullptr) {
+    env_res = std::getenv("ROCR_VISIBLE_DEVICES");
+    if (env_res == nullptr) {
+      return res;
+    }
+  }
+
+  std::stringstream ss(std::string{env_res});
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    res.push_back(std::stoi(item));
+  }
+
+  return res;
+}
+
 /**
  * Test Description
  * ------------------------
@@ -221,6 +240,17 @@ TEST_CASE("Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator") {
       dNameMap[j] = dName;
     }
     j++;
+  }
+
+  auto visible_devices = parseVisibleDevices();
+  if (visible_devices.size() > 0) {
+    // We have visible devices set, basically parse the visible devices and remove the entries
+    size_t start = 0;  // The devices will be reported from 0..
+    std::map<int, std::vector<char>> dNameMapCopy;
+    for (auto device : visible_devices) {
+      dNameMapCopy[start] = dNameMap[device];
+    }
+    dNameMap = dNameMapCopy;
   }
 
   for (const auto& i : dNameMap) {
