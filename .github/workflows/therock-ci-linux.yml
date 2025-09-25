@@ -40,7 +40,8 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 7dbdbb9ca6db2029646ce158b13bd1c77dea55a3 # 2025-09-25 commit
+          ref: users/geomin12/compiler-test
+          # ref: 7dbdbb9ca6db2029646ce158b13bd1c77dea55a3 # 2025-09-25 commit
 
       - name: Runner Health Settings
         run: |
