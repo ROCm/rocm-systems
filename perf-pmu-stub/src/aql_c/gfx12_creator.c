@@ -121,6 +121,20 @@
 #define mmTD_PERFCOUNTER1_LO                13250  /* 0x33c2 */
 #define mmTD_PERFCOUNTER1_HI                13251  /* 0x33c3 */
 
+/* TCC registers */
+#define mmTCC_PERFCOUNTER0_SELECT           15424  /* 0x3c40 */
+#define mmTCC_PERFCOUNTER0_LO               13376  /* 0x3440 */
+#define mmTCC_PERFCOUNTER0_HI               13377  /* 0x3441 */
+#define mmTCC_PERFCOUNTER1_SELECT           15426  /* 0x3c42 */
+#define mmTCC_PERFCOUNTER1_LO               13378  /* 0x3442 */
+#define mmTCC_PERFCOUNTER1_HI               13379  /* 0x3443 */
+#define mmTCC_PERFCOUNTER2_SELECT           15428  /* 0x3c44 */
+#define mmTCC_PERFCOUNTER2_LO               13380  /* 0x3444 */
+#define mmTCC_PERFCOUNTER2_HI               13381  /* 0x3445 */
+#define mmTCC_PERFCOUNTER3_SELECT           15430  /* 0x3c46 */
+#define mmTCC_PERFCOUNTER3_LO               13382  /* 0x3446 */
+#define mmTCC_PERFCOUNTER3_HI               13383  /* 0x3447 */
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
@@ -143,6 +157,9 @@
 #define GFX12_TD_COUNTER_BLOCK_NUM_COUNTERS       2
 #define GFX12_TD_COUNTER_BLOCK_MAX_EVENT          127
 #define GFX12_TD_COUNTER_BLOCK_NUM_INSTANCES      2
+#define GFX12_TCC_COUNTER_BLOCK_NUM_COUNTERS      4
+#define GFX12_TCC_COUNTER_BLOCK_MAX_EVENT         255
+#define GFX12_TCC_COUNTER_BLOCK_NUM_INSTANCES     16
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -548,6 +565,51 @@ static block_info_t* create_gfx12_td_block(void) {
     return block;
 }
 
+/* Create TCC block info for GFX12 */
+static block_info_t* create_gfx12_tcc_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_TCC_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize TCC counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmTCC_PERFCOUNTER0_SELECT, 0,
+                           mmTCC_PERFCOUNTER0_LO, mmTCC_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmTCC_PERFCOUNTER1_SELECT, 0,
+                           mmTCC_PERFCOUNTER1_LO, mmTCC_PERFCOUNTER1_HI);
+    create_counter_reg_info(&counter_regs[2], mmTCC_PERFCOUNTER2_SELECT, 0,
+                           mmTCC_PERFCOUNTER2_LO, mmTCC_PERFCOUNTER2_HI);
+    create_counter_reg_info(&counter_regs[3], mmTCC_PERFCOUNTER3_SELECT, 0,
+                           mmTCC_PERFCOUNTER3_LO, mmTCC_PERFCOUNTER3_HI);
+
+    /* Create dimensions for TCC block - global block with no SE/SA dependencies */
+    block->dimension_count = 1;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_XCC, .dim = HARDWARE_DIM_XCC};
+
+    block->name = "TCC";
+    block->id = HW_IP_BLOCK_TCC;
+    block->instance_count = GFX12_TCC_COUNTER_BLOCK_NUM_INSTANCES;
+    block->event_id_max = GFX12_TCC_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_TCC_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -574,8 +636,9 @@ arch_t* create_gfx12_arch(void) {
     block_info_t* ta_block = create_gfx12_ta_block();
     block_info_t* tcp_block = create_gfx12_tcp_block();
     block_info_t* td_block = create_gfx12_td_block();
+    block_info_t* tcc_block = create_gfx12_tcc_block();
 
-    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block) {
+    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block || !tcc_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -617,6 +680,11 @@ arch_t* create_gfx12_arch(void) {
             FREE(td_block->counter_reg_info);
             FREE(td_block);
         }
+        if (tcc_block) {
+            FREE(tcc_block->dimensions);
+            FREE(tcc_block->counter_reg_info);
+            FREE(tcc_block);
+        }
         return NULL;
     }
 
@@ -629,7 +697,8 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_TA] = ta_block;
     arch->block_map.blocks[HW_IP_BLOCK_TCP] = tcp_block;
     arch->block_map.blocks[HW_IP_BLOCK_TD] = td_block;
-    arch->block_map.block_count = 8;
+    arch->block_map.blocks[HW_IP_BLOCK_TCC] = tcc_block;
+    arch->block_map.block_count = 9;
 
     return arch;
 }

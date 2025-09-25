@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 8, "Block map has 8 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 9, "Block map has 9 blocks");
 
         free_arch(arch);
     }
@@ -380,6 +380,71 @@ static void test_gfx12_td_block(void) {
     }
 }
 
+/* Test GFX12 TCC block configuration */
+static void test_gfx12_tcc_block(void) {
+    printf("\n=== Testing GFX12 TCC Block ===\n");
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for TCC block test");
+
+    if (arch) {
+        block_info_t* tcc_block = arch->block_map.blocks[HW_IP_BLOCK_TCC];
+        TEST_ASSERT(tcc_block != NULL, "TCC block exists");
+
+        if (tcc_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(tcc_block->name, "TCC") == 0, "TCC block name is correct");
+            TEST_ASSERT(tcc_block->id == HW_IP_BLOCK_TCC, "TCC block type correct");
+            TEST_ASSERT(tcc_block->counter_count == 4, "TCC block has 4 counters");
+            TEST_ASSERT(tcc_block->event_id_max == 255, "TCC block max event ID is 255");
+            TEST_ASSERT(tcc_block->instance_count == 16, "TCC block has 16 instances");
+
+            /* Validate global dimensions - TCC is a global block with 1 dimension */
+            TEST_ASSERT(tcc_block->dimensions != NULL, "TCC block dimensions exist");
+            TEST_ASSERT(tcc_block->dimension_count == 1, "TCC block has 1 dimension");
+
+            if (tcc_block->dimensions && tcc_block->dimension_count >= 1) {
+                TEST_ASSERT(tcc_block->dimensions[0].dim == HARDWARE_DIM_XCC, "TCC dimension 0 is XCC");
+                TEST_ASSERT(tcc_block->dimensions[0].size == 1, "TCC XCC dimension size is 1");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(tcc_block->counter_reg_info != NULL, "TCC block counter registers exist");
+            if (tcc_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &tcc_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &tcc_block->counter_reg_info[1];
+                counter_reg_info_t* reg2 = &tcc_block->counter_reg_info[2];
+                counter_reg_info_t* reg3 = &tcc_block->counter_reg_info[3];
+
+                /* Counter 0 registers - based on estimated addresses */
+                TEST_ASSERT(reg0->select_addr == 15424, "TCC counter 0 select register (0x3c40)");
+                TEST_ASSERT(reg0->control_addr == 0, "TCC counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 13376, "TCC counter 0 lo register (0x3440)");
+                TEST_ASSERT(reg0->register_addr_hi == 13377, "TCC counter 0 hi register (0x3441)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 15426, "TCC counter 1 select register (0x3c42)");
+                TEST_ASSERT(reg1->control_addr == 0, "TCC counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 13378, "TCC counter 1 lo register (0x3442)");
+                TEST_ASSERT(reg1->register_addr_hi == 13379, "TCC counter 1 hi register (0x3443)");
+
+                /* Counter 2 registers */
+                TEST_ASSERT(reg2->select_addr == 15428, "TCC counter 2 select register (0x3c44)");
+                TEST_ASSERT(reg2->control_addr == 0, "TCC counter 2 no control register");
+                TEST_ASSERT(reg2->register_addr_lo == 13380, "TCC counter 2 lo register (0x3444)");
+                TEST_ASSERT(reg2->register_addr_hi == 13381, "TCC counter 2 hi register (0x3445)");
+
+                /* Counter 3 registers */
+                TEST_ASSERT(reg3->select_addr == 15430, "TCC counter 3 select register (0x3c46)");
+                TEST_ASSERT(reg3->control_addr == 0, "TCC counter 3 no control register");
+                TEST_ASSERT(reg3->register_addr_lo == 13382, "TCC counter 3 lo register (0x3446)");
+                TEST_ASSERT(reg3->register_addr_hi == 13383, "TCC counter 3 hi register (0x3447)");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -636,6 +701,7 @@ int main(void) {
     test_gfx12_ta_block();
     test_gfx12_tcp_block();
     test_gfx12_td_block();
+    test_gfx12_tcc_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
