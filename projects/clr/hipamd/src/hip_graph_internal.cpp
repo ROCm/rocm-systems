@@ -401,8 +401,9 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   nodeCaptureStatus_.clear();
   nodeCaptureStatus_.resize(topoOrder_.size(), false);
 
-  // Clear previous batches
+  // Clear previous batches and node mapping
   packetBatches_.clear();
+  nodeToPacketsMap_.clear();
 
   // Process nodes and create batches of consecutive captured nodes
   for (size_t i = 0; i < topoOrder_.size(); ++i) {
@@ -418,22 +419,42 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     }
 
     if (node->GraphCaptureEnabled()) {
-      // Start of a potential batch - try to capture packets for this node
-      std::vector<uint8_t*> currentBatch;
-      std::vector<std::string> currentKernelNames;
+      // Start of a new batch
+      PacketBatch newBatch;
+      PacketNode* lastNode = nullptr;
 
       // Collect packets from consecutive captured nodes
       size_t j = i;
       size_t capturedNodeCount = 0;
       while (j < topoOrder_.size() && topoOrder_[j]->GraphCaptureEnabled()) {
         auto& currentNode = topoOrder_[j];
-        status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &currentBatch,
-                                                             &currentKernelNames);
 
-        if (status != hipSuccess || currentBatch.empty()) {
+        // Capture packets for this node
+        std::vector<uint8_t*> nodePackets;
+        std::vector<std::string> nodeKernelNames;
+        status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
+                                                   &nodeKernelNames);
+
+        if (status != hipSuccess || nodePackets.empty()) {
           LogError("Packet capture failed");
           return status;
         }
+
+        // Create PacketNodes for this node's packets
+        std::vector<PacketNode*> nodePacketNodes;
+        for (size_t k = 0; k < nodePackets.size(); ++k) {
+          PacketNode* packetNode = new PacketNode(nodePackets[k], nodeKernelNames[k], 
+                                                  currentNode);
+          nodePacketNodes.push_back(packetNode);
+
+          // Insert into batch LinkedList
+          newBatch.insertAfter(lastNode, packetNode);
+          lastNode = packetNode;
+        }
+
+        // Store mapping from node to its PacketNodes
+        nodeToPacketsMap_[currentNode] = nodePacketNodes;
+
         // Mark this node as successfully captured
         nodeCaptureStatus_[j] = true;
         ++j;
@@ -441,9 +462,8 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       }
 
       // Add the batch if it has packets
-      if (!currentBatch.empty()) {
-        packetBatches_.emplace_back(std::move(currentBatch), std::move(currentKernelNames),
-                                    capturedNodeCount);
+      if (newBatch.head != nullptr) {
+        packetBatches_.push_back(std::move(newBatch));
       }
 
       // Skip the nodes we just processed, the index will be incremented by the loop
@@ -453,7 +473,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       if (childNode->GetChildGraph()->max_streams_ == 1) {
         childNode->SetGraphCaptureStatus(true);
         status = childNode->CaptureAndFormPacketsForGraph();
-        nodeCaptureStatus_[i] = (status == hipSuccess);
+        //nodeCaptureStatus_[i] = (status == hipSuccess);
         if (status != hipSuccess) {
           status = hipSuccess; // Continue with other nodes
         }
@@ -493,8 +513,57 @@ hipError_t GraphExec::CaptureAQLPackets() {
 hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
   hipError_t status = hipSuccess;
   if (max_streams_ == 1) {
-    status = node->CaptureAndFormPacket(kernArgManager_);
+    // Find the node's packets in the mapping
+    auto it = nodeToPacketsMap_.find(node);
+    if (it == nodeToPacketsMap_.end()) {
+      return hipSuccess; // Node not in any batch
+    }
+
+    // Capture new packets for this node
+    std::vector<uint8_t*> newPackets;
+    std::vector<std::string> newKernelNames;
+    status = node->CaptureAndFormPacket(kernArgManager_, &newPackets, &newKernelNames);
+    if (status != hipSuccess) {
+      return status;
+    }
+
+    // Simple case: assume same number of packets, just update content
+    // This is much simpler and covers the common case
+    for (size_t i = 0; i < it->second.size() && i < newPackets.size(); ++i) {
+      it->second[i]->packet = newPackets[i];
+      it->second[i]->kernelName = newKernelNames[i];
+    }
   }
+  return status;
+}
+
+// ================================================================================================
+hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
+  hipError_t status = hipSuccess;
+  if (max_streams_ != 1) {
+    // Only handle single stream case for now
+    return hipSuccess;
+  }
+
+  // Find the node's packets in the mapping
+  auto it = nodeToPacketsMap_.find(node);
+  if (it == nodeToPacketsMap_.end()) {
+    return hipSuccess; // Node not in any batch
+  }
+
+  if (isEnabled) {
+    // Node is being enabled - just mark packets as enabled
+    // No need to re-capture packets, just mark them as active
+    for (auto packetNode : it->second) {
+      packetNode->node = node; // Mark as enabled
+    }
+  } else {
+    // Node is being disabled - mark packets as disabled
+    for (auto packetNode : it->second) {
+      packetNode->node = nullptr; // Mark as disabled
+    }
+  }
+
   return status;
 }
 
@@ -508,8 +577,6 @@ void GraphExec::DecrementRefCount(cl_event event, cl_int command_exec_status, vo
 // ================================================================================================
 
 hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
-  // Accumulate command tracks all the AQL packet batch that we submit to the HW. For now
-  // we track only kernel nodes.
   amd::AccumulateCommand* accumulate = nullptr;
   hipError_t status = hipSuccess;
   if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
@@ -518,31 +585,56 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
 
   size_t batchIndex = 0;
 
-  // Process nodes in topological order with mixed execution strategy
+  // Process nodes in topological order - MAINTAIN THIS!
   for (size_t i = 0; i < topoOrder_.size(); ++i) {
     auto& node = topoOrder_[i];
 
-    if (!node->GraphCaptureEnabled()) {
+    // Skip disabled nodes
+    if (node->GetEnabled() == 0) {
+      continue;
+    }
+
+    if (node->GetType() == hipGraphNodeTypeGraph) {
+      // Handle child graph nodes
+      auto childNode = reinterpret_cast<hip::ChildGraphNode*>(node);
+      if (childNode->GetChildGraph()->max_streams_ == 1) {
+        // Execute child graph with its own packet capture
+        status = childNode->EnqueueGraphWithSingleList(hip_stream);
+        if (status != hipSuccess) {
+          accumulate->release();
+          return status;
+        }
+      }
+    } else if (!node->GraphCaptureEnabled()) {
       // Node doesn't support capture - execute individually
       node->SetStream(hip_stream);
       status = node->CreateCommand(node->GetQueue());
       node->EnqueueCommands(hip_stream);
     } else if (i < nodeCaptureStatus_.size() && nodeCaptureStatus_[i]) {
-      // Node was successfully captured - find which batch it belongs to
-      // and dispatch the entire batch
+      // Node was successfully captured - dispatch the entire batch
       if (batchIndex < packetBatches_.size()) {
-        // Dispatch this batch
-        bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
-            packetBatches_[batchIndex].packets, packetBatches_[batchIndex].kernelNames, accumulate);
-        if (!batchStatus) {
-          status = hipErrorUnknown;
-          accumulate->release();
-          return status;
+        // Collect enabled packets from this batch
+        std::vector<uint8_t*> activePackets;
+        std::vector<std::string> activeKernelNames;
+        packetBatches_[batchIndex].getEnabledPackets(activePackets, activeKernelNames);
+
+        if (!activePackets.empty()) {
+          // Dispatch this batch
+          bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(activePackets, activeKernelNames, accumulate);
+          if (!batchStatus) {
+            status = hipErrorUnknown;
+            accumulate->release();
+            return status;
+          }
         }
 
         // Skip all consecutive captured nodes that belong to this batch
-        // Use the tracked node count to skip directly instead of parsing one by one
-        i += packetBatches_[batchIndex].capturedNodeCount - 1;  // -1 because loop will increment
+        // We need to count how many nodes are in this batch
+        size_t nodesInBatch = 0;
+        for (size_t j = i; j < topoOrder_.size() && j < nodeCaptureStatus_.size() && nodeCaptureStatus_[j]; ++j) {
+          nodesInBatch++;
+        }
+        i += nodesInBatch - 1;  // -1 because loop will increment
 
         ++batchIndex;
       }

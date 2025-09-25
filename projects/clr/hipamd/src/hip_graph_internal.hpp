@@ -873,6 +873,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph);
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  // Handle packetBatches_ updates when nodes are enabled/disabled
+  hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled);
 
  protected:
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
@@ -884,15 +886,63 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
 
-  //! Structure for batch dispatch optimization - packets and kernel names in aligned memory
-  struct PacketBatch {
-    std::vector<uint8_t*> packets;
-    std::vector<std::string> kernelNames;
-    size_t capturedNodeCount;  // Number of consecutive captured nodes in this batch
+  //! Structure for individual packet in LinkedList
+  struct PacketNode {
+    uint8_t* packet;
+    std::string kernelName;
+    GraphNode* node;        // Which node owns this packet
+    PacketNode* next;
+    PacketNode* prev;
+    PacketNode() : packet(nullptr), node(nullptr), next(nullptr), prev(nullptr) {}
+    PacketNode(uint8_t* p, const std::string& name, GraphNode* n)
+      : packet(p), kernelName(name), node(n), next(nullptr), prev(nullptr) {}
+  };
 
-    PacketBatch() : capturedNodeCount(0) {}
-    PacketBatch(std::vector<uint8_t*>&& p, std::vector<std::string>&& k, size_t nodeCount)
-      : packets(std::move(p)), kernelNames(std::move(k)), capturedNodeCount(nodeCount) {}
+  //! Structure for batch dispatch optimization using LinkedList
+  struct PacketBatch {
+    PacketNode* head;
+    PacketNode* tail;
+    PacketBatch() : head(nullptr), tail(nullptr) {}
+    // O(1) insertion after a specific node
+    void insertAfter(PacketNode* after, PacketNode* newNode) {
+      if (newNode == nullptr) return;
+      if (after == nullptr) {
+        // Insert at head
+        newNode->next = head;
+        newNode->prev = nullptr;
+        if (head) head->prev = newNode;
+        head = newNode;
+        if (tail == nullptr) tail = newNode;
+      } else {
+        // Insert after 'after'
+        newNode->next = after->next;
+        newNode->prev = after;
+        if (after->next) after->next->prev = newNode;
+        after->next = newNode;
+        if (after == tail) tail = newNode;
+      }
+    }
+    // O(1) removal of a specific node
+    void remove(PacketNode* node) {
+      if (node == nullptr) return;
+      if (node->prev) node->prev->next = node->next;
+      else head = node->next;
+      if (node->next) node->next->prev = node->prev;
+      else tail = node->prev;
+    }
+    // Get all enabled packets as vectors for dispatch
+    void getEnabledPackets(std::vector<uint8_t*>& packets, std::vector<std::string>& kernelNames) const {
+      packets.clear();
+      kernelNames.clear();
+      PacketNode* current = head;
+      while (current) {
+        if (current->node != nullptr) {  // Enabled
+          packets.push_back(current->packet);
+          kernelNames.push_back(current->kernelName);
+        }
+        current = current->next;
+      }
+    }
   };
 
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
@@ -900,6 +950,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::vector<PacketBatch> packetBatches_;
   //! Track which nodes were successfully captured (true) vs need individual execution (false)
   std::vector<bool> nodeCaptureStatus_;
+  //! Map from GraphNode to its PacketNodes for O(1) lookup
+  std::unordered_map<GraphNode*, std::vector<PacketNode*>> nodeToPacketsMap_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
