@@ -87,16 +87,10 @@ endmacro()
 # Setup version information
 #############################
 find_package(Perl REQUIRED)
-
-# Determine HIP_BASE_VERSION
-set(ENV{HIP_PATH} "")
-file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
-list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
-list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
-list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
-set(HIP_VERSION_GITDATE 0)
-
 find_package(Git)
+
+hip_compute_version()
+set(HIP_VERSION_GITDATE 0)
 
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.

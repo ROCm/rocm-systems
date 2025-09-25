@@ -44,10 +44,8 @@ endif()
 target_link_libraries(rocclr PUBLIC amd_comgr)
 
 if(CLR_BUILD_HIP)
-  # Temporary hack for versioned comgr needed by hiprtc
-  file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
-  list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
-  list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
+  include(HIPVersion)
+  hip_compute_version()
 
   add_definitions(-DHIP_MAJOR_VERSION=${HIP_VERSION_MAJOR})
   add_definitions(-DHIP_MINOR_VERSION=${HIP_VERSION_MINOR})
