@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 9, "Block map has 9 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 10, "Block map has 10 blocks");
 
         free_arch(arch);
     }
@@ -445,6 +445,73 @@ static void test_gfx12_tcc_block(void) {
     }
 }
 
+/* Test GFX12 SX block configuration */
+static void test_gfx12_sx_block(void) {
+    printf("\n=== Testing GFX12 SX Block ===\n");
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for SX block test");
+
+    if (arch) {
+        block_info_t* sx_block = arch->block_map.blocks[HW_IP_BLOCK_SX];
+        TEST_ASSERT(sx_block != NULL, "SX block exists");
+
+        if (sx_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(sx_block->name, "SX") == 0, "SX block name is correct");
+            TEST_ASSERT(sx_block->id == HW_IP_BLOCK_SX, "SX block type correct");
+            TEST_ASSERT(sx_block->counter_count == 4, "SX block has 4 counters");
+            TEST_ASSERT(sx_block->event_id_max == 189, "SX block max event ID is 189");
+            TEST_ASSERT(sx_block->instance_count == 1, "SX block has 1 instance");
+
+            /* Validate SE dimensions - SX is a SE block with 2 dimensions */
+            TEST_ASSERT(sx_block->dimensions != NULL, "SX block dimensions exist");
+            TEST_ASSERT(sx_block->dimension_count == 2, "SX block has 2 dimensions");
+
+            if (sx_block->dimensions && sx_block->dimension_count >= 2) {
+                TEST_ASSERT(sx_block->dimensions[0].dim == HARDWARE_DIM_XCC, "SX dimension 0 is XCC");
+                TEST_ASSERT(sx_block->dimensions[0].size == 1, "SX XCC dimension size is 1");
+                TEST_ASSERT(sx_block->dimensions[1].dim == HARDWARE_DIM_SE, "SX dimension 1 is SE");
+                TEST_ASSERT(sx_block->dimensions[1].size == 4, "SX SE dimension size is 4");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(sx_block->counter_reg_info != NULL, "SX block counter registers exist");
+            if (sx_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &sx_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &sx_block->counter_reg_info[1];
+                counter_reg_info_t* reg2 = &sx_block->counter_reg_info[2];
+                counter_reg_info_t* reg3 = &sx_block->counter_reg_info[3];
+
+                /* Counter 0 registers - based on estimated addresses */
+                TEST_ASSERT(reg0->select_addr == 14976, "SX counter 0 select register (0x3a80)");
+                TEST_ASSERT(reg0->control_addr == 0, "SX counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 12928, "SX counter 0 lo register (0x3280)");
+                TEST_ASSERT(reg0->register_addr_hi == 12929, "SX counter 0 hi register (0x3281)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 14978, "SX counter 1 select register (0x3a82)");
+                TEST_ASSERT(reg1->control_addr == 0, "SX counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 12930, "SX counter 1 lo register (0x3282)");
+                TEST_ASSERT(reg1->register_addr_hi == 12931, "SX counter 1 hi register (0x3283)");
+
+                /* Counter 2 registers */
+                TEST_ASSERT(reg2->select_addr == 14980, "SX counter 2 select register (0x3a84)");
+                TEST_ASSERT(reg2->control_addr == 0, "SX counter 2 no control register");
+                TEST_ASSERT(reg2->register_addr_lo == 12932, "SX counter 2 lo register (0x3284)");
+                TEST_ASSERT(reg2->register_addr_hi == 12933, "SX counter 2 hi register (0x3285)");
+
+                /* Counter 3 registers */
+                TEST_ASSERT(reg3->select_addr == 14982, "SX counter 3 select register (0x3a86)");
+                TEST_ASSERT(reg3->control_addr == 0, "SX counter 3 no control register");
+                TEST_ASSERT(reg3->register_addr_lo == 12934, "SX counter 3 lo register (0x3286)");
+                TEST_ASSERT(reg3->register_addr_hi == 12935, "SX counter 3 hi register (0x3287)");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -702,6 +769,7 @@ int main(void) {
     test_gfx12_tcp_block();
     test_gfx12_td_block();
     test_gfx12_tcc_block();
+    test_gfx12_sx_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
