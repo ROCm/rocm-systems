@@ -37,15 +37,42 @@ else()
             PATHS
                 "C:/simde"
             ENV INCLUDE
-    )
+        )
     elseif(UNIX)
+        # Debug: Check if expected directories exist
+        if(EXISTS "/usr/include/simde/simde-common.h")
+            message(STATUS "DEBUG: /usr/include/simde/simde-common.h exists")
+        else()
+            message(STATUS "DEBUG: /usr/include/simde/simde-common.h does NOT exist")
+        endif()
+        
+        # Try with restricted paths first
         find_path(SIMDE_INCLUDE_DIR
             NAMES simde/simde-common.h
             PATHS
                 /usr/include
                 /usr/local/include
             NO_DEFAULT_PATH
-    )
+        )
+        
+        # If that fails, try without restrictions
+        if(NOT SIMDE_INCLUDE_DIR)
+            message(STATUS "DEBUG: Retrying without NO_DEFAULT_PATH restriction...")
+            find_path(SIMDE_INCLUDE_DIR
+                NAMES simde/simde-common.h
+                PATHS
+                    /usr/include
+                    /usr/local/include
+            )
+        endif()
+        
+        # Last resort: try system default paths only
+        if(NOT SIMDE_INCLUDE_DIR)
+            message(STATUS "DEBUG: Trying system default paths...")
+            find_path(SIMDE_INCLUDE_DIR
+                NAMES simde/simde-common.h
+            )
+        endif()
     endif()
 
     find_package_handle_standard_args(SIMDe
