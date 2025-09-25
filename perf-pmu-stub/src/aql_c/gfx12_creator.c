@@ -49,11 +49,21 @@
 #define mmSQ_PERFCOUNTER6_LO                53708
 #define mmSQ_PERFCOUNTER7_LO                53710
 
+/* GRBM registers */
+#define mmGRBM_PERFCOUNTER0_SELECT          14400
+#define mmGRBM_PERFCOUNTER0_LO              12352
+#define mmGRBM_PERFCOUNTER0_HI              12353
+#define mmGRBM_PERFCOUNTER1_SELECT          14401
+#define mmGRBM_PERFCOUNTER1_LO              12355
+#define mmGRBM_PERFCOUNTER1_HI              12356
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
 #define GFX12_SQ_COUNTER_BLOCK_NUM_COUNTERS       8
 #define GFX12_SQ_COUNTER_BLOCK_MAX_EVENT          0xFF  /* Placeholder - actual from enums */
+#define GFX12_GRBM_COUNTER_BLOCK_NUM_COUNTERS     2
+#define GFX12_GRBM_COUNTER_BLOCK_MAX_EVENT        51
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -163,6 +173,47 @@ static block_info_t* create_gfx12_sq_block(void) {
     return block;
 }
 
+/* Create GRBM block info for GFX12 */
+static block_info_t* create_gfx12_grbm_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_GRBM_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize GRBM counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmGRBM_PERFCOUNTER0_SELECT, 0,
+                           mmGRBM_PERFCOUNTER0_LO, mmGRBM_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmGRBM_PERFCOUNTER1_SELECT, 0,
+                           mmGRBM_PERFCOUNTER1_LO, mmGRBM_PERFCOUNTER1_HI);
+
+    /* Create dimensions for GRBM block - global block with no SE/SA dependencies */
+    block->dimension_count = 1;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_XCC, .dim = HARDWARE_DIM_XCC};
+
+    block->name = "GRBM";
+    block->id = HW_IP_BLOCK_GRBM;
+    block->instance_count = 1;
+    block->event_id_max = GFX12_GRBM_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_GRBM_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -183,8 +234,9 @@ arch_t* create_gfx12_arch(void) {
     /* Create and add block info entries */
     block_info_t* cpc_block = create_gfx12_cpc_block();
     block_info_t* sq_block = create_gfx12_sq_block();
+    block_info_t* grbm_block = create_gfx12_grbm_block();
 
-    if (!cpc_block || !sq_block) {
+    if (!cpc_block || !sq_block || !grbm_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -196,13 +248,19 @@ arch_t* create_gfx12_arch(void) {
             FREE(sq_block->counter_reg_info);
             FREE(sq_block);
         }
+        if (grbm_block) {
+            FREE(grbm_block->dimensions);
+            FREE(grbm_block->counter_reg_info);
+            FREE(grbm_block);
+        }
         return NULL;
     }
 
     /* Add blocks to the map */
     arch->block_map.blocks[HW_IP_BLOCK_CPC] = cpc_block;
     arch->block_map.blocks[HW_IP_BLOCK_SQ] = sq_block;
-    arch->block_map.block_count = 2;
+    arch->block_map.blocks[HW_IP_BLOCK_GRBM] = grbm_block;
+    arch->block_map.block_count = 3;
 
     return arch;
 }

@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 2, "Block map has 2 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 3, "Block map has 3 blocks");
 
         free_arch(arch);
     }
@@ -164,6 +164,51 @@ static void test_gfx12_sq_block(void) {
     }
 }
 
+/* Test GRBM block configuration */
+static void test_gfx12_grbm_block(void) {
+    printf("\n=== Testing GFX12 GRBM Block ===\n");
+
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for GRBM block test");
+
+    if (arch) {
+        block_info_t* grbm_block = arch->block_map.blocks[HW_IP_BLOCK_GRBM];
+        TEST_ASSERT(grbm_block != NULL, "GRBM block exists");
+
+        if (grbm_block) {
+            TEST_ASSERT(strcmp(grbm_block->name, "GRBM") == 0, "GRBM block name is correct");
+            TEST_ASSERT(grbm_block->id == HW_IP_BLOCK_GRBM, "GRBM block ID is correct");
+            TEST_ASSERT(grbm_block->counter_count == 2, "GRBM block has 2 counters");
+            TEST_ASSERT(grbm_block->event_id_max == 51, "GRBM block max event is 51");
+            TEST_ASSERT(grbm_block->counter_reg_info != NULL, "GRBM counter register info exists");
+            TEST_ASSERT(grbm_block->dimension_count == 1, "GRBM block has 1 dimension");
+            TEST_ASSERT(grbm_block->dimensions != NULL, "GRBM dimensions array exists");
+
+            if (grbm_block->dimensions) {
+                TEST_ASSERT(grbm_block->dimensions[0].dim == HARDWARE_DIM_XCC, "GRBM dimension is XCC");
+                TEST_ASSERT(grbm_block->dimensions[0].size == 1, "GRBM XCC dimension size is 1");
+            }
+
+            /* Test counter register info */
+            if (grbm_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &grbm_block->counter_reg_info[0];
+                TEST_ASSERT(reg0->select_addr == 14400, "GRBM counter 0 select address");
+                TEST_ASSERT(reg0->register_addr_lo == 12352, "GRBM counter 0 LO address");
+                TEST_ASSERT(reg0->register_addr_hi == 12353, "GRBM counter 0 HI address");
+                TEST_ASSERT(reg0->allocation.state == COUNTER_STATE_FREE, "GRBM counter 0 initial state is FREE");
+
+                counter_reg_info_t* reg1 = &grbm_block->counter_reg_info[1];
+                TEST_ASSERT(reg1->select_addr == 14401, "GRBM counter 1 select address");
+                TEST_ASSERT(reg1->register_addr_lo == 12355, "GRBM counter 1 LO address");
+                TEST_ASSERT(reg1->register_addr_hi == 12356, "GRBM counter 1 HI address");
+                TEST_ASSERT(reg1->allocation.state == COUNTER_STATE_FREE, "GRBM counter 1 initial state is FREE");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -242,6 +287,7 @@ int main(void) {
     test_gfx12_arch_creation();
     test_gfx12_cpc_block();
     test_gfx12_sq_block();
+    test_gfx12_grbm_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
