@@ -1822,9 +1822,9 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     )
     num_kernels = 0
     if use_mock_kokkos:
-        kokkos_app = kokkos_app_dir + "/mock_kokkos_minimal"
+        kokkos_app = f"{kokkos_app_dir}/mock_kokkos_minimal"
     else:
-        kokkos_app = kokkos_app_dir + "/real_kokkos_minimal"
+        kokkos_app = f"{kokkos_app_dir}/real_kokkos_minimal"
 
     config["app_kokkos"] = [kokkos_app]
     if not os.path.exists(kokkos_app):
@@ -1842,7 +1842,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         OTHER_CSV_FILES = ALL_CSVS_MI350
     else:
         print("Testing isn't supported yet for {}".format(soc))
-        assert 0
+        return
 
     # Exclude files that are not relevant for Kokkos tracing
     # e.g., timestamps.csv, sysinfo.csv

@@ -1067,12 +1067,12 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
 
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
-        workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
+        f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
     )
 
     # counter collection csv files are generated for each process
     counter_collection_csvs = glob.glob(
-        workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
+        f"{workload_dir}/out/pmc_1/*/*_counter_collection.csv"
     )
 
     existing_marker_files_csv = [d for d in marker_api_trace_csvs if Path(d).is_file()]
@@ -1083,11 +1083,11 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     # Check if we have files to process
     if not existing_marker_files_csv:
         no_results = pd.DataFrame()
-        if not Path(workload_dir + "/out/pmc_1").exists():
-            Path(workload_dir + "/out/pmc_1").mkdir(parents=True, exist_ok=True)
+        if not Path(f"{workload_dir}/out/pmc_1").exists():
+            Path(f"{workload_dir}/out/pmc_1").mkdir(parents=True, exist_ok=True)
 
         no_results.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             index=False,
         )
 
@@ -1098,19 +1098,19 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         )
 
         combined_results_marker.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             index=False,
         )
 
         shutil.copyfile(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
-            workload_dir + "/" + fbase + "_marker_api_trace.csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
+            f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )
 
     if not existing_counter_files_csv:
         no_results = pd.DataFrame()
         no_results.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+            f"{workload_dir}/out/pmc_1/results_{fbase}_kokkos_trace.csv",
             index=False,
         )
         return
@@ -1134,13 +1134,13 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     ]
 
     combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
+        f"{workload_dir}/out/pmc_1/results_{fbase}_kokkos_trace.csv",
         index=False,
     )
 
     shutil.copyfile(
-        workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_trace.csv",
-        workload_dir + "/" + fbase + "_kokkos_trace.csv",
+        f"{workload_dir}/out/pmc_1/results_{fbase}_kokkos_trace.csv",
+        f"{workload_dir}/{fbase}_kokkos_trace.csv",
     )
 
 
