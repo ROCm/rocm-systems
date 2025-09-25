@@ -39,6 +39,7 @@ typedef enum {
     HW_IP_BLOCK_EA,
     HW_IP_BLOCK_GDS,
     HW_IP_BLOCK_GRBM,
+    HW_IP_BLOCK_GL2C,
     HW_IP_BLOCK_PA_SC,
     HW_IP_BLOCK_PA_SU,
     HW_IP_BLOCK_RMI,

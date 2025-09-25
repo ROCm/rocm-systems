@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 3, "Block map has 3 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 4, "Block map has 4 blocks");
 
         free_arch(arch);
     }
@@ -209,6 +209,65 @@ static void test_gfx12_grbm_block(void) {
     }
 }
 
+/* Test GL2C block configuration */
+static void test_gfx12_gl2c_block(void) {
+    printf("\n=== Testing GFX12 GL2C Block ===\n");
+
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for GL2C block test");
+
+    if (arch) {
+        block_info_t* gl2c_block = arch->block_map.blocks[HW_IP_BLOCK_GL2C];
+        TEST_ASSERT(gl2c_block != NULL, "GL2C block exists");
+
+        if (gl2c_block) {
+            TEST_ASSERT(strcmp(gl2c_block->name, "GL2C") == 0, "GL2C block name is correct");
+            TEST_ASSERT(gl2c_block->id == HW_IP_BLOCK_GL2C, "GL2C block ID is correct");
+            TEST_ASSERT(gl2c_block->counter_count == 4, "GL2C block has 4 counters");
+            TEST_ASSERT(gl2c_block->event_id_max == 249, "GL2C block max event is 249");
+            TEST_ASSERT(gl2c_block->instance_count == 16, "GL2C block has 16 instances");
+            TEST_ASSERT(gl2c_block->counter_reg_info != NULL, "GL2C counter register info exists");
+            TEST_ASSERT(gl2c_block->dimension_count == 1, "GL2C block has 1 dimension");
+            TEST_ASSERT(gl2c_block->dimensions != NULL, "GL2C dimensions array exists");
+
+            if (gl2c_block->dimensions) {
+                TEST_ASSERT(gl2c_block->dimensions[0].dim == HARDWARE_DIM_XCC, "GL2C dimension is XCC");
+                TEST_ASSERT(gl2c_block->dimensions[0].size == 1, "GL2C XCC dimension size is 1");
+            }
+
+            /* Test counter register info */
+            if (gl2c_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &gl2c_block->counter_reg_info[0];
+                TEST_ASSERT(reg0->select_addr == 15232, "GL2C counter 0 select address");
+                TEST_ASSERT(reg0->register_addr_lo == 13184, "GL2C counter 0 LO address");
+                TEST_ASSERT(reg0->register_addr_hi == 13185, "GL2C counter 0 HI address");
+                TEST_ASSERT(reg0->control_addr == 0, "GL2C counter 0 has no control address");
+                TEST_ASSERT(reg0->allocation.state == COUNTER_STATE_FREE, "GL2C counter 0 initial state is FREE");
+
+                counter_reg_info_t* reg1 = &gl2c_block->counter_reg_info[1];
+                TEST_ASSERT(reg1->select_addr == 15234, "GL2C counter 1 select address");
+                TEST_ASSERT(reg1->register_addr_lo == 13186, "GL2C counter 1 LO address");
+                TEST_ASSERT(reg1->register_addr_hi == 13187, "GL2C counter 1 HI address");
+                TEST_ASSERT(reg1->control_addr == 0, "GL2C counter 1 has no control address");
+
+                counter_reg_info_t* reg2 = &gl2c_block->counter_reg_info[2];
+                TEST_ASSERT(reg2->select_addr == 15236, "GL2C counter 2 select address");
+                TEST_ASSERT(reg2->register_addr_lo == 13188, "GL2C counter 2 LO address");
+                TEST_ASSERT(reg2->register_addr_hi == 13189, "GL2C counter 2 HI address");
+                TEST_ASSERT(reg2->control_addr == 0, "GL2C counter 2 has no control address");
+
+                counter_reg_info_t* reg3 = &gl2c_block->counter_reg_info[3];
+                TEST_ASSERT(reg3->select_addr == 15238, "GL2C counter 3 select address");
+                TEST_ASSERT(reg3->register_addr_lo == 13190, "GL2C counter 3 LO address");
+                TEST_ASSERT(reg3->register_addr_hi == 13191, "GL2C counter 3 HI address");
+                TEST_ASSERT(reg3->control_addr == 0, "GL2C counter 3 has no control address");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -288,6 +347,7 @@ int main(void) {
     test_gfx12_cpc_block();
     test_gfx12_sq_block();
     test_gfx12_grbm_block();
+    test_gfx12_gl2c_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
