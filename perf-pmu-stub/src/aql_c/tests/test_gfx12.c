@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 4, "Block map has 4 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 5, "Block map has 5 blocks");
 
         free_arch(arch);
     }
@@ -268,6 +268,61 @@ static void test_gfx12_gl2c_block(void) {
     }
 }
 
+/* Test SPI block configuration */
+static void test_gfx12_spi_block(void) {
+    printf("\n=== Testing GFX12 SPI Block ===\n");
+
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for SPI block test");
+
+    if (arch) {
+        block_info_t* spi_block = arch->block_map.blocks[HW_IP_BLOCK_SPI];
+        TEST_ASSERT(spi_block != NULL, "SPI block exists");
+
+        if (spi_block) {
+            TEST_ASSERT(strcmp(spi_block->name, "SPI") == 0, "SPI block name is correct");
+            TEST_ASSERT(spi_block->id == HW_IP_BLOCK_SPI, "SPI block ID is correct");
+            TEST_ASSERT(spi_block->counter_count == 6, "SPI block has 6 counters");
+            TEST_ASSERT(spi_block->event_id_max == 318, "SPI block max event is 318");
+            TEST_ASSERT(spi_block->instance_count == 1, "SPI block has 1 instance");
+            TEST_ASSERT(spi_block->counter_reg_info != NULL, "SPI counter register info exists");
+            TEST_ASSERT(spi_block->dimension_count == 2, "SPI block has 2 dimensions");
+            TEST_ASSERT(spi_block->dimensions != NULL, "SPI dimensions array exists");
+
+            if (spi_block->dimensions) {
+                TEST_ASSERT(spi_block->dimensions[0].dim == HARDWARE_DIM_XCC, "SPI dimension 0 is XCC");
+                TEST_ASSERT(spi_block->dimensions[0].size == 1, "SPI XCC dimension size is 1");
+                TEST_ASSERT(spi_block->dimensions[1].dim == HARDWARE_DIM_SE, "SPI dimension 1 is SE");
+                TEST_ASSERT(spi_block->dimensions[1].size == 4, "SPI SE dimension size is 4");
+            }
+
+            /* Test counter register info */
+            if (spi_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &spi_block->counter_reg_info[0];
+                TEST_ASSERT(reg0->select_addr == 14720, "SPI counter 0 select address");
+                TEST_ASSERT(reg0->register_addr_lo == 12673, "SPI counter 0 LO address");
+                TEST_ASSERT(reg0->register_addr_hi == 12672, "SPI counter 0 HI address");
+                TEST_ASSERT(reg0->control_addr == 0, "SPI counter 0 has no control address");
+                TEST_ASSERT(reg0->allocation.state == COUNTER_STATE_FREE, "SPI counter 0 initial state is FREE");
+
+                counter_reg_info_t* reg1 = &spi_block->counter_reg_info[1];
+                TEST_ASSERT(reg1->select_addr == 14721, "SPI counter 1 select address");
+                TEST_ASSERT(reg1->register_addr_lo == 12675, "SPI counter 1 LO address");
+                TEST_ASSERT(reg1->register_addr_hi == 12674, "SPI counter 1 HI address");
+                TEST_ASSERT(reg1->control_addr == 0, "SPI counter 1 has no control address");
+
+                counter_reg_info_t* reg5 = &spi_block->counter_reg_info[5];
+                TEST_ASSERT(reg5->select_addr == 14725, "SPI counter 5 select address");
+                TEST_ASSERT(reg5->register_addr_lo == 12683, "SPI counter 5 LO address");
+                TEST_ASSERT(reg5->register_addr_hi == 12682, "SPI counter 5 HI address");
+                TEST_ASSERT(reg5->control_addr == 0, "SPI counter 5 has no control address");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -348,6 +403,7 @@ int main(void) {
     test_gfx12_sq_block();
     test_gfx12_grbm_block();
     test_gfx12_gl2c_block();
+    test_gfx12_spi_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();

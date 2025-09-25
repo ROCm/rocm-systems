@@ -71,6 +71,26 @@
 #define mmGL2C_PERFCOUNTER3_LO              13190
 #define mmGL2C_PERFCOUNTER3_HI              13191
 
+/* SPI registers */
+#define mmSPI_PERFCOUNTER0_SELECT           14720
+#define mmSPI_PERFCOUNTER0_LO               12673
+#define mmSPI_PERFCOUNTER0_HI               12672
+#define mmSPI_PERFCOUNTER1_SELECT           14721
+#define mmSPI_PERFCOUNTER1_LO               12675
+#define mmSPI_PERFCOUNTER1_HI               12674
+#define mmSPI_PERFCOUNTER2_SELECT           14722
+#define mmSPI_PERFCOUNTER2_LO               12677
+#define mmSPI_PERFCOUNTER2_HI               12676
+#define mmSPI_PERFCOUNTER3_SELECT           14723
+#define mmSPI_PERFCOUNTER3_LO               12679
+#define mmSPI_PERFCOUNTER3_HI               12678
+#define mmSPI_PERFCOUNTER4_SELECT           14724
+#define mmSPI_PERFCOUNTER4_LO               12681
+#define mmSPI_PERFCOUNTER4_HI               12680
+#define mmSPI_PERFCOUNTER5_SELECT           14725
+#define mmSPI_PERFCOUNTER5_LO               12683
+#define mmSPI_PERFCOUNTER5_HI               12682
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
@@ -81,6 +101,9 @@
 #define GFX12_GL2C_COUNTER_BLOCK_NUM_COUNTERS     4
 #define GFX12_GL2C_COUNTER_BLOCK_MAX_EVENT        249
 #define GFX12_GL2C_COUNTER_BLOCK_NUM_INSTANCES    16
+#define GFX12_SPI_COUNTER_BLOCK_NUM_COUNTERS      6
+#define GFX12_SPI_COUNTER_BLOCK_MAX_EVENT         318
+#define GFX12_SPI_COUNTER_BLOCK_NUM_INSTANCES     1
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -276,6 +299,56 @@ static block_info_t* create_gfx12_gl2c_block(void) {
     return block;
 }
 
+/* Create SPI block info for GFX12 */
+static block_info_t* create_gfx12_spi_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_SPI_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize SPI counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmSPI_PERFCOUNTER0_SELECT, 0,
+                           mmSPI_PERFCOUNTER0_LO, mmSPI_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmSPI_PERFCOUNTER1_SELECT, 0,
+                           mmSPI_PERFCOUNTER1_LO, mmSPI_PERFCOUNTER1_HI);
+    create_counter_reg_info(&counter_regs[2], mmSPI_PERFCOUNTER2_SELECT, 0,
+                           mmSPI_PERFCOUNTER2_LO, mmSPI_PERFCOUNTER2_HI);
+    create_counter_reg_info(&counter_regs[3], mmSPI_PERFCOUNTER3_SELECT, 0,
+                           mmSPI_PERFCOUNTER3_LO, mmSPI_PERFCOUNTER3_HI);
+    create_counter_reg_info(&counter_regs[4], mmSPI_PERFCOUNTER4_SELECT, 0,
+                           mmSPI_PERFCOUNTER4_LO, mmSPI_PERFCOUNTER4_HI);
+    create_counter_reg_info(&counter_regs[5], mmSPI_PERFCOUNTER5_SELECT, 0,
+                           mmSPI_PERFCOUNTER5_LO, mmSPI_PERFCOUNTER5_HI);
+
+    /* Create dimensions for SPI block - SE block with SE dimensions */
+    block->dimension_count = 2;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_XCC, .dim = HARDWARE_DIM_XCC};
+    block->dimensions[1] = (dimension_t){.size = GFX12_NUM_SE, .dim = HARDWARE_DIM_SE};
+
+    block->name = "SPI";
+    block->id = HW_IP_BLOCK_SPI;
+    block->instance_count = GFX12_SPI_COUNTER_BLOCK_NUM_INSTANCES;
+    block->event_id_max = GFX12_SPI_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_SPI_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -298,8 +371,9 @@ arch_t* create_gfx12_arch(void) {
     block_info_t* sq_block = create_gfx12_sq_block();
     block_info_t* grbm_block = create_gfx12_grbm_block();
     block_info_t* gl2c_block = create_gfx12_gl2c_block();
+    block_info_t* spi_block = create_gfx12_spi_block();
 
-    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block) {
+    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -321,6 +395,11 @@ arch_t* create_gfx12_arch(void) {
             FREE(gl2c_block->counter_reg_info);
             FREE(gl2c_block);
         }
+        if (spi_block) {
+            FREE(spi_block->dimensions);
+            FREE(spi_block->counter_reg_info);
+            FREE(spi_block);
+        }
         return NULL;
     }
 
@@ -329,7 +408,8 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_SQ] = sq_block;
     arch->block_map.blocks[HW_IP_BLOCK_GRBM] = grbm_block;
     arch->block_map.blocks[HW_IP_BLOCK_GL2C] = gl2c_block;
-    arch->block_map.block_count = 4;
+    arch->block_map.blocks[HW_IP_BLOCK_SPI] = spi_block;
+    arch->block_map.block_count = 5;
 
     return arch;
 }
