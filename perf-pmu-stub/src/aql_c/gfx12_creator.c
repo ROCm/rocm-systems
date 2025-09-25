@@ -177,6 +177,20 @@
 #define mmPA_SC_PERFCOUNTER3_LO             12678  /* 0x3186 */
 #define mmPA_SC_PERFCOUNTER3_HI             12679  /* 0x3187 */
 
+/* PA_SU registers */
+#define mmPA_SU_PERFCOUNTER0_SELECT         14216  /* 0x3788 */
+#define mmPA_SU_PERFCOUNTER0_LO             12680  /* 0x3188 */
+#define mmPA_SU_PERFCOUNTER0_HI             12681  /* 0x3189 */
+#define mmPA_SU_PERFCOUNTER1_SELECT         14218  /* 0x378a */
+#define mmPA_SU_PERFCOUNTER1_LO             12682  /* 0x318a */
+#define mmPA_SU_PERFCOUNTER1_HI             12683  /* 0x318b */
+#define mmPA_SU_PERFCOUNTER2_SELECT         14220  /* 0x378c */
+#define mmPA_SU_PERFCOUNTER2_LO             12684  /* 0x318c */
+#define mmPA_SU_PERFCOUNTER2_HI             12685  /* 0x318d */
+#define mmPA_SU_PERFCOUNTER3_SELECT         14222  /* 0x378e */
+#define mmPA_SU_PERFCOUNTER3_LO             12686  /* 0x318e */
+#define mmPA_SU_PERFCOUNTER3_HI             12687  /* 0x318f */
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
@@ -211,6 +225,10 @@
 #define GFX12_PA_SC_COUNTER_BLOCK_NUM_COUNTERS    4
 #define GFX12_PA_SC_COUNTER_BLOCK_MAX_EVENT       171
 #define GFX12_PA_SC_COUNTER_BLOCK_NUM_INSTANCES   1
+
+#define GFX12_PA_SU_COUNTER_BLOCK_NUM_COUNTERS    4
+#define GFX12_PA_SU_COUNTER_BLOCK_MAX_EVENT       171
+#define GFX12_PA_SU_COUNTER_BLOCK_NUM_INSTANCES   1
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -799,6 +817,52 @@ static block_info_t* create_gfx12_pa_sc_block(void) {
     return block;
 }
 
+static block_info_t* create_gfx12_pa_su_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_PA_SU_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize PA_SU counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmPA_SU_PERFCOUNTER0_SELECT, 0,
+                           mmPA_SU_PERFCOUNTER0_LO, mmPA_SU_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmPA_SU_PERFCOUNTER1_SELECT, 0,
+                           mmPA_SU_PERFCOUNTER1_LO, mmPA_SU_PERFCOUNTER1_HI);
+    create_counter_reg_info(&counter_regs[2], mmPA_SU_PERFCOUNTER2_SELECT, 0,
+                           mmPA_SU_PERFCOUNTER2_LO, mmPA_SU_PERFCOUNTER2_HI);
+    create_counter_reg_info(&counter_regs[3], mmPA_SU_PERFCOUNTER3_SELECT, 0,
+                           mmPA_SU_PERFCOUNTER3_LO, mmPA_SU_PERFCOUNTER3_HI);
+
+    /* Create dimensions for PA_SU block - SE block with SE dimensions */
+    block->dimension_count = 2;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_XCC, .dim = HARDWARE_DIM_XCC};
+    block->dimensions[1] = (dimension_t){.size = GFX12_NUM_SE, .dim = HARDWARE_DIM_SE};
+
+    block->name = "PA_SU";
+    block->id = HW_IP_BLOCK_PA_SU;
+    block->instance_count = GFX12_PA_SU_COUNTER_BLOCK_NUM_INSTANCES;
+    block->event_id_max = GFX12_PA_SU_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_PA_SU_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -829,8 +893,9 @@ arch_t* create_gfx12_arch(void) {
     block_info_t* sx_block = create_gfx12_sx_block();
     block_info_t* db_block = create_gfx12_db_block();
     block_info_t* pa_sc_block = create_gfx12_pa_sc_block();
+    block_info_t* pa_su_block = create_gfx12_pa_su_block();
 
-    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block || !tcc_block || !sx_block || !db_block || !pa_sc_block) {
+    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block || !tcc_block || !sx_block || !db_block || !pa_sc_block || !pa_su_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -892,6 +957,11 @@ arch_t* create_gfx12_arch(void) {
             FREE(pa_sc_block->counter_reg_info);
             FREE(pa_sc_block);
         }
+        if (pa_su_block) {
+            FREE(pa_su_block->dimensions);
+            FREE(pa_su_block->counter_reg_info);
+            FREE(pa_su_block);
+        }
         return NULL;
     }
 
@@ -908,7 +978,8 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_SX] = sx_block;
     arch->block_map.blocks[HW_IP_BLOCK_DB] = db_block;
     arch->block_map.blocks[HW_IP_BLOCK_PA_SC] = pa_sc_block;
-    arch->block_map.block_count = 12;
+    arch->block_map.blocks[HW_IP_BLOCK_PA_SU] = pa_su_block;
+    arch->block_map.block_count = 13;
 
     return arch;
 }
