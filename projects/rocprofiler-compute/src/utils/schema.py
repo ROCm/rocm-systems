@@ -23,11 +23,6 @@
 
 ##############################################################################
 
-#
-# Define all common data storage classes,
-# predifned dict and global functions.
-#
-
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any

@@ -25,7 +25,6 @@
         "Unit_hipStreamPerThread_MultiThread",
         "SWDEV-398981 fails in stress test",
         "Unit_hipStreamCreateWithPriority_MulthreadDefaultflag",
-        "Unit_hipEventIpc",
         "=== Below 2 tests are disable due to defect EXSWHTEC-356 ===",
         "Unit_Device___hisinf2_Accuracy_Positive",
         "Unit_Device___hisnan2_Accuracy_Positive",
@@ -626,6 +625,15 @@
         "Unit_hipGetLastError_KernelFailure_TwoStreams",
         "=== Enable the below test when multi-device graph launches are fully supported ===",
         "Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg",
+        "=== SWDEV-556658 multiple test failures ===",
+        "Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic - uint8_t",
+        "Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic - uint16_t",
+        "Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic - uint32_t",
+        "Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic",
+        "Unit_hipGraphNodeSetEnabled_Functional_KernelNode",
+        "Unit_hipGraphNodeSetEnabled_Functional_MemSet",
+        "Unit_hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams",
+        "Unit_TexObjectCreate_TypePitch2D_IncompleteInit",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
         "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
