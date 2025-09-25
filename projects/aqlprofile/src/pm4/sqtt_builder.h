@@ -139,6 +139,10 @@ class SqttBuilder {
   // Builds Pm4 command stream to program hardware registers that
   // inserts "data" into the SQTT buffer as USERDATA_2 (data_lo) and USERDATA_3 (data_hi)
   virtual hsa_status_t InsertCodeobjMarker(CmdBuffer* cmd_buffer, uint32_t data, unsigned channel) = 0;
+  // Builds PM4 command stream to swap SQTT buffer to the next
+  virtual void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, int se_id) = 0;
+  // Builds PM4 command stream to query status bit
+  virtual void GetStatusPacket(CmdBuffer* cmd_buffer, TraceConfig* config, uint32_t* addr, int se_id) = 0;
 
   virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) {};
 
@@ -336,15 +340,29 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
           builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
                                               Primitives::sqtt_ctrl_value(true));
           // Issue a CSPartialFlush cmd including cache flush
-          if (config->concurrent == 0) builder.BuildWriteWaitIdlePacket(cmd_buffer);
+          builder.BuildWriteWaitIdlePacket(cmd_buffer);
           // Program the thread trace mode register, mode ON
           builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_MODE_ADDR,
-                                          Primitives::sqtt_mode_on_value());
+                                          Primitives::sqtt_mode_on_value(config->buffer_num > 1));
+
+          if (config->buffer_num > 1)
+          {
+            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+            uint64_t buf2_addr = reinterpret_cast<uint64_t>(config->buffer_data.at(0));
+
+            builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR,
+                                                Primitives::sqtt_base_value_lo(buf2_addr));
+            builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE2_ADDR,
+                                                Primitives::sqtt_base_value_hi(buf2_addr));
+          }
           base_addr += base_step;
       }
       // Reset the GRBM to broadcast mode
       SetGRBMToBroadcast(cmd_buffer);
     } else {
+      // Not implemented
+      if (config->buffer_num > 1) abort();
+
       SetGRBMToBroadcast(cmd_buffer);
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
 
@@ -505,8 +523,8 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       // Initialize cache flush request object
       builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->control_buffer_ptr),
                                     config->control_buffer_size);
-      builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->data_buffer_ptr),
-                                    config->data_buffer_size);
+      //builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->data_buffer_ptr),
+      //                              config->data_buffer_size);
       // Program zero size of thread trace buffer
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR,
                                          Primitives::sqtt_zero_size_value());
@@ -619,6 +637,37 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       builder.BuildWriteUConfigRegPacket(cmdbuf, reg, value);
     else
       builder.BuildWritePConfigRegPacket(cmdbuf, reg, value);
+  }
+
+  void GetStatusPacket(CmdBuffer* cmd_buffer, TraceConfig* config, uint32_t* addr, int se_id) override
+  {
+    assert(se_id == 0);
+    int se_per_xcc = se_number_total / GetXCCNumber();
+    XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
+    Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
+
+    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    builder.BuildCopyRegDataPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, addr, Primitives::COPY_DATA_SEL_COUNT_1DW_PRM, true);
+    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+
+    builder.BuildCacheFlushPacket(cmd_buffer, size_t(addr), sizeof(uint32_t));
+    SetGRBMToBroadcast(cmd_buffer);
+  }
+
+  void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, int se_id) override
+  {
+    assert(se_id == 0);
+    int se_per_xcc = se_number_total / GetXCCNumber();
+    uint64_t base_addr = reinterpret_cast<uint64_t>(addr);
+
+    XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
+
+    Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
+
+    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, Primitives::sqtt_base_value_lo(base_addr));
+    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE2_ADDR, Primitives::sqtt_base_value_hi(base_addr));
+
+    SetGRBMToBroadcast(cmd_buffer);
   }
 
   size_t se_number_total{};

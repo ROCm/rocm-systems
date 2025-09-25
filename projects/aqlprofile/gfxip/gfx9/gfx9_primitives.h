@@ -661,13 +661,14 @@ class gfx9_cntx_prim {
     return sq_thread_trace_mode;
   }
   // Thread trace mode ON value
-  static uint32_t sqtt_mode_on_value() {
+  static uint32_t sqtt_mode_on_value(bool wrap) {
     uint32_t sq_thread_trace_mode =
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MODE, WRAP, 0) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MODE, CAPTURE_MODE, 0) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MODE, MASK_CS, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MODE, AUTOFLUSH_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MODE, MODE, SQ_THREAD_TRACE_MODE_ON);
+    if (wrap) sq_thread_trace_mode |= SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MODE, WRAP, 1);
     return sq_thread_trace_mode;
   }
 

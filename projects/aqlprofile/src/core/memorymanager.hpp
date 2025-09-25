@@ -196,6 +196,25 @@ class TraceMemoryManager : public MemoryManager {
                      aqlprofile_memory_dealloc_callback_t dealloc, void* data)
       : MemoryManager(agent, alloc, dealloc, data) {}
 
+  void* AddExtraOutputBuf()
+  {
+    current_buffer.fetch_add(1);
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.device_access = true;
+    flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+    next_buffer.emplace_back(AllocMemory(outputbuf_size, flags));
+    return next_buffer.back().get();
+  }
+  
+  void* AddExtraCmdBuf(size_t size)
+  {
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.host_access = flags.device_access = true;
+    flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+    extra_cmd_buffers.emplace_back(AllocMemory(size, flags));
+    return extra_cmd_buffers.back().get();
+  }
+
   void CreateOutputBuf(size_t size) override {
     aqlprofile_buffer_desc_flags_t flags{};
     flags.device_access = true;
@@ -235,12 +254,17 @@ class TraceMemoryManager : public MemoryManager {
 
   pm4_builder::TraceConfig config{};
 
+  std::atomic<size_t> current_buffer{0};
+
  protected:
   int target_cu = -1;
   int simd_mask = 0xF;
   aqlprofile_memory_copy_t copy_fn;
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   std::unique_ptr<void, MemoryDeleter> trace_control_buf = nullptr;
+  
+  std::vector<std::unique_ptr<void, MemoryDeleter>> next_buffer{};
+  std::vector<std::unique_ptr<void, MemoryDeleter>> extra_cmd_buffers{};
 };
 
 class CodeobjMemoryManager : public MemoryManager {

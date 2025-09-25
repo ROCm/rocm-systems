@@ -281,6 +281,7 @@ typedef enum aqlprofile_att_parameter_name_ext_t
    */
   AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH = 11,
   AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP,  // one of aqlprofile_att_parameter_rt_timestamp_t
+  AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS
 } aqlprofile_att_parameter_name_ext_t;
 
 // Profile parameter object
@@ -432,6 +433,50 @@ hsa_status_t aqlprofile_att_create_packets(aqlprofile_handle_t* handle,
                                            aqlprofile_memory_copy_t memcpy_cb, void* userdata);
 
 void aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
+
+/**
+ * @brief Fn to create query and swap packets in case of double buffering.
+ * The caller must pool information by sending a query_status packet, followed by a call
+ * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_v0_t.is_full, then
+ * a buffer_swap packet must be inserted into the queue.
+ * 
+ * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
+ * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
+ * @param[in] handle Created in aqlprofile_att_create_packets()
+ * @param[in] shader_engine_id Shader engine to get packets from
+ * @param[in] flags Must be zero
+ * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_ERROR otherwise
+ */
+hsa_status_t aqlprofile_att_get_buffer_packets(hsa_ext_amd_aql_pm4_packet_t* query_status,
+                                               hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+                                               aqlprofile_handle_t handle,
+                                               int shader_engine_id,
+                                               int flags);
+
+struct aqlprofile_att_buffer_status_v0_t
+{
+  size_t _size;       // sizeof(aqlprofile_att_buffer_status_v0_t)
+  void*  data;        // Read data from, if is full
+  size_t read_size;   // Number of bytes to read, if is full
+  bool   needs_swap;  // If buffer requires swap
+  bool   is_too_late;
+};
+
+/**
+ * @brief Fn to retrieve buffer status.
+ * Must be called at least once with has_buffer_swapped=true for every swap packet inserted.
+ * @param[out] handle To be passed to iterate_data()
+ * @param[in] handle What was passed to aqlprofile_att_get_buffer_packets
+ * @param[in] shader_engine_id Shader engine (SE) ID
+ * @param[in] flags Must be zero
+ * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_ERROR otherwise
+ */
+hsa_status_t aqlprofile_att_get_buffer_status(aqlprofile_att_buffer_status_v0_t* out,
+                                              aqlprofile_handle_t handle,
+                                              int shader_engine_id,
+                                              int flags);
 
 /**
  * @brief Callback for iteration of all possible event coordinate IDs and coordinate names.

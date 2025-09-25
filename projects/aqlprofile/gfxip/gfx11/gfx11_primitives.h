@@ -622,7 +622,7 @@ class gfx11_cntx_prim {
   // Thread trace mode OFF value
   static uint32_t sqtt_mode_off_value() { return 0; }
   // Thread trace mode ON value
-  static uint32_t sqtt_mode_on_value() { return 0; }
+  static uint32_t sqtt_mode_on_value(bool) { return 0; }
 
   // Base address of buffer to use for thread trace
   static uint32_t sqtt_base_value_lo(const uint64_t& base_addr) {

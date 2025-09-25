@@ -187,11 +187,11 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
 
   auto& trace_config = memorymgr->config;
 
-    trace_config.vmIdMask = 0;
-    trace_config.simd_sel = 0xF;
-    trace_config.perfMASK = ~0u;
-    trace_config.se_mask = 0x11;
-    trace_config.enable_rt_timestamp = true;
+  trace_config.vmIdMask = 0;
+  trace_config.simd_sel = 0xF;
+  trace_config.perfMASK = ~0u;
+  trace_config.se_mask = 0x1;
+  trace_config.enable_rt_timestamp = true;
 
   const size_t se_number_total = pm4_factory->GetShaderEnginesNumber();
   uint64_t buffer_size = DEFAULT_TRACE_BUFFER_SIZE;
@@ -223,6 +223,10 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
         case AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP:
           trace_config.enable_rt_timestamp = p->value != static_cast<uint32_t>(AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE);
           break;
+        case AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS:
+          if (p->value < 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          trace_config.buffer_num = p->value;
+          break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK:
           trace_config.perfMASK = p->value;
           break;
@@ -243,6 +247,18 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
 
   memorymgr->CreateTraceControlBuf(control_size + THREAD_TRACE_PREFIX_SIZE);
   memorymgr->CreateOutputBuf(buffer_size);
+
+  if (trace_config.buffer_num > 1)
+  {
+    if (trace_config.se_mask != 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    for (int64_t i=1; i<trace_config.buffer_num; i++)
+      trace_config.buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
+
+    // First == Last buf for ring
+    trace_config.buffer_data.emplace_back(memorymgr->GetOutputBuf());
+  }
+
   MemoryManager::RegisterManager(memorymgr);
 
   auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
@@ -336,6 +352,78 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
 }  // namespace aql_profile_v2
 
 extern "C" {
+
+PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_status(
+  aqlprofile_att_buffer_status_v0_t* out,
+  aqlprofile_handle_t handle,
+  int shader_engine_id,
+  int flags
+)
+{
+  if(shader_engine_id != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  auto generic_manager = MemoryManager::GetManager(handle.handle);
+
+  auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
+  if (manager == nullptr) return HSA_STATUS_ERROR;
+
+  uint32_t status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status;
+  
+  out->_size       = sizeof(aqlprofile_att_buffer_status_v0_t);
+  out->is_too_late = false;
+  out->needs_swap  = status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask();
+  std::cout << out->needs_swap << " Status: " << std::hex << status << std::dec << std::endl;
+
+  if (out->needs_swap)
+  {
+    auto& config    = manager->config;
+    out->read_size  = config.capacity_per_se;
+    out->data       = config.buffer_data.at(manager->current_buffer.fetch_add(1) % config.buffer_data.size());
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
+  hsa_ext_amd_aql_pm4_packet_t* query_status,
+  hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+  aqlprofile_handle_t handle,
+  int shader_engine_id,
+  int flags)
+{
+  if(shader_engine_id != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  auto generic_manager = MemoryManager::GetManager(handle.handle);
+
+  auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
+  if (manager == nullptr) return HSA_STATUS_ERROR;
+
+  auto& buffers = manager->config.buffer_data;
+
+  aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(manager->GetAgent());
+  pm4_builder::SqttBuilder* sqttbuilder = pm4_factory->GetSqttBuilder();
+  pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
+
+  for (size_t i=0; i<buffers.size(); i++)
+  {
+    pm4_builder::CmdBuffer commands;
+    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at(i), shader_engine_id);
+
+    void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
+    memcpy(cmdbuffer, commands.Data(), commands.Size());
+    aql_profile::PopulateAql(cmdbuffer, commands.Size(), cmd_writer, buffer_swap[i]);
+  }
+  
+  pm4_builder::CmdBuffer commands;
+  uint32_t& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status;
+  sqttbuilder->GetStatusPacket(&commands, &manager->config, &status, shader_engine_id);
+
+  void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
+  memcpy(cmdbuffer, commands.Data(), commands.Size());
+  aql_profile::PopulateAql(cmdbuffer, commands.Size(), cmd_writer, query_status);
+
+  return HSA_STATUS_SUCCESS;
+}
 
 // Method to populate the provided AQL packet with ATT Markers
 PUBLIC_API hsa_status_t aqlprofile_att_codeobj_marker(
