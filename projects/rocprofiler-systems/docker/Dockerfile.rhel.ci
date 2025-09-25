@@ -2,15 +2,15 @@ ARG DISTRO=rockylinux/rockylinux
 ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
 
-ENV HOME /root
-ENV SHELL /bin/bash
-ENV BASH_ENV /etc/bash.bashrc
-ENV DEBIAN_FRONTEND noninteractive
+ENV HOME=/root
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/bash.bashrc
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
-ENV PATH /usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
+ENV PATH=/usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
