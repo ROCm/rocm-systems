@@ -264,7 +264,7 @@ static const char* get_arch_name_from_gpu_sysfs(uint32_t gpu_id)
             aql_debug("GPU %u mapped to architecture %s (gfx_target_version=%u)",
                       gpu_id, arch_name, gfx_target_version);
         } else {
-            aql_warn("GPU %u has unknown gfx_target_version=%u",
+            aql_info("GPU %u has unknown gfx_target_version=%u",
                      gpu_id, gfx_target_version);
         }
     } else {
@@ -449,7 +449,7 @@ int aql_perf_session_initialize(struct aql_perf_session *session)
             if (!session->arch) {
                 aql_err("Session %llu: Failed to create architecture %s for GPU %u",
                         session->session_id, arch_name, session->gpu_ids[0]);
-                ret = -ENOTSUP;
+                ret = -ENOTSUPP;
                 goto error;
             }
             aql_info("Session %llu: Created architecture %s for GPU %u",
@@ -457,7 +457,7 @@ int aql_perf_session_initialize(struct aql_perf_session *session)
         } else {
             aql_err("Session %llu: Failed to determine architecture for GPU %u",
                     session->session_id, session->gpu_ids[0]);
-            ret = -ENOTSUP;
+            ret = -ENOTSUPP;
             goto error;
         }
     } else {

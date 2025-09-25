@@ -17,12 +17,12 @@
 #include <linux/workqueue.h>
 #include <linux/ktime.h>
 #include <linux/perf_event.h>
+#include "aql_c/aql_structures.h"
 
 /* Forward declarations */
 struct file;
 struct kfd_process;
 struct amdgpu_ib;
-struct arch_t;
 
 /* KFD Data Allocation Structure - from KFD module */
 struct kfd_data_alloc {
@@ -237,7 +237,7 @@ struct aql_perf_session {
     struct counter_config counters;
 
     /* GPU Architecture */
-    struct arch_t *arch;
+    arch_t *arch;
 
     /* Session ID for debugging */
     uint64_t session_id;

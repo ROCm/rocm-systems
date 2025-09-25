@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #endif
 
+#include "pm4_packets.h"
+
 /* Forward declarations */
 struct kvec_u32;
 struct kvec_counter_reg_info;
@@ -97,7 +99,9 @@ typedef struct {
     uint32_t num_sa;
     uint32_t num_cu;
     uint32_t num_wgp_per_sa;
-    struct kvec_u32* command;
+
+    /* PM4 command buffer for building GPU command streams */
+    pm4_buffer_t* command;
 
     /* Block info organized by hardware IP block type */
     block_info_map_t block_map;
@@ -475,6 +479,8 @@ uint32_t gpu_block_info_get_attr(const gpu_block_info_t* self);
 const block_delay_info_t* gpu_block_info_get_delay_info(const gpu_block_info_t* self);
 uint32_t gpu_block_info_get_spm_block_id(const gpu_block_info_t* self);
 */
+
+/* pm4_op_t and related types are now defined in pm4_packets.h */
 
 /* Architecture creation and destruction functions */
 arch_t* arch_create_by_name(const char* arch_name);
