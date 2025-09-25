@@ -425,7 +425,6 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
 
       // Collect packets from consecutive captured nodes
       size_t j = i;
-      size_t capturedNodeCount = 0;
       while (j < topoOrder_.size() && topoOrder_[j]->GraphCaptureEnabled()) {
         auto& currentNode = topoOrder_[j];
 
@@ -458,7 +457,6 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
         // Mark this node as successfully captured
         nodeCaptureStatus_[j] = true;
         ++j;
-        ++capturedNodeCount;
       }
 
       // Add the batch if it has packets
