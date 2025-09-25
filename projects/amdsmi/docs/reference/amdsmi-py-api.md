@@ -1301,11 +1301,11 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 Example:
 
 ```python
-    try:
-        entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(
-            device, severity_mask, buffer_size, initial_cursor)
-    except AmdSmiException as e:
-        print(e)
+try:
+    entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(
+        device, severity_mask, buffer_size, initial_cursor)
+except AmdSmiException as e:
+    print(e)
 ```
 
 Refer to [amd_smi_cper_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_cper_example.py) for a complete example.
@@ -1335,18 +1335,37 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
     AMDSMI_STATUS_UNEXPECTED_DATA
     AMDSMI_STATUS_NOT_SUPPORTED
 
-Example:
+Example 1: Using a single CPER record as bytes
 
 ```python
-    try:
-        with open(cper_file.path, "rb") as file:
-            afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(file.read())
-    except AmdSmiException as e:
-        print(e)
+cper_bytes = b'\x43\x50\x45\x52...'  # Replace with actual bytes
+afids, num_afids = amdsmi_get_afids_from_cper(cper_bytes)
+print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+```
+
+Example 2: Using a list of dicts
+
+```python
+cper_record = {
+'bytes': [67, 80, 69, 82, ...],  # Replace with actual byte values
+'size': 376}
+afids, num_afids = amdsmi_get_afids_from_cper([cper_record])
+print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+```
+
+Example 3: General Usage
+
+```python
+try:
+    with open(cper_file.path, "rb") as file:
+        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(file.read())
+        print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+
+except AmdSmiException as e:
+    print(e)
 ```
 
 Refer to [amd_smi_afid_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_afid_example.py) for a complete example.
-
 
 ### amdsmi_get_gpu_ras_feature_info
 
