@@ -1236,6 +1236,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         }
     };
 
+#if(ROCPROFILER_VERSION >= 600)
     static bool is_first_implicit_task = false;
     if(!is_first_implicit_task && record.operation == ROCPROFILER_OMPT_ID_implicit_task)
     {
@@ -1244,6 +1245,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         is_first_implicit_task = true;
         return;
     }
+#endif
 
     auto ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts));
@@ -2273,7 +2275,9 @@ tool_fini(void* callback_data)
     static std::atomic_flag _once = ATOMIC_FLAG_INIT;
     if(_once.test_and_set()) return;
 
+#if(ROCPROFILER_VERSION >= 600)
     ompt_finalize_orphan_events();
+#endif
 
     flush();
     stop();
