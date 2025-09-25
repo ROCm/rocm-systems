@@ -56,6 +56,10 @@ ARG GPU_TYPE=""
 ARG GPU_TARBALL=""
 RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
         VERSION=$(echo "$GPU_TARBALL" | sed -nE 's/.*([0-9]\.[0-9]\.[0-9]).*/\1/p'); \
+        if [ -z "$VERSION" ]; then \
+            echo "Error: Could not extract version from GPU_TARBALL ('$GPU_TARBALL')." >&2; \
+            exit 1; \
+        fi; \
         pip install --upgrade pip; \
         pip install awscli --break-system-packages; \
         aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
