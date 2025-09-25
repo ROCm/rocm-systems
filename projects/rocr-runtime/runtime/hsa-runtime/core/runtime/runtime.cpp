@@ -905,25 +905,30 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
     if (num_agents > tinyArraySize) delete[] nodes;
   });
 
-  for (uint32_t i = 0; i < num_agents; i++)
-    agents[i]->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID,
-                       &nodes[i]);
+  for (uint32_t i = 0; i < num_agents; i++) {
+    if (agents[i]->driver().kernel_driver_type_ != DriverType::KFD) {
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+    agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
+  }
 
   if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(interop_handle, &info, num_agents,
                                           nodes)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
-  HSAuint64 altAddress;
+  assert(num_agents > 0);
+  auto& driver = agents[0]->driver();
+
+  uint64_t altAddress;
   HsaMemMapFlags map_flags;
   map_flags.Value = 0;
   map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-  if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes,
-                                &altAddress, map_flags, num_agents,
-                                nodes)) != HSAKMT_STATUS_SUCCESS) {
+  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+                                num_agents, nodes) != HSA_STATUS_SUCCESS) {
     map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-    if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes, &altAddress, map_flags,
-                                  num_agents, nodes)) != HSAKMT_STATUS_SUCCESS) {
-      HSAKMT_CALL(hsaKmtDeregisterMemory(info.MemoryAddress));
+    if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+                                  num_agents, nodes) != HSA_STATUS_SUCCESS) {
+      driver.DeregisterMemory(info.MemoryAddress);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
   }
@@ -942,10 +947,14 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 }
 
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
-  if(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(ptr))!=HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if(HSAKMT_CALL(hsaKmtDeregisterMemory(ptr))!=HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
+
+  hsa_status_t err = driver.MakeMemoryUnresident(ptr);
+  if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  err = driver.DeregisterMemory(ptr);
+  if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   return HSA_STATUS_SUCCESS;
 }
 
