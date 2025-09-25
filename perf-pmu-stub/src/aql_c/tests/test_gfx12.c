@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 10, "Block map has 10 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 11, "Block map has 11 blocks");
 
         free_arch(arch);
     }
@@ -512,6 +512,73 @@ static void test_gfx12_sx_block(void) {
     }
 }
 
+/* Test GFX12 DB block configuration */
+static void test_gfx12_db_block(void) {
+    printf("\n=== Testing GFX12 DB Block ===\n");
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for DB block test");
+
+    if (arch) {
+        block_info_t* db_block = arch->block_map.blocks[HW_IP_BLOCK_DB];
+        TEST_ASSERT(db_block != NULL, "DB block exists");
+
+        if (db_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(db_block->name, "DB") == 0, "DB block name is correct");
+            TEST_ASSERT(db_block->id == HW_IP_BLOCK_DB, "DB block type correct");
+            TEST_ASSERT(db_block->counter_count == 4, "DB block has 4 counters");
+            TEST_ASSERT(db_block->event_id_max == 218, "DB block max event ID is 218");
+            TEST_ASSERT(db_block->instance_count == 1, "DB block has 1 instance");
+
+            /* Validate SE dimensions - DB is a SE block with 2 dimensions */
+            TEST_ASSERT(db_block->dimensions != NULL, "DB block dimensions exist");
+            TEST_ASSERT(db_block->dimension_count == 2, "DB block has 2 dimensions");
+
+            if (db_block->dimensions && db_block->dimension_count >= 2) {
+                TEST_ASSERT(db_block->dimensions[0].dim == HARDWARE_DIM_XCC, "DB dimension 0 is XCC");
+                TEST_ASSERT(db_block->dimensions[0].size == 1, "DB XCC dimension size is 1");
+                TEST_ASSERT(db_block->dimensions[1].dim == HARDWARE_DIM_SE, "DB dimension 1 is SE");
+                TEST_ASSERT(db_block->dimensions[1].size == 4, "DB SE dimension size is 4");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(db_block->counter_reg_info != NULL, "DB block counter registers exist");
+            if (db_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &db_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &db_block->counter_reg_info[1];
+                counter_reg_info_t* reg2 = &db_block->counter_reg_info[2];
+                counter_reg_info_t* reg3 = &db_block->counter_reg_info[3];
+
+                /* Counter 0 registers - based on estimated addresses */
+                TEST_ASSERT(reg0->select_addr == 14592, "DB counter 0 select register (0x3900)");
+                TEST_ASSERT(reg0->control_addr == 0, "DB counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 12800, "DB counter 0 lo register (0x3200)");
+                TEST_ASSERT(reg0->register_addr_hi == 12801, "DB counter 0 hi register (0x3201)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 14594, "DB counter 1 select register (0x3902)");
+                TEST_ASSERT(reg1->control_addr == 0, "DB counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 12802, "DB counter 1 lo register (0x3202)");
+                TEST_ASSERT(reg1->register_addr_hi == 12803, "DB counter 1 hi register (0x3203)");
+
+                /* Counter 2 registers */
+                TEST_ASSERT(reg2->select_addr == 14596, "DB counter 2 select register (0x3904)");
+                TEST_ASSERT(reg2->control_addr == 0, "DB counter 2 no control register");
+                TEST_ASSERT(reg2->register_addr_lo == 12804, "DB counter 2 lo register (0x3204)");
+                TEST_ASSERT(reg2->register_addr_hi == 12805, "DB counter 2 hi register (0x3205)");
+
+                /* Counter 3 registers */
+                TEST_ASSERT(reg3->select_addr == 14598, "DB counter 3 select register (0x3906)");
+                TEST_ASSERT(reg3->control_addr == 0, "DB counter 3 no control register");
+                TEST_ASSERT(reg3->register_addr_lo == 12806, "DB counter 3 lo register (0x3206)");
+                TEST_ASSERT(reg3->register_addr_hi == 12807, "DB counter 3 hi register (0x3207)");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -770,6 +837,7 @@ int main(void) {
     test_gfx12_td_block();
     test_gfx12_tcc_block();
     test_gfx12_sx_block();
+    test_gfx12_db_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();

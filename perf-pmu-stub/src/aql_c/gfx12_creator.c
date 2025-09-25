@@ -149,6 +149,20 @@
 #define mmSX_PERFCOUNTER3_LO                12934  /* 0x3286 */
 #define mmSX_PERFCOUNTER3_HI                12935  /* 0x3287 */
 
+/* DB registers */
+#define mmDB_PERFCOUNTER0_SELECT            14592  /* 0x3900 */
+#define mmDB_PERFCOUNTER0_LO                12800  /* 0x3200 */
+#define mmDB_PERFCOUNTER0_HI                12801  /* 0x3201 */
+#define mmDB_PERFCOUNTER1_SELECT            14594  /* 0x3902 */
+#define mmDB_PERFCOUNTER1_LO                12802  /* 0x3202 */
+#define mmDB_PERFCOUNTER1_HI                12803  /* 0x3203 */
+#define mmDB_PERFCOUNTER2_SELECT            14596  /* 0x3904 */
+#define mmDB_PERFCOUNTER2_LO                12804  /* 0x3204 */
+#define mmDB_PERFCOUNTER2_HI                12805  /* 0x3205 */
+#define mmDB_PERFCOUNTER3_SELECT            14598  /* 0x3906 */
+#define mmDB_PERFCOUNTER3_LO                12806  /* 0x3206 */
+#define mmDB_PERFCOUNTER3_HI                12807  /* 0x3207 */
+
 /* Block info constants - from Rust block_info.rs */
 #define GFX12_CPC_COUNTER_BLOCK_NUM_COUNTERS      2
 #define GFX12_CPC_COUNTER_BLOCK_MAX_EVENT         0x1F  /* Placeholder - actual from enums */
@@ -177,6 +191,9 @@
 #define GFX12_SX_COUNTER_BLOCK_NUM_COUNTERS       4
 #define GFX12_SX_COUNTER_BLOCK_MAX_EVENT          189
 #define GFX12_SX_COUNTER_BLOCK_NUM_INSTANCES      1
+#define GFX12_DB_COUNTER_BLOCK_NUM_COUNTERS       4
+#define GFX12_DB_COUNTER_BLOCK_MAX_EVENT          218
+#define GFX12_DB_COUNTER_BLOCK_NUM_INSTANCES      1
 
 /* Counter block attributes - from Rust enums */
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
@@ -673,6 +690,52 @@ static block_info_t* create_gfx12_sx_block(void) {
     return block;
 }
 
+/* Create DB block info for GFX12 */
+static block_info_t* create_gfx12_db_block(void) {
+    block_info_t* block = ALLOC(sizeof(block_info_t));
+    if (!block) return NULL;
+
+    /* Allocate counter register info array */
+    counter_reg_info_t* counter_regs = ALLOC_ARRAY(counter_reg_info_t, GFX12_DB_COUNTER_BLOCK_NUM_COUNTERS);
+    if (!counter_regs) {
+        FREE(block);
+        return NULL;
+    }
+
+    /* Initialize DB counter registers - based on aqlprofile reference */
+    create_counter_reg_info(&counter_regs[0], mmDB_PERFCOUNTER0_SELECT, 0,
+                           mmDB_PERFCOUNTER0_LO, mmDB_PERFCOUNTER0_HI);
+    create_counter_reg_info(&counter_regs[1], mmDB_PERFCOUNTER1_SELECT, 0,
+                           mmDB_PERFCOUNTER1_LO, mmDB_PERFCOUNTER1_HI);
+    create_counter_reg_info(&counter_regs[2], mmDB_PERFCOUNTER2_SELECT, 0,
+                           mmDB_PERFCOUNTER2_LO, mmDB_PERFCOUNTER2_HI);
+    create_counter_reg_info(&counter_regs[3], mmDB_PERFCOUNTER3_SELECT, 0,
+                           mmDB_PERFCOUNTER3_LO, mmDB_PERFCOUNTER3_HI);
+
+    /* Create dimensions for DB block - SE block with SE dimensions */
+    block->dimension_count = 2;
+    block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
+    if (!block->dimensions) {
+        FREE(counter_regs);
+        FREE(block);
+        return NULL;
+    }
+    block->dimensions[0] = (dimension_t){.size = GFX12_NUM_XCC, .dim = HARDWARE_DIM_XCC};
+    block->dimensions[1] = (dimension_t){.size = GFX12_NUM_SE, .dim = HARDWARE_DIM_SE};
+
+    block->name = "DB";
+    block->id = HW_IP_BLOCK_DB;
+    block->instance_count = GFX12_DB_COUNTER_BLOCK_NUM_INSTANCES;
+    block->event_id_max = GFX12_DB_COUNTER_BLOCK_MAX_EVENT;
+    block->counter_count = GFX12_DB_COUNTER_BLOCK_NUM_COUNTERS;
+    block->counter_reg_info = counter_regs;
+    block->attr = GFX12_COUNTER_BLOCK_DFLT_ATTR;
+    block->delay_info = NULL;
+    block->spm_block_id = 0;
+
+    return block;
+}
+
 /* Create GFX12 architecture - based on Rust demo.rs values */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
@@ -701,8 +764,9 @@ arch_t* create_gfx12_arch(void) {
     block_info_t* td_block = create_gfx12_td_block();
     block_info_t* tcc_block = create_gfx12_tcc_block();
     block_info_t* sx_block = create_gfx12_sx_block();
+    block_info_t* db_block = create_gfx12_db_block();
 
-    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block || !tcc_block || !sx_block) {
+    if (!cpc_block || !sq_block || !grbm_block || !gl2c_block || !spi_block || !ta_block || !tcp_block || !td_block || !tcc_block || !sx_block || !db_block) {
         FREE(arch);
         if (cpc_block) {
             FREE(cpc_block->dimensions);
@@ -754,6 +818,11 @@ arch_t* create_gfx12_arch(void) {
             FREE(sx_block->counter_reg_info);
             FREE(sx_block);
         }
+        if (db_block) {
+            FREE(db_block->dimensions);
+            FREE(db_block->counter_reg_info);
+            FREE(db_block);
+        }
         return NULL;
     }
 
@@ -768,7 +837,8 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_TD] = td_block;
     arch->block_map.blocks[HW_IP_BLOCK_TCC] = tcc_block;
     arch->block_map.blocks[HW_IP_BLOCK_SX] = sx_block;
-    arch->block_map.block_count = 10;
+    arch->block_map.blocks[HW_IP_BLOCK_DB] = db_block;
+    arch->block_map.block_count = 11;
 
     return arch;
 }
