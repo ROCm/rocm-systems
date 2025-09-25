@@ -62,7 +62,7 @@ static void test_gfx12_arch_creation(void) {
         TEST_ASSERT(arch->num_sa == 2, "GFX12 SA count is 2");
         TEST_ASSERT(arch->num_cu == 64, "GFX12 CU count is 64");
         TEST_ASSERT(arch->num_wgp_per_sa == 4, "GFX12 WGP per SA count is 4");
-        TEST_ASSERT(arch->block_map.block_count == 11, "Block map has 11 blocks");
+        TEST_ASSERT(arch->block_map.block_count == 12, "Block map has 12 blocks");
 
         free_arch(arch);
     }
@@ -579,6 +579,73 @@ static void test_gfx12_db_block(void) {
     }
 }
 
+/* Test GFX12 PA_SC block configuration */
+static void test_gfx12_pa_sc_block(void) {
+    printf("\n=== Testing GFX12 PA_SC Block ===\n");
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "Architecture created for PA_SC block test");
+
+    if (arch) {
+        block_info_t* pa_sc_block = arch->block_map.blocks[HW_IP_BLOCK_PA_SC];
+        TEST_ASSERT(pa_sc_block != NULL, "PA_SC block exists");
+
+        if (pa_sc_block) {
+            /* Validate basic block properties */
+            TEST_ASSERT(strcmp(pa_sc_block->name, "PA_SC") == 0, "PA_SC block name is correct");
+            TEST_ASSERT(pa_sc_block->id == HW_IP_BLOCK_PA_SC, "PA_SC block type correct");
+            TEST_ASSERT(pa_sc_block->counter_count == 4, "PA_SC block has 4 counters");
+            TEST_ASSERT(pa_sc_block->event_id_max == 171, "PA_SC block max event ID is 171");
+            TEST_ASSERT(pa_sc_block->instance_count == 1, "PA_SC block has 1 instance");
+
+            /* Validate SE dimensions - PA_SC is a SE block with 2 dimensions */
+            TEST_ASSERT(pa_sc_block->dimensions != NULL, "PA_SC block dimensions exist");
+            TEST_ASSERT(pa_sc_block->dimension_count == 2, "PA_SC block has 2 dimensions");
+
+            if (pa_sc_block->dimensions && pa_sc_block->dimension_count >= 2) {
+                TEST_ASSERT(pa_sc_block->dimensions[0].dim == HARDWARE_DIM_XCC, "PA_SC dimension 0 is XCC");
+                TEST_ASSERT(pa_sc_block->dimensions[0].size == 1, "PA_SC XCC dimension size is 1");
+                TEST_ASSERT(pa_sc_block->dimensions[1].dim == HARDWARE_DIM_SE, "PA_SC dimension 1 is SE");
+                TEST_ASSERT(pa_sc_block->dimensions[1].size == 4, "PA_SC SE dimension size is 4");
+            }
+
+            /* Validate counter register info */
+            TEST_ASSERT(pa_sc_block->counter_reg_info != NULL, "PA_SC block counter registers exist");
+            if (pa_sc_block->counter_reg_info) {
+                counter_reg_info_t* reg0 = &pa_sc_block->counter_reg_info[0];
+                counter_reg_info_t* reg1 = &pa_sc_block->counter_reg_info[1];
+                counter_reg_info_t* reg2 = &pa_sc_block->counter_reg_info[2];
+                counter_reg_info_t* reg3 = &pa_sc_block->counter_reg_info[3];
+
+                /* Counter 0 registers - based on estimated addresses */
+                TEST_ASSERT(reg0->select_addr == 14208, "PA_SC counter 0 select register (0x3780)");
+                TEST_ASSERT(reg0->control_addr == 0, "PA_SC counter 0 no control register");
+                TEST_ASSERT(reg0->register_addr_lo == 12672, "PA_SC counter 0 lo register (0x3180)");
+                TEST_ASSERT(reg0->register_addr_hi == 12673, "PA_SC counter 0 hi register (0x3181)");
+
+                /* Counter 1 registers */
+                TEST_ASSERT(reg1->select_addr == 14210, "PA_SC counter 1 select register (0x3782)");
+                TEST_ASSERT(reg1->control_addr == 0, "PA_SC counter 1 no control register");
+                TEST_ASSERT(reg1->register_addr_lo == 12674, "PA_SC counter 1 lo register (0x3182)");
+                TEST_ASSERT(reg1->register_addr_hi == 12675, "PA_SC counter 1 hi register (0x3183)");
+
+                /* Counter 2 registers */
+                TEST_ASSERT(reg2->select_addr == 14212, "PA_SC counter 2 select register (0x3784)");
+                TEST_ASSERT(reg2->control_addr == 0, "PA_SC counter 2 no control register");
+                TEST_ASSERT(reg2->register_addr_lo == 12676, "PA_SC counter 2 lo register (0x3184)");
+                TEST_ASSERT(reg2->register_addr_hi == 12677, "PA_SC counter 2 hi register (0x3185)");
+
+                /* Counter 3 registers */
+                TEST_ASSERT(reg3->select_addr == 14214, "PA_SC counter 3 select register (0x3786)");
+                TEST_ASSERT(reg3->control_addr == 0, "PA_SC counter 3 no control register");
+                TEST_ASSERT(reg3->register_addr_lo == 12678, "PA_SC counter 3 lo register (0x3186)");
+                TEST_ASSERT(reg3->register_addr_hi == 12679, "PA_SC counter 3 hi register (0x3187)");
+            }
+        }
+
+        free_arch(arch);
+    }
+}
+
 /* Test counter allocation simulation */
 static void test_counter_allocation(void) {
     printf("\n=== Testing Counter Allocation ===\n");
@@ -838,6 +905,7 @@ int main(void) {
     test_gfx12_tcc_block();
     test_gfx12_sx_block();
     test_gfx12_db_block();
+    test_gfx12_pa_sc_block();
     test_counter_allocation();
     test_invalid_arch();
     test_case_sensitivity();
