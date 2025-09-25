@@ -325,8 +325,6 @@ export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 # (this registers the build-tree with a global CMake-registry)
 export(PACKAGE ${AMD_SMI})
 
-# Create the amd_smiConfig.cmake and amd_smiConfigVersion files
-# ... for the build tree
 install(
     EXPORT amd_smiTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
