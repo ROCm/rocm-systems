@@ -78,20 +78,21 @@ def main(argv=None) -> None:
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
-        "projects/rocprofiler-register": 327,
-        "projects/rocprofiler": 329,
-        "projects/roctracer": 331,
         "projects/clr": 335,
+        "projects/hip-tests": 362,
         "projects/hip": 335,
         "projects/hipother": 335,
-        "projects/rocprofiler-compute": 344,
-        "projects/rocprofiler-systems": 345,
+        "projects/rdc": 360,
         "projects/rocm-core": 349,
-        "projects/rocr-runtime": 354,
-        "projects/rocminfo": 356,
         "projects/rocm-smi-lib": 358,
-        "projects/hip-tests": 362,
+        "projects/rocminfo": 356,
+        "projects/rocprofiler-compute": 344,
+        "projects/rocprofiler-register": 327,
         "projects/rocprofiler-sdk": 347,
+        "projects/rocprofiler-systems": 345,
+        "projects/rocprofiler": 329,
+        "projects/rocr-runtime": 354,
+        "projects/roctracer": 331,
     }
 
     args = parse_arguments(argv)
