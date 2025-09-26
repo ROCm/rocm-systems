@@ -54,7 +54,7 @@ test_packet_generation.o: test_packet_generation.c
 
 # Compile library sources (userspace mode)
 ../pm4_packets.o: ../pm4_packets.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) -DUSERSPACE_BUILD -c $< -o $@
 
 ../counter_registry.o: ../counter_registry.c
 	$(CC) $(CFLAGS) $(INCLUDES) -DUSERSPACE_BUILD -c $< -o $@
