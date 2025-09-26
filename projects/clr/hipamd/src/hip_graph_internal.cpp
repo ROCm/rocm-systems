@@ -445,29 +445,29 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           return status;
         }
 
-        // Create PacketNodes for this node's packets
-        std::vector<PacketNode*> nodePacketNodes;
-        for (size_t k = 0; k < nodePackets.size(); ++k) {
-          PacketNode* packetNode = new PacketNode(nodePackets[k], nodeKernelNames[k], 
-                                                  currentNode);
-          nodePacketNodes.push_back(packetNode);
-
-          // Insert into batch LinkedList
-          newBatch.insertAfter(lastNode, packetNode);
-          lastNode = packetNode;
+        // Create PacketNode for this node's packets
+        PacketNode* packetNode = new PacketNode(nodePackets, nodeKernelNames, currentNode);
+        if (packetNode == nullptr) {
+          LogError("Failed to allocate PacketNode");
+          return hipErrorOutOfMemory;
         }
 
-        // Store mapping from node to its PacketNodes
-        nodeToPacketsMap_[currentNode] = nodePacketNodes;
+        // Insert into batch LinkedList
+        newBatch.insertAfter(lastNode, packetNode);
+        lastNode = packetNode;
+
+        // Store mapping from node to its PacketNode
+        nodeToPacketsMap_[currentNode] = packetNode;
 
         // Mark this node as successfully captured
         nodeCaptureStatus_[j] = true;
         ++j;
+        ++newBatch.nodeCount;  // Track number of nodes in this batch
       }
 
       // Add the batch if it has packets
       if (newBatch.head != nullptr) {
-        packetBatches_.push_back(std::move(newBatch));
+        packetBatches_.emplace_back(std::move(newBatch));
       }
 
       // Skip the nodes we just processed, the index will be incremented by the loop
@@ -477,7 +477,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       if (childNode->GetChildGraph()->max_streams_ == 1) {
         childNode->SetGraphCaptureStatus(true);
         status = childNode->CaptureAndFormPacketsForGraph();
-        //nodeCaptureStatus_[i] = (status == hipSuccess);
+        nodeCaptureStatus_[i] = (status == hipSuccess);
         if (status != hipSuccess) {
           status = hipSuccess; // Continue with other nodes
         }
@@ -546,12 +546,9 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
       return status;
     }
 
-    // Simple case: assume same number of packets, just update content
-    // This is much simpler and covers the common case
-    for (size_t i = 0; i < it->second.size() && i < newPackets.size(); ++i) {
-      it->second[i]->packet = newPackets[i];
-      it->second[i]->kernelName = newKernelNames[i];
-    }
+    // Update the packet content
+    it->second->packets = newPackets;
+    it->second->kernelNames = newKernelNames;
   }
   return status;
 }
@@ -573,14 +570,10 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
   if (isEnabled) {
     // Node is being enabled - just mark packets as enabled
     // No need to re-capture packets, just mark them as active
-    for (auto packetNode : it->second) {
-      packetNode->node = node; // Mark as enabled
-    }
+    it->second->node = node; // Mark as enabled
   } else {
     // Node is being disabled - mark packets as disabled
-    for (auto packetNode : it->second) {
-      packetNode->node = nullptr; // Mark as disabled
-    }
+    it->second->node = nullptr; // Mark as disabled
   }
 
   return status;
@@ -608,11 +601,6 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
   for (size_t i = 0; i < topoOrder_.size(); ++i) {
     auto& node = topoOrder_[i];
 
-    // Skip disabled nodes
-    if (node->GetEnabled() == 0) {
-      continue;
-    }
-
     if (node->GetType() == hipGraphNodeTypeGraph) {
       // Handle child graph nodes
       auto childNode = reinterpret_cast<hip::ChildGraphNode*>(node);
@@ -624,7 +612,7 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
           return status;
         }
       }
-    } else if (!node->GraphCaptureEnabled()) {
+    } else if (node->GetEnabled() && !node->GraphCaptureEnabled()) {
       // Node doesn't support capture - execute individually
       node->SetStream(hip_stream);
       status = node->CreateCommand(node->GetQueue());
@@ -646,15 +634,8 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
             return status;
           }
         }
-
-        // Skip all consecutive captured nodes that belong to this batch
-        // We need to count how many nodes are in this batch
-        size_t nodesInBatch = 0;
-        for (size_t j = i; j < topoOrder_.size() && j < nodeCaptureStatus_.size() && nodeCaptureStatus_[j]; ++j) {
-          nodesInBatch++;
-        }
-        i += nodesInBatch - 1;  // -1 because loop will increment
-
+        // Let batch run start from first node even if it is disabled.
+        i += packetBatches_[batchIndex].nodeCount - 1;  // -1 because loop will increment
         ++batchIndex;
       }
     }

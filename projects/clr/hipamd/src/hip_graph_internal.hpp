@@ -888,21 +888,59 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
 
   //! Structure for individual packet in LinkedList
   struct PacketNode {
-    uint8_t* packet;
-    std::string kernelName;
+    std::vector<uint8_t*> packets;
+    std::vector<std::string> kernelNames;
     GraphNode* node;        // Which node owns this packet
     PacketNode* next;
     PacketNode* prev;
-    PacketNode() : packet(nullptr), node(nullptr), next(nullptr), prev(nullptr) {}
-    PacketNode(uint8_t* p, const std::string& name, GraphNode* n)
-      : packet(p), kernelName(name), node(n), next(nullptr), prev(nullptr) {}
+    PacketNode() : node(nullptr), next(nullptr), prev(nullptr) {}
+    PacketNode(const std::vector<uint8_t*>& p, const std::vector<std::string>& names, GraphNode* n)
+      : packets(p), kernelNames(names), node(n), next(nullptr), prev(nullptr) {}
   };
 
   //! Structure for batch dispatch optimization using LinkedList
   struct PacketBatch {
     PacketNode* head;
     PacketNode* tail;
-    PacketBatch() : head(nullptr), tail(nullptr) {}
+    size_t nodeCount;  // Number of consecutive captured nodes in this batch
+    PacketBatch() : head(nullptr), tail(nullptr), nodeCount(0) {}
+    ~PacketBatch() {
+      // Clean up the entire linked list
+      while (head) {
+        PacketNode* temp = head;
+        head = head->next;
+        delete temp;
+      }
+    }
+    // Move constructor
+    PacketBatch(PacketBatch&& other) noexcept
+      : head(other.head), tail(other.tail), nodeCount(other.nodeCount) {
+      other.head = nullptr;
+      other.tail = nullptr;
+      other.nodeCount = 0;
+    }
+    // Move assignment operator
+    PacketBatch& operator=(PacketBatch&& other) noexcept {
+      if (this != &other) {
+        // Clean up current list
+        while (head) {
+          PacketNode* temp = head;
+          head = head->next;
+          delete temp;
+        }
+        // Move from other
+        head = other.head;
+        tail = other.tail;
+        nodeCount = other.nodeCount;
+        other.head = nullptr;
+        other.tail = nullptr;
+        other.nodeCount = 0;
+      }
+      return *this;
+    }
+    // Disable copy constructor and copy assignment operator
+    PacketBatch(const PacketBatch&) = delete;
+    PacketBatch& operator=(const PacketBatch&) = delete;
     // O(1) insertion after a specific node
     void insertAfter(PacketNode* after, PacketNode* newNode) {
       if (newNode == nullptr) return;
@@ -910,25 +948,25 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
         // Insert at head
         newNode->next = head;
         newNode->prev = nullptr;
-        if (head) head->prev = newNode;
+        if (head) { head->prev = newNode; }
         head = newNode;
-        if (tail == nullptr) tail = newNode;
+        if (tail == nullptr) { tail = newNode; }
       } else {
         // Insert after 'after'
         newNode->next = after->next;
         newNode->prev = after;
-        if (after->next) after->next->prev = newNode;
+        if (after->next) { after->next->prev = newNode; }
         after->next = newNode;
-        if (after == tail) tail = newNode;
+        if (after == tail) { tail = newNode; }
       }
     }
     // O(1) removal of a specific node
     void remove(PacketNode* node) {
       if (node == nullptr) return;
-      if (node->prev) node->prev->next = node->next;
+      if (node->prev) { node->prev->next = node->next; }
       else head = node->next;
-      if (node->next) node->next->prev = node->prev;
-      else tail = node->prev;
+      if (node->next) { node->next->prev = node->prev; }
+      else { tail = node->prev; }
     }
     // Get all enabled packets as vectors for dispatch
     void getEnabledPackets(std::vector<uint8_t*>& packets, std::vector<std::string>& kernelNames) const {
@@ -937,8 +975,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       PacketNode* current = head;
       while (current) {
         if (current->node != nullptr) {  // Enabled
-          packets.push_back(current->packet);
-          kernelNames.push_back(current->kernelName);
+          packets.insert(packets.end(), current->packets.begin(), current->packets.end());
+          kernelNames.insert(kernelNames.end(), current->kernelNames.begin(), current->kernelNames.end());
         }
         current = current->next;
       }
@@ -950,8 +988,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::vector<PacketBatch> packetBatches_;
   //! Track which nodes were successfully captured (true) vs need individual execution (false)
   std::vector<bool> nodeCaptureStatus_;
-  //! Map from GraphNode to its PacketNodes for O(1) lookup
-  std::unordered_map<GraphNode*, std::vector<PacketNode*>> nodeToPacketsMap_;
+  //! Map from GraphNode to its PacketNode for O(1) lookup
+  std::unordered_map<GraphNode*, PacketNode*> nodeToPacketsMap_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
