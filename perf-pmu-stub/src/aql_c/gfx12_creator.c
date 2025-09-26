@@ -5,6 +5,7 @@
 
 #include "aql_structures.h"
 #include "arch_creator_common.h"
+#include "gfx12_events.h"
 
 #ifdef __KERNEL__
 #include <linux/string.h>
@@ -1083,6 +1084,10 @@ arch_t* create_gfx12_arch(void) {
             .perfmon_sample_bit = 10                          /* Sample enable bit */
         }
     };
+
+    /* Set up the event map for this architecture */
+    arch->event_map = get_gfx12_events();
+    arch->event_count = get_gfx12_event_count();
 
     return arch;
 }

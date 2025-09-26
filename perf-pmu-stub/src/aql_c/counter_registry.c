@@ -87,18 +87,15 @@ const counter_def_t* lookup_counter_by_id(counter_id_t id) {
     return NULL;
 }
 
-uint32_t lookup_event_id(counter_id_t id, arch_type_t arch) {
-    if (id <= 0 || id >= COUNTER_ID_LAST) return 0;
+uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch) {
+    if (!counter || !arch) return 0;
 
-    /* Currently only GFX12 is supported */
-    if (arch != ARCH_TYPE_GFX12) return 0;
+    /* Use the event map from the architecture structure */
+    if (!arch->event_map || arch->event_count == 0) return 0;
 
-    const arch_event_map_t* events = get_gfx12_events();
-    size_t event_count = get_gfx12_event_count();
-
-    for (size_t i = 0; i < event_count; i++) {
-        if (events[i].counter_id == id) {
-            return events[i].event_id;
+    for (size_t i = 0; i < arch->event_count; i++) {
+        if (arch->event_map[i].counter_id == counter->id) {
+            return arch->event_map[i].event_id;
         }
     }
     return 0;

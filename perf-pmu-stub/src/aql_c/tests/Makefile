@@ -15,14 +15,14 @@ PM4_OBJECTS = ../pm4_packets.o
 # Counter registry test sources
 TEST_COUNTER_SOURCES = test_counter_registry.c
 TEST_COUNTER_OBJECTS = test_counter_registry.o
-COUNTER_SOURCES = ../counter_registry.c ../gfx12_events.c
-COUNTER_OBJECTS = ../counter_registry.o ../gfx12_events.o
+COUNTER_SOURCES = ../counter_registry.c ../gfx12_events.c ../arch_creator.c ../gfx12_creator.c
+COUNTER_OBJECTS = ../counter_registry.o ../gfx12_events.o ../arch_creator.o ../gfx12_creator.o
 
 # Packet generation test sources
 TEST_PACKET_SOURCES = test_packet_generation.c
 TEST_PACKET_OBJECTS = test_packet_generation.o
-PACKET_SOURCES = ../packet_generation.c ../pm4_packets.c ../arch_creator.c ../gfx12_creator.c
-PACKET_OBJECTS = ../packet_generation.o ../pm4_packets.o ../arch_creator.o ../gfx12_creator.o
+PACKET_SOURCES = ../packet_generation.c ../pm4_packets.c ../arch_creator.c ../gfx12_creator.c ../gfx12_events.c ../counter_registry.c
+PACKET_OBJECTS = ../packet_generation.o ../pm4_packets.o ../arch_creator.o ../gfx12_creator.o ../gfx12_events.o ../counter_registry.o
 
 # Build all tests
 all: $(TESTS)

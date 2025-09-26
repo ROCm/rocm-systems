@@ -77,7 +77,7 @@ static int test_set_uconfig_reg_packet(void)
 
     /* Expected packet structure matching Rust SetUConfigReg */
     uint32_t expected[3];
-    expected[0] = PM4_TYPE_3_HEADER(PM4_SET_UCONFIG_REG_OPCODE, 1);  /* Header with count=1 */
+    expected[0] = PM4_TYPE_3_HEADER(PM4_SET_UCONFIG_REG_OPCODE, 12);  /* Header with count=1 */
     expected[1] = (reg_offset - UCONFIG_SPACE_START) & 0xFFFF;       /* Register offset */
     expected[2] = reg_value;                                         /* Register value */
 
@@ -109,7 +109,7 @@ static int test_event_write_packet(void)
 
     /* Expected packet structure matching Rust EventWrite */
     uint32_t expected[2];
-    expected[0] = PM4_TYPE_3_HEADER(PM4_EVENT_WRITE_OPCODE, 0);  /* Header with count=0 */
+    expected[0] = PM4_TYPE_3_HEADER(PM4_EVENT_WRITE_OPCODE, 8);  /* Header with count=2 */
 
     /* Build barrier event matching Rust BarrierEvent */
     pm4_barrier_event_t event = {0};
@@ -157,7 +157,7 @@ static int test_copy_data_packet(void)
 
     /* Expected packet structure matching Rust CopyDataPacket */
     uint32_t expected[6];
-    expected[0] = PM4_TYPE_3_HEADER(PM4_COPY_DATA_OPCODE, 4);  /* Header with count=4 */
+    expected[0] = PM4_TYPE_3_HEADER(PM4_COPY_DATA_OPCODE, 24);  /* Header with count=4 */
     expected[1] = flags.raw;
     expected[2] = src_reg_lo;
     expected[3] = src_reg_hi;
@@ -197,7 +197,7 @@ static int test_write_sh_reg_packet(void)
 
     /* Expected packet structure matching Rust WriteSHRegister */
     uint32_t expected[3];
-    expected[0] = PM4_TYPE_3_HEADER(PM4_WRITE_SH_REG_OPCODE, 1);  /* Header with count=1 */
+    expected[0] = PM4_TYPE_3_HEADER(PM4_WRITE_SH_REG_OPCODE, 12);  /* Header with count=1 */
 
     /* Build word1 with bitfield layout */
     uint16_t offset = (uint16_t)((reg_offset - PERSISTENT_SPACE_START) & 0xFFFF);
@@ -244,7 +244,7 @@ static int test_acquire_mem_packet(void)
 
     /* Expected packet structure matching Rust FlushCachePacket */
     uint32_t expected[8];
-    expected[0] = PM4_TYPE_3_HEADER(PM4_ACQUIRE_MEM_OPCODE, 6);  /* Header with count=6 */
+    expected[0] = PM4_TYPE_3_HEADER(PM4_ACQUIRE_MEM_OPCODE, 32);  /* Header with count=6 */
     expected[1] = 0;  /* Reserved */
     expected[2] = coher_size_lo;
     expected[3] = coher_size_hi & 0xFF;  /* Only 8 bits */

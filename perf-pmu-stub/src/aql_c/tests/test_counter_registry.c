@@ -10,6 +10,7 @@
 
 /* Include counter registry headers */
 #include "../counter_registry.h"
+#include "../arch_creator.h"
 
 /* Test result tracking */
 static int tests_run = 0;
@@ -84,29 +85,56 @@ void test_lookup_counter_by_id(void) {
 void test_lookup_event_id(void) {
     printf("\n=== Testing lookup_event_id ===\n");
 
+    /* Create GFX12 architecture for testing */
+    arch_t* arch = arch_create_by_name("gfx12");
+    TEST_ASSERT(arch != NULL, "GFX12 architecture created successfully");
+
+    if (arch == NULL) {
+        printf("ERROR: Could not create GFX12 architecture, skipping lookup_event_id tests\n");
+        return;
+    }
+
     /* Test valid GFX12 event lookups */
-    uint32_t event_id = lookup_event_id(COUNTER_SQ_WAVES, ARCH_TYPE_GFX12);
-    TEST_ASSERT(event_id == 4, "lookup_event_id: SQ_WAVES GFX12 event ID is 4");
+    const counter_def_t* counter = lookup_counter_by_id(COUNTER_SQ_WAVES);
+    TEST_ASSERT(counter != NULL, "SQ_WAVES counter found");
+    if (counter) {
+        uint32_t event_id = lookup_event_id(counter, arch);
+        TEST_ASSERT(event_id == 4, "lookup_event_id: SQ_WAVES GFX12 event ID is 4");
+    }
 
-    event_id = lookup_event_id(COUNTER_GL2C_HIT, ARCH_TYPE_GFX12);
-    TEST_ASSERT(event_id == 41, "lookup_event_id: GL2C_HIT GFX12 event ID is 41");
+    counter = lookup_counter_by_id(COUNTER_GL2C_HIT);
+    TEST_ASSERT(counter != NULL, "GL2C_HIT counter found");
+    if (counter) {
+        uint32_t event_id = lookup_event_id(counter, arch);
+        TEST_ASSERT(event_id == 41, "lookup_event_id: GL2C_HIT GFX12 event ID is 41");
+    }
 
-    event_id = lookup_event_id(COUNTER_SQ_BUSY_CYCLES, ARCH_TYPE_GFX12);
-    TEST_ASSERT(event_id == 3, "lookup_event_id: SQ_BUSY_CYCLES GFX12 event ID is 3");
+    counter = lookup_counter_by_id(COUNTER_SQ_BUSY_CYCLES);
+    TEST_ASSERT(counter != NULL, "SQ_BUSY_CYCLES counter found");
+    if (counter) {
+        uint32_t event_id = lookup_event_id(counter, arch);
+        TEST_ASSERT(event_id == 3, "lookup_event_id: SQ_BUSY_CYCLES GFX12 event ID is 3");
+    }
 
-    event_id = lookup_event_id(COUNTER_GRBM_COUNT, ARCH_TYPE_GFX12);
-    TEST_ASSERT(event_id == 0, "lookup_event_id: GRBM_COUNT GFX12 event ID is 0");
+    counter = lookup_counter_by_id(COUNTER_GRBM_COUNT);
+    TEST_ASSERT(counter != NULL, "GRBM_COUNT counter found");
+    if (counter) {
+        uint32_t event_id = lookup_event_id(counter, arch);
+        TEST_ASSERT(event_id == 0, "lookup_event_id: GRBM_COUNT GFX12 event ID is 0");
+    }
 
-    /* Test unsupported architecture */
-    event_id = lookup_event_id(COUNTER_SQ_WAVES, ARCH_TYPE_GFX11);
-    TEST_ASSERT(event_id == 0, "lookup_event_id: Unsupported architecture returns 0");
+    /* Test with NULL parameters */
+    uint32_t event_id = lookup_event_id(NULL, arch);
+    TEST_ASSERT(event_id == 0, "lookup_event_id: NULL counter returns 0");
 
-    /* Test invalid counter IDs */
-    event_id = lookup_event_id(0, ARCH_TYPE_GFX12);
-    TEST_ASSERT(event_id == 0, "lookup_event_id: Invalid counter ID returns 0");
+    counter = lookup_counter_by_id(COUNTER_SQ_WAVES);
+    if (counter) {
+        event_id = lookup_event_id(counter, NULL);
+        TEST_ASSERT(event_id == 0, "lookup_event_id: NULL architecture returns 0");
+    }
 
-    event_id = lookup_event_id(COUNTER_ID_LAST, ARCH_TYPE_GFX12);
-    TEST_ASSERT(event_id == 0, "lookup_event_id: ID >= COUNTER_ID_LAST returns 0");
+    /* Clean up */
+    arch_destroy(arch);
 }
 
 /* Test get all counters */

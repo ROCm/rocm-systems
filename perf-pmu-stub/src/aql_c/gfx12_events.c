@@ -12,7 +12,7 @@
 #endif
 
 /* GFX12 architecture-specific event mappings */
-static const arch_event_map_t gfx12_events[] = {
+static const struct arch_event_map gfx12_events[] = {
     /* GL2C Block Events */
     {COUNTER_GL2C_EA_RDREQ, 140},
     {COUNTER_GL2C_EA_RDREQ_128B, 148},
@@ -58,9 +58,9 @@ static const arch_event_map_t gfx12_events[] = {
     {COUNTER_GRBM_GUI_ACTIVE, 2},
 };
 
-#define GFX12_EVENT_COUNT (sizeof(gfx12_events) / sizeof(arch_event_map_t))
+#define GFX12_EVENT_COUNT (sizeof(gfx12_events) / sizeof(struct arch_event_map))
 
-const arch_event_map_t* get_gfx12_events(void) {
+const struct arch_event_map* get_gfx12_events(void) {
     return gfx12_events;
 }
 

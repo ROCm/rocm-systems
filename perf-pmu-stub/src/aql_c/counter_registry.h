@@ -65,15 +65,15 @@ typedef struct {
 } counter_def_t;
 
 /* Architecture-specific event mapping */
-typedef struct {
+struct arch_event_map {
     counter_id_t counter_id;
     uint32_t event_id;
-} arch_event_map_t;
+};
 
 /* Function prototypes */
 const counter_def_t* lookup_counter_by_name(const char* counter_name);
 const counter_def_t* lookup_counter_by_id(counter_id_t id);
-uint32_t lookup_event_id(counter_id_t id, arch_type_t arch);
+uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch);
 const counter_def_t* get_all_counters(void);
 size_t get_counter_count(void);
 

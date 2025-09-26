@@ -130,6 +130,9 @@ typedef struct {
     } perfmon_states;
 } arch_control_regs_t;
 
+/* Forward declare arch_event_map_t from counter_registry.h */
+typedef struct arch_event_map arch_event_map_t;
+
 /* Unified architecture structure - same fields for all architectures */
 typedef struct {
     arch_type_t type;
@@ -147,6 +150,10 @@ typedef struct {
 
     /* Architecture-specific control registers */
     arch_control_regs_t control_regs;
+
+    /* Architecture-specific event mapping */
+    const arch_event_map_t* event_map;
+    size_t event_count;
 } arch_t;
 
 /* Counter allocation state */
