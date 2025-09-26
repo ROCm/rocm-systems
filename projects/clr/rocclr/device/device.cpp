@@ -763,17 +763,6 @@ Device::~Device() {
     CondLog(vaCacheMap_->size() != 0, "Application didn't unmap all host memory!");
     delete vaCacheMap_;
   }
-
-  for (auto memory : hostcall_allocated_memories_) {
-    if (memory != nullptr) {
-      amd::MemObjMap::RemoveMemObj(
-          reinterpret_cast<void*>(memory->getDeviceMemory(*this, false)->virtualAddress()));
-      memory->release();
-    }
-  }
-
-  hostcall_allocated_memories_.clear();
-
   delete vaCacheAccess_;
   delete settings_;
   delete[] info_.extensions_;
@@ -1167,20 +1156,6 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
 
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
   return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle);
-}
-
-// ================================================================================================
-void Device::TrackHostcallMemory(amd::Memory* memory) {
-  hostcall_allocated_memories_.push_back(memory);
-}
-
-// ================================================================================================
-void Device::RemoveHostcallMemory(amd::Memory* memory) {
-  auto it =
-      std::find(hostcall_allocated_memories_.begin(), hostcall_allocated_memories_.end(), memory);
-  if (it != hostcall_allocated_memories_.end()) {
-    hostcall_allocated_memories_.erase(it);
-  }
 }
 
 }  // namespace amd

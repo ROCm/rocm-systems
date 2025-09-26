@@ -2181,12 +2181,6 @@ class Device : public RuntimeObject {
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 
-  // Registers a memory object allocated via hostcall for later cleanup.
-  void TrackHostcallMemory(amd::Memory* memory);
-
-  // Removes a memory object from hostcall tracking.
-  void RemoveHostcallMemory(amd::Memory* memory);
-
   //! Enable the specified extension
   char* getExtensionString();
 
@@ -2235,8 +2229,6 @@ class Device : public RuntimeObject {
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
   static constexpr int kDefaultNumaNode = -1;         //! Default NUMA node value for SVM operations
-  // Tracks all amd::Memory objects allocated via hostcall for this device.
-  std::vector<amd::Memory*> hostcall_allocated_memories_;
 };
 
 /*! @}

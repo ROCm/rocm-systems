@@ -72,7 +72,7 @@ static uint32_t resetReadyFlag(uint32_t control) {
 typedef void (*HostcallFunctionCall)(uint64_t* output, const uint64_t* input);
 
 static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* payload,
-                          const amd::Device& dev) {
+                          const amd::Device& dev, HostcallBuffer* hcb) {
   switch (service) {
     case SERVICE_FUNCTION_CALL: {
       uint64_t output[2];
@@ -93,7 +93,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
       if (payload[0]) {
         amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
         if (mem) {
-          const_cast<amd::Device*>(&dev)->RemoveHostcallMemory(mem);
+          hcb->RemoveHostcallMemory(mem);
           amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(payload[0]));
           mem->release();
         } else {
@@ -110,7 +110,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
             device::Memory* dm = buf->getDeviceMemory(dev);
             va = dm->virtualAddress();
             amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
-            const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
+            hcb->TrackHostcallMemory(buf);
           } else {
             buf->release();
           }
@@ -162,7 +162,7 @@ void HostcallBuffer::processPackets(MessageHandler& messages) {
       auto wi = amd::leastBitSet(activemask);
       activemask ^= static_cast<decltype(activemask)>(1) << wi;
       auto slot = payload->slots[wi];
-      handlePayload(messages, service, slot, *device_);
+      handlePayload(messages, service, slot, *device_, this);
     }
 
     header->control_.store(resetReadyFlag(header->control_), std::memory_order_release);
@@ -218,6 +218,37 @@ void HostcallBuffer::initialize(uint32_t num_packets) {
   }
   free_stack_ = next;
   ready_stack_ = 0;
+}
+
+/** \brief Add tracking for hostcall memory allocations.
+ */
+void HostcallBuffer::TrackHostcallMemory(amd::Memory* memory) {
+  hostcall_allocated_memories_.push_back(memory);
+}
+
+/** \brief Remove a hostcall memory allocation for a specific hostcallbuffer.
+ */
+void HostcallBuffer::RemoveHostcallMemory(amd::Memory* memory) {
+  auto it =
+      std::find(hostcall_allocated_memories_.begin(), hostcall_allocated_memories_.end(), memory);
+  if (it != hostcall_allocated_memories_.end()) {
+    hostcall_allocated_memories_.erase(it);
+  }
+}
+
+/** \brief Remove all hostcall memory allocations for a specific hostcallbuffer.
+ */
+void HostcallBuffer::RemoveAllMemoryAllocations() {
+  for (auto memory : hostcall_allocated_memories_) {
+    if (memory != nullptr) {
+      amd::MemObjMap::RemoveMemObj(
+          reinterpret_cast<void*>(memory->getDeviceMemory(*device_, false)->virtualAddress()));
+      memory->release();
+    }
+  }
+  hostcall_allocated_memories_.clear();
+}
+
 }
 
 /** \brief Manage a unique listener thread and its associated buffers.
@@ -450,6 +481,7 @@ void disableHostcalls(void* bfr) {
     assert(bfr && "expected a hostcall buffer");
     auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
     hostcallListener->removeBuffer(buffer);
+    buffer->RemoveAllMemoryAllocations();
   }
   if (hostcallListener->idle()) {
     hostcallListener->terminate();

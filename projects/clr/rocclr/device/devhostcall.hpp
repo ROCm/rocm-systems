@@ -157,6 +157,9 @@ class HostcallBuffer {
   /** Some services need a device**/
   const amd::Device* device_;
 
+  /** Tracks all amd::Memory objects allocated via hostcall for this buffer. */
+  std::vector<amd::Memory*> hostcall_allocated_memories_;
+
   PacketHeader* getHeader(uint64_t ptr) const;
   Payload* getPayload(uint64_t ptr) const;
 
@@ -165,6 +168,9 @@ class HostcallBuffer {
   void initialize(uint32_t num_packets);
   void setDoorbell(void* doorbell) { doorbell_ = doorbell; };
   void setDevice(const amd::Device* dptr) { device_ = dptr; };
+  void TrackHostcallMemory(amd::Memory* memory);
+  void RemoveHostcallMemory(amd::Memory* memory);
+  void RemoveAllMemoryAllocations();
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
