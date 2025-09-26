@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <timemory/utility/filepath.hpp>
 #include <type_traits>
 #include <unistd.h>
 
@@ -205,7 +206,7 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return (::access(so.c_str(), R_OK) == 0);
+        return ::tim::filepath::exists(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
