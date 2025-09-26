@@ -961,7 +961,7 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
     params.srcArray = desc.src.op.array.array;
     params.srcPos = make_hipPos(desc.src.op.array.offset.x, desc.src.op.array.offset.y,
                                 desc.src.op.array.offset.z);
-    params.srcPtr.ptr = nullptr;
+    params.srcPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   }
   // dest
   if (desc.dst.type == hipMemcpyOperandTypePointer) {
@@ -977,7 +977,7 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
     params.dstArray = desc.dst.op.array.array;
     params.dstPos = make_hipPos(desc.dst.op.array.offset.x, desc.dst.op.array.offset.y,
                                 desc.dst.op.array.offset.z);
-    params.dstPtr.ptr = nullptr;
+    params.dstPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   }
   return params;
 }
