@@ -1,0 +1,448 @@
+/**
+ * @file packet_generation.c
+ * @brief Implementation of PM4 packet generation functions for counter
+ * operations
+ */
+
+#include "packet_generation.h"
+
+#ifdef __KERNEL__
+#include <linux/errno.h>
+#else
+#include <errno.h>
+#include <stdbool.h>
+#endif
+
+#define VALIDATE_BLOCK_ID(arch, counter) \
+    (((counter)->block_id >= HW_IP_BLOCK_LAST) || \
+     ((counter)->block_id > (arch)->block_map.block_count) || \
+     (!(arch)->block_map.blocks[(counter)->block_id]))
+     
+/* Helper function: Generate CS partial flush packet */
+int generate_cs_partial_flush(pm4_buffer_t *buffer, const arch_t *arch) {
+  if (!buffer || !arch) {
+    return -EINVAL;
+  }
+
+  return pm4_append_event_write(buffer,
+                                arch->control_regs.cs_partial_flush_event,
+                                arch->control_regs.event_index_flush);
+}
+
+/* Helper function: Set GRBM to broadcast mode */
+int generate_grbm_broadcast(pm4_buffer_t *buffer, const arch_t *arch) {
+  if (!buffer || !arch) {
+    return -EINVAL;
+  }
+
+  return pm4_grbm_broadcast(buffer, arch->control_regs.grbm_gfx_index);
+}
+
+/* Helper function: Enable/disable performance monitoring */
+int generate_perfmon_enable(pm4_buffer_t *buffer, const arch_t *arch,
+                            uint8_t enable_state, bool sample_enable) {
+  if (!buffer || !arch) {
+    return -EINVAL;
+  }
+
+  /* Build perfmon control value */
+  uint32_t perfmon_value = enable_state & 0xF; /* perfmon_state in bits 0-3 */
+  if (sample_enable) {
+    perfmon_value |=
+        (1U << arch->control_regs.perfmon_states.perfmon_sample_bit);
+  }
+
+  return pm4_perfcount_enable(buffer, arch->control_regs.cp_perfmon_cntl,
+                              perfmon_value);
+}
+
+/* Helper function: Configure counter selection and control registers */
+int generate_counter_config(pm4_buffer_t *buffer, const arch_t *arch,
+                            const counter_info_t *counter) {
+  int ret;
+
+  if (!buffer || !arch || !counter) {
+    return -EINVAL;
+  }
+
+  /* Get block info for this counter */
+  if (VALIDATE_BLOCK_ID(arch, counter)) {
+    return -ENOENT; /* Block not found */
+  }
+
+  block_info_t *block = arch->block_map.blocks[counter->block_id];
+  /* Validate counter index */
+  if (counter->counter_index >= block->counter_count) {
+    return -EINVAL; /* Counter index out of range */
+  }
+
+  /* Get register info for this counter */
+  counter_reg_info_t *reg_info =
+      &block->counter_reg_info[counter->counter_index];
+
+  /* Write counter select register */
+  uint32_t select_value = counter->event_id & 0x1FF; /* 9-bit event ID */
+  ret = pm4_append_set_uconfig_reg(
+      buffer, reg_info->select_addr - arch->control_regs.uconfig_space_start,
+      select_value);
+  if (ret < 0) {
+    return ret;
+  }
+
+  /* Write counter control register if present */
+  if (reg_info->control_addr != 0) {
+    uint32_t control_value = 0;
+
+    /* For SQ counters, enable all shader stages */
+    if (counter->block_id == HW_IP_BLOCK_SQ) {
+      control_value |=
+          (1U << arch->control_regs.counter_control_bits.sq_ps_en_bit); /* PS */
+      control_value |=
+          (1U << arch->control_regs.counter_control_bits.sq_gs_en_bit); /* GS */
+      control_value |=
+          (1U << arch->control_regs.counter_control_bits.sq_hs_en_bit); /* HS */
+      control_value |=
+          (1U << arch->control_regs.counter_control_bits.sq_cs_en_bit); /* CS */
+    }
+
+    ret = pm4_append_set_uconfig_reg(
+        buffer, reg_info->control_addr - arch->control_regs.uconfig_space_start,
+        control_value);
+    if (ret < 0) {
+      return ret;
+    }
+  }
+
+  return 0;
+}
+
+/* Generate PM4 packet sequence to start performance counters */
+int generate_start_packet(pm4_buffer_t *buffer, const arch_t *arch,
+                          const counter_collection_t *collection) {
+  int ret;
+
+  if (!buffer || !arch || !collection || !collection->counters) {
+    return -EINVAL;
+  }
+
+  /* 1. CS partial flush */
+  ret = generate_cs_partial_flush(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 2. GRBM broadcast mode */
+  ret = generate_grbm_broadcast(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 3. Disable perfmon initially */
+  ret = generate_perfmon_enable(
+      buffer, arch, arch->control_regs.perfmon_states.perfmon_state_disable,
+      false);
+  if (ret < 0)
+    return ret;
+
+  /* 4. Enable SQ control for SQ counters (force_en=1, vmid_en=0xFFFF) */
+  bool has_sq_counters = false;
+  for (size_t i = 0; i < collection->counter_count; i++) {
+    if (collection->counters[i].block_id == HW_IP_BLOCK_SQ) {
+      has_sq_counters = true;
+      break;
+    }
+  }
+
+  if (has_sq_counters) {
+    uint32_t sq_ctrl2_value =
+        (1U << 0) | (0xFFFFU << 1); /* force_en | vmid_en */
+    ret = pm4_append_set_uconfig_reg(
+        buffer,
+        arch->control_regs.sq_perfcounter_ctrl2 -
+            arch->control_regs.uconfig_space_start, /* mmSQ_PERFCOUNTER_CTRL2 */
+        sq_ctrl2_value);
+    if (ret < 0)
+      return ret;
+  }
+
+  /* 5. Configure each counter */
+  for (size_t i = 0; i < collection->counter_count; i++) {
+    ret = generate_counter_config(buffer, arch, &collection->counters[i]);
+    if (ret < 0)
+      return ret;
+  }
+
+  /* 6. GRBM broadcast again */
+  ret = generate_grbm_broadcast(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 7. Enable compute perfcount */
+  ret = pm4_append_write_sh_reg(buffer,
+                                arch->control_regs.compute_perfcount_enable -
+                                    arch->control_regs.persistent_space_start,
+                                0x1, /* enable */
+                                0, 0);
+  if (ret < 0)
+    return ret;
+
+  /* 8. Enable perfmon (disable first, then enable) */
+  ret = generate_perfmon_enable(
+      buffer, arch, arch->control_regs.perfmon_states.perfmon_state_disable,
+      false);
+  if (ret < 0)
+    return ret;
+
+  ret = generate_perfmon_enable(
+      buffer, arch, arch->control_regs.perfmon_states.perfmon_state_enable,
+      false);
+  if (ret < 0)
+    return ret;
+
+  /* 9. Final CS partial flush */
+  ret = generate_cs_partial_flush(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  return 0;
+}
+
+/* Generate PM4 packet sequence to read performance counters */
+int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
+                         const counter_collection_t *collection) {
+  int ret;
+  uint64_t current_addr;
+
+  if (!buffer || !arch || !collection || !collection->counters) {
+    return -EINVAL;
+  }
+
+  /* 1. Enable perfmon with sampling */
+  ret = generate_perfmon_enable(
+      buffer, arch, arch->control_regs.perfmon_states.perfmon_state_enable,
+      true); /* enable sampling */
+  if (ret < 0)
+    return ret;
+
+  /* 2. GRBM broadcast mode */
+  ret = generate_grbm_broadcast(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 3. CS partial flush */
+  ret = generate_cs_partial_flush(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 4. Read counters from all topology locations */
+  current_addr = collection->gpu_memory_addr;
+
+  for (size_t counter_idx = 0; counter_idx < collection->counter_count;
+       counter_idx++) {
+    counter_info_t *counter = &collection->counters[counter_idx];
+    block_info_t *block = arch->block_map.blocks[counter->block_id];
+
+    if (!block) {
+      return -ENOENT;
+    }
+
+    /* Reset to broadcast mode for each counter */
+    ret = generate_grbm_broadcast(buffer, arch);
+    if (ret < 0)
+      return ret;
+
+    /* Get register info */
+    counter_reg_info_t *reg_info =
+        &block->counter_reg_info[counter->counter_index];
+
+    /* Iterate through GPU topology based on block dimensions */
+    bool has_se_dimension = false;
+    for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+      dimension_t *dim = &block->dimensions[dim_idx];
+
+      /* For now, handle SE/SA/WGP dimensions specifically */
+      if (dim->dim == HARDWARE_DIM_SE) {
+        has_se_dimension = true;
+        /* SE-dependent block - iterate through SE x SA x WGP */
+        for (uint32_t se = 0; se < arch->num_se; se++) {
+          for (uint32_t sa = 0; sa < arch->num_sa; sa++) {
+            for (uint32_t wgp = 0; wgp < arch->num_wgp_per_sa; wgp++) {
+              /* Set GRBM index for specific location */
+              ret =
+                  pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
+                                     wgp << 2, /* instance_index */
+                                     sa, se);
+              if (ret < 0)
+                return ret;
+
+              /* Copy counter data to memory */
+              pm4_copy_data_flags_t flags = {
+                  .bits = {.src_sel = 0,      /* Non-priv registers */
+                           .dst_sel = 2,      /* TC_L2 memory */
+                           .src_temporal = 3, /* LU cache policy */
+                           .dst_temporal = 3, /* LU cache policy */
+                           .count_sel = 0,    /* 32-bit data */
+                           .wr_confirm = 0}};
+
+              ret = pm4_append_copy_data(
+                  buffer, flags, reg_info->register_addr_lo,
+                  reg_info->register_addr_hi, current_addr);
+              if (ret < 0)
+                return ret;
+
+              current_addr += 8; /* 64-bit counter value */
+            }
+          }
+        }
+        break; /* Found SE dimension, processed topology */
+      }
+    }
+
+    /* For global blocks (no SE dimension), read once */
+    if (!has_se_dimension) {
+      /* No SE dimension found - global block */
+      pm4_copy_data_flags_t flags = {
+          .bits = {.src_sel = 0,      /* Non-priv registers */
+                   .dst_sel = 2,      /* TC_L2 memory */
+                   .src_temporal = 3, /* LU cache policy */
+                   .dst_temporal = 3, /* LU cache policy */
+                   .count_sel = 0,    /* 32-bit data */
+                   .wr_confirm = 0}};
+
+      ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
+                                 reg_info->register_addr_hi, current_addr);
+      if (ret < 0)
+        return ret;
+
+      current_addr += 8; /* 64-bit counter value */
+    }
+  }
+
+  /* 5. Restore broadcast mode */
+  ret = generate_grbm_broadcast(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 6. Cache coherency flush */
+  ret = pm4_append_acquire_mem(buffer, collection->gpu_memory_addr,
+                               collection->memory_size,
+                               arch->control_regs.gcr_cntl_default);
+  if (ret < 0)
+    return ret;
+
+  return 0;
+}
+
+/* Generate PM4 packet sequence to stop performance counters */
+int generate_stop_packet(pm4_buffer_t *buffer, const arch_t *arch) {
+  int ret;
+
+  if (!buffer || !arch) {
+    return -EINVAL;
+  }
+
+  /* 1. GRBM broadcast mode */
+  ret = generate_grbm_broadcast(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  /* 2. Set perfmon state to stop with sampling enabled */
+  ret = generate_perfmon_enable(
+      buffer, arch, arch->control_regs.perfmon_states.perfmon_state_stop,
+      false);
+  if (ret < 0)
+    return ret;
+
+  /* 3. CS partial flush */
+  ret = generate_cs_partial_flush(buffer, arch);
+  if (ret < 0)
+    return ret;
+
+  return 0;
+}
+
+/* Calculate total memory size needed for counter data collection */
+size_t calculate_counter_memory_size(const arch_t *arch,
+                                     const counter_collection_t *collection) {
+  if (!arch || !collection || !collection->counters) {
+    return 0;
+  }
+
+  size_t total_size = 0;
+
+  for (size_t i = 0; i < collection->counter_count; i++) {
+    counter_info_t *counter = &collection->counters[i];
+    block_info_t *block = arch->block_map.blocks[counter->block_id];
+
+    if (!block) {
+      continue; /* Skip invalid blocks */
+    }
+
+    size_t counter_size = 8; /* Base 64-bit counter size */
+
+    /* Multiply by topology dimensions */
+    for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+      dimension_t *dim = &block->dimensions[dim_idx];
+
+      switch (dim->dim) {
+      case HARDWARE_DIM_SE:
+        counter_size *= arch->num_se;
+        break;
+      case HARDWARE_DIM_SA:
+        counter_size *= arch->num_sa;
+        break;
+      case HARDWARE_DIM_WGP:
+        counter_size *= arch->num_wgp_per_sa;
+        break;
+      case HARDWARE_DIM_XCC:
+        counter_size *= arch->num_xcc;
+        break;
+      default:
+        counter_size *= dim->size;
+        break;
+      }
+    }
+
+    total_size += counter_size;
+  }
+
+  return total_size;
+}
+
+/* Validate counter collection configuration */
+int validate_counter_collection(const arch_t *arch,
+                                const counter_collection_t *collection) {
+  if (!arch || !collection || !collection->counters) {
+    return -EINVAL;
+  }
+
+  if (collection->counter_count == 0) {
+    return -EINVAL;
+  }
+
+  /* Check each counter */
+  for (size_t i = 0; i < collection->counter_count; i++) {
+    counter_info_t *counter = &collection->counters[i];
+
+    /* Validate block ID */
+    if (VALIDATE_BLOCK_ID(arch, counter)) {
+      return -EINVAL;
+    }
+
+    /* Check if block exists in architecture */
+    block_info_t *block = arch->block_map.blocks[counter->block_id];
+    if (!block) {
+      return -ENOENT;
+    }
+
+    /* Validate counter index */
+    if (counter->counter_index >= block->counter_count) {
+      return -EINVAL;
+    }
+
+    /* Validate event ID */
+    if (counter->event_id > block->event_id_max) {
+      return -EINVAL;
+    }
+  }
+
+  return 0;
+}

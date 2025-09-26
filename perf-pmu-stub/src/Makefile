@@ -5,7 +5,8 @@ obj-m := pmu_stub.o
 pmu_stub-y := pmu_main.o pmu_events.o kfd_test.o \
               aql_perf.o aql_packet_ops.o aql_error_recovery.o aql_pmu_integration.o \
               aql_c/aql_pmc_interface.o aql_c/arch_creator.o aql_c/gfx12_creator.o \
-              aql_c/pm4_packets.o aql_c/counter_registry.o aql_c/gfx12_events.o
+              aql_c/pm4_packets.o aql_c/counter_registry.o aql_c/gfx12_events.o \
+              aql_c/packet_generation.o
 
 # Kernel version and build directory
 KVERSION := $(shell uname -r)

@@ -92,6 +92,44 @@ typedef struct {
     uint32_t block_count;
 } block_info_map_t;
 
+/* Architecture-specific control registers for packet generation */
+typedef struct {
+    /* Global control registers */
+    uint32_t grbm_gfx_index;           /* GRBM graphics index register */
+    uint32_t cp_perfmon_cntl;          /* CP performance monitor control */
+    uint32_t compute_perfcount_enable; /* Compute performance counter enable */
+    uint32_t sq_perfcounter_ctrl2;     /* SQ performance counter control 2 */
+
+
+    /* Register space bases */
+    uint32_t uconfig_space_start;      /* Base of UCONFIG register space */
+    uint32_t persistent_space_start;   /* Base of persistent (SH) register space */
+
+    /* Event configuration */
+    uint32_t cs_partial_flush_event;   /* Event type for CS partial flush */
+    uint32_t event_index_flush;        /* Event index for flush operations */
+
+    /* Cache coherency parameters */
+    uint32_t gcr_cntl_default;         /* Default GCR control value */
+    uint32_t poll_interval_default;    /* Default poll interval for cache ops */
+
+    /* Performance counter control bits */
+    struct {
+        uint8_t sq_ps_en_bit;          /* Bit position for PS enable */
+        uint8_t sq_gs_en_bit;          /* Bit position for GS enable */
+        uint8_t sq_hs_en_bit;          /* Bit position for HS enable */
+        uint8_t sq_cs_en_bit;          /* Bit position for CS enable */
+    } counter_control_bits;
+
+    /* Perfmon states */
+    struct {
+        uint8_t perfmon_state_disable; /* Disable state value */
+        uint8_t perfmon_state_enable;  /* Enable state value */
+        uint8_t perfmon_state_stop;    /* Stop state value */
+        uint8_t perfmon_sample_bit;    /* Sample enable bit position */
+    } perfmon_states;
+} arch_control_regs_t;
+
 /* Unified architecture structure - same fields for all architectures */
 typedef struct {
     arch_type_t type;
@@ -106,6 +144,9 @@ typedef struct {
 
     /* Block info organized by hardware IP block type */
     block_info_map_t block_map;
+
+    /* Architecture-specific control registers */
+    arch_control_regs_t control_regs;
 } arch_t;
 
 /* Counter allocation state */
