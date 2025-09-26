@@ -41,42 +41,52 @@ set(_thread_limit_environment
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss"
 )
 
-math(EXPR THREAD_LIMIT_TEST_VALUE "${ROCPROFSYS_MAX_THREADS} + 24")
-# Make sure the thread limit is set to the maximum thread size limit, which is
-# 4096, as indicated by the counters.hpp.
+# Test values ought to be maintained above test limits and within allowed bounds. Avoid exact power-of-2 matches to prevent test duplication.
+set(THREAD_VALUES
+    ${ROCPROFSYS_MAX_THREADS}
+    1
+    2049
+    4095
+    4097
+    4120
+)
+
+# Maximum allowed threads
 set(ALLOWED_MAX_THREADS 4096)
-if(${THREAD_LIMIT_TEST_VALUE} GREATER_EQUAL ${ALLOWED_MAX_THREADS})
-    message(
-        WARNING
-        "THREAD_LIMIT_TEST_VALUE has reached or exceeded the max allowed threads (4096)."
+
+# Loop over thread values
+foreach(THREADS IN LISTS THREAD_VALUES)
+    set(THREAD_PASS_VALUE ${THREADS})
+    math(EXPR THREAD_FAIL_VALUE "${THREADS} + 1")
+    if(${THREADS} GREATER_EQUAL ${ALLOWED_MAX_THREADS})
+        math(EXPR THREAD_PASS_VALUE "${ALLOWED_MAX_THREADS} - 1")
+        math(EXPR THREAD_FAIL_VALUE "${THREADS}")
+    endif()
+
+    set(_thread_limit_pass_regex "\\|${THREAD_PASS_VALUE}>>>")
+    set(_thread_limit_fail_regex "\\|${THREAD_FAIL_VALUE}>>>|ROCPROFSYS_ABORT_FAIL_REGEX")
+
+    # Unique test name
+    set(_test_name thread-limit-${THREADS})
+
+    # Add test
+    rocprofiler_systems_add_test(
+        SKIP_BASELINE
+        NAME ${_test_name}
+        TARGET thread-limit
+        LABELS "max-threads"
+        REWRITE_ARGS -e -v 2 -i 1024 --label return args
+        RUNTIME_ARGS -e -v 1 -i 1024 --label return args
+        RUN_ARGS 35 2 ${THREADS}
+        SAMPLING_TIMEOUT 240
+        REWRITE_TIMEOUT 240
+        RUNTIME_TIMEOUT 360
+        RUNTIME_PASS_REGEX "${_thread_limit_pass_regex}"
+        SAMPLING_PASS_REGEX "${_thread_limit_pass_regex}"
+        REWRITE_RUN_PASS_REGEX "${_thread_limit_pass_regex}"
+        RUNTIME_FAIL_REGEX "${_thread_limit_fail_regex}"
+        SAMPLING_FAIL_REGEX "${_thread_limit_fail_regex}"
+        REWRITE_RUN_FAIL_REGEX "${_thread_limit_fail_regex}"
+        ENVIRONMENT "${_thread_limit_environment}"
     )
-    # Establishing the maximum number of permitted threads index.
-    math(EXPR VALID_MAX_THREAD_INDEX "${ALLOWED_MAX_THREADS} - 1")
-    set(THREAD_LIMIT_TEST_VALUE ${VALID_MAX_THREAD_INDEX})
-endif()
-math(EXPR THREAD_LIMIT_TEST_VALUE_PLUS_ONE "${THREAD_LIMIT_TEST_VALUE} + 1")
-
-set(_thread_limit_pass_regex "\\|${THREAD_LIMIT_TEST_VALUE}>>>")
-set(_thread_limit_fail_regex
-    "\\|${THREAD_LIMIT_TEST_VALUE_PLUS_ONE}>>>|ROCPROFSYS_ABORT_FAIL_REGEX"
-)
-
-rocprofiler_systems_add_test(
-    SKIP_BASELINE
-    NAME thread-limit
-    TARGET thread-limit
-    LABELS "max-threads"
-    REWRITE_ARGS -e -v 2 -i 1024 --label return args
-    RUNTIME_ARGS -e -v 1 -i 1024 --label return args
-    RUN_ARGS 35 2 ${THREAD_LIMIT_TEST_VALUE}
-    SAMPLING_TIMEOUT 240
-    REWRITE_TIMEOUT 240
-    RUNTIME_TIMEOUT 360
-    RUNTIME_PASS_REGEX "${_thread_limit_pass_regex}"
-    SAMPLING_PASS_REGEX "${_thread_limit_pass_regex}"
-    REWRITE_RUN_PASS_REGEX "${_thread_limit_pass_regex}"
-    RUNTIME_FAIL_REGEX "${_thread_limit_fail_regex}"
-    SAMPLING_FAIL_REGEX "${_thread_limit_fail_regex}"
-    REWRITE_RUN_FAIL_REGEX "${_thread_limit_fail_regex}"
-    ENVIRONMENT "${_thread_limit_environment}"
-)
+endforeach()

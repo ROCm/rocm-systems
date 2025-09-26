@@ -28,6 +28,7 @@
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
+#include "library/rocprofiler-sdk/counters.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -62,7 +63,8 @@ namespace component
 {
 using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
-
+constexpr size_t allowed_max_threads = tim::operation::set_storage<
+    rocprofsys::rocprofiler_sdk::counter_data_tracker>::max_threads;
 namespace
 {
 auto* is_shutdown   = new bool{ false };  // intentional data leak
@@ -181,7 +183,17 @@ pthread_create_gotcha::wrapper::operator()() const
     auto        _coverage    = (get_mode() == Mode::Coverage);
     const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto& _info        = thread_info::init(m_config.offset);
-    auto        _dtor        = [&]() {
+    auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
+    if(static_cast<size_t>(_sequent_value) >= allowed_max_threads)
+    {
+        ROCPROFSYS_WARNING_F(1,
+                             "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
+                             "reached. Further thread creation and profiling will be "
+                             "disabled to prevent resource exhaustion.\n",
+                             allowed_max_threads);
+        return nullptr;
+    }
+    auto _dtor = [&]() {
         set_thread_state(ThreadState::Internal);
         if(_is_sampling)
         {
