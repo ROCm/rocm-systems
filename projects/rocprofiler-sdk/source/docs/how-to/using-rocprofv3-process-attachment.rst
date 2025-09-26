@@ -36,22 +36,22 @@ Where ``<PID>`` is the process ID of the target application. The optional ``--hi
 
    ./myapp -n 1 &
 
-1. Get the process ID (PID) of the running application:
+2. Get the process ID (PID) of the running application:
 .. code-block:: bash
 
    echo $(pgrep myapp)
    OR 
    ps aux | grep myapp
 
-1. Attach ``rocprofv3`` to the running application:
+3. Attach ``rocprofv3`` to the running application:
 .. code-block:: bash
 
    rocprofv3 --attach <PID> --hip-trace --output-format rocpd
 
-1. Detach the profiler when done:
+4. Detach the profiler when done:
    Press `Enter` in the terminal where ``rocprofv3`` is running to detach the profiler from the target application.
 
-2. The profiling data will be saved in the specified output format.
+5. The profiling data will be saved in the specified output format.
 
 **Example: Attach to a running process and profile for a specific duration (e.g., 5 seconds):**
 
@@ -60,20 +60,20 @@ Where ``<PID>`` is the process ID of the target application. The optional ``--hi
 
    ./myapp -n 1 &
 
-1. Get the process ID (PID) of the running application:
+2. Get the process ID (PID) of the running application:
 .. code-block:: bash
 
    echo $(pgrep myapp)
    OR 
    ps aux | grep myapp
 
-1. Attach ``rocprofv3`` to the running application:
+3. Attach ``rocprofv3`` to the running application:
 .. code-block:: bash
 
    rocprofv3 --attach <PID> --attach-duration-msec 5000 --sys-trace --output-format csv
 
-1. The profiler will automatically detach after the specified duration (5 seconds in this case).
-2. The profiling data will be saved in the specified output format.
+4. The profiler will automatically detach after the specified duration (5 seconds in this case).
+5. The profiling data will be saved in the specified output format.
 
    For example, if you used `--output-format csv`, the data will be saved as a CSV file.
 
