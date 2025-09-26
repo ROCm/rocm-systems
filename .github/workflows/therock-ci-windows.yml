@@ -54,6 +54,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
+          ref: 7afbe45f7eaa4f2e9abcb9cd7f1c4042a2d7b638 # 2025-09-24 commit
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -80,6 +81,11 @@ jobs:
       # After other installs, so MSVC get priority in the PATH.
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Runner health status
+        run: |
+          ccache --zero-stats
+          python ./TheRock/build_tools/health_status.py
 
       - name: Fetch sources
         timeout-minutes: 30
