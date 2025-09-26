@@ -68,18 +68,17 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height,
  *  - HIP_VERSION >= 7.1
  */
 TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, float) {
-  constexpr auto kfloatval1 = -1.5;
-  constexpr auto kfloatval2 = 2.25;
-  constexpr auto kfloatval3 = -0.75;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : 10;
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : 7;
-  const TestType val3 = std::is_floating_point_v<TestType> ? kfloatval3 : 3;
+  constexpr auto kfloatval1 = -1.5f;
+  constexpr auto kfloatval2 = 2.25f;
+  constexpr auto kfloatval3 = -0.75f;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 7 : 'b';
+  const TestType val3 = std::is_floating_point_v<TestType> ? kfloatval3 : std::is_integral_v<TestType> ? 3 : 'c';
 
   constexpr int numOps = 4;
   constexpr int numW = 16;
   constexpr int numH = 16;
   constexpr int depth = 10;
-  const size_t width = numW * sizeof(TestType);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(numW *sizeof(TestType), numH, depth);
@@ -174,7 +173,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, 
 
   // Validation
   for (size_t i = 0; i < elements_3d; ++i) {
-    INFO("Array FAILURE at Index: " << i << "\nval : " << srcPtr2[i]);
+    INFO("Array FAILURE at Index: " << i << "\nval : " << srcPtr3[i]);
     REQUIRE(srcPtr3[i] == val1);
   }
 
@@ -206,15 +205,14 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, 
  */
 TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char, int, float) {
   CHECK_IMAGE_SUPPORT
-  constexpr auto kfloatval1 = -1.5;
-  constexpr auto kfloatval2 = 2.25;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : 10;
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : 7;
+  constexpr auto kfloatval1 = -1.5f;
+  constexpr auto kfloatval2 = 2.25f;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 7 : 'b';
   constexpr int numOps = 5;
   constexpr int numW = 16;
   constexpr int numH = 16;
   constexpr int depth = 10;
-  size_t width = numW * sizeof(TestType);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(numW, numH, depth);

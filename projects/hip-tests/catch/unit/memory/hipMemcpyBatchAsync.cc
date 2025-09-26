@@ -44,25 +44,30 @@
  *  - HIP_VERSION >= 7.1
  */
 #if HT_AMD
-TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_BasicFunctional") {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int, float) {
   const size_t count = 2;
   size_t numAttrs = 0;
-  const size_t size = 4096 * sizeof(char);
-  hipStream_t stream = NULL;
+  const size_t arrSize = 4096;
+  const size_t size = 4096 * sizeof(TestType);
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
+  constexpr auto kfloatval1 = 2.25f;
+  constexpr auto kfloatval2 = 0.25f;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
 
   // Allocate buffers for pointer-ptr copy
   void *srcPtr[count], *dstPtr[count];
-  std::vector<std::array<char, size>> hostPtr(count);
+  std::vector<std::vector<TestType>> hostPtr1(count, std::vector<TestType> (arrSize, val1));
+  std::vector<std::vector<TestType>> hostPtr2(count, std::vector<TestType> (arrSize, val2));
   size_t sizes[2];
   size_t attrsIdxs[1];
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipMalloc(&srcPtr[i], size));
     HIP_CHECK(hipMalloc(&dstPtr[i], size));
-    HIP_CHECK(hipMemset(srcPtr[i], 'b', size)); // Fill with value
+        HIP_CHECK(hipMemcpy(srcPtr[i], hostPtr2[i].data(), size, hipMemcpyHostToDevice));
     sizes[i] = size;
   }
-
   attrsIdxs[0] = 0;
   size_t failIdx;
 
@@ -72,14 +77,13 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_BasicFunctional") {
   // validation
   for (int i = 0; i < count; i++) {
     HIP_CHECK(
-        hipMemcpy(hostPtr[i].data(), dstPtr[i], size, hipMemcpyDeviceToHost));
-    for (int j = 0; j < size; j++) {
+        hipMemcpy(hostPtr1[i].data(), dstPtr[i], size, hipMemcpyDeviceToHost));
+    for (int j = 0; j < arrSize; j++) {
       INFO("Array FAILURE at Index: " << i << " " << j
-                                      << "\nval : " << hostPtr[i][j]);
-      REQUIRE(hostPtr[i][j] == 'b');
+                                      << "\nval : " << hostPtr1[i][j]);
+      REQUIRE(hostPtr1[i][j] == val2);
     }
   }
-
   // Clean up
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipFree(srcPtr[i]));
@@ -87,6 +91,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_BasicFunctional") {
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
 /**
  * Test Description
  * ------------------------
@@ -102,18 +107,23 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_BasicFunctional") {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int, float) {
   const size_t count = 2;
   size_t numAttrs = 0;
-  const size_t size = 4096 * sizeof(char);
-  hipStream_t stream = NULL;
+  const size_t arrSize = 4096;
+  const size_t size = 4096 * sizeof(TestType);
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
   // Allocate buffers for pointer-ptr copy
   void *hostSrcPtr[count], *dstPtr[count];
-  std::vector<std::array<char, size>> hostPtr(count);
-  std::array<char, size> arr;
-  arr.fill('b');
+  constexpr auto kfloatval1 = 2.25f;
+  constexpr auto kfloatval2 = 0.25f;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
+  std::vector<std::vector<TestType>> hostPtr(count, std::vector<TestType> (arrSize, val2));
+  std::array<TestType, arrSize> arr;
+  arr.fill(val1);
   size_t sizes[2];
   size_t attrsIdxs[1];
   for (int i = 0; i < count; i++) {
@@ -131,19 +141,19 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_BasicFunctional") {
   for (int i = 0; i < count; i++) {
     HIP_CHECK(
         hipMemcpy(hostPtr[i].data(), dstPtr[i], size, hipMemcpyDeviceToHost));
-    for (int j = 0; j < size; j++) {
+    for (int j = 0; j < arrSize; j++) {
       INFO("Array FAILURE at Index: " << i << " " << j
                                       << "\nval : " << hostPtr[i][j]);
-      REQUIRE(hostPtr[i][j] == 'b');
+      REQUIRE(hostPtr[i][j] == val1);
     }
   }
-
   // Clean up
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipFree(dstPtr[i]));
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
 /**
  * Test Description
  * ------------------------
@@ -159,25 +169,30 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_BasicFunctional") {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int, float) {
   const size_t count = 2;
   size_t numAttrs = 0;
-  const size_t size = 4096 * sizeof(char);
-  hipStream_t stream = NULL;
+  const size_t arrSize = 4096;
+  const size_t size = 4096 * sizeof(TestType);
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
+  constexpr auto kfloatval1 = 2.25f;
+  constexpr auto kfloatval2 = 0.25f;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
   // Allocate buffers for pointer-ptr copy
-  char *hostDstPtr[count];
+  TestType *hostDstPtr[count];
   void *deviceSrcPtr[count];
-  std::vector<std::array<char, size>> hostPtr(count);
-  std::array<char, size> arr;
-  arr.fill('a');
+  std::vector<std::vector<TestType>> hostPtr(count, std::vector<TestType>(arrSize, val1));
+  std::array<TestType, arrSize> arr;
+  arr.fill(val2);
   size_t sizes[2];
   size_t attrsIdxs[1];
   for (int i = 0; i < count; i++) {
     hostDstPtr[i] = arr.data();
     HIP_CHECK(hipMalloc(&deviceSrcPtr[i], size));
-    HIP_CHECK(hipMemset(deviceSrcPtr[i], 'b', size)); // Fill with value
+    HIP_CHECK(hipMemcpy(deviceSrcPtr[i], hostPtr[i].data(), size, hipMemcpyHostToDevice));
     sizes[i] = size;
   }
   attrsIdxs[0] = 0;
@@ -189,10 +204,10 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_BasicFunctional") {
   HIP_CHECK(hipStreamSynchronize(stream));
   // validation
   for (int i = 0; i < count; i++) {
-    for (int j = 0; j < size; j++) {
+    for (int j = 0; j < arrSize; j++) {
       INFO("Array FAILURE at Index: " << i << " " << j
                                       << "\nval : " << hostDstPtr[i][j]);
-      REQUIRE(hostDstPtr[i][j] == 'b');
+      REQUIRE(hostDstPtr[i][j] == val1);
     }
   }
   // Clean up
@@ -201,6 +216,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_BasicFunctional") {
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
 /**
  * Test Description
  * ------------------------
@@ -216,25 +232,29 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_BasicFunctional") {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_Functional","", char, int, float) {
   const size_t count = 2;
   size_t numAttrs = 0;
-  const size_t size = 4096 * sizeof(char);
-  hipStream_t stream = NULL;
+  const size_t arrSize =  4096;
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
+  constexpr auto kfloatval1 = 2.25;
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  constexpr auto kfloatval2 = 0.25f;
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
+
   // Allocate buffers for pointer-ptr copy
-  char *hostDstPtr[count], *hostSrcPtr[count];
-  std::vector<std::array<char, size>> hostPtr(count);
-  std::array<char, size> arr1, arr2;
-  arr1.fill('a');
-  arr2.fill('b');
+  TestType *hostDstPtr[count], *hostSrcPtr[count];
+  std::array<TestType, arrSize> arr1, arr2;
+  arr1.fill(val1);
+  arr2.fill(val2);
   size_t sizes[2];
   size_t attrsIdxs[1];
   for (int i = 0; i < count; i++) {
     hostDstPtr[i] = arr1.data();
     hostSrcPtr[i] = arr2.data();
-    sizes[i] = size;
+    sizes[i] = arrSize * sizeof(TestType);
   }
   attrsIdxs[0] = 0;
   size_t failIdx;
@@ -246,10 +266,10 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_BasicFunctional") {
   HIP_CHECK(hipStreamSynchronize(stream));
   // validation
   for (int i = 0; i < count; i++) {
-    for (int j = 0; j < size; j++) {
+    for (int j = 0; j < arrSize; j++) {
       INFO("Array FAILURE at Index: " << i << " " << j
                                       << "\nval : " << hostDstPtr[i][j]);
-      REQUIRE(hostDstPtr[i][j] == 'b');
+      REQUIRE(hostDstPtr[i][j] == val2);
     }
   }
   // Clean up
