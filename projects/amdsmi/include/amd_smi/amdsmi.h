@@ -3225,7 +3225,7 @@ amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *ener
  *
  *  @ingroup tagPowerControl
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{host} @platform{gpu_bm_linux} @platform{guest_1vf}
  *
  *  @details Set the power cap to the provided value @p cap.
  *  @p cap must be between the minimum and maximum power cap values set by the
