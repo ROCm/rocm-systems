@@ -620,7 +620,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
     pcs_ioctl_version_t pcs_ioctl_version = 0;
-    auto status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
+    status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
     // Strict check: whether the driver version (safely) supports the sampling method for
