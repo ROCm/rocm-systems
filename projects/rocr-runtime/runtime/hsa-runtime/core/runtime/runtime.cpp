@@ -1096,13 +1096,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   // Ex. ROCR_VISIBLE_DEVICES or peer GPU is not supported by ROCm.
   retInfo.agentOwner.handle = 0;
   auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-  if (nodeAgents == agents_by_node_.end()) {
-    fprintf(stderr,
-        "Warning: PtrInfo cannot find node id %u in agents_by_node_.\n"
-        "Has hsa_shut_down() already been called?\n", thunkInfo.Node);
-        return HSA_STATUS_ERROR_NOT_INITIALIZED;
-  }
-
+  assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
   for (auto agent : nodeAgents->second) {
     if (agent->Enabled()) {
       retInfo.agentOwner = agent->public_handle();
@@ -2208,11 +2202,11 @@ void Runtime::Unload() {
   mapped_handle_map_.clear();
   memory_handle_map_.clear();
 
-  DestroyAgents();
-
   CloseTools();
 
   AMD::Unload();
+
+  DestroyAgents();
 
   DestroyDrivers();
 
