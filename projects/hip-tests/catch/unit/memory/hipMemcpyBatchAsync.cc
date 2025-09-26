@@ -44,7 +44,8 @@
  *  - HIP_VERSION >= 7.1
  */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int,
+                   float) {
   const size_t count = 2;
   size_t numAttrs = 0;
   const size_t arrSize = 4096;
@@ -53,19 +54,26 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int, flo
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr auto kfloatval1 = 2.25f;
   constexpr auto kfloatval2 = 0.25f;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1
+                        : std::is_integral_v<TestType>     ? 10
+                                                           : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2
+                        : std::is_integral_v<TestType>     ? 4
+                                                           : 'b';
 
   // Allocate buffers for pointer-ptr copy
   void *srcPtr[count], *dstPtr[count];
-  std::vector<std::vector<TestType>> hostPtr1(count, std::vector<TestType> (arrSize, val1));
-  std::vector<std::vector<TestType>> hostPtr2(count, std::vector<TestType> (arrSize, val2));
+  std::vector<std::vector<TestType>> hostPtr1(
+      count, std::vector<TestType>(arrSize, val1));
+  std::vector<std::vector<TestType>> hostPtr2(
+      count, std::vector<TestType>(arrSize, val2));
   size_t sizes[2];
   size_t attrsIdxs[1];
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipMalloc(&srcPtr[i], size));
     HIP_CHECK(hipMalloc(&dstPtr[i], size));
-        HIP_CHECK(hipMemcpy(srcPtr[i], hostPtr2[i].data(), size, hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(srcPtr[i], hostPtr2[i].data(), size, hipMemcpyHostToDevice));
     sizes[i] = size;
   }
   attrsIdxs[0] = 0;
@@ -107,7 +115,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int, flo
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int,
+                   float) {
   const size_t count = 2;
   size_t numAttrs = 0;
   const size_t arrSize = 4096;
@@ -119,9 +128,14 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int, flo
   void *hostSrcPtr[count], *dstPtr[count];
   constexpr auto kfloatval1 = 2.25f;
   constexpr auto kfloatval2 = 0.25f;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
-  std::vector<std::vector<TestType>> hostPtr(count, std::vector<TestType> (arrSize, val2));
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1
+                        : std::is_integral_v<TestType>     ? 10
+                                                           : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2
+                        : std::is_integral_v<TestType>     ? 4
+                                                           : 'b';
+  std::vector<std::vector<TestType>> hostPtr(
+      count, std::vector<TestType>(arrSize, val2));
   std::array<TestType, arrSize> arr;
   arr.fill(val1);
   size_t sizes[2];
@@ -169,7 +183,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int, flo
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int,
+                   float) {
   const size_t count = 2;
   size_t numAttrs = 0;
   const size_t arrSize = 4096;
@@ -179,12 +194,17 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int, flo
 
   constexpr auto kfloatval1 = 2.25f;
   constexpr auto kfloatval2 = 0.25f;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1
+                        : std::is_integral_v<TestType>     ? 10
+                                                           : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2
+                        : std::is_integral_v<TestType>     ? 4
+                                                           : 'b';
   // Allocate buffers for pointer-ptr copy
   TestType *hostDstPtr[count];
   void *deviceSrcPtr[count];
-  std::vector<std::vector<TestType>> hostPtr(count, std::vector<TestType>(arrSize, val1));
+  std::vector<std::vector<TestType>> hostPtr(
+      count, std::vector<TestType>(arrSize, val1));
   std::array<TestType, arrSize> arr;
   arr.fill(val2);
   size_t sizes[2];
@@ -192,7 +212,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int, flo
   for (int i = 0; i < count; i++) {
     hostDstPtr[i] = arr.data();
     HIP_CHECK(hipMalloc(&deviceSrcPtr[i], size));
-    HIP_CHECK(hipMemcpy(deviceSrcPtr[i], hostPtr[i].data(), size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(deviceSrcPtr[i], hostPtr[i].data(), size,
+                        hipMemcpyHostToDevice));
     sizes[i] = size;
   }
   attrsIdxs[0] = 0;
@@ -232,17 +253,22 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int, flo
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_Functional","", char, int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_Functional", "", char, int,
+                   float) {
   const size_t count = 2;
   size_t numAttrs = 0;
-  const size_t arrSize =  4096;
+  const size_t arrSize = 4096;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
   constexpr auto kfloatval1 = 2.25;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1
+                        : std::is_integral_v<TestType>     ? 10
+                                                           : 'a';
   constexpr auto kfloatval2 = 0.25f;
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 4 : 'b';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2
+                        : std::is_integral_v<TestType>     ? 4
+                                                           : 'b';
 
   // Allocate buffers for pointer-ptr copy
   TestType *hostDstPtr[count], *hostSrcPtr[count];

@@ -29,17 +29,18 @@
  * Perform Batch of 3D copies.
  */
 // Helper to check array content
-template<typename T>
+template <typename T>
 void checkArrayContent(hipArray_t array, size_t width, size_t height,
                        size_t depth, T expected) {
   std::vector<T> hostBuf(width * height * depth, 0);
   hipMemcpy3DParms copyParms{};
   copyParms.srcArray = array;
-  copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), width * sizeof(T), width, height);
+  copyParms.dstPtr =
+      make_hipPitchedPtr(hostBuf.data(), width * sizeof(T), width, height);
   copyParms.extent = make_hipExtent(width, height, depth);
   copyParms.kind = hipMemcpyDeviceToHost;
-  copyParms.srcPos = make_hipPos(0,0,0);
-  copyParms.dstPos = make_hipPos(0,0,0);
+  copyParms.srcPos = make_hipPos(0, 0, 0);
+  copyParms.dstPos = make_hipPos(0, 0, 0);
   HIP_CHECK(hipMemcpy3D(&copyParms));
   for (size_t i = 0; i < width * height * depth; ++i) {
     INFO("Array FAILURE at Index: " << i << "\nval : " << hostBuf[i]
@@ -67,13 +68,20 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int,
+                   float) {
   constexpr auto kfloatval1 = -1.5f;
   constexpr auto kfloatval2 = 2.25f;
   constexpr auto kfloatval3 = -0.75f;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 7 : 'b';
-  const TestType val3 = std::is_floating_point_v<TestType> ? kfloatval3 : std::is_integral_v<TestType> ? 3 : 'c';
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1
+                        : std::is_integral_v<TestType>     ? 10
+                                                           : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2
+                        : std::is_integral_v<TestType>     ? 7
+                                                           : 'b';
+  const TestType val3 = std::is_floating_point_v<TestType> ? kfloatval3
+                        : std::is_integral_v<TestType>     ? 3
+                                                           : 'c';
 
   constexpr int numOps = 4;
   constexpr int numW = 16;
@@ -81,7 +89,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, 
   constexpr int depth = 10;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  hipExtent extent = make_hipExtent(numW *sizeof(TestType), numH, depth);
+  hipExtent extent = make_hipExtent(numW * sizeof(TestType), numH, depth);
   size_t elements_3d = numW * numH * depth;
 
   // Source Pointers
@@ -203,12 +211,17 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int, 
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char, int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char,
+                   int, float) {
   CHECK_IMAGE_SUPPORT
   constexpr auto kfloatval1 = -1.5f;
   constexpr auto kfloatval2 = 2.25f;
-  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1 : std::is_integral_v<TestType> ? 10 : 'a';
-  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2 : std::is_integral_v<TestType> ? 7 : 'b';
+  const TestType val1 = std::is_floating_point_v<TestType> ? kfloatval1
+                        : std::is_integral_v<TestType>     ? 10
+                                                           : 'a';
+  const TestType val2 = std::is_floating_point_v<TestType> ? kfloatval2
+                        : std::is_integral_v<TestType>     ? 7
+                                                           : 'b';
   constexpr int numOps = 5;
   constexpr int numW = 16;
   constexpr int numH = 16;
@@ -216,8 +229,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char, i
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   hipExtent extent = make_hipExtent(numW, numH, depth);
-  size_t elements_3d =
-      extent.width * extent.height * extent.depth;
+  size_t elements_3d = extent.width * extent.height * extent.depth;
 
   // Host Pointers
   std::vector<TestType> srcPtr1(elements_3d, val1);
@@ -237,8 +249,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char, i
   // Fill dev Array with val2
   std::vector<TestType> tmpHost(elements_3d, val2);
   hipMemcpy3DParms fillParms{};
-  fillParms.srcPtr = make_hipPitchedPtr(tmpHost.data(), extent.width * sizeof(TestType),
-                                        extent.width, extent.height);
+  fillParms.srcPtr =
+      make_hipPitchedPtr(tmpHost.data(), extent.width * sizeof(TestType),
+                         extent.width, extent.height);
   fillParms.dstArray = array1;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
@@ -321,7 +334,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char, i
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Check Random Array data
-  checkArrayContent<TestType>(array2, extent.width, extent.height, extent.depth, val1);
+  checkArrayContent<TestType>(array2, extent.width, extent.height, extent.depth,
+                              val1);
   // Check Final data.
   for (size_t i = 0; i < elements_3d; ++i) {
     INFO("Pointer Copy Failure at Index: " << i << "\nval : " << srcPtr2[i]);
