@@ -33,7 +33,15 @@ execute_process(
     OUTPUT_VARIABLE _network_interface
 )
 
-message(STATUS "Default network interface is ${_network_interface}")
+# Generate the list of all events that we want PAPI to record.
+execute_process(
+    COMMAND "${CMAKE_SOURCE_DIR}/tests/generate_papi_nic_events.sh"
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    OUTPUT_VARIABLE _event_list
+)
+
+message(STATUS "The first default network interface is ${_network_interface}")
+message(STATUS "The list of all PAPI network events is ${_event_list}")
 
 set(_nic_perf_environment
     "${_base_environment}"
@@ -46,7 +54,7 @@ set(_nic_perf_environment
     "ROCPROFSYS_USE_ROCM=OFF"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,papi_array,network_stats"
     "ROCPROFSYS_NETWORK_INTERFACE=${_network_interface}"
-    "ROCPROFSYS_PAPI_EVENTS=net:::${_network_interface}:tx:byte net:::${_network_interface}:rx:byte net:::${_network_interface}:rx:packet net:::${_network_interface}:tx:packet"
+    "ROCPROFSYS_PAPI_EVENTS=${_event_list}"
     "ROCPROFSYS_SAMPLING_DELAY=0.05"
 )
 

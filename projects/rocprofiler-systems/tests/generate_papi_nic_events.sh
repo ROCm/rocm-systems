@@ -21,8 +21,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+# This script gets a list of NICs by running get_default_nic.sh
+# and generates a list of PAPI events, 4 for each NIC.
+# For example, if the NIC is enp7s0, the PAPI events are
+# net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:tx:packet net:::enp7s0:rx:packet
 
-# This script gets the name of the default NIC and writes it to standard output.
-# NOTE: if command "ip r" finds multiple default NICs, this script will output
-#       only the first one.
-ip r | awk '/default/{print $5}' | head -n1
+nic_list=$(ip r | awk '/default/{print $5}')
+
+event_list=
+for nic in $nic_list
+do
+  event_list="$event_list net:::$nic:tx:byte net:::$nic:rx:byte net:::$nic:tx:packet net:::$nic:rx:packet"
+done
+echo $event_list
