@@ -64,12 +64,20 @@ set(_download_url
     "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.1/rocprofiler-systems-1.0.1-ubuntu-22.04-ROCm-60400-PAPI-OMPT-Python3.sh"
 )
 
+# We set a variable for another file, because we want to download two files, because that
+# way we can assure that wget will run long enough to let PAPI collect network metrics
+# (each of the two files is about 90MB, and we want wget to run for at least 2s even on
+# a fast network).
+set(_download2_url
+    "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.3/rocprofiler-systems-1.0.2-rhel-9.4-PAPI-OMPT-Python3.sh"
+)
+
 # Run the NIC performance test
 add_test(
     NAME nic-performance
     COMMAND
         $<TARGET_FILE:rocprofiler-systems-sample> -- wget --no-check-certificate
-        ${_download_url} -O /tmp/rocprofiler-systems.test.bin
+        ${_download_url} ${_download2_url} -O /tmp/rocprofiler-systems.test.bin
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
