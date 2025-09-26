@@ -27,6 +27,9 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+  PYTHON_VENV_PATH: "aqlprofile"
+  PYTHON_VENV_ACTIVATE: "aqlprofile/bin/activate"
   navi3_EXCLUDE_TESTS_REGEX: ""
   vega20_EXCLUDE_TESTS_REGEX: ""
   mi200_EXCLUDE_TESTS_REGEX: ""
@@ -49,15 +52,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: [
-          {gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X"},
-          {gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X"},
-          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X"}
-        ]
+        system: 
+          - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
+          - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.therock-s3 }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -79,8 +81,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-${{ matrix.system.therock-s3 }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
         ln -s -f /usr/bin/git /usr/local/bin/git
 
@@ -106,7 +108,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
         pwd
 
@@ -114,8 +116,8 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        PATH=~/.local/bin:/opt/rocm/bin:${PATH}
-        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
+        PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
+        LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${{ matrix.system.runner }}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
@@ -130,15 +132,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: [
-          {gpu: 'mi325', os: 'rhel-8.8', build-type: 'RelWithDebInfo', container: ''},
-          {gpu: 'mi325', os: 'rhel-9.5', build-type: 'RelWithDebInfo', container: ''},
-          {gpu: 'mi325', os: 'sles-15.6', build-type: 'RelWithDebInfo', container: ''}
-        ]
+        system: 
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
-    runs-on: linux-mi325-1gpu-ossci-rocm
+    runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-gfx94X-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -163,8 +164,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
 
@@ -173,8 +174,8 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        python3 -m venv rocprofiler-sdk
-        source rocprofiler-sdk/bin/activate
+        python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+        source ${{ env.PYTHON_VENV_ACTIVATE }}
         export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
         python3 -m pip install --upgrade pip
         python3 -m pip install cmake
@@ -182,12 +183,12 @@ jobs:
     - name: List Files
       shell: bash
       run: |
-        source rocprofiler-sdk/bin/activate
+        source ${{ env.PYTHON_VENV_ACTIVATE }}
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
         pwd
 
@@ -195,11 +196,12 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        source rocprofiler-sdk/bin/activate;
-        PATH=~/.local/bin:/opt/rocm/bin:${PATH}
-        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
+        source ${{ env.PYTHON_VENV_ACTIVATE }}
+        PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
+        LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="linux-mi325-1gpu-ossci-rocm"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" 
+          -DCTEST_SITE=${{ matrix.system.runner }}
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
