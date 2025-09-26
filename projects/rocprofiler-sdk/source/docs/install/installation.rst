@@ -57,6 +57,15 @@ Install the following dependencies:
     export CXX=/usr/bin/g++-12
     export CC=/usr/bin/gcc-12
 
+.. note::
+   The above ``export`` statements set the compiler environment variables only for the current terminal session. If you open a new terminal or log out, these variables will be unset. To make these settings permanent, add the following lines to your ``~/.bashrc`` file:
+
+   .. code-block:: bash
+
+      export CXX=/usr/bin/g++-12
+      export CC=/usr/bin/gcc-12
+
+   Alternatively, ensure these variables are set before building ROCprofiler-SDK.
 To build ROCprofiler-SDK, install ``CMake`` as explained in the following section.
 
 Install CMake
