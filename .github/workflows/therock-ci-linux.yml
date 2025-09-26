@@ -52,30 +52,34 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
+          ref: 7afbe45f7eaa4f2e9abcb9cd7f1c4042a2d7b638 # 2025-09-24 commit
 
-      - name: Runner Health Settings
+      - name: Install python deps
         run: |
-          echo "CCACHE_DIR=${CCACHE_DIR}"
-          df -h
-          ccache -z
-          mkdir -p $CCACHE_DIR
-          cmake --version
-          echo "Installed Python versions:"
-          ls -d /opt/python
-          echo "python: $(which python), python3: $(which python3)"
-          echo "Git version: $(git --version)"
+          pip install -r TheRock/requirements.txt
+
+      # safe.directory must be set before Runner health status
+      - name: Adjust git config
+        run: |
           git config --global --add safe.directory $PWD
           git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-presubmit" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
       
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
 
-      - name: Install python deps
-        run: |
-          pip install -r TheRock/requirements.txt
-          pip freeze
 
       - name: Configure Projects
         env:
