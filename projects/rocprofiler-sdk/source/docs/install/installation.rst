@@ -34,6 +34,29 @@ The relevant fields are ``ID`` and the ``VERSION_ID``.
 Build requirements
 ------------------
 
+Install the following dependencies:
+
+- Debian/Ubuntu
+.. code-block:: bash
+
+    sudo apt install -y libdw-dev libsqlite3-dev
+
+- Red Hat Enterprise Linux/Alma Linux/Rocky Linux/Fedora
+
+.. code-block:: bash
+
+    sudo dnf install elfutils elfutils-devel libsqlite3x-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
+    python3 -m pip install --upgrade pip
+    python3 -m pip install scikit-build
+
+- SUSE Linux Enterprise Server
+
+.. code-block:: bash
+
+    sudo zypper install gcc12 gcc12-c++ cmake make python3-devel elfutils sqlite3-devel libelf-devel libdw-devel
+    export CXX=/usr/bin/g++-12
+    export CC=/usr/bin/gcc-12
+
 To build ROCprofiler-SDK, install ``CMake`` as explained in the following section.
 
 Install CMake
@@ -59,6 +82,7 @@ Building ROCprofiler-SDK from source
     git sparse-checkout init --cone
     git sparse-checkout set projects/rocprofiler-sdk
     git checkout develop
+    python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
     cmake                                         \
         -B rocprofiler-sdk-build                \
         -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
