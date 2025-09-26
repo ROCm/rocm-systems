@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <errno.h>
 #include "arch_creator.h"
 #include "packet_generation.h"
@@ -19,15 +20,31 @@
 #define MAX_COUNTERS 16
 #define MAX_BUFFER_SIZE 4096
 
+typedef enum {
+    PACKET_ALL,
+    PACKET_START,
+    PACKET_READ,
+    PACKET_STOP
+} packet_type_t;
+
 typedef struct {
     char *gfx_name;
     uint64_t output_address;
     counter_info_t counters[MAX_COUNTERS];
     size_t counter_count;
+    packet_type_t packet_filter;
+    bool continuous_hex;
+    bool quiet_mode;
 } tool_config_t;
 
 static void print_usage(const char *program_name) {
-    printf("Usage: %s <gfx_name> <output_address_hex> <counter1> [counter2] ...\n", program_name);
+    printf("Usage: %s [options] <gfx_name> <output_address_hex> <counter1> [counter2] ...\n", program_name);
+    printf("\n");
+    printf("Options:\n");
+    printf("  --packet=TYPE    : Select which packet to output (start, read, stop, all)\n");
+    printf("                     Default: all\n");
+    printf("  --continuous     : Print packet as continuous hex (no spaces, no 0x prefix)\n");
+    printf("  --quiet          : Suppress all output except packet data\n");
     printf("\n");
     printf("Arguments:\n");
     printf("  gfx_name         : GPU architecture name (e.g., gfx12)\n");
@@ -40,7 +57,8 @@ static void print_usage(const char *program_name) {
     printf("\n");
     printf("Examples:\n");
     printf("  %s gfx12 0x1000000 SQ_WAVES GL2C_HIT\n", program_name);
-    printf("  %s gfx12 0x1000000 SQ:0:0x42 SQ:1:0x43\n", program_name);
+    printf("  %s --packet=start --quiet gfx12 0x1000000 SQ_WAVES\n", program_name);
+    printf("  %s --continuous --packet=read gfx12 0x1000000 GL2C_HIT\n", program_name);
 }
 
 static int parse_block_name(const char *block_name) {
@@ -119,17 +137,54 @@ static int parse_counter_name(const char *counter_name, const arch_t *arch, coun
     return parse_counter_spec(counter_name, counter);
 }
 
+static int parse_packet_type(const char *type_str) {
+    if (!type_str) return PACKET_ALL;
+    if (strcmp(type_str, "start") == 0) return PACKET_START;
+    if (strcmp(type_str, "read") == 0) return PACKET_READ;
+    if (strcmp(type_str, "stop") == 0) return PACKET_STOP;
+    if (strcmp(type_str, "all") == 0) return PACKET_ALL;
+    return -1;
+}
+
 static int parse_arguments(int argc, char *argv[], tool_config_t *config) {
-    if (argc < 4) {
+    /* Initialize default values */
+    config->packet_filter = PACKET_ALL;
+    config->continuous_hex = false;
+    config->quiet_mode = false;
+    config->counter_count = 0;
+
+    int arg_index = 1;
+
+    /* Parse options */
+    while (arg_index < argc && argv[arg_index][0] == '-') {
+        if (strncmp(argv[arg_index], "--packet=", 9) == 0) {
+            int packet_type = parse_packet_type(argv[arg_index] + 9);
+            if (packet_type < 0) {
+                fprintf(stderr, "Error: Invalid packet type '%s'\n", argv[arg_index] + 9);
+                return -EINVAL;
+            }
+            config->packet_filter = packet_type;
+        } else if (strcmp(argv[arg_index], "--continuous") == 0) {
+            config->continuous_hex = true;
+        } else if (strcmp(argv[arg_index], "--quiet") == 0) {
+            config->quiet_mode = true;
+        } else {
+            fprintf(stderr, "Error: Unknown option '%s'\n", argv[arg_index]);
+            return -EINVAL;
+        }
+        arg_index++;
+    }
+
+    /* Check remaining required arguments */
+    if (argc - arg_index < 3) {
         return -EINVAL;
     }
 
-    config->gfx_name = argv[1];
-    config->output_address = strtoull(argv[2], NULL, 16);
-    config->counter_count = 0;
+    config->gfx_name = argv[arg_index];
+    config->output_address = strtoull(argv[arg_index + 1], NULL, 16);
 
     /* Store the counter arguments for later parsing with architecture */
-    for (int i = 3; i < argc && config->counter_count < MAX_COUNTERS; i++) {
+    for (int i = arg_index + 2; i < argc && config->counter_count < MAX_COUNTERS; i++) {
         config->counter_count++;
     }
 
@@ -139,7 +194,14 @@ static int parse_arguments(int argc, char *argv[], tool_config_t *config) {
 static int parse_counters_with_arch(int argc, char *argv[], tool_config_t *config, const arch_t *arch) {
     config->counter_count = 0;
 
-    for (int i = 3; i < argc && config->counter_count < MAX_COUNTERS; i++) {
+    /* Find the start of counter arguments (after options, gfx_name, and output_address) */
+    int counter_start = 1;
+    while (counter_start < argc && argv[counter_start][0] == '-') {
+        counter_start++;
+    }
+    counter_start += 2;  /* Skip gfx_name and output_address */
+
+    for (int i = counter_start; i < argc && config->counter_count < MAX_COUNTERS; i++) {
         if (parse_counter_name(argv[i], arch, &config->counters[config->counter_count]) == 0) {
             config->counter_count++;
         } else {
@@ -157,7 +219,7 @@ static int parse_counters_with_arch(int argc, char *argv[], tool_config_t *confi
     return 0;
 }
 
-static void print_pm4_buffer(const char *packet_type, pm4_buffer_t *buffer) {
+static void print_pm4_buffer_normal(const char *packet_type, pm4_buffer_t *buffer) {
     printf("=== %s PACKET ===\n", packet_type);
     printf("Size: %zu DWORDs (%zu bytes)\n", buffer->size, buffer->size * 4);
 
@@ -174,6 +236,31 @@ static void print_pm4_buffer(const char *packet_type, pm4_buffer_t *buffer) {
         printf("\n");
     }
     printf("\n");
+}
+
+static void print_pm4_buffer_continuous(pm4_buffer_t *buffer) {
+    for (size_t i = 0; i < buffer->size; i++) {
+        printf("%08x", buffer->data[i]);
+    }
+}
+
+static void print_pm4_buffer_quiet(pm4_buffer_t *buffer) {
+    for (size_t i = 0; i < buffer->size; i++) {
+        printf("0x%08x", buffer->data[i]);
+        if (i < buffer->size - 1) {
+            printf(" ");
+        }
+    }
+}
+
+static void print_pm4_buffer(const char *packet_type, pm4_buffer_t *buffer, const tool_config_t *config) {
+    if (config->continuous_hex) {
+        print_pm4_buffer_continuous(buffer);
+    } else if (config->quiet_mode) {
+        print_pm4_buffer_quiet(buffer);
+    } else {
+        print_pm4_buffer_normal(packet_type, buffer);
+    }
 }
 
 static pm4_buffer_t* create_buffer(void) {
@@ -210,10 +297,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("Packet Generation Tool\n");
-    printf("======================\n");
-    printf("Architecture: %s\n", config.gfx_name);
-    printf("Output Address: 0x%lx\n", config.output_address);
+    if (!config.quiet_mode) {
+        printf("Packet Generation Tool\n");
+        printf("======================\n");
+        printf("Architecture: %s\n", config.gfx_name);
+        printf("Output Address: 0x%lx\n", config.output_address);
+    }
 
     /* Create architecture */
     arch = arch_create_by_name(config.gfx_name);
@@ -229,14 +318,16 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    printf("Counter Count: %zu\n", config.counter_count);
-    for (size_t i = 0; i < config.counter_count; i++) {
-        printf("  Counter %zu: Block %d, Index %d, Event 0x%x\n", i,
-               config.counters[i].block_id,
-               config.counters[i].counter_index,
-               config.counters[i].event_id);
+    if (!config.quiet_mode) {
+        printf("Counter Count: %zu\n", config.counter_count);
+        for (size_t i = 0; i < config.counter_count; i++) {
+            printf("  Counter %zu: Block %d, Index %d, Event 0x%x\n", i,
+                   config.counters[i].block_id,
+                   config.counters[i].counter_index,
+                   config.counters[i].event_id);
+        }
+        printf("\n");
     }
-    printf("\n");
 
     /* Create counter collection */
     counter_collection_t collection = {
@@ -249,7 +340,9 @@ int main(int argc, char *argv[]) {
         })
     };
 
-    printf("Required memory size: %zu bytes\n\n", collection.memory_size);
+    if (!config.quiet_mode) {
+        printf("Required memory size: %zu bytes\n\n", collection.memory_size);
+    }
 
     /* Validate counter collection */
     ret = validate_counter_collection(arch, &collection);
@@ -294,10 +387,37 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    /* Print results */
-    print_pm4_buffer("START", start_buffer);
-    print_pm4_buffer("READ", read_buffer);
-    print_pm4_buffer("STOP", stop_buffer);
+    /* Print results based on packet filter */
+    bool printed_any = false;
+    if (config.packet_filter == PACKET_ALL || config.packet_filter == PACKET_START) {
+        print_pm4_buffer("START", start_buffer, &config);
+        printed_any = true;
+        if (config.continuous_hex && (config.packet_filter == PACKET_ALL)) {
+            /* Add space between packets in continuous mode when printing all */
+            if (config.packet_filter == PACKET_ALL) printf(" ");
+        } else if (config.quiet_mode && config.packet_filter == PACKET_ALL) {
+            printf("\n");
+        }
+    }
+    if (config.packet_filter == PACKET_ALL || config.packet_filter == PACKET_READ) {
+        print_pm4_buffer("READ", read_buffer, &config);
+        printed_any = true;
+        if (config.continuous_hex && (config.packet_filter == PACKET_ALL)) {
+            /* Add space between packets in continuous mode when printing all */
+            if (config.packet_filter == PACKET_ALL) printf(" ");
+        } else if (config.quiet_mode && config.packet_filter == PACKET_ALL) {
+            printf("\n");
+        }
+    }
+    if (config.packet_filter == PACKET_ALL || config.packet_filter == PACKET_STOP) {
+        print_pm4_buffer("STOP", stop_buffer, &config);
+        printed_any = true;
+    }
+
+    /* Add final newline for continuous and quiet modes */
+    if (printed_any && (config.continuous_hex || config.quiet_mode)) {
+        printf("\n");
+    }
 
 cleanup:
     if (start_buffer) destroy_buffer(start_buffer);
