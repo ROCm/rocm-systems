@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip/hip_ext.h>
+#include <dlfcn.h>
 
 /**
  * @addtogroup clock clock
@@ -111,6 +112,126 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
   return verify_time_execution(ratio, time1, time2, expected_time1, expected_time2);
 }
 
+ typedef enum {
+    AMDSMI_STATUS_SUCCESS = 0,              //!< Call succeeded
+    // Library usage errors
+    AMDSMI_STATUS_INVAL = 1,                //!< Invalid parameters
+    AMDSMI_STATUS_NOT_SUPPORTED = 2,        //!< Command not supported
+    AMDSMI_STATUS_NOT_YET_IMPLEMENTED = 3,  //!< Not implemented yet
+    AMDSMI_STATUS_FAIL_LOAD_MODULE = 4,     //!< Fail to load lib
+    AMDSMI_STATUS_FAIL_LOAD_SYMBOL = 5,     //!< Fail to load symbol
+    AMDSMI_STATUS_DRM_ERROR = 6,            //!< Error when call libdrm
+    AMDSMI_STATUS_API_FAILED = 7,           //!< API call failed
+    AMDSMI_STATUS_TIMEOUT = 8,              //!< Timeout in API call
+    AMDSMI_STATUS_RETRY = 9,                //!< Retry operation
+    AMDSMI_STATUS_NO_PERM = 10,             //!< Permission Denied
+    AMDSMI_STATUS_INTERRUPT = 11,           //!< An interrupt occurred during execution of function
+    AMDSMI_STATUS_IO = 12,                  //!< I/O Error
+    AMDSMI_STATUS_ADDRESS_FAULT = 13,       //!< Bad address
+    AMDSMI_STATUS_FILE_ERROR = 14,          //!< Problem accessing a file
+    AMDSMI_STATUS_OUT_OF_RESOURCES = 15,    //!< Not enough memory
+    AMDSMI_STATUS_INTERNAL_EXCEPTION = 16,  //!< An internal exception was caught
+    AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS = 17, //!< The provided input is out of allowable or safe range
+    AMDSMI_STATUS_INIT_ERROR = 18,          //!< An error occurred when initializing internal data structures
+    AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,   //!< An internal reference counter exceeded INT32_MAX
+    AMDSMI_STATUS_DIRECTORY_NOT_FOUND = 20, //!< Error when a directory is not found, maps to ENOTDIR
+    // Processor related errors
+    AMDSMI_STATUS_BUSY = 30,                //!< Processor busy
+    AMDSMI_STATUS_NOT_FOUND = 31,           //!< Processor Not found
+    AMDSMI_STATUS_NOT_INIT = 32,            //!< Processor not initialized
+    AMDSMI_STATUS_NO_SLOT = 33,             //!< No more free slot
+    AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,   //!< Processor driver not loaded
+    // Data and size errors
+    AMDSMI_STATUS_MORE_DATA = 39,           //!< There is more data than the buffer size the user passed
+    AMDSMI_STATUS_NO_DATA = 40,             //!< No data was found for a given input
+    AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,   //!< Not enough resources were available for the operation
+    AMDSMI_STATUS_UNEXPECTED_SIZE = 42,     //!< An unexpected amount of data was read
+    AMDSMI_STATUS_UNEXPECTED_DATA = 43,     //!< The data read or provided to function is not what was expected
+    //esmi errors
+    AMDSMI_STATUS_NON_AMD_CPU = 44,         //!< System has different cpu than AMD
+    AMDSMI_STATUS_NO_ENERGY_DRV = 45,       //!< Energy driver not found
+    AMDSMI_STATUS_NO_MSR_DRV = 46,          //!< MSR driver not found
+    AMDSMI_STATUS_NO_HSMP_DRV = 47,         //!< HSMP driver not found
+    AMDSMI_STATUS_NO_HSMP_SUP = 48,         //!< HSMP not supported
+    AMDSMI_STATUS_NO_HSMP_MSG_SUP = 49,     //!< HSMP message/feature not supported
+    AMDSMI_STATUS_HSMP_TIMEOUT = 50,        //!< HSMP message timed out
+    AMDSMI_STATUS_NO_DRV = 51,              //!< No Energy and HSMP driver present
+    AMDSMI_STATUS_FILE_NOT_FOUND = 52,      //!< file or directory not found
+    AMDSMI_STATUS_ARG_PTR_NULL = 53,        //!< Parsed argument is invalid
+    AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
+    AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
+    AMDSMI_STATUS_CORRUPTED_EEPROM = 56,    //!< EEPROM is corrupted
+    // General errors
+    AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
+    AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF  //!< An unknown error occurred
+} amdsmi_status_t;
+ 
+int getEngineFreq()
+{
+  // Opening and initializing rocm-smi library
+  void* lib_rocm_smi_hdl;
+  
+  typedef struct {
+    uint32_t clk;            //!< In MHz
+    uint32_t min_clk;        //!< In MHz
+    uint32_t max_clk;        //!< In MHz
+    uint8_t clk_locked;      //!< True/False
+    uint8_t clk_deep_sleep;  //!< True/False
+    uint32_t reserved[4];
+  } amdsmi_clk_info_t;
+
+  typedef enum {
+    AMDSMI_CLK_TYPE_SYS = 0x0,  //!< System clock
+    AMDSMI_CLK_TYPE_FIRST = AMDSMI_CLK_TYPE_SYS,
+    AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,  //!< Graphics clock
+    AMDSMI_CLK_TYPE_DF,         /**< Data Fabric clock (for ASICs
+                                     running on a separate clock) */
+    AMDSMI_CLK_TYPE_DCEF,       /**< Display Controller Engine Front clock,
+                                     timing/bandwidth signals to display */
+    AMDSMI_CLK_TYPE_SOC,        //!< System On Chip clock, integrated circuit frequency
+    AMDSMI_CLK_TYPE_MEM,        //!< Memory clock speed, system operating frequency
+    AMDSMI_CLK_TYPE_PCIE,       //!< PCI Express clock, high bandwidth peripherals
+    AMDSMI_CLK_TYPE_VCLK0,      //!< Video 0 clock, video processing units
+    AMDSMI_CLK_TYPE_VCLK1,      //!< Video 1 clock, video processing units
+    AMDSMI_CLK_TYPE_DCLK0,      //!< Display 1 clock, timing signals for display output
+    AMDSMI_CLK_TYPE_DCLK1,      //!< Display 2 clock, timing signals for display output
+    AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
+} amdsmi_clk_type_t;
+
+  /*amdsmi_clk_type_t clk_type;
+    amdsmi_clk_info_t *info;
+    void* processor_handle;*/
+  typedef void *amdsmi_processor_handle;
+ 
+  [[maybe_unused]] amdsmi_status_t (*amdsmi_get_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*);
+  amdsmi_status_t (*amdsmi_init)(uint64_t);
+  amdsmi_status_t (*amdsmi_shut_down)();
+  
+
+  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/libamd_smi.so", RTLD_LAZY);
+  REQUIRE(lib_rocm_smi_hdl);
+
+  void* fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_clock_info");
+  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_init");
+
+  REQUIRE(fnsym);
+  amdsmi_get_clock_info = reinterpret_cast<amdsmi_status_t (*)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*)>(fnsym);  
+  amdsmi_init = reinterpret_cast<amdsmi_status_t (*)(uint64_t)>(fnsym);
+
+  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_shut_down");
+  REQUIRE(fnsym);
+  amdsmi_shut_down = reinterpret_cast<amdsmi_status_t (*)()>(fnsym);
+
+  uint64_t init_flags = 0;
+  amdsmi_status_t retsmi_init;
+  retsmi_init = amdsmi_init(init_flags);
+  REQUIRE(AMDSMI_STATUS_SUCCESS == retsmi_init);
+  amdsmi_shut_down();
+  dlclose(lib_rocm_smi_hdl);
+  //   AMDSMI_CLK_TYPE_GFX
+  return 0;
+}
+
 /**
  * Test Description
  * ------------------------
@@ -137,6 +258,7 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
     return;
   }
 
+  getEngineFreq();
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
