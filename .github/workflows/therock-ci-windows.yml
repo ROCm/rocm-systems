@@ -80,6 +80,11 @@ jobs:
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
+      - name: Runner health status
+        run: |
+          ccache --zero-stats
+          python ./TheRock/build_tools/health_status.py
+
       - name: Fetch sources
         timeout-minutes: 30
         run: |
