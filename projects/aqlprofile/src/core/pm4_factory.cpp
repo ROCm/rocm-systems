@@ -53,6 +53,11 @@ locked_agent_cache& get_cache() {
 }  // namespace
 
 aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info) {
+  // If assertion fails,
+  // Update handling of new fields
+  // Update size to new size
+  static_assert(sizeof(aqlprofile_agent_info_v1_t) == 40);
+
   aqlprofile_agent_handle_t agent_id {};
   AgentInfo int_agent_info {};
   int_agent_info.cu_num = agent_info->cu_num;

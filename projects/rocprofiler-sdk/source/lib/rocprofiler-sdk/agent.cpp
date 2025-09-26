@@ -948,8 +948,14 @@ get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
 
     aqlprofile_agent_handle_t handle = {.handle = 0};
 
-#if defined(AQLPROFILE_VERSION) && AQLPROFILE_VERSION == 10000
+#if defined(AQLPROFILE_VERSION) && AQLPROFILE_VERSION >= 10000
+    // If assertion fails, new fields were added.
+    // Populate agent_info with new fields and information
+    // Increase assertion to check for new size
+    static_assert(sizeof(aqlprofile_agent_info_v1_t) == 40);
+
     aqlprofile_agent_info_v1_t agent_info = {
+        .size                 = sizeof(aqlprofile_agent_info_v1_t),
         .agent_gfxip          = agent->name,
         .xcc_num              = agent->num_xcc,
         .se_num               = agent->num_shader_banks,

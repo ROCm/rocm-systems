@@ -372,6 +372,7 @@ PUBLIC_API hsa_status_t aqlprofile_register_agent_info(aqlprofile_agent_handle_t
       case AQLPROFILE_AGENT_VERSION_V0: {
         const auto* info = static_cast<const aqlprofile_agent_info_t*>(agent_info);
         aqlprofile_agent_info_v1_t info_v1 = {
+            .size = sizeof(aqlprofile_agent_info_v1_t),
             .agent_gfxip = info->agent_gfxip,
             .xcc_num = info->xcc_num,
             .se_num = info->se_num,
