@@ -614,7 +614,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    
    # Aggregate device utilization analysis
    rocpd query -i multi_gpu_results.db \
-               --query "SELECT device_id, COUNT(*) as operations, SUM(duration) as total_time FROM kernels GROUP BY device_id"
+               --query "SELECT agent_abs_index as device_id, COUNT(*) as operations, SUM(duration) as total_time FROM kernels GROUP BY device_id"
    
    # Cross-device performance comparison
    rocpd summary -i multi_gpu_results.db --domain-summary
@@ -761,9 +761,11 @@ rocpd databases provide comprehensive views for analysis.  In general, any queri
    -- Top performing kernels by execution time
    SELECT * FROM top_kernels LIMIT 10;
    
-   -- Memory bandwidth analysis
-   SELECT * FROM memory_copy_summary;
+   -- Top Analysis
+   SELECT * FROM top;
 
+   -- Busy Analysis
+   SELECT * FROM busy;
 
 Basic Query Examples
 ~~~~~~~~~~~~~~~~~~~~
@@ -791,7 +793,7 @@ Basic Query Examples
    
    # Cross-session performance comparison
    rocpd query -i baseline.db optimized.db \
-               --query "SELECT name, AVG(duration) as avg_duration FROM kernels GROUP BY name"
+               --query "SELECT name as kernel_name, AVG(duration) as avg_duration FROM kernels GROUP BY kernel_name"
 
 **Advanced Analytics:**
 
@@ -800,14 +802,14 @@ Basic Query Examples
    # Kernel performance analysis with statistics
    rocpd query -i profile.db --query "
    SELECT 
-       name,
+       name as kernel_name,
        COUNT(*) as dispatch_count,
        MIN(duration) as min_duration,
        AVG(duration) as avg_duration,
        MAX(duration) as max_duration,
        SUM(duration) as total_duration
    FROM kernels 
-   GROUP BY name 
+   GROUP BY kernel_name
    ORDER BY total_duration DESC"
 
 **Memory Transfer Analysis:**
@@ -817,7 +819,7 @@ Basic Query Examples
    # Memory copy analysis by direction
    rocpd query -i profile.db --query "
    SELECT 
-       name,
+       name as kernel_name,
        src_agent_type,
        src_agent_abs_index,
        dst_agent_type,
@@ -893,13 +895,13 @@ Execute complex SQL scripts with view definitions and custom analysis logic:
    -- Create temporary views for complex analysis
    CREATE TEMP VIEW kernel_stats AS
    SELECT 
-       name,
+       name as kernel_name,
        COUNT(*) as dispatch_count,
        AVG(duration) as avg_duration,
        STDDEV(duration) as duration_stddev
    FROM kernels 
-   GROUP BY name;
-   
+   GROUP BY kernel_name;
+
    CREATE TEMP VIEW performance_outliers AS
    SELECT k.*, ks.avg_duration, ks.duration_stddev
    FROM kernels k
