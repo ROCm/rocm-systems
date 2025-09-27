@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 Test script to verify that debugger blocks are working in HSA applications.
-This runs apps under GDB and automatically continues at each block.
+This runs apps standalone and uses GDB attach/detach to handle blocks.
 """
 
 import subprocess
 import sys
 import time
 import os
+import signal
+import select
 
 def test_app_blocks(app_path):
-    """Test that an application hits debugger blocks correctly."""
+    """Test that an application hits debugger blocks correctly using attach/detach."""
 
     if not os.path.exists(app_path):
         print(f"Error: Application {app_path} does not exist")
@@ -18,81 +20,97 @@ def test_app_blocks(app_path):
 
     print(f"Testing {app_path} for debugger blocks...")
 
-    # Create GDB commands to run the application
-    gdb_commands = f"""
-set confirm off
-set pagination off
-file {app_path}
-run
-"""
-
-    # Start GDB process
-    proc = subprocess.Popen(
-        ["gdb", "-quiet"],
-        stdin=subprocess.PIPE,
+    # Start the application in background
+    app_proc = subprocess.Popen(
+        [app_path],
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=0
+        stderr=subprocess.PIPE,
+        text=True
     )
 
-    # Send initial commands
-    proc.stdin.write(gdb_commands)
-    proc.stdin.flush()
-
     blocks_found = 0
-    output_lines = []
+    max_blocks = 10  # Safety limit
+    timeout = 30  # 30 second total timeout
+    start_time = time.time()
 
     try:
-        while True:
-            # Check if process has terminated
-            if proc.poll() is not None:
+        while blocks_found < max_blocks and (time.time() - start_time) < timeout:
+            # Check if app has terminated
+            if app_proc.poll() is not None:
+                print(f"  Application terminated normally")
                 break
 
-            # Read output with timeout
+            # Check for "AT BLOCK" in stderr output
+            # Use non-blocking read with select-like behavior
             try:
-                line = proc.stdout.readline()
-                if not line:
-                    break
+                # Check if there's stderr output available
+                ready, _, _ = select.select([app_proc.stderr], [], [], 0.1)
 
-                output_lines.append(line.strip())
+                if ready:
+                    line = app_proc.stderr.readline()
+                    if line and "AT BLOCK" in line:
+                        blocks_found += 1
+                        print(f"  Block {blocks_found} detected - attaching GDB")
 
-                # Check for block message
-                if "AT BLOCK" in line:
-                    blocks_found += 1
-                    print(f"  Block {blocks_found} detected")
+                        # Attach GDB to continue the process
+                        gdb_proc = subprocess.Popen(
+                            ["gdb", "-quiet", "-p", str(app_proc.pid)],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True
+                        )
 
-                    # Automatically call continue
-                    time.sleep(0.1)  # Small delay
-                    proc.stdin.write("call app_debugger_continue()\n")
-                    proc.stdin.write("continue\n")
-                    proc.stdin.flush()
+                        # Send commands to continue
+                        gdb_commands = """
+set confirm off
+set pagination off
+call app_debugger_continue()
+detach
+quit
+"""
+                        gdb_proc.stdin.write(gdb_commands)
+                        gdb_proc.stdin.flush()
 
-                # Check for program exit
-                if "exited normally" in line or ("Inferior" in line and "exited" in line):
-                    print(f"  Application finished normally")
-                    break
+                        # Wait for GDB to complete
+                        gdb_proc.wait(timeout=5)
 
-                # Check for timeout or hang
-                if "timeout" in line.lower():
-                    print(f"  Warning: Timeout detected")
-                    break
+                        print(f"  Block {blocks_found} continued - GDB detached")
 
-            except:
+                        # Small delay before checking for next block
+                        time.sleep(0.2)
+
+                else:
+                    # No output available, small sleep
+                    time.sleep(0.1)
+
+            except Exception as e:
+                print(f"  Error reading output: {e}")
                 break
 
     except KeyboardInterrupt:
         print("  Interrupted by user")
+        return False
+    except Exception as e:
+        print(f"  Error during test: {e}")
+        return False
     finally:
-        # Clean up
-        try:
-            proc.stdin.write("quit\n")
-            proc.stdin.write("y\n")
-            proc.stdin.flush()
-        except:
-            pass
-        proc.terminate()
-        proc.wait()
+        # Clean up application process
+        if app_proc.poll() is None:
+            try:
+                app_proc.terminate()
+                app_proc.wait(timeout=5)
+            except:
+                app_proc.kill()
+                app_proc.wait()
+
+    # Read any remaining output
+    try:
+        stdout_output, stderr_output = app_proc.communicate(timeout=1)
+        if "completed successfully" in stdout_output:
+            print(f"  Application completed successfully")
+    except:
+        pass
 
     print(f"  Total blocks found: {blocks_found}")
     expected_blocks = 2  # Most apps have 2 blocks (before/after operation)
@@ -115,7 +133,10 @@ def main():
         "app2_signal_store",
         "app3_barrier_packet",
         "app4_dual_barrier",
-        "app5_cpu_memory_pool"
+        "app5_cpu_memory_pool",
+        "app6_aql_start_packet",
+        "app7_aql_read_packet",
+        "app8_aql_stop_packet"
     ]
 
     print("Testing HSA applications for debugger blocks")

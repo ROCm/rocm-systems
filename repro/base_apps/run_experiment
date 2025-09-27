@@ -10,6 +10,7 @@ import time
 import os
 import tempfile
 import signal
+import select
 from datetime import datetime
 
 class ExperimentRunner:
@@ -29,7 +30,10 @@ class ExperimentRunner:
             "app2_signal_store",
             "app3_barrier_packet",
             "app4_dual_barrier",
-            "app5_cpu_memory_pool"
+            "app5_cpu_memory_pool",
+            "app6_aql_start_packet",
+            "app7_aql_read_packet",
+            "app8_aql_stop_packet"
         ]
 
         # Data collection types with their script templates - easily modifiable
@@ -84,7 +88,7 @@ class ExperimentRunner:
         return script_path, output_file
 
     def run_app_with_collection(self, app_name, data_type, temp_dir):
-        """Run an application with data collection."""
+        """Run an application with data collection using attach/detach approach."""
         app_path = os.path.join(self.base_dir, app_name)
 
         if not os.path.exists(app_path):
@@ -96,132 +100,130 @@ class ExperimentRunner:
         # Create the collection script
         script_path, log_file = self.create_collection_script(data_type, app_name, temp_dir)
 
-        # Always run the actual application under GDB (both test and production mode)
-        # The difference is only which SwApps command we use
         if self.test_mode:
             print(f"    [TEST MODE] Using mock SwApps: {self.swapps_cmd}")
 
-        # Create GDB commands to run the application
-        gdb_commands = f"""
-set confirm off
-set pagination off
-file {app_path}
-run
-"""
-
-        # Start GDB process
-        gdb_proc = subprocess.Popen(
-            ["gdb", "-quiet"],
-            stdin=subprocess.PIPE,
+        # Start the application in background
+        app_proc = subprocess.Popen(
+            [app_path],
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
-            bufsize=0,
             cwd=self.base_dir
         )
 
+        blocks_found = 0
+        swapps_proc = None
+        max_blocks = 10  # Safety limit
+        timeout = 30  # 30 second total timeout
+        start_time = time.time()
+
         try:
-            # Send initial commands
-            gdb_proc.stdin.write(gdb_commands)
-            gdb_proc.stdin.flush()
-
-            blocks_found = 0
-            swapps_proc = None
-            timeout_counter = 0
-            max_timeout = 30  # 30 second timeout for finding blocks
-
-            while True:
-                # Check if GDB process has terminated
-                if gdb_proc.poll() is not None:
+            while blocks_found < max_blocks and (time.time() - start_time) < timeout:
+                # Check if app has terminated
+                if app_proc.poll() is not None:
+                    print(f"    Application terminated normally")
                     break
 
-                # Read output with timeout
+                # Check for "AT BLOCK" in stderr output using select
                 try:
-                    line = gdb_proc.stdout.readline()
-                    if not line:
-                        # No output - increment timeout counter
-                        timeout_counter += 1
-                        if timeout_counter > max_timeout:
-                            print(f"    Timeout waiting for blocks - terminating")
-                            break
-                        time.sleep(1)
-                        continue
+                    ready, _, _ = select.select([app_proc.stderr], [], [], 0.1)
 
-                    timeout_counter = 0  # Reset timeout when we get output
+                    if ready:
+                        line = app_proc.stderr.readline()
+                        if line and "AT BLOCK" in line:
+                            blocks_found += 1
+                            print(f"    Block {blocks_found} detected - attaching GDB")
 
-                    # Check for block message
-                    if "AT BLOCK" in line:
-                        blocks_found += 1
-                        print(f"    Block {blocks_found} detected")
+                            if blocks_found == 1:
+                                # First block - start data collection
+                                print(f"    Starting SwApps data collection...")
+                                swapps_proc = subprocess.Popen(
+                                    [self.swapps_cmd, "-s", script_path],
+                                    cwd=self.base_dir,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE
+                                )
 
-                        if blocks_found == 1:
-                            # First block - start data collection
-                            print(f"    Starting SwApps data collection...")
-                            swapps_proc = subprocess.Popen(
-                                [self.swapps_cmd, "-s", script_path],
-                                cwd=self.base_dir,
+                            elif blocks_found == 2:
+                                # Second block - wait for SwApps to complete
+                                print(f"    Waiting for SwApps to complete...")
+                                if swapps_proc:
+                                    try:
+                                        swapps_proc.wait(timeout=10)
+                                        print(f"    SwApps completed normally")
+                                    except subprocess.TimeoutExpired:
+                                        print(f"    SwApps timeout - killing process")
+                                        swapps_proc.kill()
+                                        swapps_proc.wait()
+
+                            # Attach GDB to continue the process
+                            gdb_proc = subprocess.Popen(
+                                ["gdb", "-quiet", "-p", str(app_proc.pid)],
+                                stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE
+                                stderr=subprocess.STDOUT,
+                                text=True
                             )
 
-                            # Continue the application
-                            time.sleep(0.1)
-                            gdb_proc.stdin.write("call app_debugger_continue()\n")
-                            gdb_proc.stdin.write("continue\n")
+                            # Send commands to continue
+                            gdb_commands = """
+set confirm off
+set pagination off
+call app_debugger_continue()
+detach
+quit
+"""
+                            gdb_proc.stdin.write(gdb_commands)
                             gdb_proc.stdin.flush()
 
-                        elif blocks_found == 2:
-                            # Second block - wait for SwApps and continue
-                            print(f"    Waiting for SwApps to complete...")
+                            # Wait for GDB to complete
+                            gdb_proc.wait(timeout=5)
 
-                            if swapps_proc:
-                                try:
-                                    # Wait for SwApps to terminate, with 10s timeout
-                                    swapps_proc.wait(timeout=10)
-                                    print(f"    SwApps completed normally")
-                                except subprocess.TimeoutExpired:
-                                    print(f"    SwApps timeout - killing process")
-                                    swapps_proc.kill()
-                                    swapps_proc.wait()
+                            print(f"    Block {blocks_found} continued - GDB detached")
 
-                            # Continue the application to completion
-                            time.sleep(0.1)
-                            gdb_proc.stdin.write("call app_debugger_continue()\n")
-                            gdb_proc.stdin.write("continue\n")
-                            gdb_proc.stdin.flush()
+                            # Small delay before checking for next block
+                            time.sleep(0.2)
 
-                    # Check for program exit
-                    if "exited normally" in line or ("Inferior" in line and "exited" in line):
-                        print(f"    Application finished normally")
-                        break
+                    else:
+                        # No output available, small sleep
+                        time.sleep(0.1)
 
-                    # Check for GDB prompt - might mean the program is waiting
-                    if "(gdb)" in line and blocks_found == 0:
-                        print(f"    GDB prompt detected, sending continue...")
-                        gdb_proc.stdin.write("continue\n")
-                        gdb_proc.stdin.flush()
-
-                except:
+                except Exception as e:
+                    print(f"    Error reading output: {e}")
                     break
 
         except KeyboardInterrupt:
             print("    Interrupted by user")
             return False
+        except Exception as e:
+            print(f"    Error during experiment: {e}")
+            return False
         finally:
-            # Clean up GDB
-            try:
-                gdb_proc.stdin.write("quit\n")
-                gdb_proc.stdin.write("y\n")
-                gdb_proc.stdin.flush()
-            except:
-                pass
-            gdb_proc.terminate()
-            gdb_proc.wait()
+            # Clean up application process
+            if app_proc.poll() is None:
+                try:
+                    app_proc.terminate()
+                    app_proc.wait(timeout=5)
+                except:
+                    app_proc.kill()
+                    app_proc.wait()
 
             # Clean up SwApps if still running
             if swapps_proc and swapps_proc.poll() is None:
-                swapps_proc.kill()
-                swapps_proc.wait()
+                try:
+                    swapps_proc.kill()
+                    swapps_proc.wait()
+                except:
+                    pass
+
+        # Read any remaining output
+        try:
+            stdout_output, stderr_output = app_proc.communicate(timeout=1)
+            if "completed successfully" in stdout_output:
+                print(f"    Application completed successfully")
+        except:
+            pass
 
         print(f"    Completed {app_name} with {data_type} - found {blocks_found} blocks")
         return blocks_found > 0
