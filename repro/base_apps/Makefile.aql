@@ -1,0 +1,136 @@
+# Makefile for AQL Profiling Implementation
+# Assumes aqlprofile v2 interface is available
+
+CXX = hipcc
+CXXFLAGS = -g -O2 -std=c++17 -Wall -Wextra
+INCLUDES = -I/opt/rocm/include -I../../projects/aqlprofile/src/core/include
+LDFLAGS = -L/opt/rocm/lib -lhsa-runtime64 -lhsa-amd-aqlprofile64
+TARGET_DIR = .
+
+# AQL Profiler library
+AQL_PROFILER_OBJS = aql_profiler.o
+AQL_PROFILER_LIB = libaql_profiler.a
+
+# Test applications
+TEST_TARGETS = aql_profiler_test app_with_aql_profiling simple_aql_example
+
+# All targets
+all: $(AQL_PROFILER_LIB) $(TEST_TARGETS)
+
+# Build AQL profiler library
+$(AQL_PROFILER_LIB): $(AQL_PROFILER_OBJS)
+	ar rcs $@ $^
+
+aql_profiler.o: aql_profiler.cpp aql_profiler.h
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Test applications
+aql_profiler_test: aql_profiler_test.cpp aql_profiler.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $^ $(LDFLAGS) -o $@
+
+app_with_aql_profiling: app_with_aql_profiling.cpp aql_profiler.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $^ $(LDFLAGS) -o $@
+
+simple_aql_example: simple_aql_example.cpp aql_profiler.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $^ $(LDFLAGS) -o $@
+
+# Test targets
+test-basic: aql_profiler_test
+	@echo "Running basic AQL profiler test..."
+	./aql_profiler_test basic
+
+test-all: aql_profiler_test
+	@echo "Running all AQL profiler tests..."
+	./aql_profiler_test
+
+test-integration: app_with_aql_profiling
+	@echo "Running integration demo..."
+	./app_with_aql_profiling signal
+
+# Verify build
+verify: $(AQL_PROFILER_LIB) $(TEST_TARGETS)
+	@echo "=== AQL Profiler Build Verification ==="
+	@echo "Library: $(AQL_PROFILER_LIB)"
+	@ls -la $(AQL_PROFILER_LIB)
+	@echo "Test executables:"
+	@ls -la $(TEST_TARGETS)
+	@echo "Headers:"
+	@ls -la aql_profiler.h
+	@echo "=== Build Complete ==="
+
+# Check if aqlprofile is available
+check-deps:
+	@echo "Checking for aqlprofile dependencies..."
+	@echo "Looking for aqlprofile headers..."
+	@test -f ../../projects/aqlprofile/src/core/include/aqlprofile-sdk/aql_profile_v2.h && echo "✓ aqlprofile v2 header found" || echo "✗ aqlprofile v2 header not found"
+	@echo "Looking for HSA runtime..."
+	@test -f /opt/rocm/include/hsa/hsa.h && echo "✓ HSA headers found" || echo "✗ HSA headers not found"
+	@echo "Looking for aqlprofile library..."
+	@test -f /opt/rocm/lib/libhsa-amd-aqlprofile64.so.1.0.0 && echo "✓ libhsa-amd-aqlprofile64 library found" || echo "✗ libhsa-amd-aqlprofile64 library not found"
+
+# Generate a simple validation script
+validation-script:
+	@echo "#!/bin/bash" > validate_aql_profiler.sh
+	@echo "# AQL Profiler Validation Script" >> validate_aql_profiler.sh
+	@echo "" >> validate_aql_profiler.sh
+	@echo "echo 'AQL Profiler Validation'" >> validate_aql_profiler.sh
+	@echo "echo '======================'" >> validate_aql_profiler.sh
+	@echo "" >> validate_aql_profiler.sh
+	@echo "# Check if executables exist and are executable" >> validate_aql_profiler.sh
+	@echo "for exe in aql_profiler_test app_with_aql_profiling; do" >> validate_aql_profiler.sh
+	@echo "    if [[ -x \$$exe ]]; then" >> validate_aql_profiler.sh
+	@echo "        echo \"✓ \$$exe is executable\"" >> validate_aql_profiler.sh
+	@echo "    else" >> validate_aql_profiler.sh
+	@echo "        echo \"✗ \$$exe not found or not executable\"" >> validate_aql_profiler.sh
+	@echo "        exit 1" >> validate_aql_profiler.sh
+	@echo "    fi" >> validate_aql_profiler.sh
+	@echo "done" >> validate_aql_profiler.sh
+	@echo "" >> validate_aql_profiler.sh
+	@echo "# Run error handling test (should not require GPU)" >> validate_aql_profiler.sh
+	@echo "echo 'Running error handling test...'" >> validate_aql_profiler.sh
+	@echo "./aql_profiler_test error" >> validate_aql_profiler.sh
+	@echo "" >> validate_aql_profiler.sh
+	@echo "# Check library exists" >> validate_aql_profiler.sh
+	@echo "if [[ -f libaql_profiler.a ]]; then" >> validate_aql_profiler.sh
+	@echo "    echo \"✓ libaql_profiler.a exists\"" >> validate_aql_profiler.sh
+	@echo "    echo \"Library size: \$$(ls -lh libaql_profiler.a | awk '{print \$$5}')\"" >> validate_aql_profiler.sh
+	@echo "else" >> validate_aql_profiler.sh
+	@echo "    echo \"✗ libaql_profiler.a not found\"" >> validate_aql_profiler.sh
+	@echo "    exit 1" >> validate_aql_profiler.sh
+	@echo "fi" >> validate_aql_profiler.sh
+	@echo "" >> validate_aql_profiler.sh
+	@echo "echo 'Validation complete - AQL profiler ready for use'" >> validate_aql_profiler.sh
+	@chmod +x validate_aql_profiler.sh
+	@echo "Generated validation script: validate_aql_profiler.sh"
+
+# Clean
+clean:
+	rm -f $(AQL_PROFILER_OBJS) $(AQL_PROFILER_LIB) $(TEST_TARGETS)
+	rm -f validate_aql_profiler.sh
+
+# Help
+help:
+	@echo "AQL Profiler Makefile"
+	@echo "===================="
+	@echo ""
+	@echo "Targets:"
+	@echo "  all                 - Build library and test applications"
+	@echo "  $(AQL_PROFILER_LIB)           - Build AQL profiler library"
+	@echo "  aql_profiler_test   - Build test application"
+	@echo "  app_with_aql_profiling - Build integration demo"
+	@echo "  test-basic          - Run basic functionality test"
+	@echo "  test-all            - Run all tests"
+	@echo "  test-integration    - Run integration demo"
+	@echo "  verify              - Verify build completed successfully"
+	@echo "  check-deps          - Check for required dependencies"
+	@echo "  validation-script   - Generate validation script"
+	@echo "  clean               - Remove built files"
+	@echo "  help                - Show this help"
+	@echo ""
+	@echo "Usage example:"
+	@echo "  make check-deps     # Check dependencies first"
+	@echo "  make all            # Build everything"
+	@echo "  make verify         # Verify build"
+	@echo "  make validation-script && ./validate_aql_profiler.sh"
+
+.PHONY: all test-basic test-all test-integration verify check-deps validation-script clean help

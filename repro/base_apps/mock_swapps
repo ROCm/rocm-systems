@@ -1,0 +1,29 @@
+#!/bin/bash
+# Mock SwApps script for testing run_experiment
+# Simulates the behavior of /opt/brdcm/SwApps
+
+echo "Mock SwApps started with script: $2"
+
+# Read the script file and show what commands would be executed
+if [ -f "$2" ]; then
+    echo "Script contents:"
+    cat "$2"
+    echo ""
+fi
+
+# Simulate some processing time
+sleep 2
+
+# Create a mock log file based on the script
+if [ -f "$2" ]; then
+    output_file=$(grep -o '[a-zA-Z0-9_]*\.log' "$2" | head -1)
+    if [ -n "$output_file" ]; then
+        echo "Mock data collection results for $output_file" > "$output_file"
+        echo "Timestamp: $(date)" >> "$output_file"
+        echo "Mock TLP data..." >> "$output_file"
+        echo "Created mock log file: $output_file"
+    fi
+fi
+
+echo "Mock SwApps completed"
+exit 0

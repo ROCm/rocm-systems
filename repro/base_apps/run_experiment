@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""
+Experiment runner for collecting data from HSA applications.
+Runs each application with different data collection types and collects logs.
+"""
+
+import subprocess
+import sys
+import time
+import os
+import tempfile
+import signal
+from datetime import datetime
+
+class ExperimentRunner:
+    def __init__(self, test_mode=False):
+        self.base_dir = "/root/rocm-systems/repro/base_apps"
+        self.test_mode = test_mode
+
+        # Use mock SwApps for testing, real one for production
+        if test_mode:
+            self.swapps_cmd = os.path.join(self.base_dir, "mock_swapps")
+        else:
+            self.swapps_cmd = "/opt/brdcm/SwApps"
+
+        # List of applications to test - easily modifiable
+        self.applications = [
+            "app1_signal_create",
+            "app2_signal_store",
+            "app3_barrier_packet",
+            "app4_dual_barrier",
+            "app5_cpu_memory_pool"
+        ]
+
+        # Data collection types with their script templates - easily modifiable
+        self.data_types = {
+            "atomics": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -it cmd 4c 23 -o {output_file}",
+                "quit"
+            ],
+            "downstream_reads": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -et mr -o {output_file}",
+                "quit"
+            ],
+            "downstream_writes": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -et mw -o {output_file}",
+                "quit"
+            ],
+            "upstream_reads": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -it mr -o {output_file}",
+                "quit"
+            ],
+            "upstream_writes": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -it mw -o {output_file}",
+                "quit"
+            ]
+        }
+
+        self.log_files = []
+
+    def create_collection_script(self, data_type, app_name, temp_dir):
+        """Create a temporary script file for data collection."""
+        output_file = f"{app_name}_{data_type}.log"
+        script_commands = []
+
+        for line in self.data_types[data_type]:
+            script_commands.append(line.format(output_file=output_file))
+
+        script_path = os.path.join(temp_dir, f"collect_{app_name}_{data_type}.script")
+        with open(script_path, 'w') as f:
+            f.write('\n'.join(script_commands) + '\n')
+
+        self.log_files.append(output_file)
+        return script_path, output_file
+
+    def run_app_with_collection(self, app_name, data_type, temp_dir):
+        """Run an application with data collection."""
+        app_path = os.path.join(self.base_dir, app_name)
+
+        if not os.path.exists(app_path):
+            print(f"Error: Application {app_path} does not exist")
+            return False
+
+        print(f"  Running {app_name} with {data_type} collection...")
+
+        # Create the collection script
+        script_path, log_file = self.create_collection_script(data_type, app_name, temp_dir)
+
+        # Always run the actual application under GDB (both test and production mode)
+        # The difference is only which SwApps command we use
+        if self.test_mode:
+            print(f"    [TEST MODE] Using mock SwApps: {self.swapps_cmd}")
+
+        # Create GDB commands to run the application
+        gdb_commands = f"""
+set confirm off
+set pagination off
+file {app_path}
+run
+"""
+
+        # Start GDB process
+        gdb_proc = subprocess.Popen(
+            ["gdb", "-quiet"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=0,
+            cwd=self.base_dir
+        )
+
+        try:
+            # Send initial commands
+            gdb_proc.stdin.write(gdb_commands)
+            gdb_proc.stdin.flush()
+
+            blocks_found = 0
+            swapps_proc = None
+            timeout_counter = 0
+            max_timeout = 30  # 30 second timeout for finding blocks
+
+            while True:
+                # Check if GDB process has terminated
+                if gdb_proc.poll() is not None:
+                    break
+
+                # Read output with timeout
+                try:
+                    line = gdb_proc.stdout.readline()
+                    if not line:
+                        # No output - increment timeout counter
+                        timeout_counter += 1
+                        if timeout_counter > max_timeout:
+                            print(f"    Timeout waiting for blocks - terminating")
+                            break
+                        time.sleep(1)
+                        continue
+
+                    timeout_counter = 0  # Reset timeout when we get output
+
+                    # Check for block message
+                    if "AT BLOCK" in line:
+                        blocks_found += 1
+                        print(f"    Block {blocks_found} detected")
+
+                        if blocks_found == 1:
+                            # First block - start data collection
+                            print(f"    Starting SwApps data collection...")
+                            swapps_proc = subprocess.Popen(
+                                [self.swapps_cmd, "-s", script_path],
+                                cwd=self.base_dir,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE
+                            )
+
+                            # Continue the application
+                            time.sleep(0.1)
+                            gdb_proc.stdin.write("call app_debugger_continue()\n")
+                            gdb_proc.stdin.write("continue\n")
+                            gdb_proc.stdin.flush()
+
+                        elif blocks_found == 2:
+                            # Second block - wait for SwApps and continue
+                            print(f"    Waiting for SwApps to complete...")
+
+                            if swapps_proc:
+                                try:
+                                    # Wait for SwApps to terminate, with 10s timeout
+                                    swapps_proc.wait(timeout=10)
+                                    print(f"    SwApps completed normally")
+                                except subprocess.TimeoutExpired:
+                                    print(f"    SwApps timeout - killing process")
+                                    swapps_proc.kill()
+                                    swapps_proc.wait()
+
+                            # Continue the application to completion
+                            time.sleep(0.1)
+                            gdb_proc.stdin.write("call app_debugger_continue()\n")
+                            gdb_proc.stdin.write("continue\n")
+                            gdb_proc.stdin.flush()
+
+                    # Check for program exit
+                    if "exited normally" in line or ("Inferior" in line and "exited" in line):
+                        print(f"    Application finished normally")
+                        break
+
+                    # Check for GDB prompt - might mean the program is waiting
+                    if "(gdb)" in line and blocks_found == 0:
+                        print(f"    GDB prompt detected, sending continue...")
+                        gdb_proc.stdin.write("continue\n")
+                        gdb_proc.stdin.flush()
+
+                except:
+                    break
+
+        except KeyboardInterrupt:
+            print("    Interrupted by user")
+            return False
+        finally:
+            # Clean up GDB
+            try:
+                gdb_proc.stdin.write("quit\n")
+                gdb_proc.stdin.write("y\n")
+                gdb_proc.stdin.flush()
+            except:
+                pass
+            gdb_proc.terminate()
+            gdb_proc.wait()
+
+            # Clean up SwApps if still running
+            if swapps_proc and swapps_proc.poll() is None:
+                swapps_proc.kill()
+                swapps_proc.wait()
+
+        print(f"    Completed {app_name} with {data_type} - found {blocks_found} blocks")
+        return blocks_found > 0
+
+    def copy_logs_to_timestamped_dir(self):
+        """Copy all log files to a timestamped directory."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = os.path.join(self.base_dir, f"experiment_results_{timestamp}")
+        os.makedirs(results_dir, exist_ok=True)
+
+        copied_files = 0
+        for log_file in self.log_files:
+            src_path = os.path.join(self.base_dir, log_file)
+            dst_path = os.path.join(results_dir, log_file)
+
+            if os.path.exists(src_path):
+                try:
+                    subprocess.run(['cp', src_path, dst_path], check=True)
+                    copied_files += 1
+                    print(f"  Copied {log_file}")
+                except subprocess.CalledProcessError:
+                    print(f"  Failed to copy {log_file}")
+            else:
+                print(f"  Log file {log_file} not found")
+
+        print(f"\nResults copied to: {results_dir}")
+        print(f"Total files copied: {copied_files}/{len(self.log_files)}")
+        return results_dir
+
+    def run_experiment(self):
+        """Run the complete experiment."""
+        print("Starting HSA Application Data Collection Experiment")
+        print("=" * 60)
+
+        # Create temporary directory for scripts
+        with tempfile.TemporaryDirectory() as temp_dir:
+
+            total_runs = 0
+            successful_runs = 0
+
+            # For each data collection type
+            for data_type in self.data_types.keys():
+                print(f"\nCollecting {data_type} data:")
+                print("-" * 40)
+
+                # For each application
+                for app_name in self.applications:
+                    total_runs += 1
+                    success = self.run_app_with_collection(app_name, data_type, temp_dir)
+                    if success:
+                        successful_runs += 1
+
+        print("\n" + "=" * 60)
+        print("Experiment Summary:")
+        print(f"Total runs: {total_runs}")
+        print(f"Successful runs: {successful_runs}")
+        print(f"Failed runs: {total_runs - successful_runs}")
+
+        # Copy logs to timestamped directory
+        if self.log_files:
+            print("\nCopying log files...")
+            self.copy_logs_to_timestamped_dir()
+
+        return successful_runs == total_runs
+
+def main():
+    """Main entry point."""
+    # Check for test mode
+    test_mode = len(sys.argv) > 1 and sys.argv[1] == "--test"
+
+    if test_mode:
+        print("Running in TEST MODE (using mock SwApps)")
+    else:
+        print("Running in PRODUCTION MODE (using real SwApps)")
+
+    runner = ExperimentRunner(test_mode=test_mode)
+
+    try:
+        success = runner.run_experiment()
+        return 0 if success else 1
+    except KeyboardInterrupt:
+        print("\nExperiment interrupted by user")
+        return 1
+    except Exception as e:
+        print(f"\nExperiment failed with error: {e}")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main())

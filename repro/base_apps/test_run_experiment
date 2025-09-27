@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""
+Test version of run_experiment that simulates the workflow without running actual applications.
+"""
+
+import os
+import tempfile
+from datetime import datetime
+
+class TestExperimentRunner:
+    def __init__(self):
+        self.base_dir = "/root/rocm-systems/repro/base_apps"
+        self.swapps_cmd = os.path.join(self.base_dir, "mock_swapps")
+
+        # List of applications to test - easily modifiable
+        self.applications = [
+            "app1_signal_create",
+            "app2_signal_store",
+            "app3_barrier_packet",
+            "app4_dual_barrier",
+            "app5_cpu_memory_pool"
+        ]
+
+        # Data collection types with their script templates - easily modifiable
+        self.data_types = {
+            "atomics": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -it cmd 4c 23 -o {output_file}",
+                "quit"
+            ],
+            "downstream_reads": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -et mr -o {output_file}",
+                "quit"
+            ],
+            "downstream_writes": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -et mw -o {output_file}",
+                "quit"
+            ],
+            "upstream_reads": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -it mr -o {output_file}",
+                "quit"
+            ],
+            "upstream_writes": [
+                "smpt 2",
+                "openhdw",
+                "vik -p 112 -fili tlp -it mw -o {output_file}",
+                "quit"
+            ]
+        }
+
+        self.log_files = []
+
+    def create_collection_script(self, data_type, app_name, temp_dir):
+        """Create a temporary script file for data collection."""
+        output_file = f"{app_name}_{data_type}.log"
+        script_commands = []
+
+        for line in self.data_types[data_type]:
+            script_commands.append(line.format(output_file=output_file))
+
+        script_path = os.path.join(temp_dir, f"collect_{app_name}_{data_type}.script")
+        with open(script_path, 'w') as f:
+            f.write('\n'.join(script_commands) + '\n')
+
+        self.log_files.append(output_file)
+        return script_path, output_file
+
+    def test_script_generation(self):
+        """Test that scripts are generated correctly."""
+        print("Testing script generation...")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for data_type in self.data_types.keys():
+                for app_name in self.applications:
+                    script_path, log_file = self.create_collection_script(data_type, app_name, temp_dir)
+
+                    print(f"  Generated script for {app_name}_{data_type}")
+                    print(f"    Script: {script_path}")
+                    print(f"    Output: {log_file}")
+
+                    # Show script contents
+                    with open(script_path, 'r') as f:
+                        content = f.read().strip()
+                        print(f"    Contents: {content.replace(chr(10), ' | ')}")
+
+        print(f"Total scripts that would be generated: {len(self.log_files)}")
+
+    def copy_logs_to_timestamped_dir(self):
+        """Copy all log files to a timestamped directory."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = os.path.join(self.base_dir, f"test_experiment_results_{timestamp}")
+        os.makedirs(results_dir, exist_ok=True)
+
+        print(f"\nWould copy logs to: {results_dir}")
+        print("Log files that would be copied:")
+        for log_file in self.log_files:
+            print(f"  {log_file}")
+
+        return results_dir
+
+def main():
+    """Test the experiment workflow."""
+    print("Testing HSA Application Data Collection Experiment Workflow")
+    print("=" * 65)
+
+    runner = TestExperimentRunner()
+
+    # Test script generation
+    runner.test_script_generation()
+
+    # Test result directory creation
+    runner.copy_logs_to_timestamped_dir()
+
+    print(f"\nSummary:")
+    print(f"Applications: {len(runner.applications)}")
+    print(f"Data types: {len(runner.data_types)}")
+    print(f"Total runs: {len(runner.applications) * len(runner.data_types)}")
+    print(f"Mock SwApps command: {runner.swapps_cmd}")
+
+if __name__ == "__main__":
+    main()
