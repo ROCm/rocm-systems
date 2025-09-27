@@ -119,7 +119,7 @@ hsa_status_t InitializeDriver(std::unique_ptr<core::Driver>& driver) {
   }
 
   driver_guard.Dismiss();
-  return status_driver_init;
+  return HSA_STATUS_SUCCESS;
 }
 
 void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop, core::DriverType driver_type) {

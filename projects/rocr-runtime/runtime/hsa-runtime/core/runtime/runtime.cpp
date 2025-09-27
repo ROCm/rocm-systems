@@ -119,7 +119,7 @@ bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
-  ScopedAcquire<KernelMutex> boot(&bootstrap_lock());S
+  ScopedAcquire<KernelMutex> boot(&bootstrap_lock());
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
