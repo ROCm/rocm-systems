@@ -110,15 +110,16 @@ void DiscoverDrivers() {
   }
 }
 
-bool InitializeDriver(std::unique_ptr<core::Driver>& driver) {
+hsa_status_t InitializeDriver(std::unique_ptr<core::Driver>& driver) {
   MAKE_NAMED_SCOPE_GUARD(driver_guard, [&]() { driver->Close(); });
 
-  if (driver->Init() != HSA_STATUS_SUCCESS) {
-    return false;
+  hsa_status_t status_driver_init = driver->Init();
+  if (status_driver_init != HSA_STATUS_SUCCESS) {
+    return status_driver_init;
   }
 
   driver_guard.Dismiss();
-  return true;
+  return status_driver_init;
 }
 
 void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop, core::DriverType driver_type) {
@@ -313,7 +314,7 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
 ///
 /// @details Topology information includes information about each node in the
 /// topology graph, which includes agents, IO links, memory, and caches.
-bool BuildTopology() {
+hsa_status_t BuildTopology() {
   auto rt = core::Runtime::runtime_singleton_;
   std::unordered_map<core::DriverType, HsaSystemProperties> driver_sys_props;
   std::unordered_map<core::DriverType, std::vector<HsaNodeProperties>> driver_node_props;
@@ -335,8 +336,9 @@ bool BuildTopology() {
   for (const auto& driver : rt->AgentDrivers()) {
     auto &sys_props = driver_sys_props[driver->kernel_driver_type_];
     auto &node_props_vec = driver_node_props[driver->kernel_driver_type_];
-    if (driver->GetSystemProperties(sys_props) != HSA_STATUS_SUCCESS)
-      return false;
+    hsa_status_t driver_get_sys_props_status = driver->GetSystemProperties(sys_props);
+    if (driver_get_sys_props_status != HSA_STATUS_SUCCESS)
+      return driver_get_sys_props_status;
 
     const auto num_nodes = sys_props.NumNodes;
 
@@ -349,8 +351,9 @@ bool BuildTopology() {
     uint32_t node_id = 0;
 
     for (auto& node_props : node_props_vec) {
-      if (driver->GetNodeProperties(node_props, node_id) != HSA_STATUS_SUCCESS) {
-        return false;
+      hsa_status_t driver_get_node_props_status = driver->GetNodeProperties(node_props, node_id);
+      if (driver_get_node_props_status != HSA_STATUS_SUCCESS) {
+        return driver_get_node_props_status;
       }
       ++node_id;
     }
@@ -499,32 +502,36 @@ bool BuildTopology() {
       ((AMD::GpuAgent*)src_gpu)->RegisterRecSdmaEngIdMaskPeer(*dst_gpu, rec_sdma_eng_id_mask);
     }
   }
-  return true;
+  return HSA_STATUS_SUCCESS;
 }
 }  // Anonymous namespace
 
-bool Load() {
+hsa_status_t Load() {
   DiscoverDrivers();
 
-  if (core::Runtime::runtime_singleton_->AgentDrivers().empty()) return false;
+  if (core::Runtime::runtime_singleton_->AgentDrivers().empty()) {
+    return HSA_STATUS_ERROR;
+  }
 
   for (auto& d : core::Runtime::runtime_singleton_->AgentDrivers()) {
     bool is_model_enabled = false;
     d->IsModelEnabled(&is_model_enabled);
     if (is_model_enabled) continue;
-    if (!InitializeDriver(d)) return false;
+    hsa_status_t status_driver_init = InitializeDriver(d);
+    if (status_driver_init != HSA_STATUS_SUCCESS) {
+      return status_driver_init;
+    }
   }
 
   return BuildTopology();
 }
 
-bool Unload() {
+hsa_status_t Unload() {
   for (auto& driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
     hsa_status_t ret = driver->ShutDown();
-    if (ret != HSA_STATUS_SUCCESS) return false;
+    if (ret != HSA_STATUS_SUCCESS) return ret;
   }
-
-  return true;
+  return HSA_STATUS_SUCCESS;
 }
 }  // namespace amd
 }  // namespace rocr

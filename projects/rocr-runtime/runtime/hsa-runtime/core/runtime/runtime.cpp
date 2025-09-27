@@ -119,7 +119,7 @@ bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
-  ScopedAcquire<KernelMutex> boot(&bootstrap_lock());
+  ScopedAcquire<KernelMutex> boot(&bootstrap_lock());S
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
@@ -137,7 +137,7 @@ hsa_status_t Runtime::Acquire() {
     hsa_status_t status = runtime_singleton_->Load();
 
     if (status != HSA_STATUS_SUCCESS) {
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      return status;
     }
   }
 
@@ -2171,8 +2171,11 @@ hsa_status_t Runtime::Load() {
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
 
-  if (!AMD::Load()) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  {
+    hsa_status_t amd_load_status = AMD::Load();
+    if (amd_load_status != HSA_STATUS_SUCCESS) {
+      return amd_load_status;
+    }
   }
 
   // Setup system clock frequency for the first time.

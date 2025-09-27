@@ -43,15 +43,17 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_TOPOLOGY_H_
 #define HSA_RUNTIME_CORE_INC_AMD_TOPOLOGY_H_
 
+#include "hsa.h"
+
 namespace rocr {
 namespace AMD {
 /// @brief Initializes the runtime.
 /// Should not be called directly, must be called only from Runtime::Acquire()
-bool Load();
+hsa_status_t Load();
 
 /// @brief Shutdown/cleanup of runtime.
 /// Should not be called directly, must be called only from Runtime::Release()
-bool Unload();
+hsa_status_t Unload();
 }  // namespace amd
 }  // namespace rocr
 
