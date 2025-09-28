@@ -434,7 +434,7 @@ def write_pc_sampling_csv(importData, config) -> None:
             correlation_id AS Correlation_Id,
             wave_issued AS Wave_Issued_Instruction,
             inst_type AS Instruction_Type,
-            snapshot_stall_reason AS Stall_Reason,
+            stall_reason AS Stall_Reason,
             wave_count AS Wave_Count
         FROM "pc_sampling"
         WHERE sampling_method = 'stochastic'

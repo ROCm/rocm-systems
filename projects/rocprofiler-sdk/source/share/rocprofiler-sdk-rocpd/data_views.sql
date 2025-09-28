@@ -769,7 +769,7 @@ SELECT
     E.correlation_id,
     S.extdata AS sample_extdata,
     E.extdata AS event_extdata,
-    JSON_EXTRACT(E.extdata, '$.snapshot.stall_reason') AS snapshot_stall_reason,
+    JSON_EXTRACT(E.extdata, '$.snapshot.stall_reason') AS stall_reason,
     JSON_EXTRACT(E.extdata, '$.snapshot.dual_issue_valu') AS snapshot_dual_issue_valu,
     JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_valu') AS snapshot_arb_state_issue_valu,
     JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_matrix') AS snapshot_arb_state_issue_matrix,
