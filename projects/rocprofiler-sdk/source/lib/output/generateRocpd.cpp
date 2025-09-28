@@ -146,11 +146,6 @@ struct stochastic_memory_counters
     uint32_t km_cnt     = 0;
 };
 
-struct stochastic_flags
-{
-    bool has_mem_cnt = false;
-};
-
 // Event data for PC sampling (common for both host trap and stochastic)
 struct pc_sampling_event_data
 {
@@ -161,7 +156,6 @@ struct pc_sampling_event_data
     std::optional<bool>                       wave_issued;
     std::optional<std::string>                inst_type;
     std::optional<uint32_t>                   wave_count;
-    std::optional<stochastic_flags>           flags;
     std::optional<stochastic_snapshot_data>   snapshot;
     std::optional<stochastic_memory_counters> memory_counters;
 };
@@ -261,13 +255,6 @@ save(ArchiveT& ar, const stochastic_memory_counters& data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, const stochastic_flags& data)
-{
-    ar(cereal::make_nvp("has_mem_cnt", data.has_mem_cnt));
-}
-
-template <typename ArchiveT>
-void
 save(ArchiveT& ar, const pc_sampling_event_data& data)
 {
     ar(cereal::make_nvp("workgroup_id", data.workgroup_id));
@@ -279,8 +266,6 @@ save(ArchiveT& ar, const pc_sampling_event_data& data)
     if(data.inst_type.has_value()) ar(cereal::make_nvp("inst_type", data.inst_type.value()));
 
     if(data.wave_count.has_value()) ar(cereal::make_nvp("wave_count", data.wave_count.value()));
-
-    if(data.flags.has_value()) ar(cereal::make_nvp("flags", data.flags.value()));
 
     if(data.snapshot.has_value()) ar(cereal::make_nvp("snapshot", data.snapshot.value()));
 
@@ -1719,7 +1704,6 @@ write_rocpd(
                     .wave_issued     = std::nullopt,
                     .inst_type       = std::nullopt,
                     .wave_count      = std::nullopt,
-                    .flags           = std::nullopt,
                     .snapshot        = std::nullopt,
                     .memory_counters = std::nullopt};
 
@@ -1756,10 +1740,6 @@ write_rocpd(
                         event_data.wave_issued = static_cast<bool>(stochastic_record.wave_issued);
                         event_data.inst_type   = sanitize_sql_string(inst_type_str);
                         event_data.wave_count  = stochastic_record.wave_count;
-
-                        event_data.flags = cereal::stochastic_flags{
-                            .has_mem_cnt =
-                                static_cast<bool>(stochastic_record.flags.has_memory_counter)};
 
                         event_data.snapshot = cereal::stochastic_snapshot_data{
                             .stall_reason = sanitize_sql_string(reason_str),

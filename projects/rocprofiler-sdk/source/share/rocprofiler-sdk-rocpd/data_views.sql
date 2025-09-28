@@ -762,7 +762,6 @@ SELECT
     JSON_EXTRACT(E.extdata, '$.wave_issued') AS wave_issued,
     JSON_EXTRACT(E.extdata, '$.inst_type') AS inst_type,
     JSON_EXTRACT(E.extdata, '$.wave_count') AS wave_count,
-    JSON_EXTRACT(E.extdata, '$.flags.has_mem_cnt') AS has_mem_cnt,
     S.event_id,
     S.track_id,
     E.stack_id,
