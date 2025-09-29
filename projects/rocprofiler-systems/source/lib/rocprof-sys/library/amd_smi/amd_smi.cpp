@@ -193,25 +193,78 @@ filter_devices(const processor_vector_t& processors, const std::string& filter)
 }
 
 enabled_metrics
+parse_enabled_metrics_settings(const std::string& settings)
+{
+    const auto settings_trimmed = [](const std::string& settings) {
+        std::string str;
+        str.reserve(settings.size());
+        std::for_each(settings.begin(), settings.end(), [&str](auto ch) {
+            if(ch != '\t' && ch != ' ')
+            {
+                str.push_back(ch);
+            }
+        });
+        return str;
+    }(settings);
+
+    if(settings_trimmed == "none")
+    {
+        return enabled_metrics{ .value = disable_all_metrics };
+    }
+
+    if(settings_trimmed == "all")
+    {
+        return enabled_metrics{ .value = enable_all_metrics };
+    }
+
+    std::regex validator{
+        R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity)(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity))*$)"
+    };
+
+    if(!std::regex_match(settings_trimmed, validator))
+    {
+        printf("Invalid metrics settings '%s'. Disabling all SMI metrics!\n",
+               settings.c_str());
+        return { .value = disable_all_metrics };
+    }
+
+    const std::unordered_map<std::string, uint16_t> mapper{
+        { "temp",
+          (enabled_metrics{ .fields{ .hotspot_temperature = 1, .edge_temperature = 1 } })
+              .value },
+        { "power", (enabled_metrics{
+                        .fields{ .current_socket_power = 1, .average_socket_power = 1 } })
+                       .value },
+        { "busy", (enabled_metrics{ .fields{
+                       .gfx_activity = 1, .umc_activity = 1, .mm_activity = 1 } })
+                      .value },
+        { "mem_usage", (enabled_metrics{ .fields{ .memory_usage = 1 } }).value },
+        { "vcn_activity", (enabled_metrics{ .fields{ .vcn_activity = 1 } }).value },
+        { "jpeg_activity", (enabled_metrics{ .fields{ .jpeg_activity = 1 } }).value },
+    };
+
+    enabled_metrics      metrics{ .value = disable_all_metrics };
+    std::regex           tokenizer{ R"(\w+)" };
+    std::sregex_iterator it(settings_trimmed.begin(), settings_trimmed.end(), tokenizer);
+    std::sregex_iterator end;
+
+    for(; it != end; ++it)
+    {
+        metrics.value |= mapper.at(it->str());
+    }
+
+    return metrics;
+}
+
+enabled_metrics
 get_enabled_metrics()
 {
-    auto _settings = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
-    if(*_settings == "none")
-    {
-        enabled_metrics _metrics;
-        _metrics.value = disable_all_metrics;
-        return _metrics;
-    }
-
-    if(*_settings == "all")
-    {
-        enabled_metrics _metrics;
-        _metrics.value = enable_all_metrics;
-        return _metrics;
-    }
-
-    enabled_metrics _metrics;
-    return _metrics;
+    static auto _enabled_metrics = [] {
+        auto settings = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
+        return parse_enabled_metrics_settings(settings.has_value() ? settings.value()
+                                                                   : "");
+    }();
+    return _enabled_metrics;
 };
 
 void
@@ -522,12 +575,11 @@ void
 sample()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
-    benchmark::start(benchmark::category::amd_smi_sample);
     if(amd_smi::get_state() != State::Active)
     {
         return;
     }
-
+    benchmark::start(benchmark::category::amd_smi_sample);
     for(auto& processor : m_gpu_processors)
     {
         auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
@@ -535,8 +587,9 @@ sample()
 
         try
         {
-            auto _smi_metrics       = processor->get_smi_metrics();
+            benchmark::start(benchmark::category::amd_smi_get_metrics);
             auto _supported_metrics = processor->get_supported_metrics();
+            auto _smi_metrics       = processor->get_smi_metrics();
 
             auto _power = _supported_metrics.current_socket_power
                               ? _smi_metrics.current_socket_power
@@ -544,13 +597,17 @@ sample()
             auto _temp  = _supported_metrics.hotspot_temperature
                               ? static_cast<int32_t>(_smi_metrics.hotspot_temperature)
                               : static_cast<int32_t>(_smi_metrics.edge_temperature);
-
+            benchmark::end(benchmark::category::amd_smi_get_metrics);
+            // cache
+            benchmark::start(benchmark::category::amd_smi_sample_cache);
             trace_cache::get_buffer_storage().store(
                 trace_cache::entry_type::amd_smi_sample,
                 static_cast<size_t>(get_enabled_metrics().value), 0, _timestamp,
                 _smi_metrics.gfx_activity, _smi_metrics.umc_activity,
                 _smi_metrics.mm_activity, _power, _temp, _smi_metrics.memory_usage,
                 std::vector<uint8_t>(40));
+            benchmark::end(benchmark::category::amd_smi_sample_cache);
+
         } catch(const std::runtime_error& e)
         {
             ROCPROFSYS_WARNING(
@@ -597,7 +654,7 @@ data::post_process(uint32_t _dev_id)
     ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
     if(!_thread_info) return;
 
-    auto _settings = get_settings(_dev_id);
+    auto settings = getsettings(_dev_id);
 
     auto use_perfetto = get_use_perfetto();
 
@@ -639,25 +696,25 @@ data::post_process(uint32_t _dev_id)
                 }
             };
 
-            if(_settings.busy)
+            if(settings.busy)
             {
                 counter_track::emplace(_dev_id, addendum("GFX Busy"), "%");
                 counter_track::emplace(_dev_id, addendum("UMC Busy"), "%");
                 counter_track::emplace(_dev_id, addendum("MM Busy"), "%");
             }
-            if(_settings.temp)
+            if(settings.temp)
             {
                 counter_track::emplace(_dev_id, addendum("Temperature"), "deg C");
             }
-            if(_settings.power)
+            if(settings.power)
             {
                 counter_track::emplace(_dev_id, addendum("Current Power"), "watts");
             }
-            if(_settings.mem_usage)
+            if(settings.mem_usage)
             {
                 counter_track::emplace(_dev_id, addendum("Memory Usage"), "megabytes");
             }
-            if(_settings.vcn_activity)
+            if(settings.vcn_activity)
             {
                 if(itr.m_xcp_metrics.empty())
                 {
@@ -685,7 +742,7 @@ data::post_process(uint32_t _dev_id)
                     }
                 }
             }
-            if(_settings.jpeg_activity)
+            if(settings.jpeg_activity)
             {
                 if(itr.m_xcp_metrics.empty())
                 {
@@ -715,7 +772,7 @@ data::post_process(uint32_t _dev_id)
         auto write_perfetto_metrics = [&]() {
             size_t track_index = 0;
 
-            if(_settings.busy)
+            if(settings.busy)
             {
                 TRACE_COUNTER("device_busy_gfx",
                               counter_track::at(_dev_id, track_index++), _ts, _gfxbusy);
@@ -724,23 +781,23 @@ data::post_process(uint32_t _dev_id)
                 TRACE_COUNTER("device_busy_mm", counter_track::at(_dev_id, track_index++),
                               _ts, _mmbusy);
             }
-            if(_settings.temp)
+            if(settings.temp)
             {
                 TRACE_COUNTER("device_temp", counter_track::at(_dev_id, track_index++),
                               _ts, _temp);
             }
-            if(_settings.power)
+            if(settings.power)
             {
                 TRACE_COUNTER("device_power", counter_track::at(_dev_id, track_index++),
                               _ts, _power);
             }
-            if(_settings.mem_usage)
+            if(settings.mem_usage)
             {
                 TRACE_COUNTER("device_memory_usage",
                               counter_track::at(_dev_id, track_index++), _ts, _usage);
             }
 
-            if(_settings.vcn_activity && !itr.m_xcp_metrics.empty())
+            if(settings.vcn_activity && !itr.m_xcp_metrics.empty())
             {
                 // Iterate over all XCPs and their VCN busy/activity values
                 for(const auto& metrics : itr.m_xcp_metrics)
@@ -754,7 +811,7 @@ data::post_process(uint32_t _dev_id)
                 }
             }
 
-            if(_settings.jpeg_activity && !itr.m_xcp_metrics.empty())
+            if(settings.jpeg_activity && !itr.m_xcp_metrics.empty())
             {
                 // Iterate over all XCPs and their JPEG busy/activity values
                 for(const auto& metrics : itr.m_xcp_metrics)
@@ -818,7 +875,7 @@ shutdown()
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     if(!is_initialized()) return;
-    ROCPROFSYS_VERBOSE_F(1, "Shutting down amd-smi...\n");
+    ROCPROFSYS_VERBOSE_F(0, "Shutting down amd-smi...\n");
 
     // TODO shutdown smi
     benchmark::show_results();

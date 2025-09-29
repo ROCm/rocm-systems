@@ -22,6 +22,7 @@ target_sources(
 )
 
 add_subdirectory(library)
+add_subdirectory(tests)
 
 target_link_libraries(
     rocprofiler-systems-object-library
@@ -68,14 +69,7 @@ add_library(
     SHARED
     $<TARGET_OBJECTS:rocprofiler-systems-object-library>
 )
-add_library(
-    rocprofiler-systems::librocprofiler-systems-shared
-    ALIAS rocprofiler-systems-shared-library
-)
-add_library(
-    rocprofiler-systems::rocprofiler-systems-library
-    ALIAS rocprofiler-systems-shared-library
-)
+
 
 target_link_libraries(
     rocprofiler-systems-shared-library

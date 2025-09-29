@@ -28,11 +28,14 @@
 
 #pragma once
 
+#include "core/benchmark/benchmark.hpp"
+#include "core/benchmark/category.hpp"
 #include <algorithm>
 #include <amd_smi/amdsmi.h>
 #include <bitset>
 #include <cstdint>
 
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
@@ -41,7 +44,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 namespace rocprofsys
 {
@@ -70,10 +72,10 @@ struct supported_metrics
     uint32_t gfx_activity         : 1;
     uint32_t umc_activity         : 1;
     uint32_t mm_activity          : 1;
-    struct
+    struct xcp_metrics_t
     {
-        std::bitset<AMDSMI_MAX_NUM_VCN>          vcn_activity;
-        std::bitset<AMDSMI_MAX_NUM_JPEG_ENGINES> jpeg_activity;
+        std::bitset<AMDSMI_MAX_NUM_VCN>          vcn_busy;
+        std::bitset<AMDSMI_MAX_NUM_JPEG_ENGINES> jpeg_busy;
     } xcp_metrics[AMDSMI_MAX_NUM_XCP];
 };
 
@@ -89,9 +91,9 @@ struct smi_metrics
     uint32_t mm_activity;
     struct
     {
-        uint16_t vcn_activity[AMDSMI_MAX_NUM_VCN];
-        uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG_ENGINES];
-    } xcp_metrics[AMDSMI_MAX_NUM_XCP];
+        uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];
+        uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG_ENGINES];
+    } xcp_stats[AMDSMI_MAX_NUM_XCP];
 };
 
 /**
@@ -134,7 +136,8 @@ struct processor
     smi_metrics get_smi_metrics()
     {
         amdsmi_gpu_metrics_t gpu_metrics;
-        auto                 driver_call_result =
+        benchmark::start(benchmark::category::amd_smi_driver);
+        auto driver_call_result =
             m_driver_api->get_metrics_info(m_processor_handle, &gpu_metrics);
         if(driver_call_result != AMDSMI_STATUS_SUCCESS)
         {
@@ -150,7 +153,7 @@ struct processor
             std::cout << "Failed to read SMI data! AMD SMI Error code: "
                       << driver_call_result << std::endl;
         }
-
+        benchmark::end(benchmark::category::amd_smi_driver);
         auto populate_metrics = [](auto flag, const auto& source, auto& destination) {
             if(flag) destination = source;
         };
@@ -174,8 +177,24 @@ struct processor
         populate_metrics(m_supported_metrics.hotspot_temperature,
                          gpu_metrics.temperature_hotspot, metrics.hotspot_temperature);
 
-        // uint32_t vcn_activity  : 1;
-        // uint32_t jpeg_activity : 1;
+        std::for_each(
+            std::begin(m_supported_metrics.xcp_metrics),
+            std::end(m_supported_metrics.xcp_metrics),
+            [&, xcp_index = 0](const supported_metrics::xcp_metrics_t& xcp) mutable {
+                if(xcp.jpeg_busy.any())
+                {
+                    std::memcpy(metrics.xcp_stats[xcp_index].jpeg_busy,
+                                gpu_metrics.xcp_stats[xcp_index].jpeg_busy,
+                                sizeof(gpu_metrics.xcp_stats[xcp_index].jpeg_busy));
+                }
+                if(xcp.vcn_busy.any())
+                {
+                    std::memcpy(metrics.xcp_stats[xcp_index].vcn_busy,
+                                gpu_metrics.xcp_stats[xcp_index].vcn_busy,
+                                sizeof(gpu_metrics.xcp_stats[xcp_index].vcn_busy));
+                }
+                xcp_index++;
+            });
 
         return metrics;
     }
@@ -293,18 +312,17 @@ private:
         std::for_each(
             std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
             [&, xcp_index = 0](const amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
-                std::for_each(std::begin(xcp_stats.jpeg_busy),
-                              std::end(xcp_stats.jpeg_busy),
-                              [&, index = 0](const auto& engine_busy_value) mutable {
-                                  m_supported_metrics.xcp_metrics[xcp_index]
-                                      .jpeg_activity[index++] =
-                                      driver_call_result_success &&
-                                      engine_busy_value != metric_value_not_supported;
-                              });
+                std::for_each(
+                    std::begin(xcp_stats.jpeg_busy), std::end(xcp_stats.jpeg_busy),
+                    [&, index = 0](const auto& engine_busy_value) mutable {
+                        m_supported_metrics.xcp_metrics[xcp_index].jpeg_busy[index++] =
+                            driver_call_result_success &&
+                            engine_busy_value != metric_value_not_supported;
+                    });
                 std::for_each(
                     std::begin(xcp_stats.vcn_busy), std::end(xcp_stats.vcn_busy),
                     [&, index = 0](const auto& engine_busy_value) mutable {
-                        m_supported_metrics.xcp_metrics[xcp_index].vcn_activity[index++] =
+                        m_supported_metrics.xcp_metrics[xcp_index].vcn_busy[index++] =
                             driver_call_result_success &&
                             engine_busy_value != metric_value_not_supported;
                     });

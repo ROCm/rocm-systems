@@ -125,8 +125,12 @@ private:
         check_status(m_driver_api->get_socket_handles(&count, nullptr),
                      "Failed to get socket handles!");
         std::vector<amdsmi_socket_handle> socket_handles(count);
-        check_status(m_driver_api->get_socket_handles(&count, socket_handles.data()),
-                     "Failed to get socket handles!");
+        if(count > 0)
+        {
+            check_status(m_driver_api->get_socket_handles(&count, socket_handles.data()),
+                         "Failed to get socket handles!");
+        }
+
         return socket_handles;
     }
 
@@ -143,9 +147,12 @@ private:
         check_status(m_driver_api->get_processor_handles(socket_handle, &count, nullptr),
                      "Fail to get processor count for provided socket!");
         std::vector<amdsmi_processor_handle> processor_handles(count);
-        check_status(m_driver_api->get_processor_handles(socket_handle, &count,
-                                                         processor_handles.data()),
-                     "Failed to get processor handles for provided socket!");
+        if(count > 0)
+        {
+            check_status(m_driver_api->get_processor_handles(socket_handle, &count,
+                                                             processor_handles.data()),
+                         "Failed to get processor handles for provided socket!");
+        }
 
         return processor_handles;
     }
