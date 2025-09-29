@@ -1192,7 +1192,7 @@ rocprofiler_set_api_table(const char* name,
            (NCCL_VERSION_CODE < 22703 &&
             rccl_api->size > offsetof(rcclApiFuncTable, ncclAllReduceWithBias_fn) + sizeof(void*)))
         {
-            valid = false;
+            is_valid_rccl_dispatch_table = false;
         }
 #endif
         if(is_valid_rccl_dispatch_table)
