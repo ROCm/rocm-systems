@@ -2804,18 +2804,19 @@ bool Device::createBlitProgram() {
       std::string opt = "-cl-internal-kernel ";
       if (auto retval =
               asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
-        DevLogPrintfError("Build failed for trap handler with error code: %d\n", retval);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::KERN,
+                 "Build failed for trap handler with error code: %d\n", retval);
         asm_program->release();
       } else {
         if (asm_program->load()) {
           trap_handler_ = asm_program;
         } else {
-          DevLogError("Could not load the trap handler \n");
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::KERN, "Could not load the trap handler \n");
           asm_program->release();
         }
       }
     } else {
-      DevLogError("Trap handler creation failed\n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::KERN, "Trap handler creation failed\n");
     }
   }
 

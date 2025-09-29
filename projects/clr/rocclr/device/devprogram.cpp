@@ -269,7 +269,8 @@ static amd_comgr_language_t getCOMGRLanguage(bool isHIP, const amd::option::Opti
     }
   }
 
-  DevLogPrintfError("Cannot set Language version for %s \n", amdOptions.oVariables->CLStd);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
+           "Cannot set Language version for %s \n", amdOptions.oVariables->CLStd);
   return AMD_COMGR_LANGUAGE_NONE;
 }
 
@@ -1379,7 +1380,7 @@ bool Program::initBuild(amd::option::Options* options) {
   }
   buildLog_.clear();
   if (!initClBinary()) {
-    DevLogError("Init CL Binary failed \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Init CL Binary failed \n");
     return false;
   }
 
@@ -2003,7 +2004,8 @@ bool Program::getCompileOptionsAtLinking(const std::vector<Program*>& inputProgr
 bool isSPIRVMagicL(const void* Image, size_t Length) {
   const unsigned SPRVMagicNumber = 0x07230203;
   if (Image == nullptr || Length < sizeof(unsigned)) {
-    DevLogPrintfError("Invalid Argument, Image: 0x%x Length: %u \n", Image, Length);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Invalid Argument, Image: 0x%x Length: %u \n", Image, Length);
     return false;
   }
   auto Magic = static_cast<const unsigned*>(Image);
@@ -2014,7 +2016,7 @@ bool isSPIRVMagicL(const void* Image, size_t Length) {
 bool Program::initClBinary(const char* binaryIn, size_t size, amd::Os::FileDesc fdesc,
                            size_t foffset, std::string uri) {
   if (!initClBinary()) {
-    DevLogError("Init CL Binary failed \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Init CL Binary failed \n");
     return false;
   }
 
@@ -2084,7 +2086,7 @@ bool Program::initClBinary(const char* binaryIn, size_t size, amd::Os::FileDesc 
   } else {
     size_t decryptedSize;
     if (!clBinary()->decryptElf(binaryIn, size, &decryptedBin, &decryptedSize, &encryptCode)) {
-      DevLogError("Cannot Decrypt Elf \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Cannot Decrypt Elf \n");
       return false;
     }
     if (decryptedBin != nullptr) {
@@ -2096,7 +2098,7 @@ bool Program::initClBinary(const char* binaryIn, size_t size, amd::Os::FileDesc 
     if (!isElf(bin)) {
       // Invalid binary.
       delete[] decryptedBin;
-      DevLogError("Bin is not ELF \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Bin is not ELF \n");
       return false;
     }
   }
@@ -2120,7 +2122,7 @@ void Program::addKernel(Kernel* k) {
 bool Program::setBinary(const char* binaryIn, size_t size, const device::Program* same_dev_prog,
                         amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
   if (!initClBinary(binaryIn, size, fdesc, foffset, uri)) {
-    DevLogError("Init CL Binary failed \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Init CL Binary failed \n");
     return false;
   }
 
@@ -2817,7 +2819,7 @@ const bool Program::getLoweredNames(std::vector<std::string>* mangledNames) cons
 
   /* Itrate thru global vars */
   if (!getSymbolsFromCodeObj(mangledNames, AMD_COMGR_SYMBOL_TYPE_OBJECT)) {
-    DevLogError("Cannot get Symbols from Code Obj \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR, "Cannot get Symbols from Code Obj \n");
     return false;
   }
 
