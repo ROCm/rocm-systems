@@ -194,15 +194,22 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
 
     std::vector<std::string> candidates;
     candidates.reserve(6);
+
+    auto push_unique = [&](const std::string& p) {
+        if(p.empty()) return;
+        if(std::find(candidates.begin(), candidates.end(), p) == candidates.end())
+            candidates.emplace_back(p);
+    };
+
     if(!rocmv_dir.empty())
     {
-        candidates.emplace_back(rocmv_dir + "/llvm/lib");
-        candidates.emplace_back(rocmv_dir + "/lib");
+        push_unique(rocmv_dir + "/llvm/lib");
+        push_unique(rocmv_dir + "/lib");
     }
-    candidates.emplace_back(rocm_dir + "/llvm/lib");
-    candidates.emplace_back(rocm_dir + "/lib/llvm/lib");
-    candidates.emplace_back(std::string{ "/opt/rocm/llvm/lib" });
-    candidates.emplace_back(std::string{ "/opt/rocm/lib/llvm/lib" });
+    push_unique(rocm_dir + "/llvm/lib");
+    push_unique(rocm_dir + "/lib/llvm/lib");
+    push_unique("/opt/rocm/llvm/lib");
+    push_unique("/opt/rocm/lib/llvm/lib");
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";

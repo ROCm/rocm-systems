@@ -230,9 +230,15 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
 {
     updated_envs.emplace(_env_var);
 
-    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
-    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
-    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
+    auto _prepend  = (_mode & UPD_PREPEND) != 0;
+    auto _append   = (_mode & UPD_APPEND) != 0;
+    auto _weak_upd = (_mode & UPD_WEAK) != 0;
+
+    // if both flags are set, prefer append
+    if(_prepend && _append)
+    {
+        _prepend = false;
+    }
 
     auto _key = join("", _env_var, "=");
     for(auto& itr : _environ)
@@ -256,11 +262,11 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
                     free(itr);
                     if(_prepend)
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
                                        .c_str());
                     else
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
                                        .c_str());
                 }
             }

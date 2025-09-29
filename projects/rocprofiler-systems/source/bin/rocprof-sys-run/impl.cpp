@@ -83,27 +83,42 @@ to_string(bool _v)
 namespace
 {
 auto original_envs = std::set<std::string>{};
+enum update_mode : int
+{
+    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
+    UPD_PREPEND = 1 << 0,  // 0x01
+    UPD_APPEND  = 1 << 1,  // 0x02
+    UPD_WEAK    = 1 << 2,  // 0x04
+};
+
+std::string
+get_rocprofsys_root(void)
+{
+    char*       _tmp = realpath("/proc/self/exe", nullptr);
+    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
+
+    if(_tmp) free(_tmp);
+
+    auto _pos = _exe.find_last_of('/');
+    auto _dir = std::string{ "./" };
+
+    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
+
+    return rocprofsys::common::join("/", _dir, "..");
+}
+
 std::string
 get_internal_libpath(const std::string& _lib)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "lib", _lib);
 }
+
 std::string
-get_internal_script_path()
+get_internal_script_path(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir =
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems");
-
-    return _script_dir;
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 std::string
@@ -123,9 +138,15 @@ void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode&& _mode, std::string_view _join_delim = ":")
 {
-    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
-    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
-    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
+    auto _prepend  = (_mode & UPD_PREPEND) != 0;
+    auto _append   = (_mode & UPD_APPEND) != 0;
+    auto _weak_upd = (_mode & UPD_WEAK) != 0;
+
+    // if both flags are set, prefer append
+    if(_prepend && _append)
+    {
+        _prepend = false;
+    }
 
     auto _key = join("", _env_var, "=");
     for(auto& itr : _environ)
@@ -149,11 +170,11 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
                     free(itr);
                     if(_prepend)
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
                                        .c_str());
                     else
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
                                        .c_str());
                 }
             }
