@@ -25,4 +25,4 @@
 # This script gets the name of the default NIC and writes it to standard output.
 # NOTE: if command "ip r" finds multiple default NICs, this script will output
 #       only the first one.
-ip r | awk '/default/{print $5}' | head -n1
+ip r | awk '/default/{print $5}'

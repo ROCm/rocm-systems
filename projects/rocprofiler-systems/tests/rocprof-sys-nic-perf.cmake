@@ -33,6 +33,8 @@ execute_process(
     OUTPUT_VARIABLE _network_interface
 )
 
+message(STATUS "The list of default network interfaces is ${_network_interface}")
+
 # Generate the list of all events that we want PAPI to record.
 execute_process(
     COMMAND "${CMAKE_SOURCE_DIR}/tests/generate_papi_nic_events.sh"
@@ -40,7 +42,6 @@ execute_process(
     OUTPUT_VARIABLE _event_list
 )
 
-message(STATUS "The first default network interface is ${_network_interface}")
 message(STATUS "The list of all PAPI network events is ${_event_list}")
 
 set(_nic_perf_environment
