@@ -95,16 +95,23 @@ if(ENABLE_TESTS)
     endif()
 endif()
 
+
 if(ENABLE_KOKKOS)
+    message(STATUS "Kokkos tests enabled on-DKokkos_ARCH_AMD_${KOKKOS_ARCH}")
     if(NOT USE_MOCK_KOKKOS)
+        # GFX950 is not supported in Kokkos, mapping to GFX942
+        if(KOKKOS_ARCH STREQUAL "GFX950")
+            set(KOKKOS_ARCH "GFX942")
+        endif()
+
         ExternalProject_Add(
             kokkos_src
             GIT_REPOSITORY https://github.com/kokkos/kokkos.git
             GIT_TAG caea1f54557acb408fe994c7d5b2574e4847454e
-            SOURCE_DIR ${CMAKE_BINARY_DIR}/../tests/kokkos-src
-            BINARY_DIR ${CMAKE_BINARY_DIR}/../tests/kokkos-build
+            SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos-src
+            BINARY_DIR ${CMAKE_BINARY_DIR}/kokkos-build
             CMAKE_ARGS
-                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/../tests/kokkos-build
+                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/kokkos-build
                 -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_${KOKKOS_ARCH}=ON
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_PREFIX_PATH=/opt/rocm
                 -DKokkos_ENABLE_ROCTHRUST=OFF -DKokkos_ENABLE_CUDA=OFF

@@ -61,7 +61,7 @@ if(KOKKOS_ARCH)
     message(STATUS "Using KOKKOS_ARCH: ${GPU_NAME}. Building mock_kokkos test.")
     set(CMAKE_HIP_ARCHITECTURES ${GPU_NAME} CACHE STRING "HIP GPU architecture" FORCE)
     set(KOKKOS_BUILD_DIR
-        "${CMAKE_SOURCE_DIR}/tests/kokkos-build"
+        "${CMAKE_BINARY_DIR}/kokkos-build"
         CACHE PATH
         "Kokkos build dir"
         FORCE
