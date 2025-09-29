@@ -42,15 +42,6 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
             endif()
           endif()
         endif()
-        set( DEB_OVERRIDES_INSTALL_FILENM
-          "${DEB_OVERRIDES_INSTALL_FILENM}" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
-        # Configure the changelog file
-              configure_file(
-                "${CMAKE_SOURCE_DIR}/DEBIAN/overrides.in"
-                "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
-                FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-                @ONLY
-              )
       endif()
 
       # Install Change Log 
@@ -83,11 +74,6 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
       install ( FILES ${OVERRIDE_FILE}
 	  DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
           COMPONENT ${COMPONENT_NAME_T})
-
-      message(STATUS "POTATO INSIDE OVERRIDE_FILE: ${OVERRIDE_FILE}")
-      message(STATUS "POTATO INSIDE DEB_OVERRIDES_INSTALL_PATH: ${DEB_OVERRIDES_INSTALL_PATH}")
-      message(STATUS "POTATO INSIDE COMPONENT_NAME_T: ${COMPONENT_NAME_T}")
-
     endif()
 endfunction()
 
