@@ -1160,7 +1160,7 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rccl_api = static_cast<rcclApiFuncTable*>(tables[0]);
 
-        auto is_valid_rccl_dispatch_table = true;
+        auto is_valid_rccl_dispatch_table = (rccl_api != nullptr);
 
         // Runtime ABI validation for RCCL API dispatch table.
         //
@@ -1188,11 +1188,19 @@ rocprofiler_set_api_table(const char* name,
         //
         //    If both conditions are true, the dispatch table is invalid and tracing is
         //    disabled to avoid corrupt output.
-        if(rccl_api == nullptr ||
-           (NCCL_VERSION_CODE < 22703 &&
-            rccl_api->size > offsetof(rcclApiFuncTable, ncclAllReduceWithBias_fn) + sizeof(void*)))
+        if(is_valid_rccl_dispatch_table && NCCL_VERSION_CODE < 22703 &&
+           rccl_api->size > offsetof(rcclApiFuncTable, ncclAllReduceWithBias_fn) + sizeof(void*))
         {
             is_valid_rccl_dispatch_table = false;
+
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "Invalid RCCL dispatch table: layout does not match the expected "
+                "rocprofiler-SDK ABI (RCCL API Trace v{}.{}.{}). "
+                "Tracing is disabled to prevent corrupted data. "
+                "Use a compatible RCCL version.",
+                RCCL_API_TRACE_VERSION_MAJOR,
+                0,
+                RCCL_API_TRACE_VERSION_PATCH);
         }
 #endif
         if(is_valid_rccl_dispatch_table)
@@ -1216,17 +1224,9 @@ rocprofiler_set_api_table(const char* name,
         }
         else
         {
-            ROCP_CI_LOG(WARNING) << fmt::format(
-                "ABI validation failed for RCCL dispatch table. "
-                "Tracing is disabled because the table layout does not match the "
-                "expected rocprofiler-SDK ABI contract (RCCL API Trace v{}.{}.{}). "
-                "This typically occurs when RCCL introduces new APIs without correctly "
-                "updating the ABI patch version or Functions were not added at the end of "
-                "dispatch table. Using such a table would corrupt trace data. use different "
-                "version of RCCL.",
-                RCCL_API_TRACE_VERSION_MAJOR,
-                0,
-                RCCL_API_TRACE_VERSION_PATCH);
+            ROCP_CI_LOG(WARNING)
+                << "Failed to initialize RCCL tracing: rcclApiFuncTable pointer is null. "
+                << "Tracing is disabled.";
         }
     }
     else if(std::string_view{name} == "rocdecode")
