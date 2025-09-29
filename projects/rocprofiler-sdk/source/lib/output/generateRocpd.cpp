@@ -1727,14 +1727,38 @@ write_rocpd(
                                     rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
                                     stochastic_record.snapshot.reason_not_issued));
 
-                        std::string inst_type_str =
-                            inst_type_name ? std::string(inst_type_name)
-                                           : std::to_string(stochastic_record.inst_type);
+                        // For instruction type
+                        std::string inst_type_str;
+                        if(inst_type_name)
+                        {
+                            inst_type_str = inst_type_name;
+                        }
+                        else
+                        {
+                            ROCP_CI_LOG(WARNING)
+                                << "Unknown instruction type enum value: "
+                                << stochastic_record.inst_type
+                                << " - consider updating "
+                                   "rocprofiler_get_pc_sampling_instruction_type_name";
+                            inst_type_str = std::to_string(stochastic_record.inst_type);
+                        }
 
-                        std::string reason_str =
-                            reason_not_issued_name
-                                ? std::string(reason_not_issued_name)
-                                : std::to_string(stochastic_record.snapshot.reason_not_issued);
+                        // For stall reason
+                        std::string reason_str;
+                        if(reason_not_issued_name)
+                        {
+                            reason_str = reason_not_issued_name;
+                        }
+                        else
+                        {
+                            ROCP_CI_LOG(WARNING)
+                                << "Unknown stall reason enum value: "
+                                << stochastic_record.snapshot.reason_not_issued
+                                << " - consider updating "
+                                   "rocprofiler_get_pc_sampling_instruction_not_issued_reason_name";
+                            reason_str =
+                                std::to_string(stochastic_record.snapshot.reason_not_issued);
+                        }
 
                         // Add stochastic-specific fields to event data
                         event_data.wave_issued = static_cast<bool>(stochastic_record.wave_issued);
