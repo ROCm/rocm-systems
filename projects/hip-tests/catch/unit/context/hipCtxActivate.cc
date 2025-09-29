@@ -37,7 +37,7 @@ TEST_CASE("Unit_hipSetDevice_CheckPrimaryCtxState") {
 
   unsigned flags;
   int is_active;
-  HIP_DRIVER_CHECK(hipDevicePrimaryCtxGetState(device_id, &flags, &is_active));
+  HIP_CHECK(hipDevicePrimaryCtxGetState(device_id, &flags, &is_active));
 
   REQUIRE(is_active == 1);
 }
