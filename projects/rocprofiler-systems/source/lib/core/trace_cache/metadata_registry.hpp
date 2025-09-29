@@ -217,11 +217,7 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
-#if ROCPROFSYS_USE_ROCM > 0
     metadata_registry();
-#else
-    metadata_registry() = default;
-#endif
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>

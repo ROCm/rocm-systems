@@ -361,19 +361,6 @@ metadata_registry::overwrite_cb_names(
     }
 }
 
-metadata_registry::metadata_registry()
-{
-    overwrite_cb_names({
-#    if(ROCPROFILER_VERSION >= 600)
-        { ROCPROFILER_CALLBACK_TRACING_OMPT,
-          { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
-            { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
-            { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
-            { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
-#    endif
-    });
-}
-
 rocprofiler::sdk::buffer_name_info_t<const char*>
 metadata_registry::get_buffer_name_info() const
 {
@@ -387,6 +374,21 @@ metadata_registry::get_callback_tracing_info() const
 }
 
 #endif
+
+metadata_registry::metadata_registry()
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    overwrite_cb_names({
+#    if(ROCPROFILER_VERSION >= 600)
+        { ROCPROFILER_CALLBACK_TRACING_OMPT,
+          { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
+            { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
+            { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
+            { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
+#    endif
+    });
+#endif
+}
 
 }  // namespace trace_cache
 }  // namespace rocprofsys
