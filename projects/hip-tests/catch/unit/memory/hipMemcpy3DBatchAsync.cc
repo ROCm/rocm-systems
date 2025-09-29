@@ -110,7 +110,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int,
   ops[0].src.op.ptr.ptr = srcPtr1.data();
   ops[0].src.op.ptr.rowLength = extent.width;
   ops[0].src.op.ptr.layerHeight = extent.height;
-  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeInvalid;
+  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[0].src.op.ptr.locHint.id = 0;
   ops[0].dst.type = hipMemcpyOperandTypePointer;
   ops[0].dst.op.ptr.ptr = dstPtr1;
@@ -150,7 +150,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int,
   ops[2].dst.op.ptr.ptr = srcPtr2.data();
   ops[2].dst.op.ptr.rowLength = extent.width;
   ops[2].dst.op.ptr.layerHeight = extent.height;
-  ops[2].dst.op.ptr.locHint.type = hipMemLocationTypeInvalid;
+  ops[2].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[2].dst.op.ptr.locHint.id = 0;
   ops[2].extent = extent;
   ops[2].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -161,13 +161,13 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps", "", char, int,
   ops[3].src.op.ptr.ptr = srcPtr2.data();
   ops[3].src.op.ptr.rowLength = extent.width;
   ops[3].src.op.ptr.layerHeight = extent.height;
-  ops[3].src.op.ptr.locHint.type = hipMemLocationTypeInvalid;
+  ops[3].src.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[3].src.op.ptr.locHint.id = 0;
   ops[3].dst.type = hipMemcpyOperandTypePointer;
   ops[3].dst.op.ptr.ptr = srcPtr3.data();
   ops[3].dst.op.ptr.rowLength = extent.width;
   ops[3].dst.op.ptr.layerHeight = extent.height;
-  ops[3].dst.op.ptr.locHint.type = hipMemLocationTypeInvalid;
+  ops[3].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[3].dst.op.ptr.locHint.id = 0;
   ops[3].extent = extent;
   ops[3].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -265,7 +265,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char,
   ops[0].src.op.ptr.ptr = srcPtr1.data();
   ops[0].src.op.ptr.rowLength = extent.width;
   ops[0].src.op.ptr.layerHeight = extent.height;
-  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeInvalid;
+  ops[0].src.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[0].src.op.ptr.locHint.id = 0;
   ops[0].dst.type = hipMemcpyOperandTypeArray;
   ops[0].dst.op.array.array = array1;
@@ -321,7 +321,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char,
   ops[4].dst.op.ptr.ptr = srcPtr2.data();
   ops[4].dst.op.ptr.rowLength = extent.width;
   ops[4].dst.op.ptr.layerHeight = extent.height;
-  ops[4].dst.op.ptr.locHint.type = hipMemLocationTypeInvalid;
+  ops[4].dst.op.ptr.locHint.type = hipMemLocationTypeHost;
   ops[4].dst.op.ptr.locHint.id = 0;
   ops[4].extent = extent;
   ops[4].srcAccessOrder = hipMemcpySrcAccessOrderStream;
