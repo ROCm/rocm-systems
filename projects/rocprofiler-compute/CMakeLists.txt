@@ -54,42 +54,59 @@ option(USE_MOCK_KOKKOS "Use mock Kokkos implementation for testing" ON)
 
 if(ENABLE_TESTS)
     if(UNIX)
-        # Detect AMD GPU architecture using rocminfo
-        execute_process(
-            COMMAND
-                bash -c
-                "rocminfo | grep 'Name:' | grep -E 'gfx[0-9]+' | head -n 1 | awk '{print $2}'"
-            OUTPUT_VARIABLE GPU_NAME
-            ERROR_VARIABLE ROCMINFO_ERROR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
+        find_program(ROCMINFO_EXECUTABLE rocminfo)
+        if(ROCMINFO_EXECUTABLE)
+            # Detect AMD GPU architecture using rocminfo
+            execute_process(
+                COMMAND
+                    bash -c
+                    "rocminfo | grep 'Name:' | grep -E 'gfx[0-9]+' | head -n 1 | awk '{print $2}'"
+                OUTPUT_VARIABLE GPU_NAME
+                ERROR_VARIABLE ROCMINFO_ERROR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
 
-        if(GPU_NAME)
-            string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
-            set(ENABLE_KOKKOS ON)
-            message(STATUS "Detected AMD GPU architecture: ${KOKKOS_ARCH}")
+            if(GPU_NAME)
+                string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
+                set(ENABLE_KOKKOS ON)
+                message(STATUS "Detected AMD GPU architecture: ${KOKKOS_ARCH}")
+            else()
+                message(
+                    WARNING
+                    "Could not detect AMD GPU architecture, Kokkos Test. Error: ${ROCMINFO_ERROR}"
+                )
+            endif()
         else()
             message(
                 WARNING
-                "Could not detect AMD GPU architecture, Kokkos Test. Error: ${ROCMINFO_ERROR}"
+                "rocminfo not found, cannot detect AMD GPU architecture. Disabling Kokkos Test."
             )
         endif()
     elseif(WIN32)
-        execute_process(
-            COMMAND wmic path win32_videocontroller get name
-            OUTPUT_VARIABLE GPU_NAME
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_VARIABLE WMIC_ERROR
-            RESULT_VARIABLE WMIC_RESULT
-        )
-        if(WMIC_RESULT EQUAL 0 AND NOT "${GPU_NAME}" STREQUAL "")
-            string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
-            set(ENABLE_KOKKOS ON)
-            message(STATUS "Detected GPU: ${KOKKOS_ARCH}")
+        find_program(WMIC_EXECUTABLE wmic)
+        if(WMIC_EXECUTABLE)
+            # On Windows, use WMIC to get GPU name
+            execute_process(
+                COMMAND wmic path win32_videocontroller get name
+                OUTPUT_VARIABLE GPU_NAME
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_VARIABLE WMIC_ERROR
+                RESULT_VARIABLE WMIC_RESULT
+            )
+            if(WMIC_RESULT EQUAL 0 AND NOT "${GPU_NAME}" STREQUAL "")
+                string(TOUPPER "${GPU_NAME}" KOKKOS_ARCH)
+                set(ENABLE_KOKKOS ON)
+                message(STATUS "Detected GPU: ${KOKKOS_ARCH}")
+            else()
+                message(
+                    WARNING
+                    "Could not detect GPU via WMIC. Disabling Kokkos Test. Error: ${WMIC_ERROR}"
+                )
+            endif()
         else()
             message(
                 WARNING
-                "Could not detect GPU via WMIC. Disabling Kokkos Test. Error: ${WMIC_ERROR}"
+                "WMIC not found, cannot detect GPU. Disabling Kokkos Test."
             )
         endif()
     endif()
