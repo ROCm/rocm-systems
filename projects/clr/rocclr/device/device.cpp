@@ -526,7 +526,7 @@ bool Device::ValidateVirtualAddressRange(amd::Memory* vaddr_base_obj, amd::Memor
 
 //==================================================================================================
 amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vptr, size_t size,
-                                         int deviceId, bool parent, bool kForceAlloc) {
+                                         int deviceId, int locationType, bool parent, bool kForceAlloc) {
   amd::Memory* vaddr_base_obj = nullptr;
   amd::Memory* vaddr_sub_obj = nullptr;
   constexpr bool kSysMemAlloc = false;
@@ -572,6 +572,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     }
 
     vaddr_sub_obj->getUserData().deviceId = deviceId;
+    vaddr_sub_obj->getUserData().locationType = locationType;
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
@@ -694,6 +695,8 @@ bool Device::init() {
       // Ignore the failure and assume KFD is not installed.
       // abort();
       DevLogError("KFD is not installed \n");
+      // Disable direct dispatch if ROC initialization wasn't successful
+      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
     }
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
@@ -702,6 +705,10 @@ bool Device::init() {
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
   if (GPU_ENABLE_PAL != 0) {
+    if (GPU_ENABLE_PAL == 1) {
+      // PAL path can't support direct dispatch, unless it's forced
+      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
+    }
     ret |= PalDeviceLoad();
   }
 #endif  // WITH_PAL_DEVICE

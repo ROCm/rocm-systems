@@ -256,6 +256,8 @@ const char* ihipGetErrorName(hipError_t hip_error);
              reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus() ==                         \
                  hipStreamCaptureStatusInvalidated) {                                              \
     return hipErrorStreamCaptureInvalidated;                                                       \
+  } else if (stream == nullptr || stream == hipStreamLegacy) {                                     \
+    CHECK_STREAM_CAPTURING()                                                                       \
   }
 
 #define PER_THREAD_DEFAULT_STREAM(stream)                                                         \
@@ -415,8 +417,8 @@ public:
       pCaptureGraph_ = pGraph;
       captureStatus_ = hipStreamCaptureStatusActive;
     }
-    /// Reset graph to nullptr when capture is invalidated, but keep the status
-    void ResetCaptureGraph() { pCaptureGraph_ = nullptr; }
+    /// Release graph when capture is invalidated
+    void ReleaseCaptureGraph();
     void SetCaptureId() {
       // ID is generated in Begin Capture i.e.. when capture status is active
       captureID_ = GenerateCaptureID();

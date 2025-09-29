@@ -29,12 +29,6 @@ THE SOFTWARE.
 
 namespace cg = cooperative_groups;
 
-#if defined(__has_extension) && __has_extension(clang_atomic_attributes)
-#define HIP_TEST_FINE_GRAINED_MEMORY [[clang::atomic(fine_grained_memory)]]
-#else
-#define HIP_TEST_FINE_GRAINED_MEMORY
-#endif
-
 namespace MinMax {
 enum class AtomicOperation {
   kMin = 0,
@@ -88,14 +82,14 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
     return safeAtomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kBuiltinMin) {
     if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_FINE_GRAINED_MEMORY {
+      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
       return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
     } else {
       return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
     }
   } else if constexpr (operation == AtomicOperation::kBuiltinMax) {
     if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_FINE_GRAINED_MEMORY {
+      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
       return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
     } else {
       return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
@@ -306,8 +300,8 @@ void TestCore(const TestParams& p) {
     for (auto j = 0u; j < p.kernel_count; ++j) {
       const auto& stream = streams[i * p.kernel_count + j].stream();
       const auto old_vals = old_vals_devs[i].ptr() + j * p.ThreadCount();
-      LaunchKernel<TestType, operation, use_shared_mem, memory_scope>(p, stream, mem_devs[i].ptr(),
-                                                                      old_vals);
+      LaunchKernel<TestType, operation, use_shared_mem, memory_scope>(p, stream,
+          mem_devs[i].ptr(), old_vals);
     }
   }
   for (auto i = 0; i < p.num_devices; ++i) {
@@ -326,12 +320,10 @@ void TestCore(const TestParams& p) {
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
 
-inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateThreadDimensions() { return dim3(1024); }
 
 inline dim3 GenerateBlockDimensions() {
-  int sm_count = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return dim3(sm_count);
+  return dim3(8);
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
@@ -422,31 +414,10 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
       return;
     }
   }
-
-  CHECK_P2P_SUPPORT
-
-  if (kernel_count > 1) {
-    for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
-      for (auto j = 0u; j < num_devices; ++j) {
-        if (i != j) {
-          HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
-            HipTest::HIP_SKIP_TEST(msg.c_str());
-            return;
-          }
-        }
-      }
-      int concurrent_kernels = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
-      if (!concurrent_kernels) {
-        HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-        return;
-      }
-    }
+  if (!HipTest::checkConcurrentKernels(num_devices)) {
+    HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
+    return;
   }
-
   TestParams params;
   params.num_devices = num_devices;
   params.kernel_count = kernel_count;
@@ -456,7 +427,7 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
   params.pitch = pitch;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipMalloc}) {
+  for (const auto alloc_type : {LA::hipMalloc, LA::hipHostMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);

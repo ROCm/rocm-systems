@@ -929,9 +929,6 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
     // connect. This will be changed in the future
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin) _name = "omp_parallel";
-    // Although not necessary to connect them, this forces a unified name instead of
-    // the whole track being named omp_lock_init
-    if(record.operation == ROCPROFILER_OMPT_ID_lock_init) _name = "omp_lock";
 
     if(get_use_timemory())
     {
@@ -984,9 +981,6 @@ ompt_tracing_callback_stop(
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
     // connect. This will be changed in the future
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_end) _name = "omp_parallel";
-    // Although not necessary to connect them, this forces a unified name instead of
-    // the whole track being named omp_lock_init
-    if(record.operation == ROCPROFILER_OMPT_ID_lock_destroy) _name = "omp_lock";
 
     if(get_use_timemory())
     {
@@ -1317,11 +1311,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                         break;
                     case ROCPROFILER_OMPT_ID_lock_init:
-                        ompt_tracing_callback_start(record, user_data, ts);
-                        break;
                     case ROCPROFILER_OMPT_ID_lock_destroy:
-                        ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
-                        break;
                     // Although this has endpoint arg, treat it as instant event
                     case ROCPROFILER_OMPT_ID_nest_lock:
                     case ROCPROFILER_OMPT_ID_dispatch:

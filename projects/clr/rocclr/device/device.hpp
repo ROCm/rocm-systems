@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1351,10 +1351,11 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool isFenceDirty() const = 0;
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
-  //! Dispatch captured AQL packet
-  virtual bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                 amd::AccumulateCommand* vcmd = nullptr) = 0;
 
+  //! Dispatches multiple AQL packets in a single batch operation
+  virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                                      const std::vector<std::string>& kernelNames,
+                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1396,7 +1397,8 @@ class MemObjMap : public AllStatic {
     size_t psize;                              ///< Total size of the device memory allocation
     size_t poffset;                            ///< Offset within the allocation
     int owners_process_id;                     ///< ID of the process that owns the allocation
-    char reserved[LP64_SWITCH(20, 12)];        ///< Reserved for future extensions
+    int owners_device_id;                      ///< ID of the device that owns the allocation
+    char reserved[LP64_SWITCH(16, 8)];        ///< Reserved for future extensions
 
     bool operator<(const IpcMemHandle& h) const {
       int cmp = std::memcmp(ipc_handle, h.ipc_handle, AMD_IPC_MEM_HANDLE_SIZE);
@@ -1658,6 +1660,8 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
+  //<! Enum describing the location of Virtual memory
+  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1814,13 +1818,27 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::hostAlloc
    */
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const {
+  virtual void* hostAlloc(size_t size, size_t alignment,
+                          MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const {
     ShouldNotCallThis();
     return NULL;
   }
 
-  virtual void* deviceLocalAlloc(size_t size, bool atomics = false, bool pseudo_fine_grain = false,
-                                 bool contiguous = false) const {
+  //! Flags for deviceLocalAlloc method
+  typedef union {
+    struct {
+      uint32_t atomics_ : 1;           //!< True if atomics support is required
+      uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
+      uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
+      uint32_t executable_ : 1;        //!< True if executable memory is required
+      uint32_t reserved_ : 28;         //!< Reserved for future use
+    };
+    uint32_t data_;
+  } AllocationFlags;
+
+  virtual void* deviceLocalAlloc(
+      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1878,7 +1896,7 @@ class Device : public RuntimeObject {
    * @param ForceAlloc force_alloc
    */
   amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size, int deviceId,
-                                   bool parent, bool kForceAlloc = false);
+                                   int locationType, bool parent, bool kForceAlloc = false);
 
   /**
    * Deletes Virtual Buffer and creates memob
@@ -1904,7 +1922,8 @@ class Device : public RuntimeObject {
    * @param access_flags Access permissions
    * @param count Number of access permissions
    */
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) = 0;
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.

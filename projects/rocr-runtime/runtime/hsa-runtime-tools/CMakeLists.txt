@@ -1,3 +1,11 @@
+################################################################################
+##
+## Copyright (c) Advanced Micro Devices, Inc., or its affiliates. 
+## 
+## SPDX-License-Identifier: MIT
+##
+################################################################################
+
 cmake_minimum_required ( VERSION 3.5.0 )
 
 # Set ext runtime module name and project name.
@@ -23,8 +31,10 @@ include ( utils )
 
 ## Compiler preproc definitions.
 #add_definitions ( -D__linux__ )
-add_definitions ( -DUNIX_OS )
-add_definitions ( -DLINUX )
+if(UNIX)
+  add_definitions ( -DUNIX_OS )
+  add_definitions ( -DLINUX )
+endif()
 add_definitions ( -D__AMD64__ )
 add_definitions ( -D__x86_64__ )
 add_definitions ( -DAMD_INTERNAL_BUILD )

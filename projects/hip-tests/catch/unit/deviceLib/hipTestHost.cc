@@ -391,6 +391,8 @@ TEST_CASE("Unit_TestDevice_DoublePrecisionMathFunc") {
   REQUIRE(srcPtr[0] == true);
 
   HIP_CHECK(hipFree(devicePtr));
+  HIP_CHECK(hipFree(Afd));
+  HIP_CHECK(hipFree(Ad));
   delete srcPtr;
   delete[] Af;
   delete[] A;

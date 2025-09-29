@@ -125,7 +125,9 @@ get_initial_environment()
     auto _dl_libpath   = get_realpath(get_internal_libpath("librocprof-sys-dl.so"));
     auto _omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so"));
     auto _libexecpath  = get_realpath(get_internal_script_path());
+    auto _rootpath     = get_realpath(get_rocprofsys_root());
 
+    update_env(_env, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
     update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
     update_env(_env, "LD_LIBRARY_PATH", tim::filepath::dirname(_dl_libpath), UPD_APPEND);
     update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
@@ -138,27 +140,33 @@ get_initial_environment()
 }
 
 std::string
-get_internal_libpath(const std::string& _lib)
+get_rocprofsys_root(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
+    char*       _tmp = realpath("/proc/self/exe", nullptr);
+    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
+
+    if(_tmp) free(_tmp);
+
     auto _pos = _exe.find_last_of('/');
     auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
+
+    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
+
+    return rocprofsys::common::join("/", _dir, "..");
+}
+
+std::string
+get_internal_libpath(const std::string& _lib)
+{
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "lib", _lib);
 }
 
 std::string
 get_internal_script_path(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir =
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems");
-
-    return _script_dir;
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 void
