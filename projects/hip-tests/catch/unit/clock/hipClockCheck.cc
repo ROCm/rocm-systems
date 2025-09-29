@@ -168,9 +168,14 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
  
 int getEngineFreq()
 {
+  typedef void *amdsmi_processor_handle;
+  typedef void *amdsmi_socket_handle;
+
+  std::unique_ptr<amdsmi_processor_handle[]> processors;
   // Opening and initializing rocm-smi library
   void* lib_rocm_smi_hdl;
-  
+  amdsmi_status_t status;
+
   typedef struct {
     uint32_t clk;            //!< In MHz
     uint32_t min_clk;        //!< In MHz
@@ -196,39 +201,44 @@ int getEngineFreq()
     AMDSMI_CLK_TYPE_DCLK0,      //!< Display 1 clock, timing signals for display output
     AMDSMI_CLK_TYPE_DCLK1,      //!< Display 2 clock, timing signals for display output
     AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
-} amdsmi_clk_type_t;
+  } amdsmi_clk_type_t;
 
-  /*amdsmi_clk_type_t clk_type;
-    amdsmi_clk_info_t *info;
-    void* processor_handle;*/
-  typedef void *amdsmi_processor_handle;
- 
-  [[maybe_unused]] amdsmi_status_t (*amdsmi_get_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*);
-  amdsmi_status_t (*amdsmi_init)(uint64_t);
-  amdsmi_status_t (*amdsmi_shut_down)();
-  
+  amdsmi_clk_info_t clk_info;
+  uint32_t gpu_count;
 
-  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/libamd_smi.so", RTLD_LAZY);
+  // lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/libamd_smi.so", RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("libamd_smi.so", RTLD_LAZY);
   REQUIRE(lib_rocm_smi_hdl);
 
-  void* fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_clock_info");
-  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_init");
-
+  void* fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_init");
+  auto fninit = reinterpret_cast<amdsmi_status_t (*)(uint64_t)>(fnsym);
   REQUIRE(fnsym);
-  amdsmi_get_clock_info = reinterpret_cast<amdsmi_status_t (*)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*)>(fnsym);  
-  amdsmi_init = reinterpret_cast<amdsmi_status_t (*)(uint64_t)>(fnsym);
+
+  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_processor_handles");
+  auto fnget_processor_handles = reinterpret_cast<amdsmi_status_t (*)(amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*)>(fnsym);
+  REQUIRE(fnsym);
+
+  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_clock_info");
+  REQUIRE(fnsym);
+  auto fnget_clock_info = reinterpret_cast<amdsmi_status_t (*)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*)>(fnsym);
 
   fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_shut_down");
+  auto fnshut_down = reinterpret_cast<amdsmi_status_t (*)()>(fnsym);
   REQUIRE(fnsym);
-  amdsmi_shut_down = reinterpret_cast<amdsmi_status_t (*)()>(fnsym);
 
-  uint64_t init_flags = 0;
-  amdsmi_status_t retsmi_init;
-  retsmi_init = amdsmi_init(init_flags);
-  REQUIRE(AMDSMI_STATUS_SUCCESS == retsmi_init);
-  amdsmi_shut_down();
+  status = fninit(1 << 1);
+  REQUIRE(AMDSMI_STATUS_SUCCESS == status);
+  // just get number of processors first
+  status = fnget_processor_handles(nullptr, &gpu_count, nullptr);
+  REQUIRE(AMDSMI_STATUS_SUCCESS == status);
+  processors.reset(new amdsmi_processor_handle[gpu_count]);
+  status = fnget_processor_handles(nullptr, &gpu_count, processors.get());
+  REQUIRE(AMDSMI_STATUS_SUCCESS == status);
+  status = fnget_clock_info(processors[0], AMDSMI_CLK_TYPE_GFX, &clk_info);
+  REQUIRE(AMDSMI_STATUS_SUCCESS == status);
+  printf("max_clk: %d\n", clk_info.max_clk);
+  fnshut_down();
   dlclose(lib_rocm_smi_hdl);
-  //   AMDSMI_CLK_TYPE_GFX
   return 0;
 }
 
