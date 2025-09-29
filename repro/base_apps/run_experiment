@@ -33,7 +33,8 @@ class ExperimentRunner:
             "app5_cpu_memory_pool",
             "app6_aql_start_packet",
             "app7_aql_read_packet",
-            "app8_aql_stop_packet"
+            "app8_aql_stop_packet",
+            "app9_signal_wait"
         ]
 
         # Data collection types with their script templates - easily modifiable
@@ -141,8 +142,6 @@ class ExperimentRunner:
                                 swapps_proc = subprocess.Popen(
                                     [self.swapps_cmd, "-s", script_path],
                                     cwd=self.base_dir,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE
                                 )
 
                             elif blocks_found == 2:
@@ -150,12 +149,31 @@ class ExperimentRunner:
                                 print(f"    Waiting for SwApps to complete...")
                                 if swapps_proc:
                                     try:
-                                        swapps_proc.wait(timeout=10)
+                                        # Get SwApps output
+                                        stdout_output, _ = swapps_proc.communicate(timeout=10)
                                         print(f"    SwApps completed normally")
+
+                                        # Print SwApps output
+                                        if stdout_output:
+                                            print(f"    SwApps output:")
+                                            for line in stdout_output.strip().split('\n'):
+                                                if line.strip():  # Skip empty lines
+                                                    print(f"      {line}")
+                                        else:
+                                            print(f"    SwApps produced no output")
+
                                     except subprocess.TimeoutExpired:
                                         print(f"    SwApps timeout - killing process")
                                         swapps_proc.kill()
-                                        swapps_proc.wait()
+                                        try:
+                                            stdout_output, _ = swapps_proc.communicate(timeout=2)
+                                            if stdout_output:
+                                                print(f"    Partial SwApps output before timeout:")
+                                                for line in stdout_output.strip().split('\n'):
+                                                    if line.strip():
+                                                        print(f"      {line}")
+                                        except:
+                                            pass
 
                             # Attach GDB to continue the process
                             gdb_proc = subprocess.Popen(
