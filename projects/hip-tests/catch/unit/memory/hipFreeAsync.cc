@@ -60,14 +60,6 @@ TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
     HIP_CHECK(hipFreeAsync(nullptr, stream.stream()));
   }
 
-  SECTION("Invalid stream handle") {
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&p), alloc_size, stream.stream()));
-    HIP_CHECK(hipStreamSynchronize(stream.stream()));
-    HIP_CHECK_ERROR(hipFreeAsync(p, reinterpret_cast<hipStream_t>(-1)), hipErrorInvalidHandle);
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(p), stream.stream()));
-    HIP_CHECK(hipStreamSynchronize(stream.stream()));
-  }
-
   SECTION("Double free") {
     HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&p), alloc_size, stream.stream()));
     HIP_CHECK(hipStreamSynchronize(stream.stream()));

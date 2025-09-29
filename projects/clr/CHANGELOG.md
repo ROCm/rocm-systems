@@ -50,10 +50,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Improved hip module loading latency
 * Optimized kernel metadata retrieval during module post load
 
-### Resolved issues
-
-* Fixed `hipFreeAsync` to properly validate stream handles and return `hipErrorInvalidHandle` when an invalid stream is provided. This change prevents potential segmentation faults that could occur previously.
-
 ## HIP 7.0.2 for ROCm 7.0.2
 
 ### Added

@@ -147,10 +147,6 @@ class FreeAsyncCommand : public amd::Command {
 hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   HIP_INIT_API(hipFreeAsync, dev_ptr, stream);
 
-  if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-
   getStreamPerThread(stream);
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
