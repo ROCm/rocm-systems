@@ -195,6 +195,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Perfetto support for scratch memory.
 - Support in the `rocprofv3` avail tool for command-line arguments.
 - Documentation for `rocprofv3` advanced options.
+- Support for multi dispatch ATT file added
 
 ### Changed
 
