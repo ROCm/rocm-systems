@@ -165,14 +165,12 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
     AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
     AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF  //!< An unknown error occurred
 } amdsmi_status_t;
- 
+
 int getEngineFreq()
 {
   typedef void *amdsmi_processor_handle;
   typedef void *amdsmi_socket_handle;
 
-  std::unique_ptr<amdsmi_processor_handle[]> processors;
-  // Opening and initializing rocm-smi library
   void* lib_rocm_smi_hdl;
   amdsmi_status_t status;
 
@@ -206,12 +204,15 @@ int getEngineFreq()
   amdsmi_clk_info_t clk_info;
   uint32_t gpu_count;
 
-  // lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/libamd_smi.so", RTLD_LAZY);
   lib_rocm_smi_hdl = dlopen("libamd_smi.so", RTLD_LAZY);
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_init");
   auto fninit = reinterpret_cast<amdsmi_status_t (*)(uint64_t)>(fnsym);
+  REQUIRE(fnsym);
+
+  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_socket_handles");
+  auto fnget_socket_handles = reinterpret_cast<amdsmi_status_t (*)(uint32_t*, amdsmi_socket_handle*)>(fnsym);
   REQUIRE(fnsym);
 
   fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_processor_handles");
@@ -228,11 +229,21 @@ int getEngineFreq()
 
   status = fninit(1 << 1);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
-  // just get number of processors first
-  status = fnget_processor_handles(nullptr, &gpu_count, nullptr);
+  uint32_t socket_count = 0;
+
+  // Get the socket count available in the system.
+  status = fnget_socket_handles(&socket_count, nullptr);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
-  processors.reset(new amdsmi_processor_handle[gpu_count]);
-  status = fnget_processor_handles(nullptr, &gpu_count, processors.get());
+
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  status = fnget_socket_handles(&socket_count, &sockets[0]);
+
+  // just get number of processors first
+  status = fnget_processor_handles(sockets[0], &gpu_count, nullptr);
+  REQUIRE(AMDSMI_STATUS_SUCCESS == status);
+
+  std::vector<amdsmi_processor_handle> processors(gpu_count);
+  status = fnget_processor_handles(sockets[0], &gpu_count, &processors[0]);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
   status = fnget_clock_info(processors[0], AMDSMI_CLK_TYPE_GFX, &clk_info);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
