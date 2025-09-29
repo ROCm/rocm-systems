@@ -940,7 +940,8 @@ auto&
 get_ompt_standard_cb_storage()
 {
     // uint64_t -> internal id from rocprofiler_correlation_id_t
-    static auto _v = std::unordered_map<uint64_t, rocprofsys_ompt_data_storage_t>{};
+    static thread_local auto _v =
+        std::unordered_map<uint64_t, rocprofsys_ompt_data_storage_t>{};
     return _v;
 }
 
@@ -948,7 +949,8 @@ auto&
 get_ompt_parallel_cb_storage()
 {
     // uintptr_t -> parallel_data (cb definition)
-    static auto _v = std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
+    static thread_local auto _v =
+        std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
     return _v;
 }
 
