@@ -123,8 +123,6 @@ void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode&& _mode, std::string_view _join_delim = ":")
 {
-    // updated_envs.emplace(_env_var);
-
     auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
     auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
     auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
