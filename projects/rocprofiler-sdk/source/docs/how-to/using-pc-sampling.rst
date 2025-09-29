@@ -414,7 +414,7 @@ SELECT * FROM pc_sampling WHERE sampling_method = 'host_trap';
 Browsing PC sampling data
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When you open the ``pc_sampling`` view, you can see the actual PC sampling data in a tabular format:
+When you open the ``pc_sampling`` view, you can see the actual PC sampling data in a tabular format, some of the fields are captured in the snapshot for reference:
 
 .. figure:: /data/pc_sampling_data_view.png
    :alt: PC sampling data in database browser
