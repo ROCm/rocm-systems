@@ -25,6 +25,8 @@
 
 #include "core/aql_profile.hpp"
 #include "core/pm4_factory.h"
+#include "aqlprofile-sdk/version.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 // header for memcpy
 #include <cstring>
 
@@ -44,7 +46,7 @@ Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
 
 // Mock classes to simulate Pm4Factory and related functionality
 class MockPm4Factory : public Pm4Factory {
-public:
+ public:
   MockPm4Factory() : Pm4Factory(BlockInfoMap(nullptr, 0)) {}
   MOCK_METHOD(const GpuBlockInfo*, GetBlockInfo, (const hsa_ven_amd_aqlprofile_event_t*), (const));
   MOCK_METHOD(bool, IsGFX9, (), (const));
@@ -103,7 +105,7 @@ hsa_status_t DefaultTracedataCallback(hsa_ven_amd_aqlprofile_info_type_t info_ty
 
 // Test fixture for CountersVec tests
 class CountersVecTest : public Test {
-protected:
+ protected:
   void SetUp() override {
     pm4_factory = new NiceMock<MockPm4Factory>();
     ON_CALL(*pm4_factory, IsGFX9()).WillByDefault(Return(true));
@@ -117,7 +119,7 @@ protected:
 };
 
 pm4_builder::counters_vector CountersVecTest::CountersVec(const profile_t* profile,
-                                                       const Pm4Factory* pm4_factory) {
+                                                          const Pm4Factory* pm4_factory) {
   pm4_builder::counters_vector vec;
   std::map<block_des_t, uint32_t, lt_block_des> index_map;
   for (const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
@@ -171,12 +173,12 @@ TEST_F(CountersVecTest, RegularEvents) {
   pm4_factory->GetBlockInfo(profile->events);
   bool is_gfx9 = pm4_factory->IsGFX9();
   EXPECT_TRUE(is_gfx9);
- 
+
 }
 
 // Test fixture for the DefaultTracedataCallback function
 class DefaultTracedataCallbackTest : public Test {
-protected:
+ protected:
   hsa_ven_amd_aqlprofile_info_data_t CreateInfoData(uint32_t sample_id) {
     hsa_ven_amd_aqlprofile_info_data_t data{};
     data.sample_id = sample_id;
@@ -242,4 +244,21 @@ TEST_F(DefaultTracedataCallbackTest, NonTraceInfoType) {
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(callback_data.trace_data.ptr, original_ptr);
   EXPECT_EQ(callback_data.trace_data.size, original_size);
+}
+
+TEST(aqlprofile, version) {
+  auto correct_version = aqlprofile_version_t{.major = AQLPROFILE_VERSION_MAJOR,
+                                              .minor = AQLPROFILE_VERSION_MINOR,
+                                              .patch = AQLPROFILE_VERSION_PATCH};
+
+  auto query_version = aqlprofile_version_t{};
+
+  auto ret = aqlprofile_get_version(&query_version);
+
+  EXPECT_EQ(ret, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(query_version.major, correct_version.major);
+  EXPECT_EQ(query_version.minor, correct_version.minor);
+  EXPECT_EQ(query_version.patch, correct_version.patch);
+
+  EXPECT_EQ(aqlprofile_get_version(nullptr), HSA_STATUS_ERROR_INVALID_ARGUMENT);
 }

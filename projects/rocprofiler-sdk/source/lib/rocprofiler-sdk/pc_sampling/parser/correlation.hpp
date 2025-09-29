@@ -378,6 +378,10 @@ pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
     {
         parseSample_func = _parse_buffer<GFX11, PcSamplingRecordT>;
     }
+    else if(gfxip_major == 12)
+    {
+        parseSample_func = _parse_buffer<GFX12, PcSamplingRecordT>;
+    }
     else
     {
         return PCSAMPLE_STATUS_INVALID_GFXIP;
