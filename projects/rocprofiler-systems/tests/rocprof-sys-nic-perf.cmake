@@ -78,7 +78,8 @@ add_test(
     NAME nic-performance
     COMMAND
         $<TARGET_FILE:rocprofiler-systems-sample> -- wget --no-check-certificate
-        ${_download_url} ${_download2_url} -O ${PROJECT_BINARY_DIR}/rocprofiler-systems.test.bin
+        ${_download_url} ${_download2_url} -O
+        ${PROJECT_BINARY_DIR}/rocprofiler-systems.test.bin
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
