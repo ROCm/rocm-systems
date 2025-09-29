@@ -2157,69 +2157,6 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
     result = HostBlitManager::fillBuffer(memory, pattern, patternSize, size, origin, size, entire);
     synchronize();
     return result;
-  } else {
-    // Pack the fill buffer info, that handles unaligned memories.
-    std::vector<FillBufferInfo> packed_vector{};
-    FillBufferInfo::PackInfo(memory, size[0], origin[0], pattern, patternSize, packed_vector);
-
-    size_t overall_offset = origin[0];
-    for (auto& packed_obj : packed_vector) {
-      constexpr uint32_t kFillType = FillBufferAligned;
-      uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
-                                   : patternSize;
-      size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
-      uint64_t koffset = overall_offset;
-      overall_offset += packed_obj.fill_size_;
-
-      size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
-                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
-                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
-                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
-                                                        : sizeof(uint8_t);
-
-      // Program kernels arguments for the fill operation
-      Memory* mem = &gpuMem(memory);
-      setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
-      const size_t localWorkSize = 256;
-      size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
-      globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
-
-      Memory& gpuCB = gpu().xferWrite().Acquire(patternSize);
-      void* constBuf = gpuCB.map(&gpu(), Resource::NoWait);
-      // If pattern has been expanded, use the expanded pattern, otherwise use the default pattern
-      if (packed_obj.pattern_expanded_) {
-        memcpy(constBuf, &packed_obj.expanded_pattern_, kpattern_size);
-      } else {
-        memcpy(constBuf, pattern, kpattern_size);
-      }
-      gpuCB.unmap(&gpu());
-      Memory* pGpuCB = &gpuCB;
-      setArgument(kernels_[kFillType], 1, sizeof(cl_mem), &pGpuCB);
-      uint64_t offset = origin[0];
-
-      // Adjust the pattern size in the copy type size
-      kpattern_size /= alignment;
-      setArgument(kernels_[kFillType], 2, sizeof(uint32_t), &kpattern_size);
-      setArgument(kernels_[kFillType], 3, sizeof(alignment), &alignment);
-
-      // Calculate max id
-      uint64_t end_ptr = memory.virtualAddress() + koffset + kfill_size * kpattern_size * alignment;
-      setArgument(kernels_[kFillType], 4, sizeof(end_ptr), &end_ptr);
-      uint32_t next_chunk = globalWorkSize * kpattern_size;
-      setArgument(kernels_[kFillType], 5, sizeof(uint32_t), &next_chunk);
-      uint32_t lws = localWorkSize;
-      setArgument(kernels_[kFillType], 6, sizeof(lws), &lws);
-
-      // Create ND range object for the kernel's execution
-      amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
-
-      // Execute the blit
-      address parameters = kernels_[kFillType]->parameters().values();
-      result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters);
-      gpu().xferWrite().Release(gpuCB);
-    }
   }
 
   synchronize();

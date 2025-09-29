@@ -27,6 +27,7 @@
 #include "device/blit.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocsched.hpp"
+#include <vector>
 
 /*! \addtogroup ROC Blit Implementation
  *  @{
@@ -275,6 +276,7 @@ class KernelBlitManager : public DmaBlitManager {
  public:
   enum {
     FillBufferAligned = 0,
+    FillBufferUnAligned,
     FillBufferAligned2D,
     BlitCopyBuffer,
     BlitCopyBufferAligned,
@@ -512,6 +514,24 @@ class KernelBlitManager : public DmaBlitManager {
   static constexpr uint TransferSplitSize = 1;
   static constexpr uint MaxNumIssuedTransfers = 3;
 
+  //! Structure to hold alignment information for memory operations
+  struct AlignmentInfo {
+    struct SegmentInfo {
+      size_t address;           //!< Starting address for this segment
+      size_t size;              //!< Size in bytes of this segment (0 = segment doesn't exist)
+      std::vector<uint8_t> pattern;  //!< Pattern data for this segment
+    };
+    
+    SegmentInfo head;           //!< Unaligned head portion
+    SegmentInfo aligned;        //!< Aligned middle portion  
+    SegmentInfo tail;           //!< Unaligned tail portion
+  };
+
+  //! Analyzes memory alignment and creates optimized patterns for head/aligned/tail segments
+  AlignmentInfo analyzeMemoryAlignment(device::Memory& memory, const amd::Coord3D& origin,
+                                       const void* pattern, size_t patternSize, 
+                                       size_t totalSize) const;
+
   //! Copies a buffer object to an image object
   bool copyBufferToImageKernel(
       device::Memory& srcMemory,                            //!< Source memory object
@@ -581,8 +601,9 @@ class KernelBlitManager : public DmaBlitManager {
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
-    "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillBufferAligned2D",
-    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferAligned",
+    "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillBufferUnAligned",
+    "__amd_rocclr_fillBufferAligned2D", "__amd_rocclr_copyBuffer",
+    "__amd_rocclr_copyBufferAligned",
     "__amd_rocclr_copyBufferRect",    "__amd_rocclr_copyBufferRectAligned",
     "__amd_rocclr_streamOpsWrite",    "__amd_rocclr_streamOpsWait",
     "__amd_rocclr_scheduler",         "__amd_rocclr_gwsInit",

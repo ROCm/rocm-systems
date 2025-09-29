@@ -2002,12 +2002,77 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
 }
 
 // ================================================================================================
+KernelBlitManager::AlignmentInfo KernelBlitManager::analyzeMemoryAlignment(
+    device::Memory& memory, const amd::Coord3D& origin, const void* pattern, size_t patternSize,
+    size_t totalSize) const {
+  AlignmentInfo info = {};                         // All sizes initialized to 0
+  const size_t alignmentBoundary = sizeof(void*);  // 8 bytes on 64-bit systems
+  const size_t startAddress = memory.virtualAddress() + origin[0];
+  const size_t alignmentOffset = startAddress & (alignmentBoundary - 1);
+
+  const uint8_t* patternBytes = static_cast<const uint8_t*>(pattern);
+
+  if (alignmentOffset != 0) {
+    // We have an unaligned start - create head segment
+    const size_t headSize = std::min(alignmentBoundary - alignmentOffset, totalSize);
+    info.head.address = startAddress;
+    info.head.size = headSize;
+
+    // Create head pattern with preceding zeros
+    info.head.pattern.resize(alignmentBoundary, 0);
+    for (size_t i = 0; i < headSize; ++i) {
+      info.head.pattern[alignmentOffset + i] = patternBytes[i % patternSize];
+    }
+  }
+
+  // Calculate aligned segment
+  const size_t alignedStart = (startAddress + alignmentBoundary - 1) & ~(alignmentBoundary - 1);
+  const size_t remainingAfterHead = totalSize - info.head.size;
+  const size_t alignedSize = (remainingAfterHead / alignmentBoundary) * alignmentBoundary;
+
+  if (alignedSize > 0) {
+    info.aligned.address = alignedStart;
+    info.aligned.size = alignedSize;
+
+    // Create rotated pattern for aligned segment
+    const size_t patternOffset = info.head.size > 0 ? info.head.size % patternSize : 0;
+    info.aligned.pattern.resize(patternSize);
+    for (size_t i = 0; i < patternSize; ++i) {
+      info.aligned.pattern[i] = patternBytes[(i + patternOffset) % patternSize];
+    }
+  }
+
+  // Calculate tail segment
+  const size_t processedSize = info.head.size + alignedSize;
+  const size_t tailSize = totalSize - processedSize;
+
+  if (tailSize > 0) {
+    info.tail.address = startAddress + processedSize;
+    info.tail.size = tailSize;
+
+    // Create tail pattern with preceding zeros
+    info.tail.pattern.resize(alignmentBoundary, 0);
+    const size_t tailPatternOffset = processedSize % patternSize;
+    for (size_t i = 0; i < tailSize; ++i) {
+      info.tail.pattern[i] = patternBytes[(tailPatternOffset + i) % patternSize];
+    }
+  }
+
+  return info;
+}
+
+// ================================================================================================
 bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern,
                                      size_t patternSize, const amd::Coord3D& surface,
                                      const amd::Coord3D& origin, const amd::Coord3D& size,
                                      bool entire, bool forceBlit) const {
   amd::ScopedLock k(lockXferOps_);
   bool result = false;
+
+  // Analyze memory alignment and create optimized patterns for head/aligned/tail segments
+  AlignmentInfo alignInfo = analyzeMemoryAlignment(memory, origin, pattern, patternSize, size[0]);
+  bool unalignedMemory =
+      (DEBUG_REDUCE_FILLBUFFER_PACKETS && (alignInfo.head.size > 0 || alignInfo.tail.size > 0));
 
   // Use host fill if memory has direct access
   if (setup_.disableFillBuffer_ || (!forceBlit && memory.isHostMemDirectAccess())) {
@@ -2017,68 +2082,74 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     synchronize();
     return result;
   } else {
-    // Pack the fill buffer info, that handles unaligned memories.
-    std::vector<FillBufferInfo> packed_vector{};
-    FillBufferInfo::PackInfo(memory, size[0], origin[0], pattern, patternSize, packed_vector);
-
     size_t overall_offset = origin[0];
-    for (auto& packed_obj : packed_vector) {
-      constexpr uint32_t kFillType = FillBufferAligned;
-      uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
-                                   : patternSize;
-      size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
-      size_t koffset = overall_offset;
-      overall_offset += packed_obj.fill_size_;
+    uint32_t kFillType = unalignedMemory ? FillBufferUnAligned : FillBufferAligned;
 
-      size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
-                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
-                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
-                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
-                                                        : sizeof(uint8_t);
-      // Program kernels arguments for the fill operation
-      cl_mem mem = as_cl<amd::Memory>(memory.owner());
-      setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
-      const size_t localWorkSize = 256;
-      size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
-      globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
+    uint32_t kpattern_size = (packed_obj.pattern_expanded_)
+                                 ? HostBlitManager::FillBufferInfo::kExtendedSize
+                                 : patternSize;
+    size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
+    size_t koffset = overall_offset;
+    overall_offset += packed_obj.fill_size_;
 
-      bool isGraphPktCapturing =
-          gpu().command() != nullptr && gpu().command()->getPktCapturingState();
-      auto constBuf = isGraphPktCapturing ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment)
-                                          : gpu().allocKernArg(kCBSize, kCBAlignment);
+    size_t globalWorkOffset[3] = {0, 0, 0};
+    uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
+                         : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
+                         : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
+                         : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
+                                                      : sizeof(uint8_t);
+    // Program kernels arguments for the fill operation
+    cl_mem mem = as_cl<amd::Memory>(memory.owner());
+    setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
+    const size_t localWorkSize = 256;
+    size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
+    globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
 
-      // If pattern has been expanded, use the expanded pattern, otherwise use the default pattern.
-      if (packed_obj.pattern_expanded_) {
-        memcpy(constBuf, &packed_obj.expanded_pattern_, kpattern_size);
-      } else {
-        memcpy(constBuf, pattern, kpattern_size);
-      }
-      constexpr bool kDirectVa = true;
-      setArgument(kernels_[kFillType], 1, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
+    bool isGraphPktCapturing =
+        gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+    auto constBuf = isGraphPktCapturing ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment)
+                                        : gpu().allocKernArg(kCBSize, kCBAlignment);
 
-      // Adjust the pattern size in the copy type size
-      kpattern_size /= alignment;
-      setArgument(kernels_[kFillType], 2, sizeof(uint32_t), &kpattern_size);
-      setArgument(kernels_[kFillType], 3, sizeof(alignment), &alignment);
+    memcpy(constBuf, pattern, kpattern_size);
+    constexpr bool kDirectVa = true;
+    setArgument(kernels_[kFillType], 1, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
 
-      // Calculate max id
-      kfill_size = memory.virtualAddress() + koffset + kfill_size * kpattern_size * alignment;
-      setArgument(kernels_[kFillType], 4, sizeof(kfill_size), &kfill_size);
-      uint32_t next_chunk = globalWorkSize * kpattern_size;
-      setArgument(kernels_[kFillType], 5, sizeof(uint32_t), &next_chunk);
-      uint32_t lws = localWorkSize;
-      setArgument(kernels_[kFillType], 6, sizeof(lws), &lws);
+    // Adjust the pattern size in the copy type size
+    kpattern_size /= alignment;
+    setArgument(kernels_[kFillType], 2, sizeof(uint32_t), &kpattern_size);
+    setArgument(kernels_[kFillType], 3, sizeof(alignment), &alignment);
 
-      // Create ND range object for the kernel's execution
-      amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
+    // Calculate max id
+    kfill_size = memory.virtualAddress() + koffset + kfill_size * kpattern_size * alignment;
+    setArgument(kernels_[kFillType], 4, sizeof(kfill_size), &kfill_size);
+    uint32_t next_chunk = globalWorkSize * kpattern_size;
+    setArgument(kernels_[kFillType], 5, sizeof(uint32_t), &next_chunk);
+    uint32_t lws = localWorkSize;
+    setArgument(kernels_[kFillType], 6, sizeof(lws), &lws);
 
-      // Execute the blit
-      address parameters = captureArguments(kernels_[kFillType]);
-      result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
-      releaseArguments(parameters);
+    if (unalignedMemory) {
+      uint32_t headSize = static_cast<uint32_t>(alignInfo.head.size);
+      uint32_t tailSize = static_cast<uint32_t>(alignInfo.tail.size);
+      uint64_t headAddress = static_cast<uint64_t>(alignInfo.head.address);
+      uint64_t tailAddress = static_cast<uint64_t>(alignInfo.tail.address);
+      const void* headPattern = alignInfo.head.size > 0 ? alignInfo.head.pattern.data() : nullptr;
+      const void* tailPattern = alignInfo.tail.size > 0 ? alignInfo.tail.pattern.data() : nullptr;
+
+      setArgument(kernels_[kFillType], 7, sizeof(uint32_t), &headSize);
+      setArgument(kernels_[kFillType], 8, sizeof(void*), &headPattern);
+      setArgument(kernels_[kFillType], 9, sizeof(uint64_t), &headAddress);
+      setArgument(kernels_[kFillType], 10, sizeof(uint32_t), &tailSize);
+      setArgument(kernels_[kFillType], 11, sizeof(void*), &tailPattern);
+      setArgument(kernels_[kFillType], 12, sizeof(uint64_t), &tailAddress);
     }
+
+    // Create ND range object for the kernel's execution
+    amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
+
+    // Execute the blit
+    address parameters = captureArguments(kernels_[kFillType]);
+    result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
+    releaseArguments(parameters);
   }
 
   synchronize();
