@@ -1726,6 +1726,7 @@ bool VirtualGPU::create() {
 
   // Initialize barrier and barrier value packets
   memset(&barrier_packet_, 0, sizeof(barrier_packet_));
+  memset(&barrier_value_packet_, 0, sizeof(barrier_value_packet_));
   barrier_packet_.header = kInvalidAql;
   barrier_value_packet_.header.header = kInvalidAql;
 
