@@ -305,7 +305,7 @@ VulkanTest::MappedBuffer<T> VulkanTest::CreateMappedStorage(uint32_t count,
   VkExportMemoryWin32HandleInfoKHR vulkanExportMemoryWin32HandleInfoKHR = {};
 #endif
 
-if (external) {
+  if (external) {
     vulkan_export_memory_allocate_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
     vulkan_export_memory_allocate_info.handleTypes = _mem_handle_type;
 
