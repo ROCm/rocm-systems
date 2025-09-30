@@ -28,7 +28,10 @@ RUN apt-get update && \
         gzip iproute2 libiberty-dev libpapi-dev libpfm4-dev libsqlite3-dev libtool \
         locales lsb-release m4 ninja-build python3-pip software-properties-common \
         texinfo unzip wget vim zip zlib1g-dev && \
-    apt-get autoclean
+    apt-get autocleane && \
+    if [ "${OS_VERSION}" == "20.04" ]; then \
+        apt-get install -y gfortran; \
+    fi
 
 RUN if ! pip install 'cmake==3.21' perfetto 2>&1 | tee pip_output.log | grep -q "externally managed environment"; then \
         echo "pip install succeeded without --break-system-packages"; \
