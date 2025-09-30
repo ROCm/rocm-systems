@@ -3300,6 +3300,51 @@ def showWeightTopology(deviceList):
         printEmptyLine()
 
 
+def showHopsTopology(deviceList):
+    """ Display the HW Topology Information based on number of hops
+
+    This reads the HW Topology file and displays the matrix for the nodes
+
+    :param deviceList: List of DRM devices (can be a single-item list)
+    """
+    linktype = c_char_p()
+    devices_ind = range(len(deviceList))
+    gpu_links_hops = [[0 for x in devices_ind] for y in devices_ind]
+    printLogSpacer(' Hops between two GPUs ')
+    for srcdevice in deviceList:
+        for destdevice in deviceList:
+            if (srcdevice == destdevice):
+                gpu_links_hops[srcdevice][destdevice] = '0'
+                continue
+            hops = c_uint64()
+            ret = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
+            if rsmi_ret_ok(ret, metric='get_link_type_topology'):
+                gpu_links_hops[srcdevice][destdevice] = hops
+            else:
+                gpu_links_hops[srcdevice][destdevice] = None
+
+    if PRINT_JSON:
+        formatMatrixToJSON(deviceList, gpu_links_hops, "(Topology) Hops between DRM devices {} and {}")
+        return
+
+    printTableRow(None, '      ')
+    for row in deviceList:
+        tmp = 'GPU%d' % row
+        printTableRow('%-12s', tmp)
+    printEmptyLine()
+    for gpu1 in deviceList:
+        tmp = 'GPU%d' % gpu1
+        printTableRow('%-6s', tmp)
+        for gpu2 in deviceList:
+            if (gpu1 == gpu2):
+                printTableRow('%-12s', '0')
+            elif (gpu_links_hops[gpu1][gpu2] is None):
+                printTableRow('%-12s', 'N/A')
+            else:
+                printTableRow('%-12s', gpu_links_hops[gpu1][gpu2].value)
+        printEmptyLine()
+
+
 def showTypeTopology(deviceList):
     """ Display the HW Topology Information based on link type
 
@@ -3375,6 +3420,8 @@ def showHwTopology(deviceList):
     :param deviceList: List of DRM devices (can be a single-item list)
     """
     showWeightTopology(deviceList)
+    printEmptyLine()
+    showHopsTopology(deviceList)
     printEmptyLine()
     showTypeTopology(deviceList)
     printEmptyLine()
@@ -4277,6 +4324,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showtopo', help='Show hardware topology information', action='store_true')
     groupDisplay.add_argument('--showtopoaccess', help='Shows the link accessibility between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopoweight', help='Shows the relative weight between GPUs ', action='store_true')
+    groupDisplay.add_argument('--showtopohops', help='Shows the number of hops between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopotype', help='Shows the link type between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtoponuma', help='Shows the numa nodes ', action='store_true')
     groupDisplay.add_argument('--showenergycounter', help='Energy accumulator that stores amount of energy consumed',
@@ -4553,6 +4601,8 @@ if __name__ == '__main__':
         showAccessibleTopology(deviceList)
     if args.showtopoweight:
         showWeightTopology(deviceList)
+    if args.showtopohops:
+        showHopsTopology(deviceList)
     if args.showtopotype:
         showTypeTopology(deviceList)
     if args.showtoponuma:

@@ -58,7 +58,7 @@ The following is the output from the ``-h`` flag:
                    [-m] [-o] [-p] [-S] [-s] [--showmeminfo TYPE [TYPE ...]] [--showpids [VERBOSE]]
                    [--showpidgpus [SHOWPIDGPUS [SHOWPIDGPUS ...]]] [--showreplaycount]
                    [--showrasinfo [SHOWRASINFO [SHOWRASINFO ...]]] [--showvc] [--showxgmierr] [--showtopo]
-                   [--showtopoaccess] [--showtopoweight] [--showtopotype] [--showtoponuma]
+                   [--showtopoaccess] [--showtopoweight] [--showtopohops] [--showtopotype] [--showtoponuma]
                    [--showenergycounter] [--shownodesbw] [--showcomputepartition] [--showmemorypartition] [-r]
                    [--resetfans] [--resetprofile] [--resetpoweroverdrive] [--resetxgmierr] [--resetperfdeterminism]
                    [--resetcomputepartition] [--resetmemorypartition] [--setclock TYPE LEVEL] [--setsclk LEVEL [LEVEL ...]]
@@ -147,6 +147,7 @@ The following is the output from the ``-h`` flag:
      --showtopo                                                       Show hardware topology information
      --showtopoaccess                                                 Shows the link accessibility between GPUs
      --showtopoweight                                                 Shows the relative weight between GPUs
+     --showtopohops                                                   Shows the number of hops between GPUs
      --showtopotype                                                   Shows the link type between GPUs
      --showtoponuma                                                   Shows the numa nodes
      --showenergycounter                                              Energy accumulator that stores amount of energy
