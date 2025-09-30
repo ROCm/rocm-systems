@@ -156,6 +156,17 @@ foreach(
 endforeach()
 
 if(ENABLE_FORTRAN_MPI_CTESTS)
+    set(_fortran_mpip_flat_environment
+        "ROCPROFSYS_FLAT_PROFILE=ON"
+        "ROCPROFSYS_COUT_OUTPUT=ON"
+        "ROCPROFSYS_TIMELINE_PROFILE=OFF"
+        "ROCPROFSYS_COLLAPSE_PROCESSES=ON"
+        "ROCPROFSYS_COLLAPSE_THREADS=ON"
+        "ROCPROFSYS_SAMPLING_FREQ=50"
+        "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count"
+        "${_mpip_environment}"
+    )
+
     rocprofiler_systems_add_test(
         NAME "mpi-fortran-poisson"
         TARGET mpi-fortran-poisson
@@ -172,7 +183,9 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
             args
             --min-instructions
             0
-        ENVIRONMENT "${_mpip_environment}"
+        ENVIRONMENT "${_fortran_mpip_flat_environment}"
+        REWRITE_RUN_PASS_REGEX
+            ">>> mpi-fortran-poisson.inst(.*\n.*)>>> PMPI_Init(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)>>> PMPI_Cart_create(.*\n.*)>>> PMPI_Cart_shift(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)>>> PMPI_Allreduce(.*\n.*)"
     )
 
     rocprofiler_systems_add_test(
@@ -191,6 +204,8 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
             args
             --min-instructions
             0
-        ENVIRONMENT "${_mpip_environment}"
+        ENVIRONMENT "${_fortran_mpip_flat_environment}"
+        REWRITE_RUN_PASS_REGEX
+            ">>> mpi-fortran-poisson-nonblock.inst(.*\n.*)>>> PMPI_Init(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)>>> PMPI_Cart_create(.*\n.*)>>> PMPI_Cart_shift(.*\n.*)>>> PMPI_Isend(.*\n.*)>>> PMPI_Irecv(.*\n.*)>>> PMPI_Waitall(.*\n.*)>>> PMPI_Allreduce(.*\n.*)"
     )
 endif()
