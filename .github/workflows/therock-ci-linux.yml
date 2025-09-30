@@ -71,6 +71,7 @@ jobs:
 
       - name: Patch rocm-systems
         run: |
+          rm ./TheRock/patches/amd-mainline/rocm-systems/0007-Rollup-of-build-changes-needed-for-compat-with-TheRo.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Configure Projects

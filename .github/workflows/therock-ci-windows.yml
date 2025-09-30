@@ -54,6 +54,7 @@ jobs:
 
       - name: Patch rocm-systems
         run: |
+          rm ./TheRock/patches/amd-mainline/rocm-systems/0007-Rollup-of-build-changes-needed-for-compat-with-TheRo.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
@@ -95,7 +96,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
