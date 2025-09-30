@@ -99,10 +99,6 @@ const std::vector<LimitDesc> kLimits = {
     {hipLimitStackSize, "hipLimitStackSize"},
     {hipLimitPrintfFifoSize, "hipLimitPrintfFifoSize"},
     {hipLimitMallocHeapSize, "hipLimitMallocHeapSize"},
-#if HIP_VERSION_MAJOR >= 7
-    {hipLimitDevRuntimeSyncDepth, "hipLimitDevRuntimeSyncDepth"},
-    {hipLimitDevRuntimePendingLaunchCount, "hipLimitDevRuntimePendingLaunchCount"}
-#endif
 };
 
 void
