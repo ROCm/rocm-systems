@@ -71,6 +71,9 @@ config["METRIC_LOGGING"] = False
 num_kernels = 3
 num_devices = 1
 
+attach_detach_interval_msec_no_delay = 10000
+attach_detach_interval_msec_with_delay = 60000
+
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
@@ -1785,10 +1788,9 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
 
     process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
-    time_to_detach = "10000"
     attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = time_to_detach
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
 
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -1845,10 +1847,9 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
         [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
     )
 
-    time_to_detach = "60000"
     attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = time_to_detach
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_with_delay
 
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -1901,11 +1902,10 @@ def test_live_attach_detach_singlepath_launch_stats(
     env["ROCP_TOOL_ATTACH"] = "1"
 
     process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
-    time_to_detach = "10000"
 
     attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = time_to_detach
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
 
     _ = binary_handler_profile_rocprof_compute(
         config,
