@@ -49,7 +49,7 @@ Where ``<PID>`` is the process ID of the target application. The optional ``--hi
    rocprofv3 --attach <PID> --hip-trace --output-format rocpd
 
 4. Detach the profiler when done:
-   Press `Enter` in the terminal where ``rocprofv3`` is running to detach the profiler from the target application.
+   Press `Enter` in the terminal where ``rocprofv3`` is running to detach the profiler from the target application. Sending SIGINT (`Ctrl+C`) can also be sent to ``rocprofv3`` to detach from the target.
 
 5. The profiling data will be saved in the specified output format.
 
