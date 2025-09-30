@@ -1,0 +1,103 @@
+name: Publish GHCR Packages for rocprofiler-compute CI Images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 5 * * *
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rocprofiler-compute-ghcr.yml'
+      - 'projects/rocprofiler-compute/docker/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-compute-ghcr.yml'
+      - 'projects/rocprofiler-compute/docker/**'
+
+jobs:
+  rocprofiler-compute-ci-gfx:
+    needs: prepare_matrix_ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          # TODO: Add these for now while working on matrix solution for compute
+          - { distro: 'ubuntu', version: '22.04' }
+          - { distro: 'ubuntu', version: '24.04' }
+        gpu: [ 'gfx94X', 'gfx950' ]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: projects/rocprofiler-compute
+          submodules: recursive
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker variables
+        id: setup_vars_gfx
+        run: |
+          if [ ${{ matrix.system.distro }} = "opensuse" ]; then
+            DISTRO_IMAGE="opensuse/leap"
+          elif [ ${{ matrix.system.distro }} = "rhel" ]; then
+            DISTRO_IMAGE="rockylinux/rockylinux"
+          else
+            DISTRO_IMAGE=${{ matrix.system.distro }}
+          fi
+          echo "distro_image=${DISTRO_IMAGE}" >> $GITHUB_OUTPUT
+
+          if [ ${{ matrix.system.distro }} = "debian" ]; then
+            DOCKER_FILE=Dockerfile.ubuntu.ci
+          else
+            DOCKER_FILE=Dockerfile.${{ matrix.system.distro }}.ci
+          fi
+          echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
+      
+      - name: Get the latest build of The Rock tarball
+        id: therock
+        run: |
+          sudo apt-get install -y python3-pip
+          python3 -m pip install -U pip
+          python3 -m pip install -U awscli
+          export PATH=~/.local/bin:$PATH
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
+      
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5.8.0
+        with:
+          images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}
+
+      - name: Build CI GFX Container (Does not Push on PR)
+        uses: docker/build-push-action@v6.18.0
+        with:
+          file: projects/rocprofiler-compute/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
+            VERSION=${{ matrix.system.version }}
+            GPU_TYPE=${{ matrix.gpu }}
+            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
+          tags: |
+            ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-compute-ci-${{ matrix.gpu }}
+          labels: ${{ steps.meta.outputs.labels }}
