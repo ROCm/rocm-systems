@@ -40,7 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: users/geomin12/compiler-test
+          ref: users/marbre/inject-source-dirs
           # ref: 7dbdbb9ca6db2029646ce158b13bd1c77dea55a3 # 2025-09-25 commit
 
       - name: Install python deps
@@ -78,7 +78,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_SYSTEMS=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=${{ env.GITHUB_WORKSPACE }} ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_SYSTEMS=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python TheRock/build_tools/github_actions/build_configure.py
