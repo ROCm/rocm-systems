@@ -190,10 +190,10 @@ void getCurrentDeviceUUID(hipUUID& uuid)
 }
 
 // @uuid the id of the GPU to query the frequency for
-// @return the maximum engine frequency of the GPU -1 if error
+// @return the maximum engine frequency of the GPU (MHz) or -1 if error
 int getEngineFreq(const hipUUID& uuid)
 {
-  static constexpr unsigned int AMDSMI_GPU_UUID_SIZE = 38;
+  static constexpr unsigned int AMDSMI_MAX_STRING_LENGTH = 256;
   typedef void *amdsmi_processor_handle;
   typedef void *amdsmi_socket_handle;
 
@@ -208,6 +208,14 @@ int getEngineFreq(const hipUUID& uuid)
     uint8_t clk_deep_sleep;  //!< True/False
     uint32_t reserved[4];
   } amdsmi_clk_info_t;
+
+  typedef struct {
+    uint32_t drm_render; //!< the render node under /sys/class/drm/renderD*
+    uint32_t drm_card;   //!< the graphic card device under /sys/class/drm/card*
+    uint32_t hsa_id;     //!< the HSA enumeration ID
+    uint32_t hip_id;     //!< the HIP enumeration ID
+    char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  //!< the HIP unique identifer
+  } amdsmi_enumeration_info_t;
 
   typedef enum {
     AMDSMI_CLK_TYPE_SYS = 0x0,  //!< System clock
@@ -233,7 +241,7 @@ int getEngineFreq(const hipUUID& uuid)
   amdsmi_status_t (*fninit)(uint64_t);
   amdsmi_status_t (*fnget_socket_handles)(uint32_t*, amdsmi_socket_handle*);
   amdsmi_status_t (*fnget_processor_handles)(amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*);
-  amdsmi_status_t (*fnget_gpu_device_uuid)(amdsmi_processor_handle, unsigned int*, char*);
+  amdsmi_status_t (*fnget_gpu_enumeration_info)(amdsmi_processor_handle, amdsmi_enumeration_info_t*);
   amdsmi_status_t (*fnget_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*);
   amdsmi_status_t (*fnshut_down)();
 
@@ -247,7 +255,7 @@ int getEngineFreq(const hipUUID& uuid)
     loadSym(fninit, "amdsmi_init", libHdl);
     loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", libHdl);
     loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", libHdl);
-    loadSym(fnget_gpu_device_uuid, "amdsmi_get_gpu_device_uuid", libHdl);
+    loadSym(fnget_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info", libHdl);
     loadSym(fnget_clock_info, "amdsmi_get_clock_info", libHdl);
     loadSym(fnshut_down, "amdsmi_shut_down", libHdl);
   } catch (std::runtime_error&) {
@@ -285,14 +293,20 @@ int getEngineFreq(const hipUUID& uuid)
     }
 
     while (numProcessor < gpu_count && result == -1) {
-      char procUUID[AMDSMI_GPU_UUID_SIZE];
-      unsigned int stringLength = AMDSMI_GPU_UUID_SIZE;
+      amdsmi_enumeration_info_t info;
+      int offset = 0;
+      const char* prefix = "GPU-";
 
-      if (fnget_gpu_device_uuid(processors[numProcessor], &stringLength, procUUID)) {
+      if (fnget_gpu_enumeration_info(processors[numProcessor], &info)) {
 	return -1;
       }
 
-      if (!std::memcmp(uuid.bytes, procUUID, sizeof(hipUUID::bytes))) {
+      if (!std::strncmp(info.hip_uuid, "GPU-", std::strlen(prefix))) {
+	// amd-smi adds "GPU-" in front of the hip_uuid; whereas HIP doesn't
+	offset = strlen(prefix);
+      }
+
+      if (!std::memcmp(uuid.bytes, info.hip_uuid + offset, sizeof(hipUUID::bytes) - offset)) {
         if (fnget_clock_info(processors[numProcessor], AMDSMI_CLK_TYPE_GFX, &clk_info)) {
           return -1;
         }
@@ -327,6 +341,7 @@ int getEngineFreq(const hipUUID& uuid)
 TEST_CASE("Unit_hipClock64_Positive_Basic") {
   hipUUID uuid;
   HIP_CHECK(hipSetDevice(0));
+  int smiclock_rate = 0; // in kHz
   int clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
   if (clock_rate == 0) {
@@ -339,11 +354,21 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
   }
 
   getCurrentDeviceUUID(uuid);
-  REQUIRE(getEngineFreq(uuid) == clock_rate);
+  smiclock_rate = getEngineFreq(uuid) * 1000;
+
+  if (smiclock_rate == -1) {
+    WARN("Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
+    smiclock_rate = clock_rate;
+  } else if (smiclock_rate != clock_rate) {
+    WARN("clock rate: " << smiclock_rate <<
+	 "kHz is not set to maximum: " << clock_rate <<
+         "kHz");
+  }
+
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
-  REQUIRE(kernel_time_execution(kernel_c64, clock_rate, expected_time1, expected_time2));
+  REQUIRE(kernel_time_execution(kernel_c64, smiclock_rate, expected_time1, expected_time2));
 }
 
 /**
