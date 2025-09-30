@@ -372,12 +372,12 @@ class RocProfCompute:
             if not hasattr(self.__args, "name") or not self.__args.name:
                 console_error("-n/--name is required")
             self.__args.path = str(Path(self.__args.path) / self.__args.name)
-        # Add node name to workload path
-        if self.__args.subpath == "node_name":
-            self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-        # Add gpu model name to workload path
-        elif self.__args.subpath == "gpu_model":
-            self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+            # Add node name to workload path
+            if self.__args.subpath == "node_name":
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add gpu model name to workload path
+            elif self.__args.subpath == "gpu_model":
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
