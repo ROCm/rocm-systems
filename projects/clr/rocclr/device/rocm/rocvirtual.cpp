@@ -22,6 +22,7 @@
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rockernel.hpp"
+#include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/roccounters.hpp"
@@ -44,13 +45,6 @@
 #include <atomic>
 #include <cinttypes>
 
-#if defined(__AVX__)
-#if defined(__MINGW64__)
-#include <intrin.h>
-#else
-#include <immintrin.h>
-#endif
-#endif
 
 /**
  * HSA image object size in bytes (see HSAIL spec)
@@ -1072,8 +1066,11 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   TrackQueueProgress(*packet, index);
 
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
-  *aql_loc = *packet;
+  // Use non-temporal copy for AQL packet body, header written separately with packet_store_release
+  nontemporalCopyAQL(aql_loc, packet);
   if (header != 0) {
+    // Ensure all non-temporal stores complete before writing header atomically
+    nontemporalStoreFence();
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
   ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
@@ -1256,8 +1253,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         packet->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
         // Copy the packet and then write the valid of the first packet
-        *aql_loc = *packet;
-
+        // Use non-temporal copy for AQL packet body (header will be written separately)
+        nontemporalCopyAQL(aql_loc, packet);
         // Restore the header of the first packet
         packet->header = firstPacketHeader;
       } else {
@@ -1280,7 +1277,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         }
 
         // Copy the packet to the queue
-        *aql_loc = *packet;
+        // Use non-temporal copy for AQL packet
+        nontemporalCopyAQL(aql_loc, packet);
       }
 
       // Print kernel name for kernel dispatch packets
@@ -1325,6 +1323,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
     // Write valid header for the first packet in the batch
     AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[startIndex & queueMask];
+    // Ensure all non-temporal stores in batch complete before writing header atomically
+    nontemporalStoreFence();
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), firstPacketHeader, firstPacketRest);
 
     // Ring doorbell for this batch
@@ -1450,7 +1450,12 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
   hsa_barrier_and_packet_t* aql_loc =
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
-  *aql_loc = barrier_packet_;
+
+  // Use non-temporal copy for barrier packet
+  nontemporalCopyAQL(aql_loc, &barrier_packet_);
+
+  // Ensure non-temporal stores complete before writing header atomically
+  nontemporalStoreFence();
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
@@ -1539,7 +1544,12 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
-  *aql_loc = barrier_value_packet_;
+
+  // Use non-temporal copy for barrier value packet
+  nontemporalCopyAQL(aql_loc, &barrier_value_packet_);
+
+  // Ensure non-temporal stores complete before writing header atomically
+  nontemporalStoreFence();
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, rest);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
@@ -3406,61 +3416,6 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
 
   return true;
 }
-
-// ================================================================================================
-#if IS_LINUX
-__attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
-    void* __restrict dst, const void* __restrict src, size_t size) {
-#if defined(ATI_ARCH_X86)
-#if defined(__AVX512F__)
-  for (auto i = 0u; i != size / sizeof(__m512i); ++i) {
-    _mm512_stream_si512(reinterpret_cast<__m512i* __restrict&>(dst)++,
-                        *reinterpret_cast<const __m512i* __restrict&>(src)++);
-  }
-  size = size % sizeof(__m512i);
-#endif
-
-#if defined(__AVX__)
-  for (auto i = 0u; i != size / sizeof(__m256i); ++i) {
-    _mm256_stream_si256(reinterpret_cast<__m256i* __restrict&>(dst)++,
-                        *reinterpret_cast<const __m256i* __restrict&>(src)++);
-  }
-  size = size % sizeof(__m256i);
-#endif
-
-  for (auto i = 0u; i != size / sizeof(__m128i); ++i) {
-    _mm_stream_si128(reinterpret_cast<__m128i* __restrict&>(dst)++,
-                     *(reinterpret_cast<const __m128i* __restrict&>(src)++));
-  }
-  size = size % sizeof(__m128i);
-
-  for (auto i = 0u; i != size / sizeof(long long); ++i) {
-    _mm_stream_si64(reinterpret_cast<long long* __restrict&>(dst)++,
-                    *reinterpret_cast<const long long* __restrict&>(src)++);
-  }
-  size = size % sizeof(long long);
-
-  for (auto i = 0u; i != size / sizeof(int); ++i) {
-    _mm_stream_si32(reinterpret_cast<int* __restrict&>(dst)++,
-                    *reinterpret_cast<const int* __restrict&>(src)++);
-  }
-
-  size = size % sizeof(int);
-  // Copy remaining bytes for unaligned size
-  std::memcpy(dst, src, size);
-
-  // Add memory fence
-  _mm_sfence();
-#else
-  std::memcpy(dst, src, size);
-#endif
-}
-#else
-static inline void nontemporalMemcpy(void* __restrict dst, const void* __restrict src,
-                                     size_t size) {
-  std::memcpy(dst, src, size);
-}
-#endif
 
 void VirtualGPU::HiddenHeapInit() { const_cast<Device&>(dev()).HiddenHeapInit(*this); }
 
