@@ -41,7 +41,7 @@ usage: rocm-smi [-h] [-V] [-d DEVICE [DEVICE ...]] [--alldevices] [--showhw] [-a
                 [-m] [-o] [-p] [-S] [-s] [--showmeminfo TYPE [TYPE ...]] [--showpids [VERBOSE]]
                 [--showpidgpus [SHOWPIDGPUS [SHOWPIDGPUS ...]]] [--showreplaycount]
                 [--showrasinfo [SHOWRASINFO [SHOWRASINFO ...]]] [--showvc] [--showxgmierr] [--showtopo]
-                [--showtopoaccess] [--showtopoweight] [--showtopohops] [--showtopotype] [--showtoponuma]
+                [--showtopoaccess] [--showtopoweight] [--showtopotype] [--showtoponuma]
                 [--showenergycounter] [--shownodesbw] [--showcomputepartition] [--showmemorypartition] [-r]
                 [--resetfans] [--resetprofile] [--resetpoweroverdrive] [--resetxgmierr] [--resetperfdeterminism]
                 [--setclock TYPE LEVEL] [--setsclk LEVEL [LEVEL ...]]
@@ -130,7 +130,6 @@ Software-related/controlled information:
   --showtopo                                                       Show hardware topology information
   --showtopoaccess                                                 Shows the link accessibility between GPUs
   --showtopoweight                                                 Shows the relative weight between GPUs
-  --showtopohops                                                   Shows the number of hops between GPUs
   --showtopotype                                                   Shows the link type between GPUs
   --showtoponuma                                                   Shows the numa nodes
   --showenergycounter                                              Energy accumulator that stores amount of energy
