@@ -17,7 +17,8 @@ message(STATUS "KOKKOS_BUILD_DIR: ${KOKKOS_BUILD_DIR}")
 if(NOT USE_MOCK_KOKKOS)
     set_source_files_properties(real_kokkos_minimal.cpp PROPERTIES LANGUAGE HIP)
     add_executable(real_kokkos_minimal real_kokkos_minimal.cpp)
-
+    add_dependencies(real_kokkos_minimal kokkos_src)
+    
     target_include_directories(
         real_kokkos_minimal
         PRIVATE
