@@ -120,7 +120,6 @@ if(ENABLE_KOKKOS)
         ExternalProject_Add(
             kokkos_src
             GIT_REPOSITORY https://github.com/kokkos/kokkos.git
-            GIT_TAG caea1f54557acb408fe994c7d5b2574e4847454e
             SOURCE_DIR ${CMAKE_BINARY_DIR}/kokkos-src
             BINARY_DIR ${CMAKE_BINARY_DIR}/kokkos-build
             CMAKE_ARGS

@@ -58,6 +58,24 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
 
+*  Added --kokkos-trace option to rocprofiler-compute.
+*  Tests to verify --kokkos-trace by profiling a minimal app that uses either Kokkos application or mock kokkos headers.
+*  USE_MOCK_KOKKOS CMake option to control real vs mock Kokkos implementation
+*  Mock Kokkos implementation fallback when GPU architecture is not detected.
+*  Test verifies Kokkos app profiling with CSV output format.
+*  CMake integration for building Kokkos from source. 
+*  Automatic GPU architecture detection for Kokkos builds using rocminfo on Unix systems and wmic on Windows
+*  Kokkos-specific test framework with @pytest.mark.kokkos test markers
+*  Support for AMD GPU architectures in Kokkos builds:
+  *  GFX908 (MI100)
+  *  GFX90A (MI210, MI250, MI250X)
+  *  GFX942 (MI300A, MI300X)
+*  Fallback for GFX950: Kokkos doesn't support GFX950. KOKKOS_ARCH variable used in Kokkos build is set to GFX942 on GFX950.
+* Fallback to mock kokkos app when rocminfo or wmic are unavailable.
+* Test configuration to conditionally enable Kokkos tests.
+
+
+
 ### Changed
 
 * On memory chart, long string of numbers are displayed as scientific notation. It also solves the issue of overflow of displaying long number
@@ -122,6 +140,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
   * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
 
+
+
 ### Removed
 
 * Usage of `rocm-smi` in favor of `amd-smi`.
@@ -148,7 +168,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * MI300A/X L2-Fabric 64B read counter may display negative values - The rocprof-compute metric 17.6.1 (Read 64B) can report negative values due to incorrect calculation when TCC_BUBBLE_sum + TCC_EA0_RDREQ_32B_sum exceeds TCC_EA0_RDREQ_sum.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
+* Kokkos integration for GFX950 architecture uses mock implementation as Kokkos upstream does not yet support.
+* Real Kokkos builds will automatically fall back to mock implementation when rocminfo(/wmic) is not available. 
+
 ### Upcoming changes
+
+* Kokkos test to replace minimal_app with lulesh.
+* Enhance the test to profile with --kokkos-trace and rocpd output format.
 
 ## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 
