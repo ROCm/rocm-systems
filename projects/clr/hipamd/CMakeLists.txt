@@ -89,8 +89,39 @@ endmacro()
 find_package(Perl REQUIRED)
 find_package(Git)
 
-hip_compute_version()
+# Optional CI flag to control version computation
+option(HIP_MAINLINE_CI "Enable mainline CI build version computation" OFF)
+
+if(HIP_MAINLINE_CI)
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    RESULT_VARIABLE _tag_res
+    OUTPUT_VARIABLE _tag
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+  if(_tag_res EQUAL 0 AND _tag)
+    string(REGEX MATCH "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)" _m "${_tag}")
+    if(_m)
+      file(WRITE ${HIP_COMMON_DIR}/VERSION
+           "#HIP_VERSION_MAJOR\n${CMAKE_MATCH_1}\n"
+           "#HIP_VERSION_MINOR\n${CMAKE_MATCH_2}\n"
+           "#HIP_VERSION_PATCH\n${CMAKE_MATCH_3}\n")
+
+      message(STATUS "Wrote HIP version: ${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3} -> ${HIP_COMMON_DIR}/VERSION")
+    endif()
+  endif()
+else()
+endif()
+
+# Determine HIP_BASE_VERSION
+set(ENV{HIP_PATH} "")
+file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
+list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
+list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
+list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
 set(HIP_VERSION_GITDATE 0)
+
 
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
