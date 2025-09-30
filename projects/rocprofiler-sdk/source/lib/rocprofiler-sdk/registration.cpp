@@ -1224,9 +1224,7 @@ rocprofiler_set_api_table(const char* name,
         }
         else
         {
-            ROCP_CI_LOG(WARNING)
-                << "Failed to initialize RCCL tracing: rcclApiFuncTable pointer is null. "
-                << "Tracing is disabled.";
+            ROCP_CI_LOG(WARNING) << "RCCL API tracing is disabled: dispatch table is invalid.";
         }
     }
     else if(std::string_view{name} == "rocdecode")
