@@ -986,7 +986,7 @@ rocprofiler_set_api_table(const char* name,
     if(rocprofiler::registration::get_fini_status() != 0)
     {
         ROCP_WARNING << fmt::format(
-            "rocprofiler-sdk has been finalized, ignoring {}(\"{}\", {}, {}, ..., {}) call",
+            R"(rocprofiler-sdk has been finalized, ignoring {}(name="{}", lib_version={}, lib_instance={}, ..., num_tables={}) ...)",
             __FUNCTION__,
             name,
             lib_version,
