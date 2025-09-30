@@ -330,17 +330,21 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
             {
                 ROCP_CI_LOG(WARNING)
                     << fmt::format("sql text value for {} is empty. Using NULL instead", _name);
-                return sql_insert_value{_name, std::string{"NULL"}};
+                return sql_insert_value{_name,
+                                        std::string_view{"?"},
+                                        sql_insert_value::make_binder(std::string{"NULL"})};
             }
         }
         // Sanitize string values before embedding into SQL to escape quotes and remove
         // problematic control/separator characters.
         auto _sanitized = sanitize_sql_string(std::string{_value});
-        return sql_insert_value{_name, fmt::format("'{}'", _sanitized)};
+        return sql_insert_value{
+            _name, std::string_view{"?"}, sql_insert_value::make_binder(_sanitized)};
     }
     else
     {
-        return sql_insert_value{_name, fmt::format("{}", _value)};
+        return sql_insert_value{
+            _name, std::string_view{"?"}, sql_insert_value::make_binder(_value)};
     }
 }
 
@@ -360,23 +364,27 @@ template <template <typename...> class ContainerT, typename... TypesT>
 auto
 get_insert_statement_impl(std::string_view _table, ContainerT<sql_insert_value, TypesT...>&& _data)
 {
-    auto fields = std::vector<std::string_view>{};
-    auto values = std::vector<std::string_view>{};
+    auto fields  = std::vector<std::string_view>{};
+    auto values  = std::vector<std::string_view>{};
+    auto binders = std::vector<sql_insert_value::binder_type>{};
 
     fields.reserve(_data.size() + 1);
     values.reserve(_data.size() + 1);
+    binders.reserve(_data.size() + 1);
     for(auto&& itr : _data)
     {
         if(itr.name.empty() && itr.value.empty()) continue;
 
         fields.emplace_back(itr.name);
         values.emplace_back(itr.value);
+        binders.emplace_back(itr.binder);
     }
 
-    return fmt::format(R"(INSERT INTO {} ({}) VALUES ({});)",
-                       replace_uuid(_table),
-                       fmt::join(fields.begin(), fields.end(), ", "),
-                       fmt::join(values.begin(), values.end(), ", "));
+    return sql::bind_statement{fmt::format(R"(INSERT INTO {} ({}) VALUES ({});)",
+                                           replace_uuid(_table),
+                                           fmt::join(fields.begin(), fields.end(), ", "),
+                                           fmt::join(values.begin(), values.end(), ", ")),
+                               binders};
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>

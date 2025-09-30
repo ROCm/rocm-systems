@@ -24,14 +24,19 @@
 
 #include "agent_info.hpp"
 #include "generator.hpp"
+#include "lib/output/sql/bind_data_type.hpp"
+#include "lib/output/sql/common.hpp"
 #include "metadata.hpp"
 #include "output_config.hpp"
 #include "stream_info.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <sqlite3.h>
+
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <initializer_list>
 #include <optional>
 #include <string>
@@ -68,8 +73,20 @@ struct argument_info
 
 struct sql_insert_value
 {
-    std::string_view name  = {};
-    std::string      value = {};
+    using binder_type = sql::binder_func_t;
+
+    std::string_view name   = {};
+    std::string_view value  = {};
+    binder_type      binder = {};
+
+    template <typename Tp>
+    static binder_type make_binder(Tp&& value)
+    {
+        using value_type = common::mpl::unqualified_type_t<Tp>;
+        return [val = std::forward<Tp>(value)](sqlite3_stmt* stmt, int32_t col) -> int {
+            return sql::bind_data_type<value_type>{}(stmt, col, val);
+        };
+    }
 };
 
 struct track_data

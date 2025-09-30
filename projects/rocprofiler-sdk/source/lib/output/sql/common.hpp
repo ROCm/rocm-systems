@@ -43,9 +43,16 @@ namespace tool
 namespace sql
 {
 using exec_callback_t = int (*)(void* user_data, int ncols, char** coltext, char** colnames);
+using binder_func_t   = std::function<int(sqlite3_stmt* stmt, int32_t col)>;
 
 template <typename Tp>
 using ring_buffer_t = rocprofiler::common::container::ring_buffer<Tp>;
+
+struct bind_statement
+{
+    std::string                     statement = {};
+    std::vector<sql::binder_func_t> binders   = {};
+};
 
 int
 exec_callback(void* user_data, int ncols, char** coltext, char** colnames);
@@ -65,6 +72,9 @@ execute_raw_sql_statements_impl(sqlite3*         conn,
                                 exec_callback_t  callback,
                                 void*            data,
                                 int              line);
+
+int64_t
+execute_raw_sql_statements_impl(sqlite3* conn, bind_statement stmt, int line);
 
 std::string
 extract_column_name(sqlite3_stmt* stmt, int32_t col);

@@ -34,6 +34,7 @@
 #include <fmt/format.h>
 #include <sqlite3.h>
 
+#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -131,6 +132,69 @@ int64_t
 execute_raw_sql_statements_impl(sqlite3* conn, std::string_view stmts, int line)
 {
     return execute_raw_sql_statements_impl(conn, stmts, exec_callback, nullptr, line);
+}
+
+int64_t
+execute_raw_sql_statements_impl(sqlite3* conn, bind_statement stmt, int line)
+{
+    static constexpr auto full_file = std::string_view{__FILE__};
+    static constexpr auto base_file = full_file.substr(full_file.find_last_of('/') + 1);
+
+    int64_t       row_id     = -1;
+    sqlite3_stmt* p_stmt     = nullptr;
+    auto          _statement = fmt::format("{}", stmt.statement);
+
+    if(_statement.find_last_of(';') != _statement.size() - 1)
+        _statement = fmt::format("{};", _statement);
+
+    ROCP_TRACE << fmt::format("Executing SQLite3 prepared statement: {}", _statement);
+    if(auto ret = sqlite3_prepare_v2(conn, _statement.c_str(), -1, &p_stmt, nullptr);
+       ret != SQLITE_OK || p_stmt == nullptr)
+    {
+        ROCP_CI_LOG(ERROR) << fmt::format("[{}:{}] Error preparing statement for '{}': {}",
+                                          base_file,
+                                          line,
+                                          _statement,
+                                          sqlite3_errmsg(conn));
+        return row_id;
+    }
+
+    int32_t position = 1;
+    for(auto& itr : stmt.binders)
+    {
+        if(itr)
+        {
+            ROCP_TRACE << fmt::format("  - Binding value for column {}", position);
+            if(auto ret = itr(p_stmt, position); ret != SQLITE_OK)
+            {
+                ROCP_CI_LOG(ERROR)
+                    << fmt::format("[{}:{}] Error binding value at position {} for '{}': {}",
+                                   base_file,
+                                   line,
+                                   position,
+                                   _statement,
+                                   sqlite3_errmsg(conn));
+            }
+        }
+        ++position;
+    }
+
+    if(auto ret = sqlite3_step(p_stmt); ret != SQLITE_DONE)
+    {
+        ROCP_CI_LOG(ERROR) << fmt::format("[{}:{}] Error executing statement for '{}': {}",
+                                          base_file,
+                                          line,
+                                          _statement,
+                                          sqlite3_errmsg(conn));
+        sqlite3_finalize(p_stmt);  // Finalize statement
+        return row_id;
+    }
+
+    sqlite3_finalize(p_stmt);  // Finalize statement
+
+    if(_statement.find("INSERT") != std::string::npos) row_id = sqlite3_last_insert_rowid(conn);
+
+    return row_id;
 }
 
 std::string
