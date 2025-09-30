@@ -77,6 +77,8 @@ std::vector<float> matrix_transpose_reference(const std::vector<float>& input,
     return output;
 }
 
+// argv: Array of command-line arguments. Run with "--enable-sleep" to enable 
+// the mode with delay implemented by thread sleep
 int main(int argc, char* argv[])
 {
     bool enable_sleep = false;
