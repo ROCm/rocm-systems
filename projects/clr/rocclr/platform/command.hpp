@@ -1382,21 +1382,19 @@ class Marker : public Command {
 class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
-  std::vector<std::string> kernelNames_;
+  const std::vector<std::string>* kernelNamesRef_;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
 
  public:
   //! Create a new Marker
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
                     const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
+        kernelNamesRef_(nullptr) {}
 
-  //! Add kernel name to the list if available
-  void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
-
-  //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<std::string>& kernelNames) {
-    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  //! Set external kernel names reference
+  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+    kernelNamesRef_ = kernelNames;
   }
 
   //! Add kernel timestamp to the list if available
@@ -1404,8 +1402,10 @@ class AccumulateCommand : public Command {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
 
-  //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const { return kernelNames_; }
+  //! Returns the kernel names reference
+  const std::vector<std::string>& getKernelNames() const {
+    return *kernelNamesRef_;
+  }
 
   //! Return the kernel timestamps
   const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }

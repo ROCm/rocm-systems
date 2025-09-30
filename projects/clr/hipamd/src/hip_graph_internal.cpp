@@ -735,6 +735,11 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
         // This avoids creating new vectors when all nodes are enabled (common case)
         if (batch.disabledNodeCount == 0) {
           // Fast path: all nodes enabled, dispatch entire batch
+          // Use reference to kernel names stored in GraphExec
+          if (accumulate != nullptr) {
+            accumulate->setKernelNamesRef(&batch.dispatchKernelNames);
+          }
+
           bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
               batch.dispatchPackets, batch.dispatchKernelNames, accumulate);
           if (!batchStatus) {
@@ -757,6 +762,11 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
             }
           }
           // Only dispatch if there are enabled packets
+            // Use reference to kernel names
+            if (accumulate != nullptr) {
+              accumulate->setKernelNamesRef(&enabledKernelNames);
+            }
+
           if (!enabledPackets.empty()) {
             bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
                 enabledPackets, enabledKernelNames, accumulate);

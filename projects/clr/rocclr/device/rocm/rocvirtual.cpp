@@ -1371,11 +1371,8 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
 
   amd::ScopedLock lock(execution());
   profilingBegin(*vcmd);
-
   dispatchBlockingWait();
 
-  // Add all kernel names in bulk
-  vcmd->addKernelNames(kernelNames);
 
   // Dispatch all packets with a single doorbell ring
   // Cast packets vector to AQL packets vector on the fly
