@@ -65,10 +65,9 @@ set(_download_url
     "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.1/rocprofiler-systems-1.0.1-ubuntu-22.04-ROCm-60400-PAPI-OMPT-Python3.sh"
 )
 
-# We set a variable for another file, because we want to download two files, because that
-# way we can assure that wget will run long enough to let PAPI collect network metrics
-# (each of the two files is about 90MB, and we want wget to run for at least 2s even on
-# a fast network).
+# The second file to download. We are downloading two files (each about 90MB), because
+# we want wget to run for at least 2s even on a fast network. This will give PAPI enough
+# time to collect network metrics.
 set(_download2_url
     "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.3/rocprofiler-systems-1.0.2-rhel-9.4-PAPI-OMPT-Python3.sh"
 )
