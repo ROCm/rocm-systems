@@ -99,46 +99,6 @@ rocprofiler_systems_add_test(
         ">>> mpi-flat.inst(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
 )
 
-if(ENABLE_FORTRAN_MPI_CTESTS)
-    rocprofiler_systems_add_test(
-        NAME "mpi-fortran-poisson"
-        TARGET mpi-fortran-poisson
-        MPI ON
-        NUM_PROCS 2
-        LABELS "mpip;fortran"
-        REWRITE_ARGS
-            -e
-            -v
-            2
-            --label
-            file
-            line
-            args
-            --min-instructions
-            0
-        ENVIRONMENT "${_mpip_environment}"
-    )
-
-    rocprofiler_systems_add_test(
-        NAME "mpi-fortran-poisson-nonblock"
-        TARGET mpi-fortran-poisson-nonblock
-        MPI ON
-        NUM_PROCS 2
-        LABELS "mpip;fortran"
-        REWRITE_ARGS
-            -e
-            -v
-            2
-            --label
-            file
-            line
-            args
-            --min-instructions
-            0
-        ENVIRONMENT "${_mpip_environment}"
-    )
-endif()
-
 set(_mpip_environment
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
@@ -194,3 +154,43 @@ foreach(
         ENVIRONMENT "${_mpip_${_EXAMPLE}_environment}"
     )
 endforeach()
+
+if(ENABLE_FORTRAN_MPI_CTESTS)
+    rocprofiler_systems_add_test(
+        NAME "mpi-fortran-poisson"
+        TARGET mpi-fortran-poisson
+        MPI ON
+        NUM_PROCS 2
+        LABELS "mpip;fortran"
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            args
+            --min-instructions
+            0
+        ENVIRONMENT "${_mpip_environment}"
+    )
+
+    rocprofiler_systems_add_test(
+        NAME "mpi-fortran-poisson-nonblock"
+        TARGET mpi-fortran-poisson-nonblock
+        MPI ON
+        NUM_PROCS 2
+        LABELS "mpip;fortran"
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            args
+            --min-instructions
+            0
+        ENVIRONMENT "${_mpip_environment}"
+    )
+endif()
