@@ -17,7 +17,7 @@ Export the ROCm binary path:
 
 .. code-block:: bash
 
-   export PATH=$PATH:/opt/rocm/bin
+   source /opt/rocm/share/rocprofiler-sdk/setup-env.sh
 
 Check rocprofv3 version and help:
 
@@ -137,14 +137,8 @@ Working with rocpd Database Format
    rocprofv3 --runtime-trace --output-format rocpd -- ./your_app
 
    # Query the database directly with SQL
-   sqlite3 hostname/12345_results.db "SELECT * FROM rocprofiler_domain_info;"
+   sqlite3 hostname/12345_results.db "SELECT * FROM regions;"
 
-   # Convert rocpd to other formats using Python API
-   python3 -c "
-   import rocpd
-   rocpd.rocpd_to_csv('hostname/12345_results.db', 'output.csv')
-   rocpd.rocpd_to_json('hostname/12345_results.db', 'output.json')
-   "
 Converting to Other Formats
 ----------------------------
 
@@ -390,7 +384,10 @@ Timeline Visualization
 .. code-block:: bash
 
    # Generate timeline for visualization tools
-   rocprofv3 --runtime-trace --output-format pftrace -- ./your_app
+   rocprofv3 --runtime-trace  -- ./your_app
+
+   # Convert to Perfetto format
+   rocpd2pftrace -i hostname/pid_results.db -o perfetto_trace
 
 **Use case:** Visualize execution timeline in Perfetto or similar tools
 
