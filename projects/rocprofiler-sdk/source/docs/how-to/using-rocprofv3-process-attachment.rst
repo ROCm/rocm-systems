@@ -91,5 +91,6 @@ The attachment functionality works with all tracing and profiling options availa
 
 - The target process must be running and actively using GPU resources for meaningful profiling data
 - Attachment requires appropriate system permissions (may need elevated privileges depending on the target process)
+- Attachment in a docker container requires the ptrace capability to be added for the container (`SYS_PTRACE`)
 - The profiler will collect data for the entire remaining lifetime of the process or until the configured collection period expires
 - Use ``--attach-duration-msec`` to specify how long to profile the attached process (in milliseconds)
