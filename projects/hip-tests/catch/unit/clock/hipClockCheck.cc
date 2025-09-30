@@ -166,12 +166,27 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
     AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF  //!< An unknown error occurred
 } amdsmi_status_t;
 
-int getEngineFreq()
+template <class T>
+  void loadSym(T& symbol, const char* symbolName, void* handle)
 {
+  using namespace std::string_literals;
+  void *fnsym = dlsym(handle, symbolName);
+
+  if (!fnsym)
+    throw std::runtime_error("Failure while trying to dynamically load symbol: "s + symbolName);
+
+  symbol = reinterpret_cast<T>(fnsym);
+}
+
+// @uuid the id of the GPU to query the frequency for
+// @return the maximum engine frequency of the GPU -1 if error
+int getEngineFreq(const char* uuid)
+{
+
   typedef void *amdsmi_processor_handle;
   typedef void *amdsmi_socket_handle;
 
-  void* lib_rocm_smi_hdl;
+  void* libHdl;
   amdsmi_status_t status;
 
   typedef struct {
@@ -203,31 +218,26 @@ int getEngineFreq()
 
   amdsmi_clk_info_t clk_info;
   uint32_t gpu_count;
+  amdsmi_status_t (*fninit)(uint64_t);
+  amdsmi_status_t (*fnget_socket_handles)(uint32_t*, amdsmi_socket_handle*);
+  amdsmi_status_t (*fnget_processor_handles)(amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*);
+  amdsmi_status_t (*fnget_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*);
+  amdsmi_status_t (*fnshut_down)();
 
-  lib_rocm_smi_hdl = dlopen("libamd_smi.so", RTLD_LAZY);
-  REQUIRE(lib_rocm_smi_hdl);
+  libHdl = dlopen("libamd_smi.so", RTLD_LAZY);
+  REQUIRE(libHdl);
 
-  void* fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_init");
-  auto fninit = reinterpret_cast<amdsmi_status_t (*)(uint64_t)>(fnsym);
-  REQUIRE(fnsym);
+  try {
+    loadSym(fninit, "amdsmi_init", libHdl);
+    loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", libHdl);
+    loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", libHdl);
+    loadSym(fnget_clock_info, "amdsmi_get_clock_info", libHdl);
+    loadSym(fnshut_down, "amdsmi_shut_down", libHdl);
+  } catch (std::runtime_error&) {
+    return -1;
+  }
 
-  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_socket_handles");
-  auto fnget_socket_handles = reinterpret_cast<amdsmi_status_t (*)(uint32_t*, amdsmi_socket_handle*)>(fnsym);
-  REQUIRE(fnsym);
-
-  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_processor_handles");
-  auto fnget_processor_handles = reinterpret_cast<amdsmi_status_t (*)(amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*)>(fnsym);
-  REQUIRE(fnsym);
-
-  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_get_clock_info");
-  REQUIRE(fnsym);
-  auto fnget_clock_info = reinterpret_cast<amdsmi_status_t (*)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*)>(fnsym);
-
-  fnsym = dlsym(lib_rocm_smi_hdl, "amdsmi_shut_down");
-  auto fnshut_down = reinterpret_cast<amdsmi_status_t (*)()>(fnsym);
-  REQUIRE(fnsym);
-
-  status = fninit(1 << 1);
+  status = fninit(1ul << 1);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
   uint32_t socket_count = 0;
 
@@ -245,12 +255,16 @@ int getEngineFreq()
   std::vector<amdsmi_processor_handle> processors(gpu_count);
   status = fnget_processor_handles(sockets[0], &gpu_count, &processors[0]);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
+  //amdsmi_status_t
+    //amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned int *uuid_length, char *uuid);
   status = fnget_clock_info(processors[0], AMDSMI_CLK_TYPE_GFX, &clk_info);
   REQUIRE(AMDSMI_STATUS_SUCCESS == status);
   printf("max_clk: %d\n", clk_info.max_clk);
   fnshut_down();
-  dlclose(lib_rocm_smi_hdl);
-  return 0;
+  dlclose(libHdl);
+
+  (void)uuid;
+  return -1;
 }
 
 /**
@@ -279,7 +293,7 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
     return;
   }
 
-  getEngineFreq();
+  getEngineFreq("0");
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
