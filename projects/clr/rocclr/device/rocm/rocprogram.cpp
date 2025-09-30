@@ -201,37 +201,20 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
   return true;
 }
 
-HSAILProgram::HSAILProgram(roc::NullDevice& device, amd::Program& owner)
-    : roc::Program(device, owner) {}
-
-HSAILProgram::~HSAILProgram() {}
-
-bool HSAILProgram::saveBinaryAndSetType(type_t type) { return true; }
-
-bool HSAILProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc, size_t foffset,
-                              std::string uri) {
-  return true;
-}
-
-
 LightningProgram::LightningProgram(roc::NullDevice& device, amd::Program& owner)
     : roc::Program(device, owner) {
-  isLC_ = true;
   isHIP_ = (owner.language() == amd::Program::HIP);
 }
 
 bool LightningProgram::createBinary(amd::option::Options* options) {
-#if defined(USE_COMGR_LIBRARY)
   if (!clBinary()->createElfBinary(options->oVariables->BinEncrypt, type())) {
     LogError("Failed to create ELF binary image!");
     return false;
   }
-#endif  // defined(USE_COMGR_LIBRARY)
   return true;
 }
 
 bool LightningProgram::saveBinaryAndSetType(type_t type, void* rawBinary, size_t size) {
-#if defined(USE_COMGR_LIBRARY)
   // Write binary to memory
   if (type == TYPE_EXECUTABLE) {  // handle code object binary
     assert(rawBinary != nullptr && size != 0 && "must pass in the binary");
@@ -247,7 +230,6 @@ bool LightningProgram::saveBinaryAndSetType(type_t type, void* rawBinary, size_t
 
   // Set the type of binary
   setType(type);
-#endif  // defined(USE_COMGR_LIBRARY)
   return true;
 }
 
@@ -276,7 +258,6 @@ bool LightningProgram::createKernels(void* binary, size_t binSize, bool useUnifo
 
 bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
                                   size_t foffset, std::string uri) {
-#if defined(USE_COMGR_LIBRARY)
   // Stop compilation if it is an offline device - HSA runtime does not
   // support ISA compiled offline
   if (!device().isOnline()) {
@@ -330,7 +311,6 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
       return false;
     }
   }
-#endif  // defined(USE_COMGR_LIBRARY)
   return true;
 }
 

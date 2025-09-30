@@ -807,10 +807,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
                  "Unsupported address qualifier");
 
           const bool readOnly =
-#if defined(USE_COMGR_LIBRARY)
               desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST ||
-#endif  // defined(USE_COMGR_LIBRARY)
-              (mem->getMemFlags() & CL_MEM_READ_ONLY) != 0;
+                                     (mem->getMemFlags() & CL_MEM_READ_ONLY) != 0;
 
           if (!readOnly) {
             mem->signalWrite(&dev());

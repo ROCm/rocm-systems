@@ -29,7 +29,6 @@
 //! \namespace amd::roc HSA Device Implementation
 namespace amd::roc {
 
-class HSAILProgram;
 class LightningProgram;
 
 //! \class empty program
@@ -63,15 +62,6 @@ class Program : public device::Program {
                                   const char* global_name) const;
 
  protected:
-  /*! \brief Compiles LLVM binary to HSAIL code (compiler backend: link+opt+codegen)
-   *
-   *  \return The build error code
-   */
-  int compileBinaryToHSAIL(amd::option::Options* options  //!< options for compilation
-  );
-  virtual bool createBinary(amd::option::Options* options) = 0;
-
- protected:
   //! Disable default copy constructor
   Program(const Program&) = delete;
   //! Disable operator=
@@ -83,24 +73,6 @@ class Program : public device::Program {
   /* HSA executable */
   hsa_executable_t hsaExecutable_;                //!< Handle to HSA executable
   hsa_code_object_reader_t hsaCodeObjectReader_;  //!< Handle to HSA code reader
-};
-
-class HSAILProgram : public roc::Program {
- public:
-  HSAILProgram(roc::NullDevice& device, amd::Program& owner);
-  virtual ~HSAILProgram();
-
- protected:
-  bool createBinary(amd::option::Options* options) override { return true; }
-
-  virtual bool setKernels(void* binary, size_t binSize,
-                          amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-                          std::string uri = std::string()) override;
-
- private:
-  std::string codegenOptions(amd::option::Options* options);
-
-  bool saveBinaryAndSetType(type_t type) override;
 };
 
 class LightningProgram final : public roc::Program {

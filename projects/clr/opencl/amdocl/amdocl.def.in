@@ -128,7 +128,6 @@ clGetKernelSubGroupInfo
 clSetDefaultDeviceCommandQueue
 #endif
 
-#if !defined(WITH_LIGHTNING_COMPILER)
 aclCompilerInit
 aclCompilerFini
 aclCompilerVersion
@@ -167,7 +166,6 @@ aclDisassemble
 aclInsertKernelStatistics
 aclGetDeviceBinary
 aclDumpBinary
-#endif // !defined(WITH_LIGHTNING_COMPILER)
 
 #if (OPENCL_MAJOR > 2) || (OPENCL_MAJOR == 2 && OPENCL_MINOR >= 1)
 clCreateProgramWithIL

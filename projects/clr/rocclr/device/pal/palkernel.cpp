@@ -25,7 +25,6 @@
 #include "device/pal/palsched.hpp"
 #include "platform/commandqueue.hpp"
 #include "utils/options.hpp"
-#include "hsailctx.hpp"
 #include <string>
 #include <memory>
 #include <fstream>
@@ -36,7 +35,7 @@
 
 namespace amd::pal {
 
-void HSAILKernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
+void Kernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
                                    const uint32_t groupSegmentSize, const uint16_t numSGPRs,
                                    const uint16_t numVGPRs) {
   workGroupInfo_.scratchRegs_ = amd::alignUp(privateSegmentSize, 16) / sizeof(uint32_t);
@@ -71,7 +70,7 @@ void HSAILKernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
       static_cast<int>(workGroupInfo_.availableLDSSize_ - workGroupInfo_.localMemSize_);
 }
 
-bool HSAILKernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t* akc) {
+bool Kernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t* akc) {
   if (!sym) {
     return false;
   }
@@ -86,185 +85,26 @@ bool HSAILKernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t
   return true;
 }
 
-HSAILKernel::HSAILKernel(std::string name, HSAILProgram* prog, bool internalKernel)
+Kernel::Kernel(std::string name, pal::Program* prog, bool internalKernel)
     : device::Kernel(prog->device(), name, *prog), index_(0), code_(0), codeSize_(0) {
   flags_.hsa_ = true;
   flags_.internalKernel_ = internalKernel;
 }
 
-HSAILKernel::~HSAILKernel() {}
+Kernel::~Kernel() {}
 
-bool HSAILKernel::postLoad() { return true; }
+bool Kernel::postLoad() { return true; }
 
-bool HSAILKernel::init() {
-#if defined(WITH_COMPILER_LIB)
-  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
-  std::string openClKernelName = openclMangledName(name());
-  amd::hsa::loader::Symbol* sym = prog().getSymbol(openClKernelName.c_str(), &agent);
-  if (!sym) {
-    LogPrintfError("Error: Getting kernel ISA code symbol %s from AMD HSA Code Object failed.\n",
-                   openClKernelName.c_str());
-    return false;
-  }
-
-  amd_kernel_code_t* akc = &akc_;
-
-  if (!setKernelCode(sym, akc)) {
-    LogError("Error: setKernelCode() failed.");
-    return false;
-  }
-
-  if (!sym->GetInfo(HSA_EXT_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT_SIZE,
-                    reinterpret_cast<void*>(&codeSize_))) {
-    LogError("Error: sym->GetInfo() failed.");
-    return false;
-  }
-
-  // Setup the the workgroup info
-  setWorkGroupInfo(akc->workitem_private_segment_byte_size, akc->workgroup_group_segment_byte_size,
-                   akc->wavefront_sgpr_count, akc->workitem_vgpr_count);
-
-  workgroupGroupSegmentByteSize_ = workGroupInfo_.usedLDSSize_;
-  kernargSegmentByteSize_ = akc->kernarg_segment_byte_size;
-
-  // Pull out metadata from the ELF
-  size_t sizeOfArgList;
-  acl_error error =
-      amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_ARGUMENT_ARRAY,
-                            openClKernelName.c_str(), nullptr, &sizeOfArgList);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-
-  char* aclArgList = new char[sizeOfArgList];
-  if (nullptr == aclArgList) {
-    return false;
-  }
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_ARGUMENT_ARRAY,
-                                openClKernelName.c_str(), aclArgList, &sizeOfArgList);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-  // Set the argList
-  InitParameters(reinterpret_cast<const aclArgData*>(aclArgList), argsBufferSize());
-  delete[] aclArgList;
-
-  size_t sizeOfWorkGroupSize;
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_WORK_GROUP_SIZE,
-                                openClKernelName.c_str(), nullptr, &sizeOfWorkGroupSize);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_WORK_GROUP_SIZE,
-                                openClKernelName.c_str(), workGroupInfo_.compileSize_,
-                                &sizeOfWorkGroupSize);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-
-  // Copy wavefront size
-  workGroupInfo_.wavefrontSize_ = device().info().wavefrontWidth_;
-  // Find total workgroup size
-  if (workGroupInfo_.compileSize_[0] != 0) {
-    workGroupInfo_.size_ = workGroupInfo_.compileSize_[0] * workGroupInfo_.compileSize_[1] *
-                           workGroupInfo_.compileSize_[2];
-  } else {
-    workGroupInfo_.size_ = device().info().preferredWorkGroupSize_;
-  }
-
-  // Pull out printf metadata from the ELF
-  size_t sizeOfPrintfList;
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_GPU_PRINTF_ARRAY,
-                                openClKernelName.c_str(), nullptr, &sizeOfPrintfList);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-
-  // Make sure kernel has any printf info
-  if (0 != sizeOfPrintfList) {
-    char* aclPrintfList = new char[sizeOfPrintfList];
-    if (nullptr == aclPrintfList) {
-      return false;
-    }
-    error =
-        amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_GPU_PRINTF_ARRAY,
-                              openClKernelName.c_str(), aclPrintfList, &sizeOfPrintfList);
-    if (error != ACL_SUCCESS) {
-      return false;
-    }
-
-    // Set the PrintfList
-    InitPrintf(reinterpret_cast<aclPrintfFmt*>(aclPrintfList));
-    delete[] aclPrintfList;
-  }
-
-  aclMetadata md;
-  md.enqueue_kernel = false;
-  size_t sizeOfDeviceEnqueue = sizeof(md.enqueue_kernel);
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_DEVICE_ENQUEUE,
-                                openClKernelName.c_str(), &md.enqueue_kernel, &sizeOfDeviceEnqueue);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-  flags_.dynamicParallelism_ = md.enqueue_kernel;
-
-  md.kernel_index = -1;
-  size_t sizeOfIndex = sizeof(md.kernel_index);
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_KERNEL_INDEX,
-                                openClKernelName.c_str(), &md.kernel_index, &sizeOfIndex);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-  index_ = md.kernel_index;
-
-  size_t sizeOfWavesPerSimdHint = sizeof(workGroupInfo_.wavesPerSimdHint_);
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(),
-                                RT_WAVES_PER_SIMD_HINT, openClKernelName.c_str(),
-                                &workGroupInfo_.wavesPerSimdHint_, &sizeOfWavesPerSimdHint);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-
-  size_t sizeOfWorkGroupSizeHint = sizeof(workGroupInfo_.compileSizeHint_);
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(),
-                                RT_WORK_GROUP_SIZE_HINT, openClKernelName.c_str(),
-                                workGroupInfo_.compileSizeHint_, &sizeOfWorkGroupSizeHint);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-
-  size_t sizeOfVecTypeHint;
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_VEC_TYPE_HINT,
-                                openClKernelName.c_str(), NULL, &sizeOfVecTypeHint);
-  if (error != ACL_SUCCESS) {
-    return false;
-  }
-
-  if (0 != sizeOfVecTypeHint) {
-    char* VecTypeHint = new char[sizeOfVecTypeHint + 1];
-    if (NULL == VecTypeHint) {
-      return false;
-    }
-    error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_VEC_TYPE_HINT,
-                                  openClKernelName.c_str(), VecTypeHint, &sizeOfVecTypeHint);
-    if (error != ACL_SUCCESS) {
-      return false;
-    }
-    VecTypeHint[sizeOfVecTypeHint] = '\0';
-    workGroupInfo_.compileVecTypeHint_ = std::string(VecTypeHint);
-    delete[] VecTypeHint;
-  }
-
-#endif  // defined(WITH_COMPILER_LIB)
+bool Kernel::init() {
   return true;
 }
 
-const HSAILProgram& HSAILKernel::prog() const {
-  return reinterpret_cast<const HSAILProgram&>(prog_);
+const pal::Program& Kernel::prog() const {
+  return reinterpret_cast<const pal::Program&>(prog_);
 }
 
 // ================================================================================================
-hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
+hsa_kernel_dispatch_packet_t* Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
                                                          const amd::NDRangeContainer& sizes,
                                                          const_address params, size_t ldsAddress,
                                                          uint64_t vmDefQueue,
@@ -501,7 +341,6 @@ const LightningProgram& LightningKernel::prog() const {
   return reinterpret_cast<const LightningProgram&>(prog_);
 }
 
-#if defined(USE_COMGR_LIBRARY)
 bool LightningKernel::init() { return GetAttrCodePropMetadata(); }
 
 bool LightningKernel::postLoad() {
@@ -590,7 +429,5 @@ bool LightningKernel::setKernelDescriptor(amd::hsa::loader::Symbol* sym,
 
   return true;
 }
-
-#endif  // defined(USE_COMGR_LIBRARY)
 
 }  // namespace amd::pal

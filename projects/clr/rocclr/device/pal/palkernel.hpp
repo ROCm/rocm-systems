@@ -52,17 +52,17 @@ namespace amd::pal {
 class VirtualGPU;
 class Device;
 class NullDevice;
-class HSAILProgram;
+class Program;
 class LightningProgram;
 
 /*! \addtogroup pal PAL Device Implementation
  *  @{
  */
-class HSAILKernel : public device::Kernel {
+class Kernel : public device::Kernel {
  public:
-  HSAILKernel(std::string name, HSAILProgram* prog, bool internalKernel);
+  Kernel(std::string name, pal::Program* prog, bool internalKernel);
 
-  virtual ~HSAILKernel();
+  virtual ~Kernel();
 
   //! Initializes the metadata required for this kernel,
   bool init();
@@ -80,7 +80,7 @@ class HSAILKernel : public device::Kernel {
   }
 
   //! Returns HSA program associated with this kernel
-  const HSAILProgram& prog() const;
+  const pal::Program& prog() const;
 
   //! Returns LDS size used in this kernel
   uint32_t ldsSize() const { return WorkgroupGroupSegmentByteSize(); }
@@ -121,10 +121,10 @@ class HSAILKernel : public device::Kernel {
 
  private:
   //! Disable copy constructor
-  HSAILKernel(const HSAILKernel&);
+  Kernel(const pal::Kernel&);
 
   //! Disable operator=
-  HSAILKernel& operator=(const HSAILKernel&);
+  Kernel& operator=(const pal::Kernel&);
 
  protected:
   //! Get the kernel code and copy the code object from the program CPU segment
@@ -144,15 +144,14 @@ class HSAILKernel : public device::Kernel {
   size_t codeSize_;  //!< Size of ISA code
 };
 
-class LightningKernel : public HSAILKernel {
+class LightningKernel final : public pal::Kernel {
  public:
-  LightningKernel(const std::string& name, HSAILProgram* prog, bool internalKernel)
-      : HSAILKernel(name, prog, internalKernel) {}
+  LightningKernel(const std::string& name, pal::Program* prog, bool internalKernel)
+      : pal::Kernel(name, prog, internalKernel) {}
 
   //! Returns Lightning program associated with this kernel
   const LightningProgram& prog() const;
 
-#if defined(USE_COMGR_LIBRARY)
   //! Get the kernel descriptor and copy the code object from the program CPU segment
   bool setKernelDescriptor(amd::hsa::loader::Symbol* sym, llvm::amdhsa::kernel_descriptor_t* akd);
   //! Initializes the metadata required for this kernel
@@ -160,7 +159,6 @@ class LightningKernel : public HSAILKernel {
 
   //! Setup after code object loading
   bool postLoad();
-#endif
 };
 
 /*@}*/  // namespace amd::pal
