@@ -260,7 +260,8 @@ if(PkgConfig_FOUND)
 
     target_include_directories(rocprofiler-sdk-drm SYSTEM
                                INTERFACE ${DRM_INCLUDE_DIRS} ${DRM_AMDGPU_INCLUDE_DIRS})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM PkgConfig::DRM_AMDGPU)
+    target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
+                                                        PkgConfig::DRM_AMDGPU)
 else()
     find_path(
         drm_INCLUDE_DIR
@@ -290,7 +291,8 @@ else()
 
     target_include_directories(rocprofiler-sdk-drm SYSTEM
                                INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
+    target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
+                                                        ${drm_amdgpu_LIBRARY})
 endif()
 
 # ----------------------------------------------------------------------------------------#
