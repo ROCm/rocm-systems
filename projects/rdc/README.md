@@ -133,7 +133,13 @@ If you prefer to build RDC from source, follow the steps below.
 
 ### 🔧 Building gRPC and protoc
 
-**Important:** RDC requires gRPC and protoc to be built from source as pre-built packages are not available.
+**Important:** RDC requires gRPC v1.76.0 and protoc to be built from source. Pre-built packages often have:
+- ABI incompatibilities with different compilers
+- Missing or incorrectly configured CMake package dependencies (abseil, protobuf)
+- Static libraries instead of required shared libraries
+- Version mismatches that cause linker errors
+
+Building from source ensures all dependencies (abseil, protobuf, c-ares, re2, zlib) are built together with consistent compiler flags and proper CMake configuration.
 
 1. **Install Required Tools:**
 
@@ -145,7 +151,7 @@ If you prefer to build RDC from source, follow the steps below.
 2. **Clone and Build gRPC:**
 
     ```bash
-    git clone -b v1.67.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+    git clone -b v1.76.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
     export GRPC_ROOT=/opt/grpc
     cmake -B build \
@@ -155,6 +161,7 @@ If you prefer to build RDC from source, follow the steps below.
         -DCMAKE_SHARED_LINKER_FLAGS_INIT=-Wl,--enable-new-dtags,--build-id=sha1,--rpath,'$ORIGIN' \
         -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
         -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_CXX_STANDARD=17 \
         -DCMAKE_BUILD_TYPE=Release
     make -C build -j $(nproc)
     sudo make -C build install
@@ -596,6 +603,53 @@ The RAS plugin enables monitoring and counting of ECC (Error-Correcting Code) er
 >    ```
 >
 >    - Log out and log back in to apply group changes.
+>
+>#### 🔗 Build Linking Errors with gRPC
+>
+>**Error Messages:**
+>
+>```
+>undefined reference to `google::protobuf::internal::WireFormatLite::VerifyUtf8String(...)`
+>undefined reference to `absl::lts_20250512::log_internal::LogMessage::CopyToEncodedBuffer(...)`
+>```
+>
+>**Causes:**
+>
+>1. **Wrong gRPC Version:**
+>    - RDC requires exactly gRPC v1.76.0
+>    - Using different versions causes ABI incompatibilities
+>
+>2. **Pre-built gRPC Packages:**
+>    - System packages (apt/yum) often have broken CMake configs
+>    - Missing transitive dependencies (abseil, protobuf)
+>
+>3. **Mixed Build Configurations:**
+>    - gRPC built with different compiler flags than RDC
+>    - Static vs shared library mismatches
+>
+>**Solution:**
+>
+>1. **Remove any existing gRPC installations:**
+>
+>    ```bash
+>    sudo rm -rf /usr/grpc /usr/local/grpc /opt/grpc
+>    ```
+>
+>2. **Build gRPC v1.76.0 from source** (see "Building gRPC and protoc" section above)
+>
+>3. **Ensure CMake finds the correct gRPC:**
+>
+>    ```bash
+>    cmake -B build -DGRPC_ROOT=/opt/grpc
+>    ```
+>
+>4. **Verify gRPC installation:**
+>
+>    ```bash
+>    ls /opt/grpc/lib/libgrpc++.so
+>    ls /opt/grpc/lib/libprotobuf.so
+>    ls /opt/grpc/lib/libabsl_*.so
+>    ```
 >
 >### 🐛 Troubleshooting RDCD
 >

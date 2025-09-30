@@ -163,7 +163,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.67.1 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.76.0 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)
@@ -316,6 +316,8 @@ set(TESTS_COMPONENT "tests")
 # Standalone only folders
 if(BUILD_STANDALONE)
     # these packages are later used in server and client targets
+    # Note: absl must be found before protobuf/gRPC to resolve transitive dependencies
+    find_package(absl HINTS ${GRPC_ROOT} CONFIG REQUIRED)
     find_package(protobuf HINTS ${GRPC_ROOT} CONFIG REQUIRED)
     find_package(gRPC ${GRPC_DESIRED_VERSION} HINTS ${GRPC_ROOT} CONFIG REQUIRED)
 

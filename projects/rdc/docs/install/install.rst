@@ -58,21 +58,23 @@ gRPC and Protoc must be built from source as the prebuilt packages are not avail
    .. code-block:: shell
 
     sudo apt-get update
-    sudo apt-get install automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl libcap-dev
+    sudo apt-get install automake make cmake g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl libcap-dev
 
 2. Clone and build gRPC:
 
    .. code-block:: shell
 
-    git clone -b v1.67.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+    git clone -b v1.76.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
     export GRPC_ROOT=/opt/grpc
     cmake -B build \
         -DgRPC_INSTALL=ON \
         -DgRPC_BUILD_TESTS=OFF \
         -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_SHARED_LINKER_FLAGS_INIT=-Wl,--enable-new-dtags,--build-id=sha1,--rpath,'$ORIGIN' \
         -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
         -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_CXX_STANDARD=17 \
         -DCMAKE_BUILD_TYPE=Release
     make -C build -j $(nproc)
     sudo make -C build install
