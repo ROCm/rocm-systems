@@ -285,21 +285,20 @@ def add_args(parser):
         required=False,
     )
 
-    return [
-        "consolidate",
-        "output_path",
-    ]
+    def process_args(input, args):
+        valid_args = [
+            "consolidate",
+            "output_path",
+        ]
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
+        return ret
 
-
-def process_args(args, valid_args):
-
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
-    return ret
+    return process_args
 
 
 def execute(input_files, **kwargs):
@@ -359,13 +358,13 @@ def main(argv=None):
         help="Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders",
     )
 
-    valid_args = add_args(parser)
+    process_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
-    package_args = process_args(args, valid_args)
-
     input_files = flatten_rocpd_yaml_input_file(args.input, skip_auto_merge=True)
+
+    package_args = process_args(None, args)
 
     # error check for databases before trying to use the data
     if not input_files:

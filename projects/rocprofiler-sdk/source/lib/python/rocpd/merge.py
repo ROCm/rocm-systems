@@ -279,17 +279,17 @@ def add_args(parser):
         required=False,
     )
 
-    return ["output_file", "output_path"]
+    def process_args(input, args):
+        valid_args = ["output_file", "output_path"]
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
+        return ret
 
-
-def process_args(args, valid_args):
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
-    return ret
+    return process_args
 
 
 def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> str:
@@ -339,13 +339,13 @@ def main(argv=None) -> int:
         help="Path to the input ROCpd database files",
     )
 
-    valid_args = add_args(parser)
+    process_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
-    merged_args = process_args(args, valid_args)
+    merge_args = process_args(args)
 
-    execute(args.input, **merged_args)
+    execute(args.input, **merge_args)
 
 
 if __name__ == "__main__":

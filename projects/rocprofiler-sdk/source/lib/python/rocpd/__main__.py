@@ -215,28 +215,33 @@ Example usage:
     add_required_args(generate_summary)
 
     # converter: add args from any sub-modules
-    valid_out_config_args = output_config.add_args(converter)
-    valid_generic_args = output_config.add_generic_args(converter)
-    valid_pftrace_args = pftrace.add_args(converter)
-    valid_csv_args = csv.add_args(converter)
-    valid_otf2_args = otf2.add_args(converter)
-    valid_time_window_args = time_window.add_args(converter)
+    process_converter_args = []
+    process_converter_args.append(output_config.add_args(converter))
+    process_converter_args.append(output_config.add_generic_args(converter))
+    process_converter_args.append(pftrace.add_args(converter))
+    process_converter_args.append(csv.add_args(converter))
+    process_converter_args.append(otf2.add_args(converter))
+    process_converter_args.append(time_window.add_args(converter))
 
     # merge: subparser args
-    valid_merge_args = merge.add_args(merger)
+    process_merger_args = []
+    process_merger_args.append(merge.add_args(merger))
 
     # package: subparser args
-    valid_package_args = package.add_args(packager)
+    process_packager_args = []
+    process_packager_args.append(package.add_args(packager))
 
     # query: subparser args
-    valid_out_config_args = output_config.add_args(query_reporter)
-    valid_query_args = query.add_args(query_reporter)
-    valid_time_window_args = time_window.add_args(query_reporter)
+    process_query_reporter_args = []
+    process_query_reporter_args.append(output_config.add_args(query_reporter))
+    process_query_reporter_args.append(query.add_args(query_reporter))
+    process_query_reporter_args.append(time_window.add_args(query_reporter))
 
     # summary: subparser args
-    valid_io_args = summary.add_io_args(generate_summary)
-    valid_summary_args = summary.add_args(generate_summary)
-    valid_time_window_args = time_window.add_args(generate_summary)
+    process_generate_summary_args = []
+    process_generate_summary_args.append(output_config.add_args(generate_summary))
+    process_generate_summary_args.append(summary.add_args(generate_summary))
+    process_generate_summary_args.append(time_window.add_args(generate_summary))
 
     # parse the command line arguments
     args = parser.parse_args(argv)
@@ -255,30 +260,13 @@ Example usage:
 
     # if the user requested converter, process the conversion
     if args.command == "convert":
-        # process the args
-        out_cfg_args = output_config.process_args(args, valid_out_config_args)
-        generic_out_cfg_args = output_config.process_generic_args(
-            args, valid_generic_args
-        )
-        pftrace_args = pftrace.process_args(args, valid_pftrace_args)
-        csv_args = csv.process_args(args, valid_csv_args)
-        otf2_args = otf2.process_args(args, valid_otf2_args)
-        window_args = time_window.process_args(args, valid_time_window_args)
+        # construct the rocpd import data object
+        input = RocpdImportData(args.input)
 
-        # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
+        all_args = {}
+        for pitr in process_converter_args:
+            all_args.update(pitr(input, args))
 
-        # adjust the time window view of the data
-        if window_args is not None:
-            time_window.apply_time_window(importData, **window_args)
-
-        all_args = {
-            **out_cfg_args,
-            **generic_out_cfg_args,
-            **pftrace_args,
-            **csv_args,
-            **otf2_args,
-        }
         # setup the config args
         config = (
             output_config.output_config(**all_args)
@@ -296,54 +284,61 @@ Example usage:
         for out_format in args.output_format:
             if out_format in format_handlers:
                 print(f"Converting database(s) to {out_format} format:")
-                format_handlers[out_format](importData, config)
+                format_handlers[out_format](input, config)
             else:
                 print(f"Warning: Unsupported output format '{out_format}'")
 
     # if the user requested merge module, execute the merge
     elif args.command == "merge":
+        # no construction of the import data object
+        input = None
+
         # merge subparser args
-        merge_args = merge.process_args(args, valid_merge_args)
+        merge_args = {}
+        for pitr in process_merger_args:
+            merge_args.update(pitr(input, args))
+
         merge.execute(args.input, **merge_args)
 
     # if the user requested package module, package up the database
     elif args.command == "package":
-        # merge subparser args
-        package_args = package.process_args(args, valid_package_args)
-        package.execute(args.input, **package_args)
+        # construct the rocpd import data object
+        input = None
+
+        # package subparser args
+        packager_args = {}
+        for pitr in process_packager_args:
+            packager_args.update(pitr(input, args))
+
+        package.execute(args.input, **packager_args)
 
     # if the user requested query module, execute the query
     elif args.command == "query":
-        # query subparser args
-        query_args = query.process_args(args, valid_query_args)
-        out_cfg_args = output_config.process_args(args, valid_out_config_args)
-        window_args = time_window.process_args(args, valid_time_window_args)
+        # construct the rocpd import data object
+        input = RocpdImportData(args.input)
 
-        all_args = {**query_args, **out_cfg_args}
+        # query subparser args
+        query_args = {}
+        for pitr in process_query_reporter_args:
+            query_args.update(pitr(input, args))
 
         query.execute(
-            args.input,
+            input,
             args,
-            window_args=window_args,
-            **all_args,
+            **query_args,
         )
 
     # if the user requested a summary, generate the views
     elif args.command == "summary":
+        # construct the rocpd import data object
+        input = RocpdImportData(args.input)
+
         # summary subparser args
-        summary_args = summary.process_args(args, valid_summary_args)
-        io_args = output_config.process_args(args, valid_io_args)
-        window_args = time_window.process_args(args, valid_time_window_args)
+        summary_args = {}
+        for pitr in process_generate_summary_args:
+            summary_args.update(pitr(input, args))
 
-        # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
-
-        # adjust the time window view of the data
-        if window_args is not None:
-            time_window.apply_time_window(importData, **window_args)
-
-        all_args = {**summary_args, **io_args}
-        summary.generate_all_summaries(importData, **all_args)
+        summary.generate_all_summaries(input, **summary_args)
 
     print("Done. Exiting...")
 
