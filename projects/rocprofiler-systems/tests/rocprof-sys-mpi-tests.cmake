@@ -101,8 +101,8 @@ rocprofiler_systems_add_test(
 
 if(ENABLE_FORTRAN_MPI_CTESTS)
     rocprofiler_systems_add_test(
-        NAME "mpi-fortran-intervals"
-        TARGET mpi-fortran-intervals
+        NAME "mpi-fortran-poisson"
+        TARGET mpi-fortran-poisson
         MPI ON
         NUM_PROCS 2
         LABELS "mpip;fortran"
@@ -120,8 +120,8 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
     )
 
     rocprofiler_systems_add_test(
-        NAME "mpi-fortran-poisson"
-        TARGET mpi-fortran-poisson
+        NAME "mpi-fortran-poisson-nonblock"
+        TARGET mpi-fortran-poisson-nonblock
         MPI ON
         NUM_PROCS 2
         LABELS "mpip;fortran"

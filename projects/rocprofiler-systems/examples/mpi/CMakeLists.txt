@@ -111,13 +111,16 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
             $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
     )
 
-    add_executable(mpi-fortran-intervals intervals_mpi.f90)
-    target_compile_options(mpi-fortran-intervals PRIVATE ${GFORTRAN_MPI_COMPILE_FLAGS})
-    target_link_libraries(mpi-fortran-intervals PRIVATE mpi-fortran-interface-library)
-
     add_executable(mpi-fortran-poisson poisson_mpi.f90)
-    target_compile_options(mpi-fortran-poisson PRIVATE ${GFORTRAN_MPI_COMPILE_FLAGS})
+    target_compile_options(mpi-fortran-poisson PRIVATE)
     target_link_libraries(mpi-fortran-poisson PRIVATE mpi-fortran-interface-library)
+
+    add_executable(mpi-fortran-poisson-nonblock poisson_nonblock_mpi.f90)
+    target_compile_options(mpi-fortran-poisson-nonblock PRIVATE)
+    target_link_libraries(
+        mpi-fortran-poisson-nonblock
+        PRIVATE mpi-fortran-interface-library
+    )
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -149,7 +152,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     )
     if(ENABLE_FORTRAN_MPI_CTESTS)
         install(
-            TARGETS mpi-fortran-intervals mpi-fortran-poisson
+            TARGETS mpi-fortran-poisson mpi-fortran-poisson-nonblock
             DESTINATION bin
             COMPONENT rocprofiler-systems-examples
         )
