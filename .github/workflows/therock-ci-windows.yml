@@ -41,8 +41,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: users/marbre/inject-source-dirs
-          # ref: 7dbdbb9ca6db2029646ce158b13bd1c77dea55a3 # 2025-09-25 commit
+          ref: 83b25f87ea8f163ef37295f28204a9b4ab86f168 # 2025-09-30 commit
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
