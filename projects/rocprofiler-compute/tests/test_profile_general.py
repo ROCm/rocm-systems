@@ -1876,7 +1876,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     assert sorted(list(file_dict.keys())) == expected_files
     print("All expected CSV files are present.")
     print(f"Files: {list(file_dict.keys())}")
-    
+
     # If not using mock Kokkos, perform consistency checks between marker_trace and kokkos_trace files
     if not use_mock_kokkos:
         for f in KOKKOS_TRACE_FILES:

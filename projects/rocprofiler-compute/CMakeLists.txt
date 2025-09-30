@@ -104,14 +104,10 @@ if(ENABLE_TESTS)
                 )
             endif()
         else()
-            message(
-                WARNING
-                "WMIC not found, cannot detect GPU. Disabling Kokkos Test."
-            )
+            message(WARNING "WMIC not found, cannot detect GPU. Disabling Kokkos Test.")
         endif()
     endif()
 endif()
-
 
 if(ENABLE_KOKKOS)
     message(STATUS "Kokkos tests enabled on-DKokkos_ARCH_AMD_${KOKKOS_ARCH}")
