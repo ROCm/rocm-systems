@@ -617,7 +617,14 @@ class Runtime {
     AsyncEventItem(const AsyncEventItem& other)
         : signal(other.signal), cond(other.cond), value(other.value),
           handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
-
+    
+    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
+        signal = sig;
+        cond = c;
+        value = v;
+        handler = h;
+        arg = a;
+    }
     // Helper operator to convert signal to Signal* for easier access
     Signal* operator->() {
       if (signal.handle == 0) {
@@ -625,6 +632,27 @@ class Runtime {
       }
       return core::Signal::Convert(signal);
     }
+  };
+
+  class AsyncEventItemPool {
+    public:
+      static AsyncEventItemPool& Instance();
+      AsyncEventItemPool() : block_size_(preallocblocks_ * minblock_) {}
+      ~AsyncEventItemPool() { clear(); }
+
+      AsyncEventItem* alloc();
+      void free(AsyncEventItem* ptr);
+      void clear();
+
+    private:
+      void allocate_block(size_t count);
+      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+      static const size_t preallocblocks_ = 512;
+      static const size_t maxblocksize_ = 1ULL << 28;
+      HybridMutex lock_;
+      std::vector<AsyncEventItem*> free_list_;
+      std::vector<std::pair<void*, size_t>> block_list_;
+      size_t block_size_;
   };
 
   // New concurrent events structure using lock-free queue
@@ -640,16 +668,15 @@ class Runtime {
 
     bool empty() { return event_queue_.empty(); }
 
-    //! Get all events for processing (this will consume the queue)
-    bool GetAllEvents(std::vector<AsyncEventItem*>& all_events);
+    //! Get all events for processing
+    bool GetAllEvents(std::vector<AsyncEventItem>& all_events);
 
+    //! Get single event for processing
     bool GetEvent(AsyncEventItem& event);
 
     //! Add events back to queue (for events that need to be kept)
     void AddEventsBack(const std::vector<AsyncEventItem>& events);
-
   private:
-  
     ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
   };
 
