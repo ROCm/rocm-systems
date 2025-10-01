@@ -102,9 +102,12 @@ public:
         (store_value(values), ...);
     }
 
+    void start_flushing_thread(pid_t pid);
+    ~buffer_storage();
+
 private:
     friend class cache_manager;
-    buffer_storage(pid_t _pid);
+    buffer_storage();
     void     shutdown();
     bool     is_running() const;
     void     fragment_memory();
