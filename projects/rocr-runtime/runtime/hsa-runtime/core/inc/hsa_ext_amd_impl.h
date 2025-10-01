@@ -372,6 +372,16 @@ hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute
                                     void* value);
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                            uint64_t size, int64_t file_offset,
+                                            uint64_t *size_copied, int32_t *status);
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                           uint64_t size, int64_t file_offset,
+                                           uint64_t *size_copied, int32_t *status);
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
 
 }  // namespace amd
