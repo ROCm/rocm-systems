@@ -40,9 +40,6 @@
 #define WINAPI
 #endif
 
-
-BOOL(WINAPI* pfnGetNumaNodeProcessorMaskEx)(USHORT, PGROUP_AFFINITY) = NULL;
-
 namespace amd {
 
 static size_t allocationGranularity_;
@@ -54,10 +51,7 @@ PVOID divExceptionHandler = NULL;
 #endif  // _WIN64
 
 static double PerformanceFrequency;
-
-typedef BOOL(WINAPI* SetThreadGroupAffinity_fn)(__in HANDLE, __in CONST GROUP_AFFINITY*,
-                                                __out_opt PGROUP_AFFINITY);
-static SetThreadGroupAffinity_fn pfnSetThreadGroupAffinity = NULL;
+static GROUP_AFFINITY nativeMask_;
 
 #pragma section(".CRT$XCU", long, read)
 __declspec(allocate(".CRT$XCU")) bool (*__init)(void) = Os::init;
@@ -81,12 +75,9 @@ bool Os::init() {
   QueryPerformanceFrequency(&frequency);
   PerformanceFrequency = (double)frequency.QuadPart;
 
-  HMODULE handle = ::LoadLibrary("kernel32.dll");
-  if (handle != NULL) {
-    pfnSetThreadGroupAffinity =
-        (SetThreadGroupAffinity_fn)::GetProcAddress(handle, "SetThreadGroupAffinity");
-    pfnGetNumaNodeProcessorMaskEx = (BOOL(WINAPI*)(USHORT, PGROUP_AFFINITY))::GetProcAddress(
-        handle, "GetNumaNodeProcessorMaskEx");
+  if (!GetThreadGroupAffinity(GetCurrentThread(), &nativeMask_)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+      "Failed getting main thread affinity with error %d", GetLastError());
   }
 
   return Thread::init();
@@ -250,7 +241,36 @@ static void SetThreadName(DWORD threadId, const char* name) {
 
 void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThreadId(), name); }
 
-void Os::setPreferredNumaNode(uint32_t node) {};
+void Os::setPreferredNumaNode(uint32_t node) {
+ #ifdef ROCCLR_SUPPORT_NUMA_POLICY
+  if (AMD_CPU_AFFINITY) {
+    ULONG highestNodeNumber = 0;
+    if (!GetNumaHighestNodeNumber(&highestNodeNumber)) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+      "GetNumaHighestNodeNumber() failed with error %d", node, GetLastError());
+      return;
+    }
+
+    if(highestNodeNumber < node) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+      "Wrong values: highestNodeNumber %hu,  node %u", highestNodeNumber, node);
+      return;
+    }
+    GROUP_AFFINITY affinity = {};
+    // Return the primary processor group of the node
+    if (!GetNumaNodeProcessorMaskEx(node, &affinity)) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+      "Failed getting numa node(%u) affinity with error %d", node, GetLastError());
+      return;
+    }
+    if (!SetThreadGroupAffinity(GetCurrentThread(), &affinity, nullptr)) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+      "Failed setting numa node(%u) affinity onto thread with error %d", node, GetLastError());
+      return;
+    }
+  }
+#endif // ROCCLR_SUPPORT_NUMA_POLICY
+};
 
 static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
   DWORD code = ep->ExceptionRecord->ExceptionCode;
@@ -325,25 +345,33 @@ const void* Os::createOsThread(Thread* thread) {
   return reinterpret_cast<const void*>(handle);
 }
 
+// This function only works with CPU core number <= 64.
+// SetThreadGroupAffinity does clear the thread's affinity to other processor groups.
+// No API Yet to set Multi-Group Affinity.
+// So only the last group will take affect in this function!
 void Os::setThreadAffinity(const void* handle, const Os::ThreadAffinityMask& mask) {
-  if (pfnSetThreadGroupAffinity != NULL) {
-    GROUP_AFFINITY group = {0};
-    for (WORD i = 0; i < sizeof(mask.mask_) / sizeof(KAFFINITY); ++i) {
-      group.Mask = mask.mask_[i];
-      group.Group = i;
-      if (group.Mask != 0) {
-        pfnSetThreadGroupAffinity((HANDLE)handle, &group, NULL);
-      }
-    }
-  } else {  // pfnSetThreadGroupAffinity == NULL
-    DWORD_PTR threadAffinityMask = (DWORD_PTR)mask.mask_[0];
-    if (threadAffinityMask != 0) {
-      ::SetThreadAffinityMask((HANDLE)handle, threadAffinityMask);
+  GROUP_AFFINITY group = {0};
+  for (WORD i = 0; i < sizeof(mask.mask_) / sizeof(KAFFINITY); ++i) {
+    group.Mask = mask.mask_[i];
+    group.Group = i;
+    if (group.Mask != 0) {
+      SetThreadGroupAffinity((HANDLE)handle, &group, NULL);
     }
   }
 }
 
-bool Os::setThreadAffinityToMainThread() { return true; }
+bool Os::setThreadAffinityToMainThread() {
+  if (AMD_CPU_AFFINITY) {
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Setting Affinity to the main thread's affinity");
+    if (!SetThreadGroupAffinity(GetCurrentThread(), &nativeMask_, nullptr)) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+      "Failed setting main thread affinity with error %d", GetLastError());
+      return false;
+    }
+  }
+  return true;
+}
+
 void Os::yield() { ::SwitchToThread(); }
 
 uint64_t Os::timeNanos() {

@@ -54,10 +54,10 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
+#if defined(ROCCLR_SUPPORT_NUMA_POLICY) && defined(__linux__)
 #include <numa.h>
 #include <numaif.h>
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
+#endif  // ROCCLR_SUPPORT_NUMA_POLICY __linux__
 #include <sstream>
 #include <vector>
 
@@ -2061,6 +2061,7 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
 #ifndef ROCCLR_SUPPORT_NUMA_POLICY
   ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
 #else
+#ifdef __linux__
   int mode = MPOL_DEFAULT;
   int maxNodes = numa_num_possible_nodes();
   bitmask* nodeMask = numa_bitmask_alloc(maxNodes);
@@ -2092,6 +2093,23 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
       ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
   numa_free_cpumask(nodeMask);
+#else // _WIN32
+  // This depends on affinity set by the user or Os default
+  PROCESSOR_NUMBER procNumber{};
+  GetCurrentProcessorNumberEx(&procNumber);
+  USHORT numaNode = -1; // Current numa node that the thread is running on
+  if (!GetNumaProcessorNodeEx(&procNumber, &numaNode)) {
+    LogPrintfError("GetNumaProcessorNodeEx() failed with error %ld", GetLastError());
+  } else if (numaNode >= cpu_agents_.size()) {
+    // Each cpu agent denotes a numa node
+    LogPrintfError("Current numa node(%hu) >= total numa node count(%zu)", numaNode,
+      cpu_agents_.size());
+  } else {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
+          "Select numa node %hu to allocate host memory", numaNode);
+    ptr = hostAlloc(size, alignment, mem_seg, &cpu_agents_[numaNode]);
+  }
+#endif  // __linux__
 #endif  // ROCCLR_SUPPORT_NUMA_POLICY
   return ptr;
 }

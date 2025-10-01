@@ -330,6 +330,10 @@ void Os::setCurrentThreadName(const char* name) { ::prctl(PR_SET_NAME, name); }
 void Os::setPreferredNumaNode(uint32_t node) {
 #ifdef ROCCLR_SUPPORT_NUMA_POLICY
   if (AMD_CPU_AFFINITY && (numa_available() >= 0)) {
+    if (node > numa_max_node()) {
+      assert(0 && "too big numa node Id");
+      return;
+    }
     bitmask* bm = numa_allocate_cpumask();
     numa_node_to_cpus(node, bm);
     if (numa_sched_setaffinity(0, bm) < 0) {

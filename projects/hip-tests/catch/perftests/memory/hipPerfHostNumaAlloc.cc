@@ -26,6 +26,7 @@ THE SOFTWARE.
  */
 
 #include <numaif.h>
+#include <numa.h>
 #include <hip_test_common.hh>
 // #define ENABLE_DEBUG 1
 // To run it correctly, we must not export HIP_VISIBLE_DEVICES.
@@ -39,25 +40,6 @@ int page_size = 1024;
 
 const int mode[] = {MPOL_DEFAULT, MPOL_BIND, MPOL_PREFERRED, MPOL_INTERLEAVE};
 const char* modeStr[] = {"MPOL_DEFAULT", "MPOL_BIND", "MPOL_PREFERRED", "MPOL_INTERLEAVE"};
-
-std::string exeCommand(const char* cmd) {
-  std::array<char, 128> buff;
-  std::string result;
-  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-  if (!pipe) {
-    return result;
-  }
-  while (fgets(buff.data(), buff.size(), pipe.get()) != nullptr) {
-    result += buff.data();
-  }
-  return result;
-}
-
-int getCpuAgentCount() {
-  const char* cmd = "cat /proc/cpuinfo | grep \"physical id\" | sort | uniq | wc -l";
-  int cpuAgentCount = std::atoi(exeCommand(cmd).c_str());
-  return cpuAgentCount;
-}
 
 bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   void* pages[NUM_PAGES];
@@ -164,7 +146,7 @@ bool runTest(const int& cpuCount, const int& gpuCount, unsigned int hostMallocfl
 TEST_CASE("Perf_hipPerfHostNumaAlloc_test") {
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
-  int cpuCount = getCpuAgentCount();
+  int cpuCount = numa_max_node() + 1; // number of numa nodes
   CONSOLE_PRINT("Cpu count %d, Gpu count %d\n", cpuCount, gpuCount);
 
   if (cpuCount < 0 || gpuCount < 0) {
