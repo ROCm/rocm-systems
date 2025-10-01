@@ -283,14 +283,18 @@ int getClockRate(int& max_clock_rate) {
   HIP_CHECK(hipDeviceGetAttribute(&max_clock_rate, hipDeviceAttributeClockRate, 0));
 
   getCurrentDeviceUUID(uuid);
-  smi_clock_rate = getEngineFreq(uuid) * 1000;
+  smi_clock_rate = getEngineFreq(uuid);
 
   if (smi_clock_rate == -1) {
     // libamd_smi.so might not be present depending on some systems, so we load it dynamically
     // and use it if it is, otherwise we use the attribute
     INFO("Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
     return max_clock_rate;
-  } else if (smi_clock_rate != max_clock_rate) {
+  }
+
+  smi_clock_rate *= 1000;
+
+  if (smi_clock_rate != max_clock_rate) {
     INFO("clock rate: " << smi_clock_rate << "kHz is not set to maximum: " << max_clock_rate
                         << "kHz");
   }
