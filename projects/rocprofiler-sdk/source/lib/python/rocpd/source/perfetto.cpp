@@ -377,6 +377,14 @@ write_perfetto(
                 auto& track = thread_tracks.at(itr.tid);
                 auto  _name = itr.name;
 
+                itr.extdata = "{\"hw_counters\": {}, "
+                              "\"message\": \"" +
+                              _name +
+                              "\", "
+                              "\"field1\": {\"nullopt\": false, \"data\": [1,2,3,4]}, "
+                              "\"field2\": {\"nullopt\": false, \"data\": \"msg1\"}, "
+                              "\"field3\": {\"nullopt\": true, \"data\": \"msg1\"}}";
+
                 if(itr.has_extdata())
                 {
                     if(auto _extdata = itr.get_extdata(); !_extdata.message.empty())
