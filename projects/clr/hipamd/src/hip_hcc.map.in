@@ -648,6 +648,7 @@ global:
     hipExtDisableLogging;
     hipExtEnableLogging;
     hipExtSetLoggingParams;
+    hipKernelGetAttribute;
 local:
     *;
 } hip_7.1;

@@ -3397,6 +3397,15 @@ typedef union rocprofiler_hip_api_args_t
         size_t log_mask;
     } hipExtSetLoggingParams;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+    struct
+    {
+        int* pi;
+        hipFunction_attribute attrib;
+        hipKernel_t kernel;
+        hipDevice_t dev;
+    } hipKernelGetAttribute;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

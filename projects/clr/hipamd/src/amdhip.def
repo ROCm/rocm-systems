@@ -526,3 +526,4 @@ hipKernelGetParamInfo
 hipExtDisableLogging
 hipExtEnableLogging
 hipExtSetLoggingParams
+hipKernelGetAttribute

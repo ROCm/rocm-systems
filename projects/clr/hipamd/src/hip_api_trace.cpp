@@ -888,6 +888,8 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
 hipError_t hipExtDisableLogging();
 hipError_t hipExtEnableLogging();
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
 }  // namespace hip
 
 namespace hip {
@@ -1438,6 +1440,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExtDisableLogging_fn = hip::hipExtDisableLogging;
   ptrDispatchTable->hipExtEnableLogging_fn = hip::hipExtEnableLogging;
   ptrDispatchTable->hipExtSetLoggingParams_fn = hip::hipExtSetLoggingParams;
+  ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2124,15 +2127,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetParamInfo_fn, 507);
 HIP_ENFORCE_ABI(HipDispatchTable, hipExtDisableLogging_fn, 508);
 HIP_ENFORCE_ABI(HipDispatchTable, hipExtEnableLogging_fn, 509);
 HIP_ENFORCE_ABI(HipDispatchTable, hipExtSetLoggingParams_fn, 510);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 22
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetAttribute_fn, 511);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 511)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 512)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 21,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 22,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
