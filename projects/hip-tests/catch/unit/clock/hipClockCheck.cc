@@ -113,65 +113,9 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
   return verify_time_execution(ratio, time1, time2, expected_time1, expected_time2);
 }
 
- typedef enum {
-    AMDSMI_STATUS_SUCCESS = 0,              //!< Call succeeded
-    // Library usage errors
-    AMDSMI_STATUS_INVAL = 1,                //!< Invalid parameters
-    AMDSMI_STATUS_NOT_SUPPORTED = 2,        //!< Command not supported
-    AMDSMI_STATUS_NOT_YET_IMPLEMENTED = 3,  //!< Not implemented yet
-    AMDSMI_STATUS_FAIL_LOAD_MODULE = 4,     //!< Fail to load lib
-    AMDSMI_STATUS_FAIL_LOAD_SYMBOL = 5,     //!< Fail to load symbol
-    AMDSMI_STATUS_DRM_ERROR = 6,            //!< Error when call libdrm
-    AMDSMI_STATUS_API_FAILED = 7,           //!< API call failed
-    AMDSMI_STATUS_TIMEOUT = 8,              //!< Timeout in API call
-    AMDSMI_STATUS_RETRY = 9,                //!< Retry operation
-    AMDSMI_STATUS_NO_PERM = 10,             //!< Permission Denied
-    AMDSMI_STATUS_INTERRUPT = 11,           //!< An interrupt occurred during execution of function
-    AMDSMI_STATUS_IO = 12,                  //!< I/O Error
-    AMDSMI_STATUS_ADDRESS_FAULT = 13,       //!< Bad address
-    AMDSMI_STATUS_FILE_ERROR = 14,          //!< Problem accessing a file
-    AMDSMI_STATUS_OUT_OF_RESOURCES = 15,    //!< Not enough memory
-    AMDSMI_STATUS_INTERNAL_EXCEPTION = 16,  //!< An internal exception was caught
-    AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS = 17, //!< The provided input is out of allowable or safe range
-    AMDSMI_STATUS_INIT_ERROR = 18,          //!< An error occurred when initializing internal data structures
-    AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,   //!< An internal reference counter exceeded INT32_MAX
-    AMDSMI_STATUS_DIRECTORY_NOT_FOUND = 20, //!< Error when a directory is not found, maps to ENOTDIR
-    // Processor related errors
-    AMDSMI_STATUS_BUSY = 30,                //!< Processor busy
-    AMDSMI_STATUS_NOT_FOUND = 31,           //!< Processor Not found
-    AMDSMI_STATUS_NOT_INIT = 32,            //!< Processor not initialized
-    AMDSMI_STATUS_NO_SLOT = 33,             //!< No more free slot
-    AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,   //!< Processor driver not loaded
-    // Data and size errors
-    AMDSMI_STATUS_MORE_DATA = 39,           //!< There is more data than the buffer size the user passed
-    AMDSMI_STATUS_NO_DATA = 40,             //!< No data was found for a given input
-    AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,   //!< Not enough resources were available for the operation
-    AMDSMI_STATUS_UNEXPECTED_SIZE = 42,     //!< An unexpected amount of data was read
-    AMDSMI_STATUS_UNEXPECTED_DATA = 43,     //!< The data read or provided to function is not what was expected
-    //esmi errors
-    AMDSMI_STATUS_NON_AMD_CPU = 44,         //!< System has different cpu than AMD
-    AMDSMI_STATUS_NO_ENERGY_DRV = 45,       //!< Energy driver not found
-    AMDSMI_STATUS_NO_MSR_DRV = 46,          //!< MSR driver not found
-    AMDSMI_STATUS_NO_HSMP_DRV = 47,         //!< HSMP driver not found
-    AMDSMI_STATUS_NO_HSMP_SUP = 48,         //!< HSMP not supported
-    AMDSMI_STATUS_NO_HSMP_MSG_SUP = 49,     //!< HSMP message/feature not supported
-    AMDSMI_STATUS_HSMP_TIMEOUT = 50,        //!< HSMP message timed out
-    AMDSMI_STATUS_NO_DRV = 51,              //!< No Energy and HSMP driver present
-    AMDSMI_STATUS_FILE_NOT_FOUND = 52,      //!< file or directory not found
-    AMDSMI_STATUS_ARG_PTR_NULL = 53,        //!< Parsed argument is invalid
-    AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
-    AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
-    AMDSMI_STATUS_CORRUPTED_EEPROM = 56,    //!< EEPROM is corrupted
-    // General errors
-    AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
-    AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF  //!< An unknown error occurred
-} amdsmi_status_t;
-
-template <class T>
-  void loadSym(T& symbol, const char* symbolName, void* handle)
-{
+template <class T> void loadSym(T& symbol, const char* symbolName, void* handle) {
   using namespace std::string_literals;
-  void *fnsym = dlsym(handle, symbolName);
+  void* fnsym = dlsym(handle, symbolName);
 
   if (!fnsym)
     throw std::runtime_error("Failure while trying to dynamically load symbol: "s + symbolName);
@@ -179,8 +123,7 @@ template <class T>
   symbol = reinterpret_cast<T>(fnsym);
 }
 
-void getCurrentDeviceUUID(hipUUID& uuid)
-{
+void getCurrentDeviceUUID(hipUUID& uuid) {
   hipDeviceProp_t props;
   int deviceId;
 
@@ -189,16 +132,20 @@ void getCurrentDeviceUUID(hipUUID& uuid)
   std::memcpy(uuid.bytes, props.uuid.bytes, sizeof(hipUUID::bytes));
 }
 
+// Gets the maximum engine frequency of the GPU by dynamically loading amdsmi
 // @uuid the id of the GPU to query the frequency for
 // @return the maximum engine frequency of the GPU (MHz) or -1 if error
-int getEngineFreq(const hipUUID& uuid)
-{
+int getEngineFreq(const hipUUID& uuid) {
   static constexpr unsigned int AMDSMI_MAX_STRING_LENGTH = 256;
-  typedef void *amdsmi_processor_handle;
-  typedef void *amdsmi_socket_handle;
+  typedef void* amdsmi_processor_handle;
+  typedef void* amdsmi_socket_handle;
 
   void* libHdl;
   int result = -1;
+
+  typedef enum {
+    AMDSMI_STATUS_SUCCESS = 0,  //!< Call succeeded
+  } amdsmi_status_t;
 
   typedef struct {
     uint32_t clk;            //!< In MHz
@@ -210,10 +157,10 @@ int getEngineFreq(const hipUUID& uuid)
   } amdsmi_clk_info_t;
 
   typedef struct {
-    uint32_t drm_render; //!< the render node under /sys/class/drm/renderD*
-    uint32_t drm_card;   //!< the graphic card device under /sys/class/drm/card*
-    uint32_t hsa_id;     //!< the HSA enumeration ID
-    uint32_t hip_id;     //!< the HIP enumeration ID
+    uint32_t drm_render;  //!< the render node under /sys/class/drm/renderD*
+    uint32_t drm_card;    //!< the graphic card device under /sys/class/drm/card*
+    uint32_t hsa_id;      //!< the HSA enumeration ID
+    uint32_t hip_id;      //!< the HIP enumeration ID
     char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  //!< the HIP unique identifer
   } amdsmi_enumeration_info_t;
 
@@ -221,17 +168,17 @@ int getEngineFreq(const hipUUID& uuid)
     AMDSMI_CLK_TYPE_SYS = 0x0,  //!< System clock
     AMDSMI_CLK_TYPE_FIRST = AMDSMI_CLK_TYPE_SYS,
     AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,  //!< Graphics clock
-    AMDSMI_CLK_TYPE_DF,         /**< Data Fabric clock (for ASICs
-                                     running on a separate clock) */
-    AMDSMI_CLK_TYPE_DCEF,       /**< Display Controller Engine Front clock,
-                                     timing/bandwidth signals to display */
-    AMDSMI_CLK_TYPE_SOC,        //!< System On Chip clock, integrated circuit frequency
-    AMDSMI_CLK_TYPE_MEM,        //!< Memory clock speed, system operating frequency
-    AMDSMI_CLK_TYPE_PCIE,       //!< PCI Express clock, high bandwidth peripherals
-    AMDSMI_CLK_TYPE_VCLK0,      //!< Video 0 clock, video processing units
-    AMDSMI_CLK_TYPE_VCLK1,      //!< Video 1 clock, video processing units
-    AMDSMI_CLK_TYPE_DCLK0,      //!< Display 1 clock, timing signals for display output
-    AMDSMI_CLK_TYPE_DCLK1,      //!< Display 2 clock, timing signals for display output
+    AMDSMI_CLK_TYPE_DF,                         /**< Data Fabric clock (for ASICs
+                                                     running on a separate clock) */
+    AMDSMI_CLK_TYPE_DCEF,                       /**< Display Controller Engine Front clock,
+                                                     timing/bandwidth signals to display */
+    AMDSMI_CLK_TYPE_SOC,    //!< System On Chip clock, integrated circuit frequency
+    AMDSMI_CLK_TYPE_MEM,    //!< Memory clock speed, system operating frequency
+    AMDSMI_CLK_TYPE_PCIE,   //!< PCI Express clock, high bandwidth peripherals
+    AMDSMI_CLK_TYPE_VCLK0,  //!< Video 0 clock, video processing units
+    AMDSMI_CLK_TYPE_VCLK1,  //!< Video 1 clock, video processing units
+    AMDSMI_CLK_TYPE_DCLK0,  //!< Display 1 clock, timing signals for display output
+    AMDSMI_CLK_TYPE_DCLK1,  //!< Display 2 clock, timing signals for display output
     AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
   } amdsmi_clk_type_t;
 
@@ -240,9 +187,12 @@ int getEngineFreq(const hipUUID& uuid)
   uint32_t numProcessor = 0;
   amdsmi_status_t (*fninit)(uint64_t);
   amdsmi_status_t (*fnget_socket_handles)(uint32_t*, amdsmi_socket_handle*);
-  amdsmi_status_t (*fnget_processor_handles)(amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*);
-  amdsmi_status_t (*fnget_gpu_enumeration_info)(amdsmi_processor_handle, amdsmi_enumeration_info_t*);
-  amdsmi_status_t (*fnget_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_info_t*);
+  amdsmi_status_t (*fnget_processor_handles)(amdsmi_socket_handle, uint32_t*,
+                                             amdsmi_processor_handle*);
+  amdsmi_status_t (*fnget_gpu_enumeration_info)(amdsmi_processor_handle,
+                                                amdsmi_enumeration_info_t*);
+  amdsmi_status_t (*fnget_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t,
+                                      amdsmi_clk_info_t*);
   amdsmi_status_t (*fnshut_down)();
 
   libHdl = dlopen("libamd_smi.so", RTLD_LAZY);
@@ -269,15 +219,13 @@ int getEngineFreq(const hipUUID& uuid)
   uint32_t socket_count = 0;
   uint32_t numSocket = 0;
 
-  // get the socket count available in the system.
+  // get the socket count available in the system
   if (fnget_socket_handles(&socket_count, nullptr)) {
     return -1;
   }
 
   std::vector<amdsmi_socket_handle> sockets(socket_count);
-  int deleteme;
-  if ((deleteme = fnget_socket_handles(&socket_count, &sockets[0]))) {
-    printf("return code: %d\n", deleteme);
+  if (fnget_socket_handles(&socket_count, &sockets[0])) {
     return -1;
   }
 
@@ -298,12 +246,12 @@ int getEngineFreq(const hipUUID& uuid)
       const char* prefix = "GPU-";
 
       if (fnget_gpu_enumeration_info(processors[numProcessor], &info)) {
-	return -1;
+        return -1;
       }
 
       if (!std::strncmp(info.hip_uuid, "GPU-", std::strlen(prefix))) {
-	// amd-smi adds "GPU-" in front of the hip_uuid; whereas HIP doesn't
-	offset = strlen(prefix);
+        // amd-smi adds "GPU-" in front of the hip_uuid; whereas HIP doesn't
+        offset = strlen(prefix);
       }
 
       if (!std::memcmp(uuid.bytes, info.hip_uuid + offset, sizeof(hipUUID::bytes) - offset)) {
@@ -311,7 +259,7 @@ int getEngineFreq(const hipUUID& uuid)
           return -1;
         }
 
-	result = clk_info.max_clk;
+        result = clk_info.max_clk;
       }
 
       numProcessor++;
@@ -326,11 +274,10 @@ int getEngineFreq(const hipUUID& uuid)
 }
 
 // @return real clock rate in kHz
-int getClockRate(int& max_clock_rate)
-{
+int getClockRate(int& max_clock_rate) {
   hipUUID uuid;
   HIP_CHECK(hipSetDevice(0));
-  int smi_clock_rate = 0; // in kHz
+  int smi_clock_rate = 0;  // in kHz
 
   max_clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&max_clock_rate, hipDeviceAttributeClockRate, 0));
@@ -339,12 +286,13 @@ int getClockRate(int& max_clock_rate)
   smi_clock_rate = getEngineFreq(uuid) * 1000;
 
   if (smi_clock_rate == -1) {
+    // libamd_smi.so might not be present depending on some systems, so we load it dynamically
+    // and use it if it is, otherwise we use the attribute
     INFO("Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
     return max_clock_rate;
   } else if (smi_clock_rate != max_clock_rate) {
-    INFO("clock rate: " << smi_clock_rate <<
-         "kHz is not set to maximum: " << max_clock_rate <<
-         "kHz");
+    INFO("clock rate: " << smi_clock_rate << "kHz is not set to maximum: " << max_clock_rate
+                        << "kHz");
   }
 
   return smi_clock_rate;
