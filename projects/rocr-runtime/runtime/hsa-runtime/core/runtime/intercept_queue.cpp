@@ -369,7 +369,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     end = next_packet_ + amd_queue_.hsa_queue.size;
 
   uint64_t i = next_packet_;
-  uint64_t invalid_header_i = UINT64_MAX;
+  uint64_t invalid_header_i = end;
 
   while (i < end) {
     // Load the packet header as atomic acquire as it may have been written by
@@ -395,7 +395,6 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
   // Process callbacks.
   uint64_t packet_count = i - next_packet_;
   if (packet_count) {
-      // Process callbacks.
     Cursor.interceptor_index = interceptors.size() - 1;
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
