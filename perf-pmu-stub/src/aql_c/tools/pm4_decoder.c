@@ -675,6 +675,7 @@ static void dwords_to_hex_string(const uint32_t* dwords, size_t num_dwords) {
 
 /**
  * Process multiple packets from a hex string (rebase mode)
+ * Now also decodes and displays the rebased packets instead of just outputting hex
  */
 static void process_packet_string_rebase(const char* hex_str) {
     /* Dynamically allocate buffer to avoid stack overflow with large MAX_PACKET_SIZE */
@@ -692,6 +693,7 @@ static void process_packet_string_rebase(const char* hex_str) {
 
     size_t offset = 0;
     size_t remaining = (size_t)num_dwords;
+    int packet_count = 0;
 
     /* Process all packets and apply rebasing */
     while (remaining > 0) {
@@ -714,13 +716,17 @@ static void process_packet_string_rebase(const char* hex_str) {
         /* Apply rebasing to this packet */
         rebase_pm4_packet(&dwords[offset], header.size_dwords);
 
+        /* Decode and display the rebased packet */
+        decode_pm4_packet(&dwords[offset], header.size_dwords);
+
         offset += header.size_dwords;
         remaining -= header.size_dwords;
-    }
+        packet_count++;
 
-    /* Output the modified hex string */
-    dwords_to_hex_string(dwords, (size_t)num_dwords);
-    printf("\n");
+        if (remaining > 0) {
+            printf("---\n"); /* Separator between packets */
+        }
+    }
 
     free(dwords);
 }
@@ -784,15 +790,16 @@ static void print_usage(const char* prog_name) {
     fprintf(stderr, "PM4 packet decoder and address rebaser\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
-    fprintf(stderr, "  -r, --rebase <addr>  Rebase memory addresses to new base address (hex)\n");
+    fprintf(stderr, "  -r, --rebase <addr>  Rebase memory addresses to new base and decode\n");
     fprintf(stderr, "  -h, --help           Show this help message\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Examples:\n");
     fprintf(stderr, "  # Decode packets:\n");
     fprintf(stderr, "  echo \"c001790000000200e0000000\" | %s\n", prog_name);
     fprintf(stderr, "\n");
-    fprintf(stderr, "  # Rebase to new address:\n");
-    fprintf(stderr, "  echo \"c001790000000200e0000000\" | %s --rebase 0xDEADBEEF000\n", prog_name);
+    fprintf(stderr, "  # Rebase addresses to 0x0 and decode:\n");
+    fprintf(stderr, "  echo \"c0044000060062000000d38000000000124ec00000007266\" | %s --rebase 0x0\n", prog_name);
+    fprintf(stderr, "  # (Will show COPY_DATA with destination 0x0000000000000000)\n");
 }
 
 /**
@@ -861,6 +868,7 @@ int main(int argc, char** argv) {
         /* Process based on mode */
         if (g_rebase_state.enabled) {
             process_packet_string_rebase(line);
+            printf("\n");
         } else {
             process_packet_string(line);
             printf("\n");

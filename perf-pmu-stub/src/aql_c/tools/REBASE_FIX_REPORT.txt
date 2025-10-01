@@ -1,0 +1,240 @@
+================================================================================
+PM4_DECODER --REBASE FLAG FIX REPORT
+================================================================================
+
+DATE: 2025-10-01
+FILE: /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools/pm4_decoder.c
+
+================================================================================
+THE BUG
+================================================================================
+
+The --rebase flag was not correctly displaying rebased memory addresses in the
+decoded output. Instead of showing the rebased addresses in a human-readable
+decoded format, it was only outputting the rebased packets as hex strings,
+requiring a two-step process to see the results.
+
+SYMPTOM:
+When running:
+  echo "<packet>" | ./pm4_decoder --rebase 0x0
+
+The tool would:
+1. Apply rebasing to the packet (✓ correctly)
+2. Output the modified packet as HEX to stdout (✗ not user-friendly)
+3. Require piping to another ./pm4_decoder call to see decoded output
+
+This made the --rebase flag impractical for interactive use and required
+external scripts to work around the limitation.
+
+EVIDENCE:
+From test_results.txt:
+  "BUG: pm4_decoder not producing decoded output (only echoing hex)
+   CAUSE: Script was using --rebase flag, which only outputs rebased hex,
+          not decoded packets
+   FIX: Removed --rebase flag from subprocess call"
+
+From compare_packets.py line 169:
+  "# Note: Not using --rebase because that mode only outputs hex, not
+   decoded packets"
+
+================================================================================
+THE FIX
+================================================================================
+
+Modified the process_packet_string_rebase() function to:
+1. Apply rebasing to all packets (unchanged - already working)
+2. DECODE and DISPLAY the rebased packets (NEW)
+3. Remove hex output mode (no longer needed)
+
+CODE CHANGES:
+File: pm4_decoder.c
+Function: process_packet_string_rebase()
+
+BEFORE:
+  /* Apply rebasing to this packet */
+  rebase_pm4_packet(&dwords[offset], header.size_dwords);
+
+  offset += header.size_dwords;
+  remaining -= header.size_dwords;
+}
+
+/* Output the modified hex string */
+dwords_to_hex_string(dwords, (size_t)num_dwords);
+printf("\n");
+
+AFTER:
+  /* Apply rebasing to this packet */
+  rebase_pm4_packet(&dwords[offset], header.size_dwords);
+
+  /* Decode and display the rebased packet */
+  decode_pm4_packet(&dwords[offset], header.size_dwords);
+
+  offset += header.size_dwords;
+  remaining -= header.size_dwords;
+  packet_count++;
+
+  if (remaining > 0) {
+      printf("---\n"); /* Separator between packets */
+  }
+}
+
+RESULT:
+The --rebase flag now provides immediate, human-readable decoded output showing
+the rebased addresses directly, making it suitable for interactive use.
+
+================================================================================
+VERIFICATION - BEFORE/AFTER COMPARISON
+================================================================================
+
+TEST PACKET: SQ Event 1 Read Packet (first COPY_DATA)
+Original hex: c0044000060062000000d38000000000124ec00000007266
+
+BEFORE FIX (--rebase 0x0):
+------------------------------------------------------------
+Output: c0044000060062000000d380000000000000000000000000
+(Just hex, no decode - required second pass to see addresses)
+
+AFTER FIX (--rebase 0x0):
+------------------------------------------------------------
+COPY_DATA
+  Source: REGISTER (0x000000000000d380)
+  Destination: MEMORY (0x0000000000000000)  <-- REBASED!
+  Count Select: 0, Write Confirm: 0
+
+COMPARISON TABLE:
+------------------------------------------------------------
+Original Address:  0x00007266124ec000
+Rebased Address:   0x0000000000000000  ✓
+Offset:            0x0
+
+================================================================================
+COMPLETE PACKET SEQUENCE VERIFICATION
+================================================================================
+
+Full SQ Event 1 Read Packet Test:
+Command: cat test_sq_1_read.hex | ./pm4_decoder --rebase 0x0
+
+COPY_DATA Packets (First 4):
+┌────────┬─────────────────────┬─────────────────────┬──────────┐
+│ Packet │ Original Address    │ Rebased Address     │ Offset   │
+├────────┼─────────────────────┼─────────────────────┼──────────┤
+│ #1     │ 0x00007266124ec000 │ 0x0000000000000000 │ 0x0      │
+│ #2     │ 0x00007266124ec004 │ 0x0000000000000004 │ 0x4      │
+│ #3     │ 0x00007266124ec008 │ 0x0000000000000008 │ 0x8      │
+│ #4     │ 0x00007266124ec00c │ 0x000000000000000c │ 0xc      │
+└────────┴─────────────────────┴─────────────────────┴──────────┘
+
+ACQUIRE_MEM Packet:
+┌──────────────┬───────────────────────┬─────────────────────┐
+│ Packet Type  │ Original Address      │ Rebased Address     │
+├──────────────┼───────────────────────┼─────────────────────┤
+│ ACQUIRE_MEM  │ 0x0000007266124ec0    │ 0x0000000000000000 │
+│              │ (shifted by 8 bits)   │ (shifted by 8 bits) │
+└──────────────┴───────────────────────┴─────────────────────┘
+
+ALL PACKETS: ✓ CORRECTLY REBASED AND DECODED
+
+================================================================================
+ALTERNATIVE REBASE ADDRESS TEST
+================================================================================
+
+To verify offset calculation works correctly with different base addresses:
+
+Command: cat test_sq_1_read.hex | ./pm4_decoder --rebase 0xDEADBEEF000
+
+COPY_DATA Packets (First 4):
+┌────────┬─────────────────────┬─────────────────────┬──────────┐
+│ Packet │ Original Address    │ Rebased Address     │ Offset   │
+├────────┼─────────────────────┼─────────────────────┼──────────┤
+│ #1     │ 0x00007266124ec000 │ 0x00000deadbeef000 │ 0x0      │
+│ #2     │ 0x00007266124ec004 │ 0x00000deadbeef004 │ 0x4      │
+│ #3     │ 0x00007266124ec008 │ 0x00000deadbeef008 │ 0x8      │
+│ #4     │ 0x00007266124ec00c │ 0x00000deadbeef00c │ 0xc      │
+└────────┴─────────────────────┴─────────────────────┴──────────┘
+
+Offset Calculation Verification:
+  new_addr = new_base + (original_addr - original_base)
+  
+  Example for packet #3:
+    0x00000deadbeef008 = 0x00000deadbeef000 + (0x00007266124ec008 - 0x00007266124ec000)
+    0x00000deadbeef008 = 0x00000deadbeef000 + 0x8  ✓
+
+================================================================================
+REBASE ALGORITHM (UNCHANGED)
+================================================================================
+
+The rebasing algorithm itself was already working correctly and remains
+unchanged:
+
+1. On first COPY_DATA packet encountered:
+   - Extract destination address from dwords[4:5]
+   - Store as original_base
+   - Mark base_found = true
+
+2. For each subsequent COPY_DATA packet:
+   - Extract destination address
+   - Calculate offset = current_addr - original_base
+   - Calculate new_addr = new_base + offset
+   - Update packet dwords[4:5] with new_addr
+
+3. For ACQUIRE_MEM packets:
+   - Extract address from dwords[4:5] (stored >> 8 bits)
+   - Shift left 8 to get actual address
+   - Calculate offset from original_base
+   - Calculate new_addr = new_base + offset
+   - Shift right 8 and store back in dwords[4:5]
+
+The bug was NOT in the rebasing logic itself, but in the OUTPUT format.
+
+================================================================================
+IMPACT
+================================================================================
+
+BEFORE: Users had to use two-step workflow:
+  1. cat packet.hex | ./pm4_decoder --rebase 0x0 > rebased.hex
+  2. cat rebased.hex | ./pm4_decoder
+
+AFTER: Users can now use single-step workflow:
+  cat packet.hex | ./pm4_decoder --rebase 0x0
+  (Immediately see decoded output with rebased addresses)
+
+This makes the --rebase flag practical for:
+  ✓ Interactive debugging
+  ✓ Quick address verification
+  ✓ Scripted comparisons (compare_packets.py can now use --rebase)
+  ✓ Documentation and examples
+
+================================================================================
+BUILD AND TEST
+================================================================================
+
+Build:
+  cd /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools
+  make pm4_decoder
+
+Test:
+  # Simple test
+  echo "c0044000060062000000d38000000000124ec00000007266" | \
+    ./pm4_decoder --rebase 0x0
+
+  # Full SQ event 1 test
+  cat test_sq_1_read.hex | ./pm4_decoder --rebase 0x0
+
+Expected Output:
+  COPY_DATA packets with destination addresses starting at 0x0000000000000000
+  ACQUIRE_MEM packets with base address 0x0000000000000000
+
+================================================================================
+CONCLUSION
+================================================================================
+
+✓ Bug identified: --rebase outputting hex instead of decoded packets
+✓ Root cause: Missing decode call in process_packet_string_rebase()
+✓ Fix implemented: Added decode_pm4_packet() call after rebasing
+✓ Testing completed: All COPY_DATA and ACQUIRE_MEM addresses correctly rebased
+✓ Verification: Offset calculations work correctly with multiple base addresses
+✓ User experience: Single-step workflow now possible
+
+The --rebase flag is now fully functional and user-friendly.
+
+================================================================================

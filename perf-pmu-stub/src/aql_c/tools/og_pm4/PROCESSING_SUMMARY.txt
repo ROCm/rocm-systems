@@ -1,0 +1,121 @@
+================================================================================
+SQ PACKET PROCESSING SUMMARY
+================================================================================
+
+Date: 2025-09-30
+Source File: /home/ben/original_aql_out.txt
+Output Directory: /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools/og_pm4/
+Decoder Tool: /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools/pm4_decoder
+
+================================================================================
+PROCESSING RESULTS
+================================================================================
+
+Total SQ Packets Found:        22
+Total Files Generated:         66 (3 packet types per SQ event)
+Successfully Processed:        66
+Failed Decodes:                0
+Total Output Size:             356K
+
+================================================================================
+PACKET TYPE BREAKDOWN
+================================================================================
+
+Each SQ packet was decoded into 3 separate files:
+  - CMD_BUFFER_READ:  22 files
+  - CMD_BUFFER_START: 22 files
+  - CMD_BUFFER_STOP:  22 files
+
+================================================================================
+UNIQUE EVENT IDs PROCESSED (Hexadecimal)
+================================================================================
+
+SQ_0001 (decimal: 1)
+SQ_0003 (decimal: 3)
+SQ_0004 (decimal: 4)
+SQ_0018 (decimal: 24)
+SQ_001a (decimal: 26)
+SQ_001b (decimal: 27)
+SQ_002c (decimal: 44)
+SQ_002d (decimal: 45)
+SQ_002e (decimal: 46)
+SQ_002f (decimal: 47)
+SQ_0032 (decimal: 50)
+SQ_0036 (decimal: 54)
+SQ_0037 (decimal: 55)
+SQ_003a (decimal: 58)
+SQ_003c (decimal: 60)
+SQ_003d (decimal: 61)
+SQ_0046 (decimal: 70)
+SQ_0047 (decimal: 71)
+SQ_004b (decimal: 75)
+SQ_0066 (decimal: 102)
+SQ_0120 (decimal: 288)
+SQ_0125 (decimal: 293)
+
+================================================================================
+FILE NAMING CONVENTION
+================================================================================
+
+Format: SQ_<EventID_HEX>_<PacketType>.txt
+
+Examples:
+  - SQ_0001_CMD_BUFFER_READ.txt   (Event ID 0x0001, CMD_BUFFER_READ packet)
+  - SQ_0120_CMD_BUFFER_START.txt  (Event ID 0x0120, CMD_BUFFER_START packet)
+  - SQ_0066_CMD_BUFFER_STOP.txt   (Event ID 0x0066, CMD_BUFFER_STOP packet)
+
+================================================================================
+OUTPUT FILE CONTENTS
+================================================================================
+
+Each output file contains:
+  1. Header with metadata:
+     - Event ID (hexadecimal and decimal)
+     - Packet Type
+     - Line number in source file
+     - Hex data length (characters and DWORDs)
+
+  2. PM4 Decoder Output:
+     - Decoded PM4 packets with human-readable descriptions
+     - Packet types include:
+       * SET_UCONFIG_REG - UCONFIG register writes
+       * SET_SH_REG - SH register writes
+       * EVENT_WRITE - Event write commands
+       * COPY_DATA - Data copy operations
+       * ACQUIRE_MEM - Cache flush operations
+       * WAIT_REG_MEM - Register/memory polling
+       * WRITE_DATA - Data write operations
+
+  3. Any error output (if applicable)
+
+================================================================================
+PM4 PACKET TYPES DECODED
+================================================================================
+
+The decoded packets contain various PM4 commands including:
+  - Register writes (SET_UCONFIG_REG, SET_SH_REG)
+  - Memory operations (COPY_DATA, WRITE_DATA)
+  - Synchronization (EVENT_WRITE, WAIT_REG_MEM, ACQUIRE_MEM)
+  - Cache management (ACQUIRE_MEM with GCR control)
+
+================================================================================
+SUCCESS METRICS
+================================================================================
+
+✓ All 22 SQ packets successfully identified
+✓ All 66 packet types successfully decoded
+✓ Zero errors encountered during processing
+✓ All output files properly formatted and saved
+
+================================================================================
+NOTES
+================================================================================
+
+- Each SQ event from the source file contained 3 packet types:
+  CMD_BUFFER_READ, CMD_BUFFER_START, and CMD_BUFFER_STOP
+- The decoder successfully parsed all PM4 packet types
+- Output files are ready for further analysis
+- No modifications were made to any source code files
+- Processing completed successfully without timeouts or errors
+
+================================================================================

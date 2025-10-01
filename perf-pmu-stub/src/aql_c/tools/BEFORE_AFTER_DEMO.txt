@@ -1,0 +1,81 @@
+================================================================================
+BEFORE/AFTER DEMONSTRATION - PM4_DECODER --REBASE FIX
+================================================================================
+
+Command: echo "c0044000060062000000d38000000000124ec00000007266" | ./pm4_decoder --rebase 0x0
+
+This is a single COPY_DATA packet with destination address 0x00007266124ec000
+
+================================================================================
+BEFORE THE FIX
+================================================================================
+
+$ echo "c0044000060062000000d38000000000124ec00000007266" | ./pm4_decoder --rebase 0x0
+Rebasing to new base address: 0x0000000000000000
+Original base address: 0x00007266124ec000
+COPY_DATA: 0x00007266124ec000 -> 0x0000000000000000 (offset: 0x0)
+c0044000060062000000d380000000000000000000000000
+
+PROBLEM: Output is just hex! User cannot see the rebased addresses without
+         piping to another ./pm4_decoder call.
+
+To see decoded output, user had to do:
+$ echo "c0044000060062000000d38000000000124ec00000007266" | \
+    ./pm4_decoder --rebase 0x0 2>/dev/null | \
+    ./pm4_decoder
+
+COPY_DATA
+  Source: REGISTER (0x000000000000d380)
+  Destination: MEMORY (0x0000000000000000)
+  Count Select: 0, Write Confirm: 0
+
+TWO-STEP PROCESS REQUIRED!
+
+================================================================================
+AFTER THE FIX
+================================================================================
+
+$ echo "c0044000060062000000d38000000000124ec00000007266" | ./pm4_decoder --rebase 0x0
+Rebasing to new base address: 0x0000000000000000
+Original base address: 0x00007266124ec000
+COPY_DATA: 0x00007266124ec000 -> 0x0000000000000000 (offset: 0x0)
+COPY_DATA
+  Source: REGISTER (0x000000000000d380)
+  Destination: MEMORY (0x0000000000000000)  <-- REBASED ADDRESS!
+  Count Select: 0, Write Confirm: 0
+
+SOLUTION: Decoded output is shown immediately with rebased addresses!
+
+ONE-STEP PROCESS - IMMEDIATE RESULTS!
+
+================================================================================
+VERIFICATION WITH ORIGINAL SQ EVENT 1 READ PACKET
+================================================================================
+
+WITHOUT REBASE:
+$ cat test_sq_1_read.hex | ./pm4_decoder | grep -A2 "^COPY_DATA" | head -9
+
+COPY_DATA
+  Source: REGISTER (0x000000000000d380)
+  Destination: MEMORY (0x00007266124ec000)  <-- ORIGINAL ADDRESS
+--
+COPY_DATA
+  Source: REGISTER (0x000000000000d381)
+  Destination: MEMORY (0x00007266124ec004)  <-- ORIGINAL ADDRESS
+--
+
+WITH REBASE TO 0x0 (AFTER FIX):
+$ cat test_sq_1_read.hex | ./pm4_decoder --rebase 0x0 2>/dev/null | grep -A2 "^COPY_DATA" | head -9
+
+COPY_DATA
+  Source: REGISTER (0x000000000000d380)
+  Destination: MEMORY (0x0000000000000000)  <-- REBASED TO 0x0!
+--
+COPY_DATA
+  Source: REGISTER (0x000000000000d381)
+  Destination: MEMORY (0x0000000000000004)  <-- REBASED TO 0x4!
+--
+
+SUCCESS! Addresses are correctly rebased and displayed in decoded format!
+
+================================================================================

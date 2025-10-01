@@ -1,0 +1,147 @@
+================================================================================
+PM4_DECODER REBASE FUNCTIONALITY - TEST SUMMARY
+================================================================================
+
+MODIFICATIONS MADE
+------------------
+1. Added command-line argument parsing using getopt_long
+   - New option: -r, --rebase <hex_address>
+   - New option: -h, --help
+
+2. Added global rebase state tracking:
+   - Track new base address
+   - Track original base address (from first COPY_DATA)
+   - Flag to indicate when base has been found
+
+3. Implemented COPY_DATA packet rebasing:
+   - Extract destination address from dwords[4:5] (bytes 16-23)
+   - Calculate offset from original base
+   - Apply new base + offset
+   - Update packet in place
+
+4. Implemented ACQUIRE_MEM packet rebasing:
+   - Extract base address from dwords[4:5] (bytes 16-23)
+   - Account for 8-bit right shift (address >> 8)
+   - Calculate offset from original base
+   - Apply new base + offset
+   - Re-encode with shift and update packet
+
+5. Added hex output mode:
+   - When --rebase is used, output modified hex stream
+   - Diagnostic messages go to stderr
+   - Modified hex goes to stdout
+
+USAGE
+-----
+Decode mode (default):
+  echo "<hex>" | ./pm4_decoder
+
+Rebase mode:
+  echo "<hex>" | ./pm4_decoder --rebase 0xNEWBASEADDR
+
+Help:
+  ./pm4_decoder --help
+
+TEST RESULTS - ADDRESS TRANSFORMATIONS
+---------------------------------------
+
+Original Base Address: 0x00007266124ec000
+New Base Address:      0x00000deadbeef000
+
+COPY_DATA Packet Transformations (Selected):
+--------------------------------------------
+
+Packet #1 (offset 0x00):
+  Before: 0x00007266124ec000
+  After:  0x00000deadbeef000
+  Hex before: c0044000060062000000d38000000000124ec00000007266
+  Hex after:  c0044000060062000000d38000000000dbeef00000000dea
+
+Packet #2 (offset 0x04):
+  Before: 0x00007266124ec004
+  After:  0x00000deadbeef004
+  Hex before: c0044000060062000000d38100000000124ec00400007266
+  Hex after:  c0044000060062000000d38100000000dbeef00400000dea
+
+Packet #3 (offset 0x08):
+  Before: 0x00007266124ec008
+  After:  0x00000deadbeef008
+  Hex before: c0044000060062000000d38000000000124ec00800007266
+  Hex after:  c0044000060062000000d38000000000dbeef00800000dea
+
+Packet #32 (offset 0x7c):
+  Before: 0x00007266124ec07c
+  After:  0x00000deadbeef07c
+  Hex before: c0044000060062000000d38100000000124ec07c00007266
+  Hex after:  c0044000060062000000d38100000000dbeef07c00000dea
+
+ACQUIRE_MEM Packet Transformation:
+----------------------------------
+
+Original Address (actual):  0x00007266124ec000
+Original Address (shifted): 0x0000007266124ec0  (>> 8 bits)
+
+New Address (actual):       0x00000deadbeef000
+New Address (shifted):      0x0000000deadbeef0  (>> 8 bits)
+
+Hex before: c006580000000000000000010000000066124ec0000000720000001000018000
+Hex after:  c0065800000000000000000100000000eadbeef00000000d0000001000018000
+                                                  ^^^^^^^^^^^^^^^^
+                                                  Modified bytes (dwords 4:5)
+
+VERIFICATION
+------------
+All rebased packets were decoded successfully and show correct addresses:
+
+✓ COPY_DATA offset 0x00: 0x00000deadbeef000 ✓
+✓ COPY_DATA offset 0x04: 0x00000deadbeef004 ✓
+✓ COPY_DATA offset 0x08: 0x00000deadbeef008 ✓
+✓ COPY_DATA offset 0x7c: 0x00000deadbeef07c ✓
+✓ ACQUIRE_MEM base:      0x0000000deadbeef0 ✓ (shifted representation)
+
+ADDRESS CALCULATION DETAILS
+---------------------------
+
+For each packet:
+  1. Extract current address from packet
+  2. Calculate offset = current_addr - original_base
+  3. Calculate new_addr = new_base + offset
+  4. Update packet with new_addr
+
+Example for COPY_DATA packet #3:
+  current_addr    = 0x00007266124ec008
+  original_base   = 0x00007266124ec000
+  offset          = 0x00007266124ec008 - 0x00007266124ec000 = 0x8
+  new_base        = 0x00000deadbeef000
+  new_addr        = 0x00000deadbeef000 + 0x8 = 0x00000deadbeef008
+
+For ACQUIRE_MEM (with bit-shifting):
+  stored_addr     = 0x0000007266124ec0  (this is >> 8)
+  actual_addr     = 0x00007266124ec000  (shift left 8)
+  original_base   = 0x00007266124ec000
+  offset          = 0x0
+  new_addr        = 0x00000deadbeef000 + 0x0 = 0x00000deadbeef000
+  stored_new_addr = 0x0000000deadbeef0  (shift right 8)
+
+ISSUES ENCOUNTERED
+------------------
+None. All functionality implemented and tested successfully.
+
+FILE LOCATIONS
+--------------
+Modified source: /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools/pm4_decoder.c
+Makefile:        /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools/Makefile
+Binary:          /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools/pm4_decoder
+
+BUILD COMMAND
+-------------
+cd /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools
+make clean
+make pm4_decoder
+
+TEST COMMAND
+------------
+cd /home/ben/rocm-systems/perf-pmu-stub/src/aql_c/tools
+echo "c00179000000180800000401c001790000000200e0000000c000460000000407c001790000000200e0000000c001790000000200a0000000c0044000060062000000d38000000000124ec00000007266c0044000060062000000d38100000000124ec00400007266c001790000000200e0000000c001790000000200a0000001c0044000060062000000d38000000000124ec00800007266c0044000060062000000d38100000000124ec00c00007266c001790000000200e0000000c001790000000200a0000002c0044000060062000000d38000000000124ec01000007266c0044000060062000000d38100000000124ec01400007266c001790000000200e0000000c001790000000200a0000003c0044000060062000000d38000000000124ec01800007266c0044000060062000000d38100000000124ec01c00007266c001790000000200e0000000c001790000000200a0000004c0044000060062000000d38000000000124ec02000007266c0044000060062000000d38100000000124ec02400007266c001790000000200e0000000c001790000000200a0000005c0044000060062000000d38000000000124ec02800007266c0044000060062000000d38100000000124ec02c00007266c001790000000000e0000000c001790000000200a0000006c0044000060062000000d38000000000124ec03000007266c0044000060062000000d38100000000124ec03400007266c001790000000200e0000000c001790000000200a0000007c0044000060062000000d38000000000124ec03800007266c0044000060062000000d38100000000124ec03c00007266c001790000000200e0000000c001790000000200a0000008c0044000060062000000d38000000000124ec04000007266c0044000060062000000d38100000000124ec04400007266c001790000000200e0000000c001790000000200a0000009c0044000060062000000d38000000000124ec04800007266c0044000060062000000d38100000000124ec04c00007266c001790000000200e0000000c001790000000200a000000ac0044000060062000000d38000000000124ec05000007266c0044000060062000000d38100000000124ec05400007266c001790000000200e0000000c001790000000200a000000bc0044000060062000000d38000000000124ec05800007266c0044000060062000000d38100000000124ec05c00007266c001790000000200e0000000c001790000000200a000000cc0044000060062000000d38000000000124ec06000007266c0044000060062000000d38100000000124ec06400007266c001790000000200e0000000c001790000000200a000000dc0044000060062000000d38000000000124ec06800007266c0044000060062000000d38100000000124ec06c00007266c001790000000200e0000000c001790000000200a000000ec0044000060062000000d38000000000124ec07000007266c0044000060062000000d38100000000124ec07400007266c001790000000200e0000000c001790000000200a000000fc0044000060062000000d38000000000124ec07800007266c0044000060062000000d38100000000124ec07c00007266c001790000000200e0000000c006580000000000000000010000000066124ec0000000720000001000018000" | ./pm4_decoder --rebase 0xDEADBEEF000
+
+================================================================================

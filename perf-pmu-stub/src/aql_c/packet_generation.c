@@ -83,7 +83,7 @@ int generate_counter_config(pm4_buffer_t *buffer, const arch_t *arch,
   /* Write counter select register */
   uint32_t select_value = counter->event_id & 0x1FF; /* 9-bit event ID */
   ret = pm4_append_set_uconfig_reg(
-      buffer, reg_info->select_addr - arch->control_regs.uconfig_space_start,
+      buffer, reg_info->select_addr,
       select_value);
   if (ret < 0) {
     return ret;
@@ -106,7 +106,7 @@ int generate_counter_config(pm4_buffer_t *buffer, const arch_t *arch,
     }
 
     ret = pm4_append_set_uconfig_reg(
-        buffer, reg_info->control_addr - arch->control_regs.uconfig_space_start,
+        buffer, reg_info->control_addr,
         control_value);
     if (ret < 0) {
       return ret;
@@ -156,9 +156,13 @@ int generate_start_packet(pm4_buffer_t *buffer, const arch_t *arch,
         (1U << 0) | (0xFFFFU << 1); /* force_en | vmid_en */
     ret = pm4_append_set_uconfig_reg(
         buffer,
-        arch->control_regs.sq_perfcounter_ctrl2 -
-            arch->control_regs.uconfig_space_start, /* mmSQ_PERFCOUNTER_CTRL2 */
+        arch->control_regs.sq_perfcounter_ctrl2, /* mmSQ_PERFCOUNTER_CTRL2 */
         sq_ctrl2_value);
+    if (ret < 0)
+      return ret;
+
+    /* Reset GRBM_GFX_INDEX to broadcast before configuring counters */
+    ret = generate_grbm_broadcast(buffer, arch);
     if (ret < 0)
       return ret;
   }
@@ -177,8 +181,7 @@ int generate_start_packet(pm4_buffer_t *buffer, const arch_t *arch,
 
   /* 7. Enable compute perfcount */
   ret = pm4_append_write_sh_reg(buffer,
-                                arch->control_regs.compute_perfcount_enable -
-                                    arch->control_regs.persistent_space_start,
+                                arch->control_regs.compute_perfcount_enable,
                                 0x1, /* enable */
                                 0, 0);
   if (ret < 0)

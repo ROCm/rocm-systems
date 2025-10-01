@@ -1,0 +1,2534 @@
+SET_UCONFIG_REG
+  Base Register: 0x1808 (absolute: 0xd808)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x01000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48000)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48004)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48008)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4800c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48010)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48014)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48018)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4801c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48020)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48024)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48028)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4802c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48030)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48034)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48038)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4803c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48040)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48044)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48048)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4804c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48050)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48054)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48058)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4805c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48060)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48064)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48068)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4806c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48070)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48074)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48078)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4807c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48080)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48084)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48088)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4808c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48090)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48094)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48098)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4809c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x02000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e480a0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e480a4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e480a8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e480ac)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e480b0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e480b4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e480b8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e480bc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e480c0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e480c4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e480c8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e480cc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e480d0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e480d4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e480d8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e480dc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e480e0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e480e4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e480e8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e480ec)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e480f0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e480f4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e480f8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e480fc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48100)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48104)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48108)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4810c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48110)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48114)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48118)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4811c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48120)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48124)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48128)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4812c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48130)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48134)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48138)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4813c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x04000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48140)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48144)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48148)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4814c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48150)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48154)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48158)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4815c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48160)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48164)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48168)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4816c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48170)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48174)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48178)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4817c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48180)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48184)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48188)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4818c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48190)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48194)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48198)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4819c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e481a0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e481a4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e481a8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e481ac)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e481b0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e481b4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e481b8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e481bc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e481c0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e481c4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e481c8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e481cc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e481d0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e481d4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e481d8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e481dc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x08000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e481e0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e481e4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e481e8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e481ec)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e481f0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e481f4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e481f8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e481fc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48200)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48204)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48208)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4820c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48210)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48214)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48218)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4821c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48220)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48224)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48228)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4822c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48230)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48234)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48238)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4823c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48240)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48244)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48248)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4824c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48250)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48254)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48258)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4825c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48260)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48264)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48268)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4826c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48270)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48274)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48278)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4827c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x10000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48280)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48284)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48288)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4828c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48290)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48294)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48298)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4829c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e482a0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e482a4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e482a8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e482ac)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e482b0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e482b4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e482b8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e482bc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e482c0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e482c4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e482c8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e482cc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e482d0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e482d4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e482d8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e482dc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e482e0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e482e4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e482e8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e482ec)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e482f0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e482f4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e482f8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e482fc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48300)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48304)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48308)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4830c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48310)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48314)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48318)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4831c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x20000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48320)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48324)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48328)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4832c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48330)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48334)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48338)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4833c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48340)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48344)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48348)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4834c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48350)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48354)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48358)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4835c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48360)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48364)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48368)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4836c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48370)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48374)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48378)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4837c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48380)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48384)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48388)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4838c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48390)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48394)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48398)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4839c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e483a0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e483a4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e483a8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e483ac)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e483b0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e483b4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e483b8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e483bc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x40000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e483c0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e483c4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e483c8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e483cc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e483d0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e483d4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e483d8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e483dc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e483e0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e483e4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e483e8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e483ec)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e483f0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e483f4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e483f8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e483fc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48400)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48404)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48408)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4840c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48410)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e48414)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e48418)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e4841c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48420)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48424)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48428)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4842c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48430)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e48434)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e48438)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e4843c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48440)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48444)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48448)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4844c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48450)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e48454)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e48458)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e4845c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+PRED_EXEC
+  Start Address: 0x80000143
+  Payload Size: 0 DWORDs
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+EVENT_WRITE
+  Event Type: 0x7 (CS_PARTIAL_FLUSH)
+  Event Index: 4
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48460)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48464)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48468)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4846c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48470)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e48474)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c0)
+  Destination: MEMORY (0x00007fc683e48478)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c1)
+  Destination: MEMORY (0x00007fc683e4847c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48480)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48484)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48488)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4848c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48490)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e48494)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c2)
+  Destination: MEMORY (0x00007fc683e48498)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c3)
+  Destination: MEMORY (0x00007fc683e4849c)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e484a0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e484a4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e484a8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e484ac)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e484b0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e484b4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c4)
+  Destination: MEMORY (0x00007fc683e484b8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c5)
+  Destination: MEMORY (0x00007fc683e484bc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e484c0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e484c4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e484c8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e484cc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e484d0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e484d4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c6)
+  Destination: MEMORY (0x00007fc683e484d8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c7)
+  Destination: MEMORY (0x00007fc683e484dc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e484e0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e484e4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e484e8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e484ec)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e484f0)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e484f4)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c8)
+  Destination: MEMORY (0x00007fc683e484f8)
+  Count Select: 0, Write Confirm: 0
+---
+COPY_DATA
+  Source: REGISTER (0x000000000000d1c9)
+  Destination: MEMORY (0x00007fc683e484fc)
+  Count Select: 0, Write Confirm: 0
+---
+SET_UCONFIG_REG
+  Base Register: 0x200 (absolute: 0xc200)
+  Register Count: 0
+---
+ACQUIRE_MEM (invalid size: 7)
+

@@ -165,11 +165,10 @@ def decode_packets(hex_filepath: Path, decoder_path: Path) -> Tuple[bool, str]:
         return False, f"pm4_decoder not found at: {decoder_path}"
 
     try:
-        # Run pm4_decoder, reading from stdin
-        # Note: Not using --rebase because that mode only outputs hex, not decoded packets
+        # Run pm4_decoder with --rebase 0x0 to normalize memory addresses, reading from stdin
         with open(hex_filepath, 'r') as f:
             result = subprocess.run(
-                [str(decoder_path)],
+                [str(decoder_path), '--rebase', '0x0'],
                 stdin=f,
                 capture_output=True,
                 text=True,
@@ -189,9 +188,39 @@ def decode_packets(hex_filepath: Path, decoder_path: Path) -> Tuple[bool, str]:
         return False, f"Error running pm4_decoder: {str(e)}"
 
 
+def filter_rebase_lines(output: str) -> str:
+    """
+    Filter out rebase-related lines that should not affect comparison.
+    These lines are still printed but not used for comparison.
+
+    Args:
+        output: Decoder output string
+
+    Returns:
+        Filtered output string
+    """
+    lines = output.split('\n')
+    filtered = []
+    for line in lines:
+        # Skip rebase information lines
+        if line.startswith('Rebasing to new base address:'):
+            continue
+        if line.startswith('Original base address:'):
+            continue
+        if 'COPY_DATA:' in line and '->' in line and '(offset:' in line:
+            # Skip lines like "COPY_DATA: 0x... -> 0x... (offset: 0x...)"
+            continue
+        if 'ACQUIRE_MEM:' in line and '->' in line and '(offset:' in line:
+            # Skip lines like "ACQUIRE_MEM: 0x... -> 0x... (offset: 0x...)"
+            continue
+        filtered.append(line)
+    return '\n'.join(filtered)
+
+
 def compare_decoder_outputs(original_output: str, new_output: str) -> Tuple[bool, str]:
     """
     Compare two decoder outputs and generate a diff report.
+    Filters out rebase information lines before comparison.
 
     Args:
         original_output: Output from decoding original packets
@@ -200,13 +229,17 @@ def compare_decoder_outputs(original_output: str, new_output: str) -> Tuple[bool
     Returns:
         Tuple of (are_equal: bool, diff_report: str)
     """
-    # Simple string comparison
-    if original_output.strip() == new_output.strip():
+    # Filter out rebase lines for comparison
+    orig_filtered = filter_rebase_lines(original_output)
+    new_filtered = filter_rebase_lines(new_output)
+
+    # Simple string comparison on filtered output
+    if orig_filtered.strip() == new_filtered.strip():
         return True, ""
 
-    # Generate side-by-side comparison
-    orig_lines = original_output.strip().split('\n')
-    new_lines = new_output.strip().split('\n')
+    # Generate side-by-side comparison using filtered output
+    orig_lines = orig_filtered.strip().split('\n')
+    new_lines = new_filtered.strip().split('\n')
 
     diff_report = []
     diff_report.append(f"\n{'=' * 80}")
