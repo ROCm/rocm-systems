@@ -221,9 +221,7 @@ jobs:
         shell: bash
         working-directory: rccl
         run: |
-          apt install -y amd-smi-lib
-          export PATH=${{ env.ROCM_PATH }}:$PATH
-          ./install.sh --local_gpu_only --install
+          apt install -y rccl
           echo "✅ RCCL Installation complete!"
       
       - name: Build and Install ROCProfiler-Register
