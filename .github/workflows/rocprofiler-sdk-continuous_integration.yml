@@ -210,7 +210,6 @@ jobs:
       - name: Install RCCL
         if: ${{ contains(env.USE_DEFAULT_RCCL, 'true') }}
         shell: bash
-        working-directory: rccl
         run: |
           apt install -y rccl
           echo "✅ RCCL Installation complete!"
@@ -703,7 +702,6 @@ jobs:
     - name: Install RCCL
       if: ${{ contains(env.USE_DEFAULT_RCCL, 'true') }}
       shell: bash
-      working-directory: rccl
       run: |
         apt install -y rccl
         echo "✅ RCCL Installation complete!"
