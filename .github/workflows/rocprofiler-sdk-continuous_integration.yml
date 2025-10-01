@@ -219,8 +219,9 @@ jobs:
       - name: Install RCCL
         if: ${{ !contains(env.DISABLE_RCCL_BUILD, 'true') }}
         shell: bash
-        working-directory: rccl
+        working-directory: ${{ github.workspace }}/rccl
         run: |
+          ls
           ./install --local_gpu_only --install
           echo "✅ RCCL Installation complete!"
       
