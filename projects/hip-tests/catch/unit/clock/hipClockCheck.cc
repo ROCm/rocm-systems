@@ -325,6 +325,31 @@ int getEngineFreq(const hipUUID& uuid)
   return result;
 }
 
+// @return real clock rate in kHz
+int getClockRate(int& max_clock_rate)
+{
+  hipUUID uuid;
+  HIP_CHECK(hipSetDevice(0));
+  int smi_clock_rate = 0; // in kHz
+
+  max_clock_rate = 0;  // in kHz
+  HIP_CHECK(hipDeviceGetAttribute(&max_clock_rate, hipDeviceAttributeClockRate, 0));
+
+  getCurrentDeviceUUID(uuid);
+  smi_clock_rate = getEngineFreq(uuid) * 1000;
+
+  if (smi_clock_rate == -1) {
+    INFO("Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
+    return max_clock_rate;
+  } else if (smi_clock_rate != max_clock_rate) {
+    INFO("clock rate: " << smi_clock_rate <<
+         "kHz is not set to maximum: " << max_clock_rate <<
+         "kHz");
+  }
+
+  return smi_clock_rate;
+}
+
 /**
  * Test Description
  * ------------------------
@@ -339,12 +364,10 @@ int getEngineFreq(const hipUUID& uuid)
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipClock64_Positive_Basic") {
-  hipUUID uuid;
-  HIP_CHECK(hipSetDevice(0));
-  int smiclock_rate = 0; // in kHz
-  int clock_rate = 0;  // in kHz
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
-  if (clock_rate == 0) {
+  int max_clock_rate;
+  int real_clock_rate = getClockRate(max_clock_rate);
+
+  if (max_clock_rate == 0) {
     HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
     return;
   }
@@ -353,22 +376,10 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
     return;
   }
 
-  getCurrentDeviceUUID(uuid);
-  smiclock_rate = getEngineFreq(uuid) * 1000;
-
-  if (smiclock_rate == -1) {
-    WARN("Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
-    smiclock_rate = clock_rate;
-  } else if (smiclock_rate != clock_rate) {
-    WARN("clock rate: " << smiclock_rate <<
-	 "kHz is not set to maximum: " << clock_rate <<
-         "kHz");
-  }
-
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
-  REQUIRE(kernel_time_execution(kernel_c64, smiclock_rate, expected_time1, expected_time2));
+  REQUIRE(kernel_time_execution(kernel_c64, real_clock_rate, expected_time1, expected_time2));
 }
 
 /**
@@ -388,19 +399,22 @@ TEST_CASE("Unit_hipClock_Positive_Basic") {
   HIP_CHECK(hipSetDevice(0));
   int clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
-  if (clock_rate == 0) {
+  int max_clock_rate;
+  int real_clock_rate = getClockRate(max_clock_rate);
+
+  if (max_clock_rate == 0) {
     HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
     return;
   }
   if (IsGfx11()) {
-    HipTest::HIP_SKIP_TEST("Issue with clock() function on gfx11 devices!");
+    HipTest::HIP_SKIP_TEST("Issue with clock64() function on gfx11 devices!");
     return;
   }
 
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
-  REQUIRE(kernel_time_execution(kernel_c, clock_rate, expected_time1, expected_time2));
+  REQUIRE(kernel_time_execution(kernel_c, real_clock_rate, expected_time1, expected_time2));
 }
 
 /**
