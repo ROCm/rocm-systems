@@ -20,7 +20,7 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      matrix_data: ${{ steps.generate_matrix_ci_base.outputs.matrix_data }}
+      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
 
       - name: Output data for containers matrix
         working-directory: projects/rocprofiler-compute/docker
-        id: generate_matrix_ci_base
+        id: generate_matrix_ci
         run: |
           MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
