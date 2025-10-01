@@ -23,6 +23,9 @@
 # command line. Eventually we need to use rsp files with ninja on windows.
 # But this exposes several problems with hipcc and build system on windows.
 # While those are fixed, this hack should allow us to pass windows CI.
+
+# force second hip-rt-psdb-m jobs
+
 set(TEST_SRC
   hipGraphAddEmptyNode.cc
   hipGraphAddDependencies.cc
