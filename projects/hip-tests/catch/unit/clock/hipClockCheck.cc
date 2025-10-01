@@ -20,8 +20,10 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip/hip_ext.h>
-#include <dlfcn.h>
 #include <cstring>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 /**
  * @addtogroup clock clock
@@ -132,6 +134,7 @@ void getCurrentDeviceUUID(hipUUID& uuid) {
   std::memcpy(uuid.bytes, props.uuid.bytes, sizeof(hipUUID::bytes));
 }
 
+#ifndef _WIN32
 // Gets the maximum engine frequency of the GPU by dynamically loading amdsmi
 // @uuid the id of the GPU to query the frequency for
 // @return the maximum engine frequency of the GPU (MHz) or -1 if error
@@ -272,19 +275,24 @@ int getEngineFreq(const hipUUID& uuid) {
   dlclose(libHdl);
   return result;
 }
+#endif
 
 // @max_clock_rate will be set to the maximum clock rate as reported by hipDeviceGetAttribute()
 // @return         maximum engine clock rate obtained via amdsmi or -1 if querying via amdsmi fails
 int getClockRate(int& max_clock_rate) {
-  hipUUID uuid;
-  int smi_clock_rate = 0;  // in kHz
-
   max_clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&max_clock_rate, hipDeviceAttributeClockRate, 0));
+
+#ifdef _WIN32
+  return -1;
+#else
+  hipUUID uuid;
+  int smi_clock_rate = 0;  // in kHz
 
   getCurrentDeviceUUID(uuid);
   smi_clock_rate = getEngineFreq(uuid);
   return smi_clock_rate;
+#endif
 }
 
 /**
