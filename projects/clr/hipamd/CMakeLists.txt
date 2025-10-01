@@ -92,7 +92,7 @@ find_package(Git)
 # Optional CI flag to control version computation
 option(HIP_MAINLINE_CI "Enable mainline CI build version computation" OFF)
 
-if(HIP_MAINLINE_CI)
+if(HIP_MAINLINE_CI OR (DEFINED ENV{HIP_MAINLINE_CI} AND $ENV{HIP_MAINLINE_CI}))
   execute_process(
     COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
