@@ -54,7 +54,7 @@ Common filters to customize data collection include:
    Enables filtering kernels by name.
 
 ``-d``, ``--dispatch``
-   Enables filtering based on dispatch ID.
+   Enables filtering based on dispatch iteration.
 
 ``-b``, ``--block``
    Enables collection metrics for only the specified analysis report blocks.
