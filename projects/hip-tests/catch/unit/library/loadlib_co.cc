@@ -74,7 +74,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 4);
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -102,7 +102,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 4);
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -130,7 +130,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 4);
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 

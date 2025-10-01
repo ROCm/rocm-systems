@@ -3330,6 +3330,13 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t dst;
         hipStream_t src;
     } hipStreamCopyAttributes;
+    struct
+    {
+        int* pi;
+        hipFunction_attribute attrib;
+        hipKernel_t kernel;
+        hipDevice_t dev;
+    } hipKernelGetAttribute;
 #endif
 } rocprofiler_hip_api_args_t;
 

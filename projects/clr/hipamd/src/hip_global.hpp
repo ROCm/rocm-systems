@@ -66,6 +66,7 @@ class DeviceFunc {
   // Converts DeviceFunc to hipFunction_t(used by app) and vice versa.
   hipFunction_t asHipFunction() { return reinterpret_cast<hipFunction_t>(this); }
   static DeviceFunc* asFunction(hipFunction_t f) { return reinterpret_cast<DeviceFunc*>(f); }
+  static DeviceFunc* asFunction(hipKernel_t k) { return reinterpret_cast<DeviceFunc*>(k); }
 
   // Accessor for kernel_ and name_ populated during constructor.
   std::string name() const { return name_; }

@@ -270,4 +270,55 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   HIP_RETURN(ret);
 }
 
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  HIP_INIT_API(hipKernelGetAttribute, pi, attrib, kernel, dev);
+  if (pi == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  const auto* const d_function = hip::DeviceFunc::asFunction(kernel);
+  if (d_function == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+  const auto* const d_kernel = d_function->kernel();
+  if (d_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  const auto& device = *hip::getCurrentDevice()->devices()[dev];
+  const auto& wrkGrpInfo = *d_kernel->getDeviceKernel(device)->workGroupInfo();
+
+  switch (attrib) {
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
+      *pi = static_cast<int>(wrkGrpInfo.size_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
+      *pi = static_cast<int>(wrkGrpInfo.localMemSize_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
+      *pi = static_cast<int>(wrkGrpInfo.constMemSize_ - 1);
+      break;
+    case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+      *pi = static_cast<int>(wrkGrpInfo.privateMemSize_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_NUM_REGS:
+      *pi = static_cast<int>(wrkGrpInfo.usedVGPRs_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
+    case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
+      *pi = device.isa().versionMajor() * 10 + device.isa().versionMinor();
+      break;
+    case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
+      *pi = 0;
+      break;
+    case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      *pi = 0;
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
 }  // namespace hip

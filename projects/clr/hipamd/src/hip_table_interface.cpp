@@ -2039,13 +2039,15 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
 hipError_t hipLibraryUnload(hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryUnload_fn(library);
 }
-hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name)  {
-  return hip::GetHipDispatchTable()->hipLibraryGetKernel_fn(pKernel, library,
-                                                            name);
+hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name) {
+  return hip::GetHipDispatchTable()->hipLibraryGetKernel_fn(pKernel, library, name);
 }
-hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
-  return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
-                                                                 library);
+hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
+  return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count, library);
+}
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  return hip::GetHipDispatchTable()->hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
 }
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
