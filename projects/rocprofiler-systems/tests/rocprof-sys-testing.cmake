@@ -69,8 +69,7 @@ if(MAX_CAUSAL_ITERATIONS GREATER 100)
 endif()
 
 if(DEFINED ROCM_PATH)
-    set(ROCM_LLVM_LIB_PATH
-        "${ROCM_PATH}/lib/llvm/lib")
+    set(ROCM_LLVM_LIB_PATH "${ROCM_PATH}/lib/llvm/lib")
     set(_test_library_path
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_LLVM_LIB_PATH}/:$ENV{LD_LIBRARY_PATH}"
     )
