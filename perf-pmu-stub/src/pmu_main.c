@@ -19,6 +19,7 @@
 #include "pmu_stub.h"
 #include "kfd_test.h"
 #include "aql_perf.h"
+#include "aql_c/counter_registry.h"
 
 /* Global PMU instance */
 static struct pmu_stub *pmu_stub_instance;
@@ -61,49 +62,28 @@ static struct attribute_group pmu_stub_format_group = {
     .attrs = pmu_stub_format_attrs,
 };
 
-/* Event attributes */
-static ssize_t pmu_stub_event_show_sq_waves(struct device *dev,
-                                            struct device_attribute *attr,
-                                            char *buf)
-{
-    /* Show event configuration for sq_waves */
-    return sprintf(buf, "config=0x%llx\n", (u64)PMU_STUB_EVENT_SQ_WAVES);
-}
-
-static ssize_t pmu_stub_event_show_sq_instructions(struct device *dev,
-                                                   struct device_attribute *attr,
-                                                   char *buf)
-{
-    /* Show event configuration for sq_instructions */
-    return sprintf(buf, "config=0x%llx\n", (u64)PMU_STUB_EVENT_SQ_INSTRUCTIONS);
-}
-
-static ssize_t pmu_stub_event_show_ta_busy(struct device *dev,
-                                           struct device_attribute *attr,
-                                           char *buf)
-{
-    /* Show event configuration for ta_busy */
-    return sprintf(buf, "config=0x%llx\n", (u64)PMU_STUB_EVENT_TA_BUSY);
-}
-
-/* Define individual event attributes */
-static struct device_attribute pmu_stub_event_attr_sq_waves =
-    __ATTR(sq_waves, 0444, pmu_stub_event_show_sq_waves, NULL);
-static struct device_attribute pmu_stub_event_attr_sq_instructions =
-    __ATTR(sq_instructions, 0444, pmu_stub_event_show_sq_instructions, NULL);
-static struct device_attribute pmu_stub_event_attr_ta_busy =
-    __ATTR(ta_busy, 0444, pmu_stub_event_show_ta_busy, NULL);
-
-static struct attribute *pmu_stub_event_attrs[] = {
-    &pmu_stub_event_attr_sq_waves.attr,
-    &pmu_stub_event_attr_sq_instructions.attr,
-    &pmu_stub_event_attr_ta_busy.attr,
-    NULL,
+/* Event attributes - dynamically generated from counter_registry */
+struct pmu_event_attr {
+    struct device_attribute attr;
+    u64 id;
 };
+
+static ssize_t pmu_stub_event_show(struct device *dev,
+                                   struct device_attribute *attr,
+                                   char *buf)
+{
+    struct pmu_event_attr *pmu_attr = container_of(attr, struct pmu_event_attr, attr);
+    return sprintf(buf, "config=0x%llx\n", pmu_attr->id);
+}
+
+/* Dynamic event attributes - allocated during init */
+static struct pmu_event_attr *pmu_stub_event_attrs_dynamic = NULL;
+static struct attribute **pmu_stub_event_attrs = NULL;
+static size_t pmu_stub_event_count = 0;
 
 static struct attribute_group pmu_stub_events_group = {
     .name = "events",
-    .attrs = pmu_stub_event_attrs,
+    .attrs = NULL,  /* Set during init */
 };
 
 static const struct attribute_group *pmu_stub_attr_groups[] = {
@@ -112,48 +92,15 @@ static const struct attribute_group *pmu_stub_attr_groups[] = {
     NULL,
 };
 
-/* Timer handler for simulating counter updates */
+/* Timer handler - Legacy stub (not used with hardware-only mode) */
 enum hrtimer_restart pmu_stub_timer_handler(struct hrtimer *timer)
 {
     struct pmu_stub *pmu = container_of(timer, struct pmu_stub, timer);
-    unsigned long flags;
-    int i;
 
-    spin_lock_irqsave(&pmu->lock, flags);
+    /* Hardware-only mode: timer not used */
+    pmu_debug("Timer handler called but not used in hardware-only mode\n");
 
-    /* Update simulated counters */
-    atomic64_add(1000, &pmu->counter_sq_waves);
-    atomic64_add(500, &pmu->counter_sq_instructions);
-    atomic64_add(10, &pmu->counter_ta_busy);
-
-    /* Update active events */
-    for (i = 0; i < PMU_STUB_MAX_EVENTS; i++) {
-        if (test_bit(i, pmu->used_mask) && pmu->events[i].active) {
-            struct perf_event *event = pmu->events[i].event;
-            if (event) {
-                /* Simulate counter increment based on event type */
-                u64 delta = 0;
-                switch (event->attr.config) {
-                case PMU_STUB_EVENT_SQ_WAVES:
-                    delta = 1000;
-                    break;
-                case PMU_STUB_EVENT_SQ_INSTRUCTIONS:
-                    delta = 500;
-                    break;
-                case PMU_STUB_EVENT_TA_BUSY:
-                    delta = 10;
-                    break;
-                }
-                local64_add(delta, &event->count);
-            }
-        }
-    }
-
-    spin_unlock_irqrestore(&pmu->lock, flags);
-
-    /* Restart timer */
-    hrtimer_forward_now(timer, pmu->timer_period);
-    return HRTIMER_RESTART;
+    return HRTIMER_NORESTART;
 }
 
 /* Find free event slot */
@@ -192,7 +139,7 @@ static int pmu_stub_event_init(struct perf_event *event)
         return -ENOENT;
 
     /* Check if event configuration is supported */
-    if (event->attr.config >= PMU_STUB_EVENT_MAX) {
+    if (!pmu_stub_is_valid_event(event->attr.config)) {
         pmu_err("Unsupported event config: 0x%llx\n", event->attr.config);
         return -EINVAL;
     }
@@ -210,23 +157,24 @@ static int pmu_stub_event_init(struct perf_event *event)
     //     return -EOPNOTSUPP;
     // }
 
-    /* Try AQL hardware counters first if available and preferred */
-    if (pmu->aql_available && pmu->prefer_hardware) {
-        ret = aql_pmu_event_init(event);
-        if (ret == 0) {
-            pmu_debug("Using AQL hardware counter for event config=0x%llx\n", event->attr.config);
-            atomic64_inc(&pmu->hardware_events);
-            atomic64_inc(&pmu->total_events);
-            return 0;
-        }
-        pmu_debug("AQL hardware counter not available, falling back to simulation\n");
+    /* Only hardware (AQL) counters are supported */
+    if (!pmu->aql_available) {
+        pmu_err("AQL hardware counters not available - event creation failed for config=0x%llx\n",
+                event->attr.config);
+        return -EOPNOTSUPP;
     }
 
-    /* Initialize event for simulation */
-    event->hw.idx = -1;
-    event->hw.config = event->attr.config;
+    /* Initialize AQL hardware counter */
+    ret = aql_pmu_event_init(event);
+    if (ret != 0) {
+        pmu_err("AQL hardware counter initialization failed for config=0x%llx: %d\n",
+                event->attr.config, ret);
+        return ret;
+    }
 
-    atomic64_inc(&pmu->simulation_events);
+    /* Successfully initialized hardware counter */
+    pmu_debug("Using AQL hardware counter for event config=0x%llx\n", event->attr.config);
+    atomic64_inc(&pmu->hardware_events);
     atomic64_inc(&pmu->total_events);
 
     return 0;
@@ -510,6 +458,114 @@ static void pmu_stub_read(struct perf_event *event)
     /* This could be enhanced to read from hardware registers in a real driver */
 }
 
+/* Initialize event attributes from counter_registry */
+static int pmu_stub_init_event_attrs(void)
+{
+    const counter_def_t *counters;
+    size_t i;
+
+    pmu_stub_event_count = get_counter_count();
+    counters = get_all_counters();
+
+    pmu_info("Initializing %zu event attributes from counter registry\n", pmu_stub_event_count);
+
+    /* Allocate array of pmu_event_attr structures */
+    pmu_stub_event_attrs_dynamic = kzalloc(pmu_stub_event_count * sizeof(struct pmu_event_attr),
+                                           GFP_KERNEL);
+    if (!pmu_stub_event_attrs_dynamic) {
+        pmu_err("Failed to allocate event attributes\n");
+        return -ENOMEM;
+    }
+
+    /* Allocate array of attribute pointers (+ 1 for NULL terminator) */
+    pmu_stub_event_attrs = kzalloc((pmu_stub_event_count + 1) * sizeof(struct attribute *),
+                                   GFP_KERNEL);
+    if (!pmu_stub_event_attrs) {
+        kfree(pmu_stub_event_attrs_dynamic);
+        pmu_stub_event_attrs_dynamic = NULL;
+        pmu_err("Failed to allocate event attribute array\n");
+        return -ENOMEM;
+    }
+
+    /* Initialize each event attribute */
+    for (i = 0; i < pmu_stub_event_count; i++) {
+        struct pmu_event_attr *pmu_attr = &pmu_stub_event_attrs_dynamic[i];
+        const counter_def_t *counter = &counters[i];
+        char *name_lower;
+
+        /* Store the counter ID */
+        pmu_attr->id = counter->id;
+
+        /* Convert name to lowercase for sysfs */
+        name_lower = kstrdup(counter->name, GFP_KERNEL);
+        if (!name_lower) {
+            /* Cleanup on error */
+            while (i > 0) {
+                i--;
+                kfree(pmu_stub_event_attrs_dynamic[i].attr.attr.name);
+            }
+            kfree(pmu_stub_event_attrs);
+            kfree(pmu_stub_event_attrs_dynamic);
+            pmu_stub_event_attrs = NULL;
+            pmu_stub_event_attrs_dynamic = NULL;
+            return -ENOMEM;
+        }
+
+        /* Convert to lowercase */
+        {
+            char *p = name_lower;
+            while (*p) {
+                if (*p >= 'A' && *p <= 'Z')
+                    *p = *p + ('a' - 'A');
+                p++;
+            }
+        }
+
+        /* Initialize device_attribute */
+        sysfs_attr_init(&pmu_attr->attr.attr);
+        pmu_attr->attr.attr.name = name_lower;
+        pmu_attr->attr.attr.mode = 0444;
+        pmu_attr->attr.show = pmu_stub_event_show;
+        pmu_attr->attr.store = NULL;
+
+        /* Add to attribute array */
+        pmu_stub_event_attrs[i] = &pmu_attr->attr.attr;
+
+        pmu_debug("  Event %zu: %s = config=0x%llx\n", i, name_lower, (u64)counter->id);
+    }
+
+    /* NULL terminate the array */
+    pmu_stub_event_attrs[pmu_stub_event_count] = NULL;
+
+    /* Set the events group attrs pointer */
+    pmu_stub_events_group.attrs = pmu_stub_event_attrs;
+
+    pmu_info("Successfully initialized %zu events\n", pmu_stub_event_count);
+    return 0;
+}
+
+/* Cleanup event attributes */
+static void pmu_stub_cleanup_event_attrs(void)
+{
+    size_t i;
+
+    if (pmu_stub_event_attrs_dynamic) {
+        for (i = 0; i < pmu_stub_event_count; i++) {
+            kfree(pmu_stub_event_attrs_dynamic[i].attr.attr.name);
+        }
+        kfree(pmu_stub_event_attrs_dynamic);
+        pmu_stub_event_attrs_dynamic = NULL;
+    }
+
+    if (pmu_stub_event_attrs) {
+        kfree(pmu_stub_event_attrs);
+        pmu_stub_event_attrs = NULL;
+    }
+
+    pmu_stub_event_count = 0;
+    pmu_stub_events_group.attrs = NULL;
+}
+
 /* Module initialization */
 static int __init pmu_stub_init(void)
 {
@@ -518,10 +574,17 @@ static int __init pmu_stub_init(void)
 
     pmu_info("Initializing PMU Stub module v%s\n", PMU_STUB_VERSION);
 
+    /* Initialize event attributes from counter_registry */
+    ret = pmu_stub_init_event_attrs();
+    if (ret)
+        return ret;
+
     /* Allocate PMU structure */
     pmu = kzalloc(sizeof(*pmu), GFP_KERNEL);
-    if (!pmu)
+    if (!pmu) {
+        pmu_stub_cleanup_event_attrs();
         return -ENOMEM;
+    }
 
     /* Initialize PMU structure */
     spin_lock_init(&pmu->lock);
@@ -540,7 +603,6 @@ static int __init pmu_stub_init(void)
     /* Initialize AQL hardware integration */
     mutex_init(&pmu->aql_mutex);
     pmu->aql_available = false;
-    pmu->prefer_hardware = true;  /* Prefer hardware over simulation by default */
 
     /* Initialize timer */
     hrtimer_setup(&pmu->timer, pmu_stub_timer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -564,6 +626,7 @@ static int __init pmu_stub_init(void)
     ret = perf_pmu_register(&pmu->pmu, PMU_NAME, -1);
     if (ret) {
         pmu_err("Failed to register PMU: %d\n", ret);
+        pmu_stub_cleanup_event_attrs();
         kfree(pmu);
         return ret;
     }
@@ -576,9 +639,12 @@ static int __init pmu_stub_init(void)
         pmu->aql_available = true;
         pmu_info("AQL hardware acceleration enabled\n");
     } else {
-        pmu_info("AQL hardware acceleration not available: %d (using simulation only)\n", ret);
+        pmu_err("AQL hardware acceleration required but not available: %d\n", ret);
         pmu->aql_available = false;
-        pmu->prefer_hardware = false;
+        perf_pmu_unregister(&pmu->pmu);
+        pmu_stub_cleanup_event_attrs();
+        kfree(pmu);
+        return ret;
     }
 
     pmu_info("PMU Stub module loaded successfully\n");
@@ -632,6 +698,9 @@ static void __exit pmu_stub_exit(void)
         kfree(pmu);
         pmu_stub_instance = NULL;
     }
+
+    /* Cleanup event attributes */
+    pmu_stub_cleanup_event_attrs();
 
     pmu_info("PMU Stub module unloaded\n");
 }

@@ -105,27 +105,15 @@ bool aql_pmu_is_available(void)
  */
 static bool aql_pmu_should_use_hardware(struct perf_event *event)
 {
-    struct pmu_stub *pmu;
-
     if (!event || !event->pmu)
         return false;
-
-    pmu = container_of(event->pmu, struct pmu_stub, pmu);
 
     /* Check if AQL is available */
     if (!aql_pmu_is_available())
         return false;
 
-    /* Only use hardware for supported event types */
-    switch (event->attr.config) {
-    case PMU_STUB_EVENT_SQ_WAVES:
-    case PMU_STUB_EVENT_SQ_INSTRUCTIONS:
-    case PMU_STUB_EVENT_TA_BUSY:
-        /* These map to GFX12 hardware counters */
-        return true;
-    default:
-        return false;
-    }
+    /* All events are now supported by hardware (validated by counter_registry) */
+    return true;
 }
 
 /**

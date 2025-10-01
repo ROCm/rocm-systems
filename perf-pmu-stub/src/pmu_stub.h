@@ -27,20 +27,11 @@ struct aql_perf_stats;
 #define PMU_STUB_MAX_EVENTS 64
 
 /* Event types we support (maps to GFX12 hardware counters) */
-enum pmu_stub_event_id {
-    PMU_STUB_EVENT_SQ_WAVES = 0x00,        /* sq_waves - GFX12_PERF_SEL_SQ_WAVES */
-    PMU_STUB_EVENT_SQ_INSTRUCTIONS = 0x01, /* sq_instructions - GFX12_PERF_SEL_SQ_INSTS */
-    PMU_STUB_EVENT_TA_BUSY = 0x02,          /* ta_busy - GFX12_PERF_SEL_TA_BUSY */
-    PMU_STUB_EVENT_MAX
-};
-
-/* Event configuration structure */
-struct pmu_stub_event_config {
-    const char *name;
-    u64 config;
-    u64 config_mask;
-    const char *description;
-};
+/*
+ * Event IDs are now dynamically defined by counter_registry.h
+ * The event config value corresponds to counter_id_t from the registry.
+ * Available events can be queried using pmu_stub_get_event_count().
+ */
 
 /* Per-event private data */
 struct pmu_stub_event {
@@ -68,7 +59,6 @@ struct pmu_stub {
 
     /* AQL Hardware Integration */
     bool aql_available;                      /* AQL feature available */
-    bool prefer_hardware;                    /* Prefer hardware over simulation */
     struct mutex aql_mutex;                  /* Protects AQL operations */
 
     /* Statistics */
@@ -95,6 +85,7 @@ void pmu_stub_free_event_idx(struct pmu_stub *pmu, int idx);
 const char *pmu_stub_get_event_name(u64 config);
 const char *pmu_stub_get_event_description(u64 config);
 bool pmu_stub_is_valid_event(u64 config);
+size_t pmu_stub_get_event_count(void);
 u64 pmu_stub_get_counter_value(struct pmu_stub *pmu, u64 config);
 void pmu_stub_update_counter(struct pmu_stub *pmu, u64 config, s64 delta);
 void pmu_stub_reset_counters(struct pmu_stub *pmu);

@@ -255,16 +255,32 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
 
     /* Iterate through GPU topology based on block dimensions */
     bool has_se_dimension = false;
+    uint32_t num_se = arch->num_se;
+    uint32_t num_sa = arch->num_sa;
+    uint32_t num_wgp = arch->num_wgp_per_sa;
+
+    /* Extract dimension sizes from block dimensions */
+    for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+      dimension_t *dim = &block->dimensions[dim_idx];
+      if (dim->dim == HARDWARE_DIM_SE) {
+        num_se = dim->size;
+      } else if (dim->dim == HARDWARE_DIM_SA) {
+        num_sa = dim->size;
+      } else if (dim->dim == HARDWARE_DIM_WGP) {
+        num_wgp = dim->size;
+      }
+    }
+
     for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
       dimension_t *dim = &block->dimensions[dim_idx];
 
       /* For now, handle SE/SA/WGP dimensions specifically */
       if (dim->dim == HARDWARE_DIM_SE) {
         has_se_dimension = true;
-        /* SE-dependent block - iterate through SE x SA x WGP */
-        for (uint32_t se = 0; se < arch->num_se; se++) {
-          for (uint32_t sa = 0; sa < arch->num_sa; sa++) {
-            for (uint32_t wgp = 0; wgp < arch->num_wgp_per_sa; wgp++) {
+        /* SE-dependent block - iterate through SE x SA x WGP using block-specific dimensions */
+        for (uint32_t se = 0; se < num_se; se++) {
+          for (uint32_t sa = 0; sa < num_sa; sa++) {
+            for (uint32_t wgp = 0; wgp < num_wgp; wgp++) {
               /* Set GRBM index for specific location */
               ret =
                   pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
@@ -378,27 +394,11 @@ size_t calculate_counter_memory_size(const arch_t *arch,
 
     size_t counter_size = 8; /* Base 64-bit counter size */
 
-    /* Multiply by topology dimensions */
+    /* Multiply by topology dimensions - use block-specific dimension sizes */
     for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
       dimension_t *dim = &block->dimensions[dim_idx];
-
-      switch (dim->dim) {
-      case HARDWARE_DIM_SE:
-        counter_size *= arch->num_se;
-        break;
-      case HARDWARE_DIM_SA:
-        counter_size *= arch->num_sa;
-        break;
-      case HARDWARE_DIM_WGP:
-        counter_size *= arch->num_wgp_per_sa;
-        break;
-      case HARDWARE_DIM_XCC:
-        counter_size *= arch->num_xcc;
-        break;
-      default:
-        counter_size *= dim->size;
-        break;
-      }
+      /* Always use the dimension size from the block, not the arch defaults */
+      counter_size *= dim->size;
     }
 
     total_size += counter_size;
