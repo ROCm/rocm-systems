@@ -3323,6 +3323,8 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int* count;
         hipLibrary_t  library;
     } hipLibraryGetKernelCount;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 16
     struct
     {
         hipStream_t dst;
