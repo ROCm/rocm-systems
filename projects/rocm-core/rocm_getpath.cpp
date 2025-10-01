@@ -25,10 +25,12 @@
 
 #include <string.h>
 #include <stdlib.h>
-#include <limits.h> /* PATH_MAX */
 #include <stdio.h>
+#if not defined(_WIN32) && not defined(__CYGWIN__)
+// Linux-specific
 #include <link.h>
 #include <dlfcn.h>
+#endif
 #include "rocm_getpath.h"
 
 /* Macro for NULL CHECK */
@@ -39,7 +41,7 @@
 #define TARGET_LIB_INSTALL_DIR TARGET_LIBRARY_INSTALL_DIR
 
 /* Target Library Name Buf Size */
-#define LIBRARY_FILENAME_BUFSZ (PATH_MAX+1)
+size_t constexpr LIBRARY_FILENAME_BUFSZ = std::min({4096, PATH_MAX, FILENAME_MAX});
 
 /* Internal Function to get Base Path - Ref from Icarus Logic*/
 static int getROCmBase(char *buf);
@@ -91,7 +93,7 @@ PathErrors_t getROCmInstallPath( char** InstallPath, unsigned int *InstallPathLe
 
 /* General purpose function that fills the directory to find rocm related stuff */
 /* returns the offset into the buffer for the terminating NUL or -1 for error */
-/* The buffer should be at least PATH_MAX */
+/* The buffer should be at least LIBRARY_FILENAME_BUFSZ */
 static int getROCmBase(char *buf)
 {
   int len=0;
@@ -109,7 +111,7 @@ static int getROCmBase(char *buf)
          /* Already has at least one terminating */
          len--;
       }
-      if (len > PATH_MAX-1 ) {
+      if (len > LIBRARY_FILENAME_BUFSZ - 1) {
          return PathValuesTooLong;
       }
       strncpy(buf, envStr, len);
@@ -125,6 +127,9 @@ static int getROCmBase(char *buf)
   // use dl APIs to get target lib path
   // and get rocm base install path using the lib Path.
 #if BUILD_SHARED_LIBS
+#if defined(_WIN32) || defined(__CYGWIN__)
+  #error BUILD_SHARED_LIBS is not supported on Windows yet
+#endif
   sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);
   void *handle=dlopen(libFileName,RTLD_NOW);
   if (!handle){
@@ -165,4 +170,3 @@ static int getROCmBase(char *buf)
   len = strlen(buf);
   return len;
 }
-
