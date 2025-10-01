@@ -68,7 +68,7 @@ jobs:
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-systems/
 
@@ -104,7 +104,14 @@ jobs:
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
+      - name: Install ROCm
+        run: |
+          apt install -y rocm-dev
+          echo "✅ ROCm Installation Complete!"
+
+      # TODO: Remove the Install ROCm step and replace it with this one when runtime errors are fixed 
       - name: Install Latest Nightly ROCm
+        if: false
         run: |
           set -e
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
