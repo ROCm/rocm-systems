@@ -51,6 +51,7 @@
 
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ext_amd.h"
+#include "image/inc/hsa_amd_mipmap_impl.h"
 #include "blit_kernel.h"
 #include "image_manager.h"
 #include "util.h"
@@ -136,6 +137,31 @@ class ImageRuntime {
 
   /// @brief Destroy the device sampler object referenced by the handle.
   hsa_status_t DestroySamplerHandle(hsa_ext_sampler_t& sampler);
+
+  /// @brief Create device Mipmap array object and return its handle
+  hsa_status_t CreateMipmapArrayHandle(
+      hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+      const void* image_data, size_t image_data_size,
+      const hsa_access_permission_t access_permission,
+      uint32_t num_mipmap_levels,
+      const hsa_ext_image_data_layout_t mipmap_layout,
+      size_t image_data_row_pitch, size_t image_data_slice_pitch,
+      hsa_ext_image_t& image_handle);
+
+  /// @brief - Helper function to  compute mipmapped surface size / alignment & max levels.
+  hsa_status_t GetMipmapArraySizeAndAlignment(
+    hsa_agent_t component,
+    const hsa_ext_image_descriptor_t& desc,
+    uint32_t num_mipmap_levels,
+    hsa_ext_image_data_layout_t layout,
+    size_t row_pitch,
+    size_t slice_pitch,
+    size_t& size_out,
+    size_t& alignment_out,
+    uint32_t& max_levels_out);
+
+  /// @brief Destroy mipmapped array object referenced by the handle.
+  hsa_status_t DestroyMipmapArrayHandle(const hsa_ext_image_t& image_handle);
 
   ImageManager* image_manager(hsa_agent_t agent) {
     std::map<uint64_t, ImageManager*>::iterator it = image_managers_.find(agent.handle);

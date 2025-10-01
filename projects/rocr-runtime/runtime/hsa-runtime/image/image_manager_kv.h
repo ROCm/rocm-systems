@@ -145,6 +145,8 @@ class ImageManagerKv : public ImageManager {
 
   ADDR_HANDLE addr_lib_;
 
+  virtual ADDR_HANDLE GetAddrLib() const override { return addr_lib_; }
+
   hsa_agent_t agent_;
 
   uint32_t family_type_;

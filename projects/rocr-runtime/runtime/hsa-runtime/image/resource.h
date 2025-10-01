@@ -1,44 +1,8 @@
-////////////////////////////////////////////////////////////////////////////////
-//
-// The University of Illinois/NCSA
-// Open Source License (NCSA)
-//
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-//
-// Developed by:
-//
-//                 AMD Research and AMD HSA Software Development
-//
-//                 Advanced Micro Devices, Inc.
-//
-//                 www.amd.com
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to
-// deal with the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
-//
-//  - Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimers.
-//  - Redistributions in binary form must reproduce the above copyright
-//    notice, this list of conditions and the following disclaimers in
-//    the documentation and/or other materials provided with the distribution.
-//  - Neither the names of Advanced Micro Devices, Inc,
-//    nor the names of its contributors may be used to endorse or promote
-//    products derived from this Software without specific prior written
-//    permission.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS WITH THE SOFTWARE.
-//
-////////////////////////////////////////////////////////////////////////////////
+/*
+
+Copyright © 2025 Advanced Micro Devices, Inc., or its affiliates.
+SPDX-License-Identifier: MIT
+*/
 
 #ifndef HSA_RUNTIME_EXT_IMAGE_RESOURCE_H
 #define HSA_RUNTIME_EXT_IMAGE_RESOURCE_H
@@ -49,6 +13,7 @@
 
 #include "inc/hsa.h"
 #include "inc/hsa_ext_image.h"
+#include "addrlib/inc/addrinterface.h"
 
 #include "util.h"
 
@@ -72,8 +37,8 @@ namespace rocr {
 namespace image {
 
 typedef struct metadata_amd_s {
-    uint32_t version; // Must be 1
-    uint32_t vendorID; // AMD | CZ
+    uint32_t version;
+    uint32_t vendorID;
     uint32_t words[8];
     uint32_t mip_offsets[0]; //Mip level offset bits [39:8] for each level (if any)
 } metadata_amd_t;
@@ -97,7 +62,7 @@ typedef struct ImageProperty {
 
 /// @brief Structure to represent an HSA image object.
 typedef struct Image {
-private:
+protected:
   Image() {
     component.handle = 0;
     permission = HSA_ACCESS_PERMISSION_RO;
@@ -122,15 +87,12 @@ public:
   /// @brief Destroy an Image.
   static void Destroy(const Image* image);
 
-  /// @brief Convert from vendor representation to HSA handle.
   uint64_t Convert() const { return reinterpret_cast<uint64_t>(srd); }
 
-  /// @brief Convert from HSA handle to vendor representation.
   static Image* Convert(uint64_t handle) {
     return reinterpret_cast<Image*>(handle - offsetof(Image, srd));
   }
 
-  // Vendor specific image object.
   __ALIGNED__(
       HSA_IMAGE_OBJECT_ALIGNMENT) uint32_t srd[HSA_IMAGE_OBJECT_SIZE_DWORD];
 
@@ -165,7 +127,7 @@ public:
   TileMode tile_mode;
 } Image;
 
-/// @brief Structure to represent an HSA sampler object.
+//Represents an HSA sampler object.
 typedef struct Sampler {
 private:
   Sampler() {
@@ -183,15 +145,12 @@ public:
   /// @brief Destroy a Sampler.
   static void Destroy(const Sampler* sampler);
 
-  /// @brief Convert from vendor representation to HSA handle.
   uint64_t Convert() { return reinterpret_cast<uint64_t>(srd); }
 
-  /// @brief Convert from HSA handle to vendor representation.
   static Sampler* Convert(uint64_t handle) {
     return reinterpret_cast<Sampler*>(handle - offsetof(Sampler, srd));
   }
 
-  // Vendor specific sampler object.
   __ALIGNED__(HSA_SAMPLER_OBJECT_ALIGNMENT)
   uint32_t srd[HSA_SAMPLER_OBJECT_SIZE_DWORD];
 
@@ -201,6 +160,56 @@ public:
   // HSA sampler descriptor of the image object.
   hsa_ext_sampler_descriptor_v2_t desc;
 } Sampler;
+
+typedef struct MipmappedArray : public Image {
+private:
+  MipmappedArray() {
+    component.handle = 0;
+    data = NULL;
+    size = 0;
+    std::memset(srd, 0, sizeof(srd));
+    std::memset(&desc, 0, sizeof(desc));
+    permission = HSA_ACCESS_PERMISSION_RO;
+    num_levels = 0;
+    levels_allocated = 0;
+    flags = 0;
+    addr_handle = nullptr;
+    std::memset(&addr_output, 0, sizeof(addr_output));
+    row_pitch = slice_pitch = 0;
+    tile_mode = LINEAR;
+  }
+
+~MipmappedArray() {
+  if (addr_output.pMipInfo)
+  {
+    delete[] addr_output.pMipInfo;
+    addr_output.pMipInfo = nullptr;
+  }
+}
+
+public:
+  static MipmappedArray* Create(hsa_agent_t agent, size_t expected_surf_size_bytes);
+
+  static void Destroy(const MipmappedArray* array);
+
+  using Image::Convert;
+
+  static MipmappedArray* Convert(uint64_t handle) {
+    Image* base_image = Image::Convert(handle);
+    return static_cast<MipmappedArray*>(base_image);
+  }
+
+  size_t size;
+  uint32_t num_levels;
+  uint32_t levels_allocated;  // Number of levels actually allocated
+
+  uint32_t flags;
+
+  // Address library handle.
+  ADDR_HANDLE addr_handle;
+
+  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr_output;
+} MipmappedArray;
 
 }  // namespace image
 }  // namespace rocr

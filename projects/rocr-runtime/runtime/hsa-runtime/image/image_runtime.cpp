@@ -45,11 +45,15 @@
 
 #include <assert.h>
 #include <climits>
+#include <cstring>
+#include <vector>
 #include <mutex>
+#include <algorithm>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
+#include "image/inc/hsa_amd_mipmap_impl.h"
 #include "resource.h"
 #include "image_manager_kv.h"
 #include "image_manager_ai.h"
@@ -60,6 +64,119 @@
 
 namespace rocr {
 namespace image {
+
+  static inline uint32_t ComputeMaxMipLevels(const hsa_ext_image_descriptor_t& d) {
+  uint32_t w = d.width  ? d.width  : 1;
+  uint32_t h = d.height ? d.height : 1;
+  uint32_t depth = d.depth ? d.depth : 1;
+  uint32_t dim_max = w;
+  switch (d.geometry) {
+    case HSA_EXT_IMAGE_GEOMETRY_1D:
+    case HSA_EXT_IMAGE_GEOMETRY_1DA:
+    case HSA_EXT_IMAGE_GEOMETRY_1DB:
+      dim_max = w; break;
+    case HSA_EXT_IMAGE_GEOMETRY_2D:
+    case HSA_EXT_IMAGE_GEOMETRY_2DA:
+    case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
+    case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
+      dim_max = std::max(w, h); break;
+    case HSA_EXT_IMAGE_GEOMETRY_3D:
+      dim_max = std::max(std::max(w, h), depth); break;
+    default:
+      break;
+  }
+  uint32_t levels = 0;
+  while (dim_max > 0) { ++levels; dim_max >>= 1; }
+  return (levels == 0) ? 1 : levels;
+}
+
+// Compute max_levels_out
+// Validate requested num_mipmap_levels range.
+// Call GetImageSizeAndAlignment (baseline info / validation).
+// Select Addr3 vs Addr2 based on gfx version.
+// Populate Addr input, choose swizzle, call Addr2ComputeSurfaceInfo 
+// Return surf size & base alignment.
+hsa_status_t ImageRuntime::GetMipmapArraySizeAndAlignment(
+    hsa_agent_t component,
+    const hsa_ext_image_descriptor_t& desc,
+    uint32_t num_mipmap_levels,
+    hsa_ext_image_data_layout_t layout,
+    size_t row_pitch,
+    size_t slice_pitch,
+    size_t& size_out,
+    size_t& alignment_out,
+    uint32_t& max_levels_out) {
+  size_out = 0;
+  alignment_out = 0;
+  max_levels_out = ComputeMaxMipLevels(desc);
+
+  if (num_mipmap_levels == 0 || num_mipmap_levels > max_levels_out)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  hsa_ext_image_data_info_t base_info = {0};
+  hsa_status_t status = GetImageSizeAndAlignment(component, desc,
+                          layout, row_pitch, slice_pitch, base_info);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  ImageManager* manager = image_manager(component);
+  if (!manager) return HSA_STATUS_ERROR_INVALID_AGENT;
+  ADDR_HANDLE addr_lib = manager->GetAddrLib();
+  if (!addr_lib) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  const core::Agent* agent_info = core::Agent::Convert(component);
+  if (!agent_info) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  bool use_addr3 = false;
+  ADDR2_COMPUTE_SURFACE_INFO_INPUT addr2_in = {};
+  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr2_out = {};
+  std::vector<ADDR2_MIP_INFO> addr2_mip_info(num_mipmap_levels);
+
+#ifdef ADDR_GFX12_BUILD
+  ADDR3_COMPUTE_SURFACE_INFO_OUTPUT addr3_out = {};
+
+  use_addr3 = rocr::image::UseAddr3ForArchitecture(agent_info->properties().major(), agent_info->properties().minor());
+
+  if (use_addr3) {
+    ADDR_E_RETURNCODE addr3_result = rocr::image::ComputeSurfaceInfoAddr3(
+        addr_lib, component, &desc, num_mipmap_levels,
+        HSA_ACCESS_PERMISSION_RO, layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR,
+        &addr3_out);
+
+    if (addr3_result != ADDR_OK) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    size_out = addr3_out.surfSize;
+    alignment_out = addr3_out.baseAlign;
+    return HSA_STATUS_SUCCESS;
+  }
+#endif
+
+  if (!use_addr3) {
+    // Use Addr2 for GFX9-GFX11 architectures
+    rocr::image::PopulateAddrInput(&addr2_in, &desc, num_mipmap_levels,
+                      component, HSA_ACCESS_PERMISSION_RO,
+                      layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR);
+
+    // Apply optimal swizzle mode
+    if (layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
+      addr2_in.swizzleMode = rocr::image::GetOptimalSwizzleMode(addr_lib, addr2_in);
+    } else {
+      addr2_in.swizzleMode = ADDR_SW_LINEAR;
+    }
+
+    addr2_out.pMipInfo = addr2_mip_info.data();
+    addr2_out.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_OUTPUT);
+
+    if (Addr2ComputeSurfaceInfo(addr_lib, &addr2_in, &addr2_out) != ADDR_OK) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    size_out = addr2_out.surfSize;
+    alignment_out = addr2_out.baseAlign;
+  }
+  return HSA_STATUS_SUCCESS;
+}
 
 hsa_status_t FindKernelArgPool(hsa_amd_memory_pool_t pool, void* data) {
   assert(data != nullptr);
@@ -571,6 +688,186 @@ hsa_status_t ImageRuntime::DestroySamplerHandle(
   }
 
   Sampler::Destroy(sampler);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
+    hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+    const void* image_data, size_t image_data_size,
+    const hsa_access_permission_t access_permission,
+    uint32_t num_mipmap_levels,
+    const hsa_ext_image_data_layout_t mipmap_layout,
+    size_t image_data_row_pitch, size_t image_data_slice_pitch,
+    hsa_ext_image_t& image_handle) {
+  image_handle.handle = 0;
+  if (!image_data || mipmap_descriptor.width == 0 || num_mipmap_levels == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Calculate the required size and alignment for the mipmapped array
+  size_t required_size = 0;
+  size_t alignment = 0;
+  uint32_t max_levels = 0;
+  hsa_status_t status = GetMipmapArraySizeAndAlignment(
+      component, mipmap_descriptor, num_mipmap_levels, mipmap_layout,
+      image_data_row_pitch, image_data_slice_pitch,
+      required_size, alignment, max_levels);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  // Validate the image data size
+  if (image_data_size < required_size)
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  // Validate the image data alignment
+  if (!IsMultipleOf(reinterpret_cast<size_t>(image_data), alignment))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  ImageManager* manager = image_manager(component);
+  if (!manager) return HSA_STATUS_ERROR_INVALID_AGENT;
+  ADDR_HANDLE addr_lib = manager->GetAddrLib();
+  if (!addr_lib) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  //Compute AddrLib output for SRD population and per-level info
+  const core::Agent* agent_info = core::Agent::Convert(component);
+  if (!agent_info) return HSA_STATUS_ERROR_INVALID_AGENT;
+ 
+  bool use_addr3 = false;
+  ADDR2_COMPUTE_SURFACE_INFO_INPUT addr2_in = {};
+  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr2_out = {};
+  std::vector<ADDR2_MIP_INFO> addr2_mip_info(num_mipmap_levels);
+
+#ifdef ADDR_GFX12_BUILD
+  ADDR3_COMPUTE_SURFACE_INFO_OUTPUT addr3_out = {};
+  std::vector<ADDR3_MIP_INFO> addr3_mip_info(num_mipmap_levels);
+
+  //Check if we should use Addr3 for GFX12+ architectures
+  use_addr3 = rocr::image::UseAddr3ForArchitecture(agent_info->properties().major(), agent_info->properties().minor());
+
+  if (use_addr3) {
+    // Use Addr3 for GFX12+ architectures
+    ADDR_E_RETURNCODE addr3_result = rocr::image::ComputeSurfaceInfoAddr3(
+        addr_lib, component, &mipmap_descriptor, num_mipmap_levels,
+        access_permission, mipmap_layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR,
+        &addr3_out);
+
+    if (addr3_result != ADDR_OK) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    // Copy mip info from addr3_out to local storage
+    if (addr3_out.pMipInfo) {
+      addr3_mip_info.assign(addr3_out.pMipInfo, addr3_out.pMipInfo + num_mipmap_levels);
+    }
+  }
+#endif
+
+  if (!use_addr3) {
+    // Use Addr2 for GFX9-GFX11 architectures
+    rocr::image::PopulateAddrInput(&addr2_in, &mipmap_descriptor, num_mipmap_levels,
+                      component, access_permission,
+                      mipmap_layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR);
+
+    // Apply optimal swizzle mode for PAL parity performance
+    if (mipmap_layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
+      addr2_in.swizzleMode = rocr::image::GetOptimalSwizzleMode(addr_lib, addr2_in);
+    } else {
+      addr2_in.swizzleMode = ADDR_SW_LINEAR;
+    }
+
+    addr2_out.pMipInfo = addr2_mip_info.data();
+    addr2_out.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_OUTPUT);
+
+    if (Addr2ComputeSurfaceInfo(addr_lib, &addr2_in, &addr2_out) != ADDR_OK) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+  }
+
+  MipmappedArray* mipmap_array = MipmappedArray::Create(component, required_size);
+  if (!mipmap_array) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Determine the tile mode
+  hsa_profile_t profile;
+  status = HSA::hsa_agent_get_info(component, HSA_AGENT_INFO_PROFILE, &profile);
+
+  if (mipmap_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
+    mipmap_array->tile_mode = Image::TileMode::LINEAR;
+  } else {
+    Image::TileMode tileMode =
+        (profile == HSA_PROFILE_BASE && mipmap_descriptor.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)
+        ? Image::TileMode::TILED
+        : Image::TileMode::LINEAR;
+    mipmap_array->tile_mode = tileMode;
+  }
+
+  mipmap_array->component = component;
+  mipmap_array->data = const_cast<void*>(image_data);
+  mipmap_array->desc = mipmap_descriptor;
+  mipmap_array->permission = access_permission;
+  mipmap_array->num_levels = num_mipmap_levels;
+  mipmap_array->levels_allocated = num_mipmap_levels;
+  mipmap_array->flags = 0;
+  mipmap_array->addr_handle = addr_lib;
+
+  if (use_addr3) {
+#ifdef ADDR_GFX12_BUILD
+    mipmap_array->addr_output = {};
+    mipmap_array->addr_output.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_OUTPUT);
+    mipmap_array->addr_output.pMipInfo = new ADDR2_MIP_INFO[num_mipmap_levels];
+    for (uint32_t i = 0; i < num_mipmap_levels; ++i) {
+      const auto& addr3_mip = addr3_mip_info[i];
+      auto& addr2_mip = mipmap_array->addr_output.pMipInfo[i];
+
+      addr2_mip.pitch = addr3_mip.pitch;
+      addr2_mip.height = addr3_mip.height;
+      addr2_mip.depth = addr3_mip.depth;
+      addr2_mip.pixelPitch = addr3_mip.pixelPitch;
+      addr2_mip.pixelHeight = addr3_mip.pixelHeight;
+      addr2_mip.equationIndex = addr3_mip.equationIndex;
+      addr2_mip.offset = addr3_mip.offset;
+      addr2_mip.macroBlockOffset = addr3_mip.macroBlockOffset;
+      addr2_mip.mipTailOffset = addr3_mip.mipTailOffset;
+      addr2_mip.mipTailCoordX = addr3_mip.mipTailCoordX;
+      addr2_mip.mipTailCoordY = addr3_mip.mipTailCoordY;
+      addr2_mip.mipTailCoordZ = addr3_mip.mipTailCoordZ;
+    }
+
+    // Copy other relevant Addr3 output fields
+    mipmap_array->addr_output.surfSize = addr3_out.surfSize;
+    mipmap_array->addr_output.baseAlign = addr3_out.baseAlign;
+    mipmap_array->addr_output.pitch = addr3_out.pitch;
+    mipmap_array->addr_output.height = addr3_out.height;
+    mipmap_array->addr_output.numSlices = addr3_out.numSlices;
+#endif
+  } else {
+    // Use Addr2 results directly
+    mipmap_array->addr_output = addr2_out;
+    mipmap_array->addr_output.pMipInfo = new ADDR2_MIP_INFO[num_mipmap_levels];
+
+    // Copy computed mip info from address library
+    for (uint32_t i = 0; i < num_mipmap_levels; ++i) {
+      mipmap_array->addr_output.pMipInfo[i] = addr2_mip_info[i];
+    }
+  }
+
+  manager->PopulateImageSrd(*mipmap_array);
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd())
+    mipmap_array->printSRD();
+
+  assert(mipmap_array->size == required_size);
+  image_handle.handle = mipmap_array->Convert();
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::DestroyMipmapArrayHandle(
+    const hsa_ext_image_t& image_handle) {
+  const MipmappedArray* mipmap_array = MipmappedArray::Convert(image_handle.handle);
+
+  if (mipmap_array == NULL) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  MipmappedArray::Destroy(const_cast<MipmappedArray*>(mipmap_array));
 
   return HSA_STATUS_SUCCESS;
 }

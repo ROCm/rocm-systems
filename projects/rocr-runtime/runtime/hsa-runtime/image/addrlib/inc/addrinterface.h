@@ -2466,6 +2466,7 @@ typedef struct _ADDR2_COMPUTE_SURFACE_INFO_INPUT
                                              ///  number of fragments for EQAA
     UINT_32               pitchInElement;    ///< Pitch in elements (blocks for compressed formats)
     UINT_32               sliceAlign;        ///< Required slice size in bytes
+    ADDR_TILEINFO*        pTileInfo;         ///< Advanced tiling parameters
 } ADDR2_COMPUTE_SURFACE_INFO_INPUT;
 
 /**

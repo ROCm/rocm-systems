@@ -78,7 +78,18 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/image/mipmap_create.h" 
+#include "common/base_rocr_utils.h" // for SetDefaultAgents / SetPoolsTypical
+
+// Sanity: ensure expected utility prototypes are visible. If this static_assert fires,
+// the include path didn't resolve the intended header.
+static_assert(std::is_function<decltype(::rocrtst::SetDefaultAgents)>::value,
+              "Failed to see rocrtst::SetDefaultAgents declaration");
+static_assert(std::is_function<decltype(::rocrtst::SetPoolsTypical)>::value,
+              "Failed to see rocrtst::SetPoolsTypical declaration");
 #include "amd_smi/amdsmi.h"
+
+// Legacy mipmap test classes removed; only harness C entry remains.
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -98,9 +109,30 @@ static void RunCustomTestProlog(TestBase *test) {
   test->Run();
   return;
 }
+
+// Overloaded versions for BaseRocR (used by mipmap tests)
+static void RunCustomTestProlog(rocrtst::BaseRocR *test) {
+  // BaseRocR setup - these methods don't exist in BaseRocR
+  // Just setup agents and pools
+  hsa_status_t err = ::rocrtst::SetDefaultAgents(test);
+  if (err != HSA_STATUS_SUCCESS) {
+    std::cerr << "Failed to set default agents" << std::endl;
+  }
+  err = ::rocrtst::SetPoolsTypical(test);
+  if (err != HSA_STATUS_SUCCESS) {
+    std::cerr << "Failed to set typical pools" << std::endl;
+  }
+  return;
+}
+
 static void RunCustomTestEpilog(TestBase *test) {
   test->DisplayResults();
   test->Close();
+  return;
+}
+
+static void RunCustomTestEpilog(rocrtst::BaseRocR *test) {
+  // BaseRocR cleanup - no specific cleanup needed
   return;
 }
 
@@ -514,6 +546,7 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
   RunCustomTestEpilog(&Qw);
 }
 
+
 TEST(rocrtstPerf, Memory_Async_Copy) {
   MemoryAsyncCopy mac;
   // To do full test, uncomment this:
@@ -557,6 +590,23 @@ TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_SpinWait) {
 TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_Interrupt) {
   DispatchTime dt(false, false);
   RunGenericTest(&dt);
+}
+
+TEST(rocrtstFunc, Mipmap_Create_Basic) {
+  MipmapCreateTest mt;
+  // Setup agents & pools (BaseRocR variant) then run basic scenario
+  RunCustomTestProlog(&mt);
+  hsa_status_t s = mt.RunBasic();
+  EXPECT_EQ(HSA_STATUS_SUCCESS, s);
+  RunCustomTestEpilog(&mt);
+}
+
+TEST(rocrtstNeg, Mipmap_Create_TooManyLevels) {
+  MipmapCreateTest mt;
+  RunCustomTestProlog(&mt);
+  hsa_status_t s = mt.RunTooManyLevels();
+  EXPECT_NE(HSA_STATUS_SUCCESS, s); // Should fail
+  RunCustomTestEpilog(&mt);
 }
 
 int main(int argc, char** argv) {
