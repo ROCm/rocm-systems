@@ -156,6 +156,7 @@ jobs:
           path: 'rocJPEG'
 
       - name: Clone RCCL
+        if: ${{ !contains(env.DISABLE_RCCL_BUILD, 'true') }}
         uses: actions/checkout@v5
         with:
           repository: 'ROCm/rccl'
@@ -218,7 +219,7 @@ jobs:
       - name: Install RCCL
         if: ${{ !contains(env.DISABLE_RCCL_BUILD, 'true') }}
         shell: bash
-        working-directory: ${GITHUB_WORKSPACE}/rccl
+        working-directory: rccl
         run: |
           ./install --local_gpu_only --install
           echo "✅ RCCL Installation complete!"
