@@ -762,8 +762,6 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
-    set_metadata_process_end_timestamp(comp::wall_clock::record());
-
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
@@ -779,7 +777,10 @@ rocprofsys_finalize_hidden(void)
                                  std::to_string(get_state()).c_str());
         return;
     }
-    else if(_is_child)
+
+    set_metadata_process_end_timestamp(comp::wall_clock::record());
+
+    if(_is_child)
     {
         set_state(State::Finalized);
 

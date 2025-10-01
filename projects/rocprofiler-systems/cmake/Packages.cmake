@@ -56,8 +56,8 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
                                           "Use SQLite3 for rocpd data storage"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-nlohmann-json
-                                          "Use nlohmann-json for json data handling"
+rocprofiler_systems_add_interface_library(rocprofiler-systems-json
+                                          "Use nlohmann/json for json data handling"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
                                           "Provides timemory libraries"
