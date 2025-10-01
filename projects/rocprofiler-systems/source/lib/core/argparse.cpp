@@ -87,10 +87,10 @@ get_realpath(const std::string& _path)
 
 enum update_mode : int
 {
-    UPD_REPLACE = 0x1,
-    UPD_PREPEND = 0x2,
-    UPD_APPEND  = 0x3,
-    UPD_WEAK    = 0x4,
+    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
+    UPD_PREPEND = 1 << 0,  // 0x01
+    UPD_APPEND  = 1 << 1,  // 0x02
+    UPD_WEAK    = 1 << 2,  // 0x04
 };
 
 template <typename Tp>
@@ -100,9 +100,15 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
 {
     _data.updated.emplace(_env_var);
 
-    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
-    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
-    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
+    auto _prepend  = (_mode & UPD_PREPEND) != 0;
+    auto _append   = (_mode & UPD_APPEND) != 0;
+    auto _weak_upd = (_mode & UPD_WEAK) != 0;
+
+    // if both flags are set, prefer append
+    if(_prepend && _append)
+    {
+        _prepend = false;
+    }
 
     auto _key = join("", _env_var, "=");
     for(auto& itr : _data.current)
@@ -126,11 +132,11 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
                     free(itr);
                     if(_prepend)
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
                                        .c_str());
                     else
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
                                        .c_str());
                 }
             }
