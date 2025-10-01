@@ -53,10 +53,10 @@ Application tracing (HIP API + kernel dispatches + memory operations):
 .. code-block:: bash
 
    # Runtime tracing (recommended for most use cases)
-   rocprofv3 --runtime-trace --output-format csv -- ./your_app
+   rocprofv3 --runtime-trace -- ./your_app
 
    # System-level tracing (includes HSA API)
-   rocprofv3 --sys-trace --output-format json -- ./your_app
+   rocprofv3 --sys-trace -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3`
 
@@ -65,14 +65,8 @@ Granular Tracing Options
 
 .. code-block:: bash
 
-   # HIP API tracing only
-   rocprofv3 --hip-trace --output-format csv -- ./your_app
-
-   # Kernel execution tracing
-   rocprofv3 --kernel-trace --output-format csv -- ./your_app
-
-   # Memory operations tracing
-   rocprofv3 --memory-copy-trace --output-format csv -- ./your_app
+   # HIP API, kernel dispatches, and memory operations tracing
+   rocprofv3 --hip-trace --kernel-trace --memory-copy-trace -- ./your_app
 
 
 **Documentation:** :ref:`using-rocprofv3` (Basic tracing section)
@@ -89,7 +83,7 @@ Performance Counter Collection
    rocprofv3-avail pmc-check SQ_WAVES SQ_INSTS_VALU
 
    # Collect specific counters
-   rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU --output-format csv -- ./your_app
+   rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Counter collection section)
 
@@ -105,7 +99,7 @@ PC Sampling (Beta)
    rocprofv3-avail list --pc-sampling
 
    # Enable PC sampling
-   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-interval 1000 --output-format csv -- ./your_app
+   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-interval 1000 -- ./your_app
 
 **Documentation:** :ref:`using-pc-sampling`
 
@@ -133,115 +127,30 @@ Working with rocpd Database Format
    rocprofv3 --runtime-trace -- ./your_app
    # Creates: hostname/pid_results.db
 
-   # Explicitly specify rocpd format
-   rocprofv3 --runtime-trace --output-format rocpd -- ./your_app
-
    # Query the database directly with SQL
    sqlite3 hostname/12345_results.db "SELECT * FROM regions;"
 
-Converting to Other Formats
-----------------------------
+   # Convert rocpd database to other formats
+   rocpd convert -i *.db -f csv pftrace otf2 --start 20% --end 80%
+
+Collecting and converting to Other Formats
+-------------------------------------------
 
 .. code-block:: bash
 
-   # CSV output (human-readable)
-   rocprofv3 --runtime-trace --output-format csv -- ./your_app
+   # Multiple output formats in one run
+   rocprofv3 --runtime-trace --output-format csv json pftrace otf2 -- ./your_app
 
-   # JSON output (structured data)
-   rocprofv3 --runtime-trace --output-format json -- ./your_app
-
-   # Perfetto format (timeline visualization)
-   rocprofv3 --runtime-trace --output-format pftrace -- ./your_app
-
-   # OTF2 format (performance analysis)
-   rocprofv3 --runtime-trace --output-format otf2 -- ./your_app
 
 **Documentation:** :ref:`using-rocpd-output-format`
-
-rocpd Database Conversion Tools
--------------------------------
-
-ROCprofiler-SDK provides dedicated conversion utilities for transforming rocpd databases to different formats:
-
-**rocpd2csv - CSV Export:**
-
-.. code-block:: bash
-
-   # Basic CSV conversion
-   rocpd2csv -i profile.db
-
-   # Multiple databases with custom output
-   rocpd2csv -i db1.db db2.db -d ~/analysis/ -o combined_data
-
-   # Time-windowed export (middle 70% of execution)
-   rocpd2csv -i large_profile.db --start 15% --end 85%
-
-**rocpd2summary - Statistical Reports:**
-
-.. code-block:: bash
-
-   # Console summary (default)
-   rocpd2summary -i profile.db
-
-   # HTML report with all analysis domains
-   rocpd2summary -i profile.db --format html --region-categories HIP ROCR KERNEL
-
-   # CSV statistics for automation
-   rocpd2summary -i profile.db --format csv -o performance_metrics
-
-   # Multi-database aggregated analysis
-   rocpd2summary -i db*.db --summary-by-rank --format html
-
-**rocpd2pftrace - Perfetto Traces:**
-
-.. code-block:: bash
-
-   # Interactive timeline visualization
-   rocpd2pftrace -i profile.db
-
-   # High-throughput configuration
-   rocpd2pftrace -i workload.db --perfetto-buffer-size 128MB
-
-   # Queue-based analysis
-   rocpd2pftrace -i multi_stream.db --group-by-queue -o queue_analysis
-
-**rocpd2otf2 - HPC Analysis Format:**
-
-.. code-block:: bash
-
-   # Standard OTF2 trace
-   rocpd2otf2 -i gpu_workload.db
-
-   # Multi-process with custom agent indexing
-   rocpd2otf2 -i mpi_ranks*.db --agent-index-value type-relative
-
-   # Marker-based time windowing
-   rocpd2otf2 -i long_run.db --start-marker "computation_begin" --end-marker "computation_end"
-
-**Common Workflow - Multi-Format Analysis:**
-
-.. code-block:: bash
-
-   # Generate comprehensive analysis suite
-   rocpd2csv -i profile.db -o raw_data
-   rocpd2summary -i profile.db --format html -o performance_report  
-   rocpd2pftrace -i profile.db -o interactive_trace
-
-**Documentation:** :ref:`using-rocpd-output-format` (Dedicated Conversion Tools section)
 
 Summary and Statistics
 ----------------------
 
 .. code-block:: bash
 
-   # Generate execution summary
-   rocprofv3 --runtime-trace --summary --output-format csv -- ./your_app
-
-   # Statistics per domain
-   rocprofv3 --runtime-trace --summary-per-domain -- ./your_app
-
-   # Custom summary groups
-   rocprofv3 --runtime-trace --summary-groups "KERNEL_DISPATCH|MEMORY_COPY" -- ./your_app
+   # Overall summary statistics per domain grouped by kernel and memory operations
+   rocprofv3 --runtime-trace --summary-per-domain --summary-groups "KERNEL_DISPATCH|MEMORY_COPY" -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Post-processing tracing section)
 
@@ -254,13 +163,7 @@ Kernel Filtering
 .. code-block:: bash
 
    # Include specific kernels by regex
-   rocprofv3 --kernel-trace --kernel-include-regex "matmul.*" --output-format csv -- ./your_app
-
-   # Exclude kernels by regex
-   rocprofv3 --kernel-trace --kernel-exclude-regex ".*copy.*" --output-format csv -- ./your_app
-
-   # Filter by iteration range
-   rocprofv3 --kernel-trace --kernel-iteration-range 10-20 --output-format csv -- ./your_app
+   rocprofv3 --kernel-trace --kernel-iteration-range 10-20 --kernel-include-regex "matmul.*" --kernel-exclude-regex ".*copy.*" -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Filtering section)
 
@@ -270,9 +173,6 @@ Time-based Collection
 .. code-block:: bash
 
    # Collect for specific time periods (start_delay:collection_time:repeat)
-   rocprofv3 --runtime-trace --collection-period 5:10:1 --output-format csv -- ./your_app
-
-   # Change time units
    rocprofv3 --runtime-trace --collection-period 500:2000:0 --collection-period-unit msec -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Filtering section)
@@ -283,13 +183,13 @@ Kernel Naming and Display
 .. code-block:: bash
 
    # Keep mangled kernel names
-   rocprofv3 --kernel-trace --mangled-kernels --output-format csv -- ./your_app
+   rocprofv3 --kernel-trace --mangled-kernels -- ./your_app
 
    # Truncate kernel names for readability
-   rocprofv3 --kernel-trace --truncate-kernels --output-format csv -- ./your_app
+   rocprofv3 --kernel-trace --truncate-kernels -- ./your_app
 
    # Use ROCTx regions to rename kernels
-   rocprofv3 --kernel-trace --kernel-rename --output-format csv -- ./your_app
+   rocprofv3 --kernel-trace --kernel-rename -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (Kernel naming section)
 
@@ -299,7 +199,7 @@ Code Annotation with ROCTx
 .. code-block:: bash
 
    # Trace ROCTx markers and ranges
-   rocprofv3 --marker-trace --output-format csv -- ./your_app
+   rocprofv3 --marker-trace -- ./your_app
 
 **Documentation:** :ref:`using-rocprofiler-sdk-roctx`
 
@@ -335,13 +235,10 @@ File Organization
 .. code-block:: bash
 
    # Specify output directory
-   rocprofv3 --runtime-trace --output-directory ./results --output-format csv -- ./your_app
-
-   # Custom output file naming
-   rocprofv3 --runtime-trace --output-file my_trace --output-format csv -- ./your_app
+   rocprofv3 --runtime-trace --output-directory ./results --output-file my_trace   -- ./your_app
 
    # Generate configuration file
-   rocprofv3 --runtime-trace --output-config --output-format csv -- ./your_app
+   rocprofv3 --runtime-trace --output-config -- ./your_app
 
 **Documentation:** :ref:`using-rocprofv3` (I/O options section)
 
@@ -354,7 +251,7 @@ Basic Performance Analysis
 .. code-block:: bash
 
    # Quick performance overview
-   rocprofv3 --runtime-trace --summary --output-format csv -- ./your_app
+   rocprofv3 --runtime-trace --summary -- ./your_app
 
 **Use case:** Get a high-level view of application performance
 
@@ -364,7 +261,7 @@ Detailed Kernel Analysis
 .. code-block:: bash
 
    # Detailed kernel profiling with counters
-   rocprofv3 --kernel-trace --pmc SQ_WAVES,SQ_INSTS_VALU,TCP_PERF_SEL_TOTAL_CACHE_ACCESSES --output-format csv -- ./your_app
+   rocprofv3 --kernel-trace --pmc SQ_WAVES,SQ_INSTS_VALU,TCP_PERF_SEL_TOTAL_CACHE_ACCESSES -- ./your_app
 
 **Use case:** Analyze specific kernel performance bottlenecks
 
@@ -374,7 +271,7 @@ Memory Transfer Analysis
 .. code-block:: bash
 
    # Focus on memory operations
-   rocprofv3 --memory-copy-trace --memory-allocation-trace --output-format csv -- ./your_app
+   rocprofv3 --memory-copy-trace --memory-allocation-trace -- ./your_app
 
 **Use case:** Optimize data movement between CPU and GPU
 
