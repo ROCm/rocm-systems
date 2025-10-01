@@ -63,6 +63,7 @@ env:
 
   GLOBAL_CMAKE_OPTIONS: ""
   DISABLE_ROCR_BUILD: "true"
+  DISABLE_NIGHTLY_ROCM_INSTALL: "true" 
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -95,6 +96,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
       - name: Install Latest Nightly ROCm
+        if: ${{ !contains(env.DISABLE_NIGHTLY_ROCM_INSTALL, 'true') }}
         shell: bash
         working-directory: /tmp
         run: |
