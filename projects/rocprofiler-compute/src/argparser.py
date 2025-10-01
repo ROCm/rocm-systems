@@ -178,7 +178,10 @@ Examples:
         metavar="",
         default=None,
         required=False,
-        help="\t\t\tProcess id to be attached for profiling.",
+        help=(
+            "\t\t\tProcess id to be attached for profiling.\n"
+            "\t\t\tImplies --no-native-tool"
+        ),
     )
     profile_group.add_argument(
         "--attach-duration-msec",
@@ -188,9 +191,9 @@ Examples:
         default=None,
         required=False,
         help=(
-            "\t\t\tWhen --attach-pid is used, it specifies the attach duration "
-            "in milliseconds. If not set, detachment occurs when "
-            '"Enter" key is pressed.'
+            "\t\t\tWhen --attach-pid is used, it specifies the attach duration\n"
+            "\t\t\tin milliseconds. If not set, detachment occurs when\n"
+            '\t\t\t"Enter" key is pressed.'
         ),
     )
     profile_group.add_argument(
@@ -255,7 +258,10 @@ Examples:
         nargs="+",
         dest="dispatch",
         required=False,
-        help="\t\t\tDispatch ID filtering.",
+        help=(
+            "\t\t\tWhich dispatch iterations of the kernel to filter \n"
+            "\t\t\t(e.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
+        ),
     )
 
     profile_group.add_argument(
@@ -342,8 +348,8 @@ Examples:
         metavar="",
         dest="format_rocprof_output",
         choices=["csv", "rocpd"],
-        default="csv",
-        help="\t\t\tSet the format of output file of rocprof.",
+        default="rocpd",
+        help=("\t\t\tSet the format of output file of rocprof."),
     )
     profile_group.add_argument(
         "--pc-sampling-method",
@@ -370,14 +376,28 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--rocprofiler-sdk-library-path",
+        "--rocprofiler-sdk-tool-path",
         type=str,
-        dest="rocprofiler_sdk_library_path",
+        dest="rocprofiler_sdk_tool_path",
         required=False,
         default=str(
-            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+            Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+            / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
         ),
-        help="\t\t\tSet the path to rocprofiler SDK library.",
+        help="\t\t\tSet the path to rocprofiler-sdk tool.",
+    )
+    profile_group.add_argument(
+        "--no-native-tool",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tDo not use the native counter collection tool.\n"
+            "\t\t\tNative tool is not used if ROCPROF env. var. is set "
+            "and not equal to rocprofiler-sdk.\n"
+            "\t\t\tNative tool is not used for ROCm version < 7.x.x.\n"
+            "\t\t\tNative tool is not used attach/detach scenario"
+        ),
     )
     profile_group.add_argument(
         "--retain-rocpd-output",

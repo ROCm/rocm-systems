@@ -381,7 +381,7 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/fake/path"
+        rocprofiler_sdk_tool_path = "/fake/path"
 
     # Set ROCPROF to 'rocprof'
     monkeypatch.setenv("ROCPROF", "rocprofv3")
@@ -416,7 +416,7 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/fake/path"
+        rocprofiler_sdk_tool_path = "/fake/path"
 
     monkeypatch.setenv("ROCPROF", "rocprof")
     # shutil.which returns a fake path for 'rocprof'
@@ -448,7 +448,7 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/fake/path"
+        rocprofiler_sdk_tool_path = "/fake/path"
 
     monkeypatch.delenv("ROCPROF", raising=False)
     monkeypatch.setattr("pathlib.Path.exists", lambda _: True)
@@ -475,7 +475,7 @@ def test_detect_rocprof_sdk(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/some/sdk/path"
+        rocprofiler_sdk_tool_path = "/some/sdk/path"
 
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
     monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
@@ -2500,6 +2500,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     profiler_options = {
         "APP_CMD": ["./test_app"],
         "ROCPROF_OUTPUT_PATH": workload_dir,
+        "ROCPROF_COUNTER_COLLECTION": "1",
         "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
         "librocprofiler-sdk-tool.so",
     }
@@ -3061,13 +3062,14 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
 
     mspec = MockMSpec()
     loglevel = logging.INFO
-    format_rocprof_output = True
+    format_rocprof_output = "csv"
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
 
     profiler_options_sdk_hip = {
         "APP_CMD": "my_app",
         "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
+        "ROCPROF_COUNTER_COLLECTION": "1",
         "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
         "librocprofiler-sdk-tool.so",
     }
@@ -3123,44 +3125,6 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
 # =============================================================================
 
 
-def test_process_rocprofv3_output_json_format(tmp_path, monkeypatch):
-    """
-    Test process_rocprofv3_output with json format converts JSON files to CSV.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts CSV files are created from JSON files.
-    """
-    workload_dir = str(tmp_path)
-    output_dir = tmp_path / "out" / "pmc_1" / "subdir"
-    output_dir.mkdir(parents=True)
-
-    json_file1 = output_dir / "test1.json"
-    json_file2 = output_dir / "test2.json"
-    json_file1.write_text('{"test": "data1"}')
-    json_file2.write_text('{"test": "data2"}')
-
-    monkeypatch.setattr("glob.glob", lambda pattern: [str(json_file1), str(json_file2)])
-
-    def mock_v3_json_to_csv(json_path, csv_path):
-        Path(csv_path).write_text("csv,data\ntest,value")
-
-    monkeypatch.setattr("utils.utils.v3_json_to_csv", mock_v3_json_to_csv)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output("json", workload_dir, False)
-
-    assert len(result) == 2
-    csv_file1 = output_dir / "test1.csv"
-    csv_file2 = output_dir / "test2.csv"
-    assert csv_file1.exists()
-    assert csv_file2.exists()
-
-
 def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output with csv format processes counter collection files.
@@ -3201,7 +3165,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 1
     assert str(converted_file) in result
@@ -3247,7 +3211,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
     assert len(warnings) == 1
@@ -3282,42 +3246,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
     import utils.utils as utils_mod
 
     with pytest.raises(ValueError, match='has no corresponding "agent info" file'):
-        utils_mod.process_rocprofv3_output("csv", workload_dir, False)
-
-
-def test_process_rocprofv3_output_csv_format_timestamps_fallback(tmp_path, monkeypatch):
-    """
-    Test process_rocprofv3_output falls back to kernel trace files for timestamps.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts kernel trace files are used when is_timestamps is True.
-    """
-    workload_dir = str(tmp_path)
-    output_dir = tmp_path / "out" / "pmc_1" / "subdir"
-    output_dir.mkdir(parents=True)
-
-    trace_file = output_dir / "test_kernel_trace.csv"
-    trace_file.write_text("kernel,trace\ntest,data")
-
-    def mock_glob(pattern):
-        if "_counter_collection.csv" in pattern:
-            return []
-        elif "_kernel_trace.csv" in pattern:
-            return [str(trace_file)]
-        return []
-
-    monkeypatch.setattr("glob.glob", mock_glob)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, True)
-
-    assert len(result) == 1
-    assert str(trace_file) in result
+        utils_mod.process_rocprofv3_output(workload_dir, False)
 
 
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
@@ -3340,53 +3269,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
-
-    assert result == []
-
-
-def test_process_rocprofv3_output_invalid_format(monkeypatch):
-    """
-    Test process_rocprofv3_output raises error for invalid output format.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts console_error is called for invalid format.
-    """
-
-    def mock_console_error(msg):
-        raise RuntimeError(f"console_error: {msg}")
-
-    monkeypatch.setattr("utils.utils.console_error", mock_console_error)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(
-        RuntimeError, match="The output file of rocprofv3 can only support json or csv"
-    ):
-        utils_mod.process_rocprofv3_output("invalid", "/tmp", False)
-
-
-def test_process_rocprofv3_output_json_format_no_files(tmp_path, monkeypatch):
-    """
-    Test process_rocprofv3_output with json format when no JSON files exist.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts empty list returned when no JSON files found.
-    """
-    workload_dir = str(tmp_path)
-
-    monkeypatch.setattr("glob.glob", lambda pattern: [])
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output("json", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
 
@@ -3439,7 +3322,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 2
     assert str(converted_file1) in result
@@ -8180,8 +8063,8 @@ def test_add_counter_overwrite_existing():
 # additional test detect_rocprof console error
 # =============================================================================
 class MockArgs:
-    def __init__(self, rocprofiler_sdk_library_path):
-        self.rocprofiler_sdk_library_path = rocprofiler_sdk_library_path
+    def __init__(self, rocprofiler_sdk_tool_path):
+        self.rocprofiler_sdk_tool_path = rocprofiler_sdk_tool_path
 
 
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
@@ -8192,7 +8075,7 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
 ):
     """
     Tests that detect_rocprof calls console_error when ROCPROF is 'rocprofiler-sdk'
-    and the rocprofiler_sdk_library_path does not exist.
+    and the rocprofiler_sdk_tool_path does not exist.
     Focuses on the console_error call.
     """
     mock_path_instance = mock.Mock()
@@ -8200,13 +8083,13 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_constructor.return_value = mock_path_instance
 
     fake_library_path = "/some/invalid/path/to/librocprofiler_sdk.so"
-    args = MockArgs(rocprofiler_sdk_library_path=fake_library_path)
+    args = MockArgs(rocprofiler_sdk_tool_path=fake_library_path)
 
     with mock.patch("utils.utils.console_debug") as mock_console_debug:  # noqa
         utils.detect_rocprof(args)
 
     expected_error_message = (
-        "Could not find rocprofiler-sdk library at " + fake_library_path
+        "Could not find rocprofiler-sdk tool at " + fake_library_path
     )
     mock_console_error_func.assert_called_once_with(expected_error_message)
 
@@ -8442,7 +8325,7 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
     """
-    Edge Case: rocprofiler_sdk_library_path is valid, but librocprofiler-sdk-tool.so
+    Edge Case: rocprofiler_sdk_tool_path is valid, but librocprofiler-sdk-tool.so
     is NOT found next to it (or in rocprofiler-sdk subdir).
     This test primarily checks if the paths are constructed. The actual check for
     file existence before `capture_subprocess_output` is not in the provided snippet,
@@ -8452,31 +8335,29 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
         method = "host_trap"
         interval = 1000
         workload_dir = str(tmp_path)
-        appcmd = "my_app --arg"
+        options = {"APP_CMD": "my_app --arg"}
 
         sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_library_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_library_path).touch()
+        rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
+        Path(rocprofiler_sdk_tool_path).touch()
 
         expected_tool_path = str(
             sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
         )
 
+        options["LD_PRELOAD"] = expected_tool_path
+
         mock_capture_subprocess.return_value = (True, "Success output")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         call_args = mock_capture_subprocess.call_args
         called_env = call_args.kwargs.get("new_env", {})
 
         assert "LD_PRELOAD" in called_env
-        ld_preload_paths = called_env["LD_PRELOAD"].split(":")
-        assert expected_tool_path in ld_preload_paths
-        assert rocprofiler_sdk_library_path in ld_preload_paths
+        assert called_env["LD_PRELOAD"] == expected_tool_path
 
         mock_console_error.assert_not_called()
 
@@ -8495,14 +8376,12 @@ def test_pc_sampling_prof_subprocess_fails(
         method = "stochastic"
         interval = 5000
         workload_dir = str(tmp_path)
-        appcmd = "another_app"
-        rocprofiler_sdk_library_path = "/some/path/librocprofiler_sdk.so"
+        options = ["another_app"]
+        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
         mock_capture_subprocess.return_value = (False, "Error output from subprocess")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
@@ -8510,10 +8389,11 @@ def test_pc_sampling_prof_subprocess_fails(
     mock_capture_subprocess.reset_mock()
     mock_console_error.reset_mock()
     with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
+        options = {"APP_CMD": "another_app"}
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_library_path_sdk).touch()
+        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
+        Path(rocprofiler_sdk_tool_path_sdk).touch()
 
         tool_dir = sdk_lib_dir / "rocprofiler-sdk"
         tool_dir.mkdir(parents=True, exist_ok=True)
@@ -8524,9 +8404,7 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
@@ -8547,14 +8425,12 @@ def test_pc_sampling_prof_empty_appcmd(
         method = "host_trap"
         interval = 100
         workload_dir = str(tmp_path)
-        appcmd = ""
-        rocprofiler_sdk_library_path = "/some/path/librocprofiler_sdk.so"
+        options = ["--"]
+        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
@@ -8566,17 +8442,16 @@ def test_pc_sampling_prof_empty_appcmd(
     with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
         sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_library_path_sdk).touch()
+        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
+        Path(rocprofiler_sdk_tool_path_sdk).touch()
         tool_dir = sdk_lib_dir / "rocprofiler-sdk"
         tool_dir.mkdir(parents=True, exist_ok=True)
         (tool_dir / "librocprofiler-sdk-tool.so").touch()
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
+        options = {"APP_CMD": ""}
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""

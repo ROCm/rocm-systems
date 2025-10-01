@@ -271,7 +271,7 @@ Filtering options
    utility. See :ref:`profiling-kernel-filtering`.
 
 ``-d``, ``--dispatch <dispatch-id>``
-   Allows for dispatch ID filtering. Usage is equivalent with the current
+   Allows for dispatch iteration filtering. Usage is equivalent with the current
    ``rocprof`` utility. See :ref:`profiling-dispatch-filtering`.
 
 ``--set <metric-set>``
