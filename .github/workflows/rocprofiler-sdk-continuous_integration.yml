@@ -219,10 +219,9 @@ jobs:
       - name: Install RCCL
         if: ${{ !contains(env.DISABLE_RCCL_BUILD, 'true') }}
         shell: bash
-        working-directory: ${{ github.workspace }}/rccl
+        working-directory: rccl
         run: |
-          ls
-          ./install --local_gpu_only --install
+          ./install.sh --local_gpu_only --install
           echo "✅ RCCL Installation complete!"
       
       - name: Build and Install ROCProfiler-Register
