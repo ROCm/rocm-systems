@@ -273,10 +273,10 @@ int getEngineFreq(const hipUUID& uuid) {
   return result;
 }
 
-// @return real clock rate in kHz
+// @max_clock_rate will be set to the maximum clock rate as reported by hipDeviceGetAttribute()
+// @return         maximum engine clock rate obtained via amdsmi or -1 if querying via amdsmi fails
 int getClockRate(int& max_clock_rate) {
   hipUUID uuid;
-  HIP_CHECK(hipSetDevice(0));
   int smi_clock_rate = 0;  // in kHz
 
   max_clock_rate = 0;  // in kHz
@@ -284,21 +284,6 @@ int getClockRate(int& max_clock_rate) {
 
   getCurrentDeviceUUID(uuid);
   smi_clock_rate = getEngineFreq(uuid);
-
-  if (smi_clock_rate == -1) {
-    // libamd_smi.so might not be present depending on some systems, so we load it dynamically
-    // and use it if it is, otherwise we use the attribute
-    INFO("Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
-    return max_clock_rate;
-  }
-
-  smi_clock_rate *= 1000;
-
-  if (smi_clock_rate != max_clock_rate) {
-    INFO("clock rate: " << smi_clock_rate << "kHz is not set to maximum: " << max_clock_rate
-                        << "kHz");
-  }
-
   return smi_clock_rate;
 }
 
@@ -316,8 +301,10 @@ int getClockRate(int& max_clock_rate) {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipClock64_Positive_Basic") {
+  HIP_CHECK(hipSetDevice(0));
+
   int max_clock_rate;
-  int real_clock_rate = getClockRate(max_clock_rate);
+  int clock_rate = getClockRate(max_clock_rate);
 
   if (max_clock_rate == 0) {
     HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
@@ -328,10 +315,25 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
     return;
   }
 
+  if (clock_rate == -1) {
+    // libamd_smi.so might not be present depending on some systems, so we load it dynamically
+    // and use it if it is, otherwise we use the attribute
+    UNSCOPED_INFO(
+        "Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
+    clock_rate = max_clock_rate;
+  } else {
+    clock_rate *= 1000;
+
+    if (clock_rate != max_clock_rate) {
+      UNSCOPED_INFO("clock rate: " << clock_rate << "kHz is not set to maximum: " << max_clock_rate
+                                   << "kHz");
+    }
+  }
+
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
-  REQUIRE(kernel_time_execution(kernel_c64, real_clock_rate, expected_time1, expected_time2));
+  REQUIRE(kernel_time_execution(kernel_c64, clock_rate, expected_time1, expected_time2));
 }
 
 /**
@@ -349,10 +351,9 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
  */
 TEST_CASE("Unit_hipClock_Positive_Basic") {
   HIP_CHECK(hipSetDevice(0));
-  int clock_rate = 0;  // in kHz
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
+
   int max_clock_rate;
-  int real_clock_rate = getClockRate(max_clock_rate);
+  int clock_rate = getClockRate(max_clock_rate);
 
   if (max_clock_rate == 0) {
     HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
@@ -363,10 +364,25 @@ TEST_CASE("Unit_hipClock_Positive_Basic") {
     return;
   }
 
+  if (clock_rate == -1) {
+    // libamd_smi.so might not be present depending on some systems, so we load it dynamically
+    // and use it if it is, otherwise we use the attribute
+    UNSCOPED_INFO(
+        "Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
+    clock_rate = max_clock_rate;
+  } else {
+    clock_rate *= 1000;
+
+    if (clock_rate != max_clock_rate) {
+      UNSCOPED_INFO("clock rate: " << clock_rate << "kHz is not set to maximum: " << max_clock_rate
+                                   << "kHz");
+    }
+  }
+
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
   const auto expected_time2 = expected_time1 / 2;
 
-  REQUIRE(kernel_time_execution(kernel_c, real_clock_rate, expected_time1, expected_time2));
+  REQUIRE(kernel_time_execution(kernel_c, clock_rate, expected_time1, expected_time2));
 }
 
 /**
