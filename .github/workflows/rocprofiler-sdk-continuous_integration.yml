@@ -63,6 +63,7 @@ env:
 
   GLOBAL_CMAKE_OPTIONS: ""
   DISABLE_ROCR_BUILD: "true"
+  USE_DEFAULT_RCCL: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -206,6 +207,14 @@ jobs:
           cmake --build build-rocjpeg --target install
           echo -e "ROCJPEG Installed Successfully!"
 
+      - name: Install RCCL
+        if: ${{ contains(env.USE_DEFAULT_RCCL, 'true') }}
+        shell: bash
+        working-directory: rccl
+        run: |
+          apt install -y rccl
+          echo "✅ RCCL Installation complete!"
+      
       - name: Build and Install ROCProfiler-Register
         shell: bash
         working-directory: projects/rocprofiler-register
@@ -690,6 +699,14 @@ jobs:
         key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
         max-size: 2G
         save: true
+
+    - name: Install RCCL
+      if: ${{ contains(env.USE_DEFAULT_RCCL, 'true') }}
+      shell: bash
+      working-directory: rccl
+      run: |
+        apt install -y rccl
+        echo "✅ RCCL Installation complete!"
 
     - name: Build and Install ROCProfiler-Register
       shell: bash
