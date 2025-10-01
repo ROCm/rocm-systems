@@ -70,8 +70,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # TODO: Remove this once fix is merged to develop
-          ref: users/habajpai-amd/fix/segfault-openmp-multiprocess-ompt-libdir
           sparse-checkout: projects/rocprofiler-systems/
 
       - name: Setup Environment
@@ -146,4 +144,4 @@ jobs:
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -L "rocm|network" \
-            -LE "rccl|runtime"
+            -LE "rccl|runtime|ompvv"
