@@ -1479,34 +1479,6 @@ operator<<(std::ostream& out, const hsa_amd_svm_attribute_pair_t& v)
     std::operator<<(out, '}');
     return out;
 }
-
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x08
-inline static std::ostream&
-operator<<(std::ostream& out, const hsa_amd_ais_file_handle_t& v)
-{
-    std::operator<<(out, '{');
-    HSA_depth_max_cnt++;
-    if(HSA_depth_max == -1 || HSA_depth_max_cnt <= HSA_depth_max)
-    {
-        if(std::string_view{"hsa_amd_ais_file_handle_t::fd"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "fd=");
-            rocprofiler::hsa::detail::operator<<(out, v.fd);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_amd_ais_file_handle_t::handle"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "handle=");
-            rocprofiler::hsa::detail::operator<<(out, v.handle);
-        }
-    }
-    HSA_depth_max_cnt--;
-    std::operator<<(out, '}');
-    return out;
-}
-#endif
 // end ostream ops for HSA
 }  // namespace detail
 }  // namespace hsa
@@ -1812,12 +1784,3 @@ operator<<(std::ostream& out, const hsa_amd_svm_attribute_pair_t& v)
     rocprofiler::hsa::detail::operator<<(out, v);
     return out;
 }
-
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x08
-inline static std::ostream&
-operator<<(std::ostream& out, const hsa_amd_ais_file_handle_t& v)
-{
-    rocprofiler::hsa::detail::operator<<(out, v);
-    return out;
-}
-#endif
