@@ -598,6 +598,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("rcclp");
         _backend_choices.erase("amd-smi");
         _backend_choices.erase("rocm");
+        _backend_choices.erase("ompt");
 
 #if defined(ROCPROFSYS_USE_ROCM)
         update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);
