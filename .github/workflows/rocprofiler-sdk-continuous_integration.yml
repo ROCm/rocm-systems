@@ -63,7 +63,7 @@ env:
 
   GLOBAL_CMAKE_OPTIONS: ""
   DISABLE_ROCR_BUILD: "true"
-  DISABLE_NIGHTLY_ROCM_INSTALL: "true" 
+  DISABLE_NIGHTLY_ROCM_INSTALL: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
