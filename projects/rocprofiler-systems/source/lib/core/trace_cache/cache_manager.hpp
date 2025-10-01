@@ -44,7 +44,7 @@ private:
     void post_process_metadata();
     cache_manager() = default;
 
-    buffer_storage    m_storage{ getpid() };
+    buffer_storage    m_storage;
     metadata_registry m_metadata;
 };
 
