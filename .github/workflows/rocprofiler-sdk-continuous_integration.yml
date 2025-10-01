@@ -63,7 +63,7 @@ env:
 
   GLOBAL_CMAKE_OPTIONS: ""
   DISABLE_ROCR_BUILD: "true"
-  DISABLE_NIGHTLY_ROCM_INSTALL: "true"
+  DISABLE_RCCL_BUILD: "false"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -96,7 +96,6 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
       - name: Install Latest Nightly ROCm
-        if: ${{ !contains(env.DISABLE_NIGHTLY_ROCM_INSTALL, 'true') }}
         shell: bash
         working-directory: /tmp
         run: |
@@ -156,6 +155,14 @@ jobs:
           set-safe-directory: true
           path: 'rocJPEG'
 
+      - name: Clone RCCL
+        uses: actions/checkout@v5
+        with:
+          repository: 'ROCm/rccl'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rccl'
+
       - name: Install requirements
         timeout-minutes: 10
         shell: bash
@@ -208,6 +215,14 @@ jobs:
           cmake --build build-rocjpeg --target install
           echo -e "ROCJPEG Installed Successfully!"
 
+      - name: Install RCCL
+        if: ${{ !contains(env.DISABLE_RCCL_BUILD, 'true') }}
+        shell: bash
+        working-directory: ${GITHUB_WORKSPACE}/rccl
+        run: |
+          ./install --local_gpu_only --install
+          echo "✅ RCCL Installation complete!"
+      
       - name: Build and Install ROCProfiler-Register
         shell: bash
         working-directory: projects/rocprofiler-register
