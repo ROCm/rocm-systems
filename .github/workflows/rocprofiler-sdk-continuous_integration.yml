@@ -221,7 +221,7 @@ jobs:
         shell: bash
         working-directory: rccl
         run: |
-          apt install amd-smi-lib
+          apt install -y amd-smi-lib
           export PATH=${{ env.ROCM_PATH }}:$PATH
           ./install.sh --local_gpu_only --install
           echo "✅ RCCL Installation complete!"
