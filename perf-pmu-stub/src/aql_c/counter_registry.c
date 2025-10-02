@@ -65,6 +65,26 @@ static const counter_def_t base_counters[] = {
 
 
 /* Lookup functions */
+
+/**
+ * @brief Look up a counter definition by its string name
+ *
+ * Searches the base counter registry for a counter matching the given name.
+ * Counter names are architecture-agnostic identifiers like "SQ_WAVES" or
+ * "GL2C_HIT" that map to hardware-specific event IDs via the event map.
+ *
+ * This function provides a simpler C-based alternative to the event lookup
+ * mechanisms in projects/aqlprofile/src/core/pm4_factory.h:158-184 which
+ * uses C++ BlockInfoMap and GpuBlockInfo structures.
+ *
+ * @param counter_name String name of the counter (e.g., "SQ_WAVES")
+ * @return Pointer to counter definition, or NULL if not found
+ *
+ * @note Counter names are case-sensitive
+ * @note The returned pointer is valid for the lifetime of the program
+ * @see lookup_counter_by_id(), lookup_event_id(), BlockInfoMap::Find in
+ *      projects/aqlprofile/src/core/pm4_factory.h:89
+ */
 const counter_def_t* lookup_counter_by_name(const char* counter_name) {
     if (!counter_name) return NULL;
 
@@ -76,6 +96,18 @@ const counter_def_t* lookup_counter_by_name(const char* counter_name) {
     return NULL;
 }
 
+/**
+ * @brief Look up a counter definition by its numeric ID
+ *
+ * Searches the base counter registry for a counter with the specified ID.
+ * Counter IDs are stable numeric identifiers defined in the counter_id_t enum.
+ *
+ * @param id Numeric counter identifier from counter_id_t enum
+ * @return Pointer to counter definition, or NULL if not found or ID out of range
+ *
+ * @note The returned pointer is valid for the lifetime of the program
+ * @see lookup_counter_by_name(), lookup_event_id()
+ */
 const counter_def_t* lookup_counter_by_id(counter_id_t id) {
     if (id <= 0 || id >= COUNTER_ID_LAST) return NULL;
 
@@ -87,6 +119,27 @@ const counter_def_t* lookup_counter_by_id(counter_id_t id) {
     return NULL;
 }
 
+/**
+ * @brief Look up the architecture-specific hardware event ID for a counter
+ *
+ * Translates an architecture-agnostic counter definition to the specific
+ * hardware event ID that should be programmed into the counter's SELECT register
+ * for the given GPU architecture. Different architectures may use different
+ * event IDs for the same logical counter.
+ *
+ * This function is analogous to the event ID lookup in GpuBlockInfo structures
+ * in projects/aqlprofile/def/gpu_block_info.h and the select_value callback
+ * functions used in projects/aqlprofile/src/pm4/pmc_builder.h:325-326
+ *
+ * @param counter Pointer to counter definition (from lookup_counter_by_name/id)
+ * @param arch Architecture information containing the event map
+ * @return Hardware event ID for this counter on this architecture, or 0 if not found
+ *
+ * @note Event ID 0 typically indicates an error or unmapped counter
+ * @note The event map is architecture-specific (e.g., GFX12 has different IDs than GFX11)
+ * @see lookup_counter_by_name(), GpuBlockInfo::select_value in
+ *      projects/aqlprofile/def/gpu_block_info.h
+ */
 uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch) {
     if (!counter || !arch) return 0;
 
@@ -101,10 +154,29 @@ uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch) {
     return 0;
 }
 
+/**
+ * @brief Get pointer to the full array of counter definitions
+ *
+ * Returns a pointer to the base counter array containing all registered
+ * architecture-agnostic counter definitions.
+ *
+ * @return Pointer to array of counter definitions
+ *
+ * @note Array size can be obtained via get_counter_count()
+ * @note Array is valid for the lifetime of the program
+ * @see get_counter_count()
+ */
 const counter_def_t* get_all_counters(void) {
     return base_counters;
 }
 
+/**
+ * @brief Get the total number of registered counters
+ *
+ * @return Number of entries in the base counter array
+ *
+ * @see get_all_counters()
+ */
 size_t get_counter_count(void) {
     return BASE_COUNTER_COUNT;
 }

@@ -12,7 +12,24 @@
 #include <string.h>
 #endif
 
-/* Main architecture creation function - dispatcher */
+/**
+ * @brief Create an architecture structure by name string
+ *
+ * Factory function that instantiates the appropriate architecture-specific
+ * structure based on the GPU architecture name. Currently supports GFX12
+ * with placeholders for future architectures (GFX11, GFX10, GFX9).
+ *
+ * This function is analogous to the Pm4Factory::Create() factory pattern in
+ * projects/aqlprofile/src/core/pm4_factory.h:113-377, but implemented in C
+ * with explicit architecture creators instead of C++ polymorphism.
+ *
+ * @param arch_name String identifying the architecture (e.g., "gfx12", "GFX12")
+ * @return Pointer to initialized architecture structure, or NULL if unknown/unsupported
+ *
+ * @note Comparison is case-insensitive (both "gfx12" and "GFX12" work)
+ * @note Caller is responsible for freeing with arch_destroy()
+ * @see arch_destroy(), Pm4Factory::Create in projects/aqlprofile/src/core/pm4_factory.h:113
+ */
 arch_t* arch_create_by_name(const char* arch_name) {
     if (!arch_name) return NULL;
 
@@ -40,7 +57,29 @@ arch_t* arch_create_by_name(const char* arch_name) {
     return NULL;
 }
 
-/* Architecture destruction function */
+/**
+ * @brief Destroy an architecture structure and free all associated memory
+ *
+ * Recursively frees all dynamically allocated components of an architecture
+ * structure, including:
+ * - Block information structures
+ * - Counter register info arrays
+ * - Dimension arrays
+ * - Command buffer
+ * - The arch_t structure itself
+ *
+ * This function is analogous to Pm4Factory::~Pm4Factory() destructor in
+ * projects/aqlprofile/src/core/pm4_factory.h:233-238, but implemented
+ * explicitly in C without destructors.
+ *
+ * @param arch Pointer to architecture structure to destroy, or NULL (no-op)
+ *
+ * @note Safe to call with NULL pointer
+ * @note After calling, the arch pointer is invalid and should not be used
+ * @note Iterates through all HW_IP_BLOCK_LAST blocks to find and free allocated ones
+ * @see arch_create_by_name(), Pm4Factory::~Pm4Factory in
+ *      projects/aqlprofile/src/core/pm4_factory.h:233
+ */
 void arch_destroy(arch_t* arch) {
     if (!arch) return;
 

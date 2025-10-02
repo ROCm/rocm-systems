@@ -17,8 +17,27 @@
     (((counter)->block_id >= HW_IP_BLOCK_LAST) || \
      ((counter)->block_id > (arch)->block_map.block_count) || \
      (!(arch)->block_map.blocks[(counter)->block_id]))
-     
-/* Helper function: Generate CS partial flush packet */
+
+/**
+ * @brief Generate CS partial flush packet to synchronize compute shader execution
+ *
+ * Appends an EVENT_WRITE packet that triggers a CS_PARTIAL_FLUSH event, which
+ * ensures that all compute shader work preceding this point completes before
+ * subsequent commands execute. Used for synchronization in performance counter
+ * start/stop/read sequences.
+ *
+ * This function is analogous to the barrier commands in GpuPmcBuilder::Start() and
+ * GpuPmcBuilder::Read() in projects/aqlprofile/src/pm4/pmc_builder.h:240, 507
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @param arch Architecture information containing event configuration
+ * @return 0 on success, -EINVAL if buffer or arch is NULL
+ *
+ * @note Called at critical synchronization points: before starting counters,
+ *       before reading counter values, and after stopping counters
+ * @see pm4_append_event_write(), GpuPmcBuilder::Start in
+ *      projects/aqlprofile/src/pm4/pmc_builder.h:240
+ */
 int generate_cs_partial_flush(pm4_buffer_t *buffer, const arch_t *arch) {
   if (!buffer || !arch) {
     return -EINVAL;
@@ -29,7 +48,25 @@ int generate_cs_partial_flush(pm4_buffer_t *buffer, const arch_t *arch) {
                                 arch->control_regs.event_index_flush);
 }
 
-/* Helper function: Set GRBM to broadcast mode */
+/**
+ * @brief Set GRBM to broadcast mode for writing to all GPU instances
+ *
+ * Configures the GRBM_GFX_INDEX register to broadcast writes to all Shader Engines,
+ * Shader Arrays, and WGPs simultaneously. This is essential before configuring
+ * performance counters that exist across multiple hardware instances.
+ *
+ * This function is analogous to GpuPmcBuilder::SetGrbmBroadcast() in
+ * projects/aqlprofile/src/pm4/pmc_builder.h:191-193
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @param arch Architecture information with GRBM_GFX_INDEX register offset
+ * @return 0 on success, -EINVAL if buffer or arch is NULL
+ *
+ * @note Must be called before any counter configuration to ensure all instances
+ *       receive the same settings
+ * @see pm4_grbm_broadcast(), GpuPmcBuilder::SetGrbmBroadcast in
+ *      projects/aqlprofile/src/pm4/pmc_builder.h:191
+ */
 int generate_grbm_broadcast(pm4_buffer_t *buffer, const arch_t *arch) {
   if (!buffer || !arch) {
     return -EINVAL;
@@ -38,7 +75,28 @@ int generate_grbm_broadcast(pm4_buffer_t *buffer, const arch_t *arch) {
   return pm4_grbm_broadcast(buffer, arch->control_regs.grbm_gfx_index);
 }
 
-/* Helper function: Enable/disable performance monitoring */
+/**
+ * @brief Enable or disable performance monitoring with optional sampling
+ *
+ * Writes to the CP_PERFMON_CNTL register to control the performance monitoring
+ * state machine. The perfmon state determines whether counters are running,
+ * stopped, or disabled. The sample bit enables reading counter values without
+ * stopping them.
+ *
+ * This function is analogous to GpuPmcBuilder::SetPerfmonCntl() in
+ * projects/aqlprofile/src/pm4/pmc_builder.h:195-198
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @param arch Architecture information with CP_PERFMON_CNTL register offset
+ * @param enable_state Perfmon state: 0=disable, 1=enable/start, 2=stop
+ * @param sample_enable If true, sets the sample bit to enable non-destructive reads
+ * @return 0 on success, -EINVAL if buffer or arch is NULL
+ *
+ * @note The perfmon_state field (bits 0-3) controls the state machine
+ * @note The sample bit (typically bit 10) enables reading while counting
+ * @see pm4_perfcount_enable(), GpuPmcBuilder::SetPerfmonCntl in
+ *      projects/aqlprofile/src/pm4/pmc_builder.h:195
+ */
 int generate_perfmon_enable(pm4_buffer_t *buffer, const arch_t *arch,
                             uint8_t enable_state, bool sample_enable) {
   if (!buffer || !arch) {
@@ -56,7 +114,26 @@ int generate_perfmon_enable(pm4_buffer_t *buffer, const arch_t *arch,
                               perfmon_value);
 }
 
-/* Helper function: Configure counter selection and control registers */
+/**
+ * @brief Configure counter selection and control registers for a specific counter
+ *
+ * Writes the event ID to the counter's SELECT register and optionally configures
+ * the CONTROL register (for SQ counters, enables all shader stages). This sets up
+ * what event the hardware will count.
+ *
+ * This function is analogous to the counter configuration loop in
+ * GpuPmcBuilder::Start() at projects/aqlprofile/src/pm4/pmc_builder.h:284-439
+ *
+ * @param buffer PM4 buffer to append packets to
+ * @param arch Architecture information with block definitions
+ * @param counter Counter to configure (block, event ID, counter index)
+ * @return 0 on success, -EINVAL for invalid parameters, -ENOENT if block not found
+ *
+ * @note For SQ (shader) counters, enables all shader stages (PS, GS, HS, CS)
+ * @note Validates counter index against block's counter_count
+ * @see generate_start_packet(), GpuPmcBuilder::Start in
+ *      projects/aqlprofile/src/pm4/pmc_builder.h:284
+ */
 int generate_counter_config(pm4_buffer_t *buffer, const arch_t *arch,
                             const counter_info_t *counter) {
   int ret;

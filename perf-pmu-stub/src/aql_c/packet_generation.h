@@ -20,20 +20,38 @@
 #include "aql_structures.h"
 #include "pm4_packets.h"
 
-/* Counter information for packet generation */
+/**
+ * @brief Counter information for packet generation
+ *
+ * Describes a single performance counter to be monitored, including which
+ * hardware block it belongs to, which event to count, and which physical
+ * counter register to use within that block.
+ *
+ * This structure is analogous to the counter selection in
+ * projects/aqlprofile/src/pm4/pmc_builder.h:64-69
+ */
 typedef struct {
     hardware_ip_block_t block_id;      /* Which hardware block (SQ, CPC, etc.) */
     uint32_t event_id;                 /* Event ID to monitor */
     uint32_t counter_index;            /* Which counter in the block (0-7 for SQ) */
-    const char* name;                  /* Optional counter name */
+    const char* name;                  /* Optional counter name for debugging */
 } counter_info_t;
 
-/* Counter collection context */
+/**
+ * @brief Counter collection context for PM4 packet generation
+ *
+ * Aggregates all counters to be monitored together, along with the GPU
+ * memory location where counter data will be written. Used by the
+ * start/stop/read packet generation functions.
+ *
+ * This structure is analogous to the profile context in
+ * projects/aqlprofile/src/core/aql_profile.cpp
+ */
 typedef struct {
     counter_info_t* counters;          /* Array of counters to collect */
-    size_t counter_count;              /* Number of counters */
-    uint64_t gpu_memory_addr;          /* GPU address for counter data */
-    size_t memory_size;                /* Size of allocated memory */
+    size_t counter_count;              /* Number of counters in array */
+    uint64_t gpu_memory_addr;          /* GPU address for counter data results */
+    size_t memory_size;                /* Size of allocated memory in bytes */
 } counter_collection_t;
 
 /**

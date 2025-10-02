@@ -124,16 +124,75 @@ typedef union {
 } pm4_barrier_event_t;
 
 /* Buffer management functions */
+
+/**
+ * @brief Create a new PM4 command buffer
+ *
+ * Allocates and initializes a growable buffer for accumulating PM4 packets.
+ *
+ * @param initial_capacity Initial buffer capacity in DWORDs (0 = use default)
+ * @param flags Kernel memory allocation flags (kernel mode only)
+ * @return Pointer to allocated buffer, or NULL on allocation failure
+ *
+ * @note Caller must call pm4_buffer_destroy() to free the buffer
+ * @see pm4_buffer_destroy()
+ */
 #ifdef __KERNEL__
 pm4_buffer_t* pm4_buffer_create(size_t initial_capacity, gfp_t flags);
 #else
 pm4_buffer_t* pm4_buffer_create(size_t initial_capacity);
 #endif
+
+/**
+ * @brief Destroy a PM4 command buffer and free all memory
+ *
+ * @param buffer Pointer to buffer to destroy, or NULL (no-op)
+ * @see pm4_buffer_create()
+ */
 void pm4_buffer_destroy(pm4_buffer_t *buffer);
+
+/**
+ * @brief Reset buffer to empty state without deallocating memory
+ *
+ * @param buffer Pointer to buffer to reset
+ * @return 0 on success, -1 if buffer is NULL
+ * @see pm4_buffer_create()
+ */
 int pm4_buffer_reset(pm4_buffer_t *buffer);
+
+/**
+ * @brief Ensure buffer has capacity for additional DWORDs
+ *
+ * Expands buffer capacity if needed to accommodate additional data.
+ *
+ * @param buffer Pointer to buffer to expand
+ * @param required_dwords Number of additional DWORDs that will be appended
+ * @return 0 on success, -1 on allocation failure or NULL buffer
+ */
 int pm4_buffer_ensure_capacity(pm4_buffer_t *buffer, size_t required_dwords);
+
+/**
+ * @brief Get pointer to the buffer's data array
+ *
+ * @param buffer Pointer to buffer
+ * @return Pointer to data array, or NULL if buffer is NULL
+ */
 uint32_t* pm4_buffer_get_data(pm4_buffer_t *buffer);
+
+/**
+ * @brief Get current buffer size in DWORDs
+ *
+ * @param buffer Pointer to buffer
+ * @return Current size in DWORDs, or 0 if buffer is NULL
+ */
 size_t pm4_buffer_get_size(pm4_buffer_t *buffer);
+
+/**
+ * @brief Get current buffer size in bytes
+ *
+ * @param buffer Pointer to buffer
+ * @return Current size in bytes, or 0 if buffer is NULL
+ */
 size_t pm4_buffer_get_size_bytes(pm4_buffer_t *buffer);
 
 /* PM4 packet builder functions - matches Rust PM4CommandWriter trait */
@@ -170,25 +229,70 @@ int pm4_append_acquire_mem(pm4_buffer_t *buffer,
 
 /* Higher-level helper functions that match Rust implementation */
 
-/* Set GRBM to broadcast mode */
+/**
+ * @brief Set GRBM to broadcast mode for writing to all GPU instances
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @param grbm_gfx_index_reg GRBM_GFX_INDEX register offset
+ * @return 0 on success, negative on error
+ */
 int pm4_grbm_broadcast(pm4_buffer_t *buffer, uint32_t grbm_gfx_index_reg);
 
-/* Set specific GRBM index for targeted writes */
+/**
+ * @brief Set specific GRBM index for targeted writes
+ *
+ * Configures GRBM_GFX_INDEX to target a specific SE/SA/WGP location.
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @param grbm_gfx_index_reg GRBM_GFX_INDEX register offset
+ * @param wg_index Work group index (shifted by 2 before use)
+ * @param sa_index Shader Array index
+ * @param se_index Shader Engine index
+ * @return 0 on success, negative on error
+ */
 int pm4_set_grbm_index(pm4_buffer_t *buffer,
                         uint32_t grbm_gfx_index_reg,
                         uint32_t wg_index,
                         uint32_t sa_index,
                         uint32_t se_index);
 
-/* Enable performance counters */
+/**
+ * @brief Enable or disable performance monitoring
+ *
+ * Writes to CP_PERFMON_CNTL register to control performance monitoring state.
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @param cp_perfmon_cntl_reg CP_PERFMON_CNTL register offset
+ * @param control_value Control value to write (state + sample bit)
+ * @return 0 on success, negative on error
+ */
 int pm4_perfcount_enable(pm4_buffer_t *buffer,
                           uint32_t cp_perfmon_cntl_reg,
                           uint32_t control_value);
 
-/* Trigger CS partial flush */
+/**
+ * @brief Trigger CS partial flush event
+ *
+ * Appends an EVENT_WRITE packet for CS_PARTIAL_FLUSH synchronization.
+ *
+ * @param buffer PM4 buffer to append packet to
+ * @return 0 on success, negative on error
+ */
 int pm4_cs_partial_flush(pm4_buffer_t *buffer);
 
-/* Calculate cache coherency parameters (helper) */
+/**
+ * @brief Calculate cache coherency parameters for ACQUIRE_MEM packet
+ *
+ * Converts memory address and size into the coher_base/coher_size format
+ * required by ACQUIRE_MEM packets. Uses 256-byte granularity.
+ *
+ * @param addr Base memory address to flush
+ * @param size Size of memory range in bytes
+ * @param coher_size_lo Output: coherency size low 32 bits
+ * @param coher_size_hi Output: coherency size high 8 bits
+ * @param coher_base_lo Output: coherency base low 32 bits
+ * @param coher_base_hi Output: coherency base high 24 bits
+ */
 void pm4_calculate_cache_coher_params(uint64_t addr,
                                        uint64_t size,
                                        uint32_t *coher_size_lo,
@@ -197,8 +301,32 @@ void pm4_calculate_cache_coher_params(uint64_t addr,
                                        uint32_t *coher_base_hi);
 
 /* Debug/utility functions */
+
+/**
+ * @brief Dump a PM4 packet to console for debugging
+ *
+ * @param packet Pointer to packet data
+ * @param size_dwords Size of packet in DWORDs
+ */
 void pm4_dump_packet(const uint32_t *packet, size_t size_dwords);
+
+/**
+ * @brief Convert PM4 opcode to string name
+ *
+ * @param opcode PM4 opcode value
+ * @return String name of opcode, or "UNKNOWN"
+ */
 const char* pm4_opcode_to_string(uint8_t opcode);
+
+/**
+ * @brief Validate a PM4 packet structure
+ *
+ * Checks packet header and size for correctness.
+ *
+ * @param packet Pointer to packet data
+ * @param size_dwords Size of packet in DWORDs
+ * @return 0 if valid, -1 if invalid
+ */
 int pm4_validate_packet(const uint32_t *packet, size_t size_dwords);
 
 /**
@@ -268,9 +396,40 @@ typedef struct {
 } pm4_op_t;
 
 /* Helper functions for pm4_op_t */
+
+/**
+ * @brief Parse PM4 packet data into a pm4_op_t structure
+ *
+ * @param data Pointer to PM4 packet data
+ * @param size_dwords Size of packet in DWORDs
+ * @return Parsed pm4_op_t structure (type set to PM4_OP_INVALID on error)
+ */
 pm4_op_t pm4_op_from_buffer(const uint32_t* data, size_t size_dwords);
+
+/**
+ * @brief Serialize a pm4_op_t structure to buffer
+ *
+ * @param op Pointer to PM4 operation structure
+ * @param buffer Output buffer for packet data
+ * @param buffer_size Size of output buffer in DWORDs
+ * @return Number of DWORDs written, or -1 on error
+ */
 int pm4_op_to_buffer(const pm4_op_t* op, uint32_t* buffer, size_t buffer_size);
+
+/**
+ * @brief Get size of a PM4 operation in DWORDs
+ *
+ * @param op Pointer to PM4 operation structure
+ * @return Size in DWORDs, or 0 if op is NULL
+ */
 size_t pm4_op_get_size(const pm4_op_t* op);
+
+/**
+ * @brief Convert PM4 operation type to string name
+ *
+ * @param type PM4 operation type
+ * @return String name of operation type
+ */
 const char* pm4_op_type_to_string(pm4_op_type_t type);
 
 #endif /* PM4_PACKETS_H */

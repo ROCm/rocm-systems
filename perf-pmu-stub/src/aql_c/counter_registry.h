@@ -8,7 +8,17 @@
 
 #include "aql_structures.h"
 
-/* Counter ID enumeration - stable identifiers across architectures */
+/**
+ * @brief Counter ID enumeration - stable identifiers across architectures
+ *
+ * Each counter has a unique numeric ID that remains constant across different
+ * GPU architectures. Architecture-specific event IDs are then mapped to these
+ * stable counter IDs via the event map.
+ *
+ * This provides a level of indirection allowing counter names and IDs to remain
+ * consistent while the underlying hardware event codes change between GFX9,
+ * GFX10, GFX11, GFX12, etc.
+ */
 typedef enum {
     /* GL2C Block Counters */
     COUNTER_GL2C_EA_RDREQ = 1,
@@ -57,24 +67,73 @@ typedef enum {
     COUNTER_ID_LAST
 } counter_id_t;
 
-/* Base counter definition - architecture agnostic */
+/**
+ * @brief Base counter definition - architecture agnostic
+ *
+ * Defines the basic properties of a performance counter that are the same
+ * across all GPU architectures: its unique ID, human-readable name, and
+ * which hardware block it belongs to.
+ */
 typedef struct {
-    counter_id_t id;
-    const char* name;
-    hardware_ip_block_t hw_block;
+    counter_id_t id;                 /* Unique numeric identifier */
+    const char* name;                /* Counter name (e.g., "SQ_WAVES") */
+    hardware_ip_block_t hw_block;    /* Hardware block this counter belongs to */
 } counter_def_t;
 
-/* Architecture-specific event mapping */
+/**
+ * @brief Architecture-specific event mapping
+ *
+ * Maps an architecture-agnostic counter ID to the specific hardware event
+ * ID for a particular GPU architecture (e.g., GFX12). Different architectures
+ * may use different event IDs for the same logical counter.
+ *
+ * This structure is analogous to the event select values in
+ * projects/aqlprofile/def/gfx12/ event definition files.
+ */
 struct arch_event_map {
-    counter_id_t counter_id;
-    uint32_t event_id;
+    counter_id_t counter_id;         /* Architecture-agnostic counter ID */
+    uint32_t event_id;               /* Architecture-specific hardware event ID */
 };
 
 /* Function prototypes */
+
+/**
+ * @brief Look up a counter definition by its string name
+ *
+ * @param counter_name String name of the counter (e.g., "SQ_WAVES")
+ * @return Pointer to counter definition, or NULL if not found
+ */
 const counter_def_t* lookup_counter_by_name(const char* counter_name);
+
+/**
+ * @brief Look up a counter definition by its numeric ID
+ *
+ * @param id Numeric counter identifier from counter_id_t enum
+ * @return Pointer to counter definition, or NULL if not found
+ */
 const counter_def_t* lookup_counter_by_id(counter_id_t id);
+
+/**
+ * @brief Look up the architecture-specific hardware event ID for a counter
+ *
+ * @param counter Pointer to counter definition
+ * @param arch Architecture information containing the event map
+ * @return Hardware event ID, or 0 if not found
+ */
 uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch);
+
+/**
+ * @brief Get pointer to the full array of counter definitions
+ *
+ * @return Pointer to array of counter definitions
+ */
 const counter_def_t* get_all_counters(void);
+
+/**
+ * @brief Get the total number of registered counters
+ *
+ * @return Number of entries in the base counter array
+ */
 size_t get_counter_count(void);
 
 #endif /* COUNTER_REGISTRY_H */

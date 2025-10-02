@@ -60,10 +60,36 @@ static const struct arch_event_map gfx12_events[] = {
 
 #define GFX12_EVENT_COUNT (sizeof(gfx12_events) / sizeof(struct arch_event_map))
 
+/**
+ * @brief Get the GFX12 event mapping array
+ *
+ * Returns a pointer to the static array mapping architecture-agnostic counter
+ * IDs to GFX12-specific hardware event IDs. This array is used by the counter
+ * registry to look up the correct event ID for programming SELECT registers.
+ *
+ * This function is analogous to the event ID lookup tables in
+ * projects/aqlprofile/def/gfx12/ event definition files.
+ *
+ * @return Pointer to const array of arch_event_map structures
+ *
+ * @note Array size can be obtained via get_gfx12_event_count()
+ * @note Array is valid for the lifetime of the program
+ * @see get_gfx12_event_count(), lookup_event_id() in counter_registry.c
+ */
 const struct arch_event_map* get_gfx12_events(void) {
     return gfx12_events;
 }
 
+/**
+ * @brief Get the number of event mappings in the GFX12 event array
+ *
+ * Returns the total count of counter-to-event mappings defined for GFX12.
+ * Used to iterate over the event map or validate array bounds.
+ *
+ * @return Number of event mappings in the GFX12 array
+ *
+ * @see get_gfx12_events()
+ */
 size_t get_gfx12_event_count(void) {
     return GFX12_EVENT_COUNT;
 }

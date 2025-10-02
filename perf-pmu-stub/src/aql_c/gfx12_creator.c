@@ -267,7 +267,30 @@
 #define GFX12_NUM_CU            64
 #define GFX12_NUM_WGP_PER_SA    4
 
-/* Create CPC block info for GFX12 */
+/**
+ * @brief Create CPC (Command Processor Compute) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the CPC hardware block, which
+ * contains performance counters for command processor operations including
+ * command buffer processing, packet dispatch, and compute engine activity.
+ * CPC is a global block with no SE/SA/WGP dependencies.
+ *
+ * This function is analogous to the GFX12 CPC block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h and the BlockInfo
+ * construction in projects/aqlprofile/src/core/gfx12_factory.cpp
+ *
+ * Configuration:
+ * - 2 performance counters
+ * - 1 XCC dimension (global scope)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized CPC block_info_t, or NULL on allocation failure
+ *
+ * @note CPC counters are global and do not require iteration over topology
+ * @see create_gfx12_sq_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_cpc_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -308,7 +331,32 @@ static block_info_t* create_gfx12_cpc_block(void) {
     return block;
 }
 
-/* Create SQ block info for GFX12 */
+/**
+ * @brief Create SQ (Shader Sequencer) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the SQ hardware block, which
+ * contains performance counters for shader execution including wave counts,
+ * instruction counts, and wait states. SQ counters are per-WGP and require
+ * iteration over the GPU's SE x SA x WGP topology when reading.
+ *
+ * This function is analogous to the GFX12 SQ block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h and the BlockInfo
+ * construction in projects/aqlprofile/src/core/gfx12_factory.cpp
+ *
+ * Configuration:
+ * - 8 performance counters per WGP
+ * - 3D topology: 4 SE x 2 SA x 2 WGP = 16 instances
+ * - SELECT registers for event configuration
+ * - CTRL registers for shader stage enable (PS/GS/HS/CS)
+ * - Counter result registers (LO only, 32-bit)
+ *
+ * @return Pointer to initialized SQ block_info_t, or NULL on allocation failure
+ *
+ * @note SQ dimension is 2 WGPs per SA (not the full 4 WGP_PER_SA)
+ * @note Total counter instances: 8 counters × 16 locations = 128 readings
+ * @see create_gfx12_cpc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_sq_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -365,7 +413,29 @@ static block_info_t* create_gfx12_sq_block(void) {
     return block;
 }
 
-/* Create GRBM block info for GFX12 */
+/**
+ * @brief Create GRBM (Graphics Register Bus Manager) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the GRBM hardware block, which
+ * provides performance counters for GPU-wide activity including GUI pipeline
+ * utilization, command buffer processing, and overall GPU busy state.
+ * GRBM is a global block monitoring system-level GPU activities.
+ *
+ * This function is analogous to the GFX12 GRBM block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 2 performance counters
+ * - 1 XCC dimension (global scope)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized GRBM block_info_t, or NULL on allocation failure
+ *
+ * @note GRBM counters monitor system-level GPU activity
+ * @see create_gfx12_cpc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_grbm_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -406,7 +476,30 @@ static block_info_t* create_gfx12_grbm_block(void) {
     return block;
 }
 
-/* Create GL2C block info for GFX12 */
+/**
+ * @brief Create GL2C (Graphics L2 Cache Channel) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the GL2C hardware block, which
+ * provides performance counters for L2 cache operations including hits, misses,
+ * read/write requests, and memory traffic. GL2C has multiple instances (16 on GFX12)
+ * that can be monitored independently or aggregated.
+ *
+ * This function is analogous to the GFX12 GL2C block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters per instance
+ * - 16 instances across the GPU
+ * - 1 XCC dimension (global scope)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized GL2C block_info_t, or NULL on allocation failure
+ *
+ * @note GL2C monitors L2 cache behavior critical for memory performance analysis
+ * @see create_gfx12_tcc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_gl2c_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -451,7 +544,29 @@ static block_info_t* create_gfx12_gl2c_block(void) {
     return block;
 }
 
-/* Create SPI block info for GFX12 */
+/**
+ * @brief Create SPI (Shader Processor Input) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the SPI hardware block, which
+ * provides performance counters for shader input operations including wave
+ * allocation, resource allocation, and shader launch activity. SPI is
+ * per-SE (Shader Engine) and monitors shader dispatch behavior.
+ *
+ * This function is analogous to the GFX12 SPI block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 6 performance counters
+ * - XCC + SE dimensions (4 SEs on GFX12)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized SPI block_info_t, or NULL on allocation failure
+ *
+ * @note SPI counters must be read separately for each SE
+ * @see create_gfx12_sq_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_spi_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -501,7 +616,30 @@ static block_info_t* create_gfx12_spi_block(void) {
     return block;
 }
 
-/* Create TA block info for GFX12 */
+/**
+ * @brief Create TA (Texture Addresser) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the TA hardware block, which
+ * provides performance counters for texture address calculation including
+ * texture load/store operations, address generation, and filtering operations.
+ * TA is a WGP-level block with full topology dimensions.
+ *
+ * This function is analogous to the GFX12 TA block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 2 performance counters per instance
+ * - 2 instances per WGP
+ * - Full 4D topology: XCC x SE x SA x WGP
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized TA block_info_t, or NULL on allocation failure
+ *
+ * @note TA counters require iteration over full GPU topology (SE/SA/WGP)
+ * @see create_gfx12_tcp_block(), create_gfx12_td_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_ta_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -553,7 +691,30 @@ static block_info_t* create_gfx12_ta_block(void) {
     return block;
 }
 
-/* Create TCP block info for GFX12 */
+/**
+ * @brief Create TCP (Texture Cache Processor) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the TCP hardware block, which
+ * provides performance counters for texture cache operations including
+ * texture fetch requests, cache hits/misses, and data transfer rates.
+ * TCP is a WGP-level block responsible for L1 texture cache.
+ *
+ * This function is analogous to the GFX12 TCP block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters per instance
+ * - 2 instances per WGP
+ * - Full 4D topology: XCC x SE x SA x WGP
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized TCP block_info_t, or NULL on allocation failure
+ *
+ * @note TCP L1 cache is critical for texture memory performance
+ * @see create_gfx12_ta_block(), create_gfx12_tcc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_tcp_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -609,7 +770,30 @@ static block_info_t* create_gfx12_tcp_block(void) {
     return block;
 }
 
-/* Create TD block info for GFX12 */
+/**
+ * @brief Create TD (Texture Data) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the TD hardware block, which
+ * provides performance counters for texture data fetch operations including
+ * texture load operations, texture filtering, and memory read requests.
+ * TD is a WGP-level block handling texture data retrieval.
+ *
+ * This function is analogous to the GFX12 TD block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 2 performance counters per instance
+ * - 2 instances per WGP
+ * - Full 4D topology: XCC x SE x SA x WGP
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized TD block_info_t, or NULL on allocation failure
+ *
+ * @note TD works with TA and TCP to complete texture operations
+ * @see create_gfx12_ta_block(), create_gfx12_tcp_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_td_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -661,7 +845,30 @@ static block_info_t* create_gfx12_td_block(void) {
     return block;
 }
 
-/* Create TCC block info for GFX12 */
+/**
+ * @brief Create TCC (Texture Cache Controller) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the TCC hardware block, which
+ * provides performance counters for L2 texture cache operations including
+ * cache hits/misses, read/write requests, and coherency operations.
+ * TCC has multiple instances (16 on GFX12) managing L2 cache slices.
+ *
+ * This function is analogous to the GFX12 TCC block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters per instance
+ * - 16 instances across the GPU
+ * - 1 XCC dimension (global scope)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized TCC block_info_t, or NULL on allocation failure
+ *
+ * @note TCC L2 cache is critical for overall memory hierarchy performance
+ * @see create_gfx12_tcp_block(), create_gfx12_gl2c_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_tcc_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -706,7 +913,29 @@ static block_info_t* create_gfx12_tcc_block(void) {
     return block;
 }
 
-/* Create SX block info for GFX12 */
+/**
+ * @brief Create SX (Shader Export) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the SX hardware block, which
+ * provides performance counters for pixel and vertex shader export operations
+ * including color/depth exports, parameter cache activity, and memory writes.
+ * SX is per-SE and handles shader output data.
+ *
+ * This function is analogous to the GFX12 SX block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters
+ * - XCC + SE dimensions (4 SEs on GFX12)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized SX block_info_t, or NULL on allocation failure
+ *
+ * @note SX counters track shader output and export efficiency
+ * @see create_gfx12_db_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_sx_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -752,7 +981,29 @@ static block_info_t* create_gfx12_sx_block(void) {
     return block;
 }
 
-/* Create DB block info for GFX12 */
+/**
+ * @brief Create DB (Depth Buffer) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the DB hardware block, which
+ * provides performance counters for depth/stencil operations including
+ * Z-test operations, hierarchical-Z activity, and depth buffer writes.
+ * DB is per-SE and manages depth/stencil rendering.
+ *
+ * This function is analogous to the GFX12 DB block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters
+ * - XCC + SE dimensions (4 SEs on GFX12)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized DB block_info_t, or NULL on allocation failure
+ *
+ * @note DB counters are essential for depth/stencil performance analysis
+ * @see create_gfx12_sx_block(), create_gfx12_pa_sc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_db_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -798,7 +1049,29 @@ static block_info_t* create_gfx12_db_block(void) {
     return block;
 }
 
-/* Create PA_SC block info for GFX12 */
+/**
+ * @brief Create PA_SC (Primitive Assembly - Scan Converter) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the PA_SC hardware block, which
+ * provides performance counters for scan conversion including primitive processing,
+ * quad generation, small primitive culling, and rasterization activity.
+ * PA_SC is per-SE and handles geometry-to-pixel conversion.
+ *
+ * This function is analogous to the GFX12 PA_SC block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters
+ * - XCC + SE dimensions (4 SEs on GFX12)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized PA_SC block_info_t, or NULL on allocation failure
+ *
+ * @note PA_SC is critical for understanding rasterization performance
+ * @see create_gfx12_pa_su_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_pa_sc_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -844,6 +1117,29 @@ static block_info_t* create_gfx12_pa_sc_block(void) {
     return block;
 }
 
+/**
+ * @brief Create PA_SU (Primitive Assembly - Setup Unit) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the PA_SU hardware block, which
+ * provides performance counters for primitive setup operations including
+ * triangle setup, clipping, culling, and viewport transformation.
+ * PA_SU is per-SE and prepares primitives for rasterization.
+ *
+ * This function is analogous to the GFX12 PA_SU block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters
+ * - XCC + SE dimensions (4 SEs on GFX12)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized PA_SU block_info_t, or NULL on allocation failure
+ *
+ * @note PA_SU tracks geometry setup efficiency
+ * @see create_gfx12_pa_sc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_pa_su_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -890,6 +1186,29 @@ static block_info_t* create_gfx12_pa_su_block(void) {
     return block;
 }
 
+/**
+ * @brief Create GDS (Global Data Store) block information for GFX12
+ *
+ * Initializes the block_info_t structure for the GDS hardware block, which
+ * provides performance counters for global data share operations including
+ * atomic operations, ordered append/consume, and inter-wave communication.
+ * GDS is a global block providing fast shared memory for compute shaders.
+ *
+ * This function is analogous to the GFX12 GDS block definition in
+ * projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ *
+ * Configuration:
+ * - 4 performance counters
+ * - 1 XCC dimension (global scope)
+ * - SELECT registers for event configuration
+ * - 64-bit counter result registers (LO + HI)
+ *
+ * @return Pointer to initialized GDS block_info_t, or NULL on allocation failure
+ *
+ * @note GDS is used for compute shader synchronization and data sharing
+ * @see create_gfx12_cpc_block(), GFX12 block info in
+ *      projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
+ */
 static block_info_t* create_gfx12_gds_block(void) {
     block_info_t* block = ALLOC(sizeof(block_info_t));
     if (!block) return NULL;
@@ -935,7 +1254,31 @@ static block_info_t* create_gfx12_gds_block(void) {
     return block;
 }
 
-/* Create GFX12 architecture - based on Rust demo.rs values */
+/**
+ * @brief Create and initialize the complete GFX12 architecture structure
+ *
+ * Constructs the full architecture descriptor for AMD RDNA 3 (GFX12) GPUs,
+ * including all hardware block definitions, register mappings, control registers,
+ * and event mappings. This is the top-level factory function for GFX12.
+ *
+ * This function is analogous to Pm4Factory::Gfx12Create() in
+ * projects/aqlprofile/src/core/gfx12_factory.cpp which creates the GFX12-specific
+ * factory with CmdBuilder, PmcBuilder, and BlockInfo structures.
+ *
+ * Architecture configuration includes:
+ * - Hardware topology: 4 SEs x 2 SAs x 4 WGPs = 64 CUs
+ * - 14 hardware blocks (SQ, CPC, GL2C, GRBM, SPI, TA, TCP, TD, TCC, SX, DB, PA_SC, PA_SU, GDS)
+ * - Per-block counter registers and dimensions
+ * - Control register offsets for PM4 packet generation
+ * - Event ID mappings from counter names to hardware event codes
+ *
+ * @return Pointer to initialized GFX12 architecture, or NULL on allocation failure
+ *
+ * @note Caller must call arch_destroy() to free the returned structure
+ * @note All 14 block creators must succeed or the entire arch creation fails
+ * @see arch_destroy(), Pm4Factory::Gfx12Create in
+ *      projects/aqlprofile/src/core/gfx12_factory.cpp
+ */
 arch_t* create_gfx12_arch(void) {
     arch_t* arch = ALLOC(sizeof(arch_t));
     if (!arch) return NULL;
