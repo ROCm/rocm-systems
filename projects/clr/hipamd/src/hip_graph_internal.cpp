@@ -237,67 +237,89 @@ void Graph::ScheduleNodes() {
 
 // ================================================================================================
 bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
-  std::queue<Node> q;
+  TopoOrder.reserve(vertices_.size());
   std::unordered_map<Node, int> inDegree;
-  for (auto entry : vertices_) {
+  inDegree.reserve(vertices_.size());
+  std::deque<Node> q;
+
+  for (const auto& entry : vertices_) {
     // Update the dependencies if a signal is required
-    for (auto dep : entry->GetDependencies()) {
+    for (const auto& dep : entry->GetDependencies()) {
       // Check if the stream ID doesn't match and enable signal
       if (dep->stream_id_ != entry->stream_id_) {
         dep->signal_is_required_ = true;
       }
     }
 
-    if (entry->GetInDegree() == 0) {
-      q.push(entry);
+    int degree = entry->GetInDegree();
+    if (degree == 0) {
+      q.push_back(entry);
     }
-    inDegree[entry] = entry->GetInDegree();
+    inDegree[entry] = degree;
   }
+
   while (!q.empty()) {
-    Node node = q.front();
+    const Node& node = q.front();
     TopoOrder.push_back(node);
-    q.pop();
-    for (auto edge : node->GetEdges()) {
+    q.pop_front();
+    for (const auto& edge : node->GetEdges()) {
       inDegree[edge]--;
       if (inDegree[edge] == 0) {
-        q.push(edge);
+        q.push_back(edge);
       }
     }
   }
-  if (GetNodeCount() == TopoOrder.size()) {
-    return true;
+
+  if (GetNodeCount() != TopoOrder.size()) {
+    TopoOrder.clear();
+    return false;
   }
-  return false;
+  return true;
 }
 
 // ================================================================================================
 void Graph::clone(Graph* newGraph, bool cloneNodes) const {
   newGraph->pOriginalGraph_ = this;
-  for (hip::GraphNode* entry : vertices_) {
+
+  // Pre-allocate containers
+  const size_t nodeCount = vertices_.size();
+  newGraph->vertices_.reserve(nodeCount);
+  newGraph->clonedNodes_.reserve(nodeCount);
+
+  // Clone all nodes
+  for (const auto& entry : vertices_) {
     GraphNode* node = entry->clone();
     node->SetParentGraph(newGraph);
     newGraph->vertices_.push_back(node);
     newGraph->clonedNodes_[entry] = node;
   }
 
+  // Clone edges and dependencies
   std::vector<Node> clonedEdges;
   std::vector<Node> clonedDependencies;
-  for (auto node : vertices_) {
+  clonedEdges.reserve(32);        // pre-allocated starting capacity
+  clonedDependencies.reserve(32);
+
+  for (const auto& node : vertices_) {
     const std::vector<Node>& edges = node->GetEdges();
     clonedEdges.clear();
-    for (auto edge : edges) {
+    clonedEdges.reserve(edges.size());
+    for (const auto& edge : edges) {
       clonedEdges.push_back(newGraph->clonedNodes_[edge]);
     }
     newGraph->clonedNodes_[node]->SetEdges(clonedEdges);
   }
-  for (auto node : vertices_) {
+
+  for (const auto& node : vertices_) {
     const std::vector<Node>& dependencies = node->GetDependencies();
     clonedDependencies.clear();
-    for (auto dep : dependencies) {
+    clonedDependencies.reserve(dependencies.size());
+    for (const auto& dep : dependencies) {
       clonedDependencies.push_back(newGraph->clonedNodes_[dep]);
     }
     newGraph->clonedNodes_[node]->SetDependencies(clonedDependencies);
   }
+
   for (auto& userObj : graphUserObj_) {
     userObj.first->retain();
     newGraph->graphUserObj_.insert(userObj);
