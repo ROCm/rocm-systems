@@ -283,7 +283,7 @@ trap_entry:
   // - Set bit 21 in TTMP13 to indicate a stochastic trap.
   // - Branch to the profile trap handler logic.
 
-  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0 glc   // ttmp[14:15]=*host_trap_buffers
+  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0        // ttmp[14:15]=*host_trap_buffers
 .if .amdgcn.gfx_generation_minor >= 4
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT, 1), 0
   s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
@@ -326,7 +326,8 @@ trap_entry:
 
   // Handle stochastic trap
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
-  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8 glc // ttmp[14:15]=*stoch_trap_buf
+
+  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8       // ttmp[14:15]=*stoch_trap_buf
   s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 25 in TTMP13
   s_waitcnt                             lgkmcnt(0)
@@ -379,7 +380,7 @@ trap_entry:
   // ttmp[14:15] is tma->host_trap_buffers; Available: ttmp[2:3], ttmp[4:5], ttmp7, ttmp13
 .profile_trap_handlers_gfx9:
   s_mov_b64                             ttmp[2:3], 1                    // atomic increment buf_write_val
-  s_atomic_add_x2                       ttmp[2:3], ttmp[14:15], glc     // ttmp[2:3] = packed local_entry
+  s_atomic_add_x2                       ttmp[2:3], ttmp[14:15]          // ttmp[2:3] = packed local_entry
   S_LOAD_DWORD_PCS_TTMP_REG1            ttmp[14:15], 0x8                // TTMP_REG1 = tma->buf_size
   s_waitcnt                             lgkmcnt(0)
   s_lshr_b32                            ttmp7, ttmp3, 31                // ttmp7 = buf_to_use
@@ -579,8 +580,6 @@ trap_entry:
   // get_correlation_id() -- end //
 
   // complete stores before returning
-  s_dcache_wb
-  s_waitcnt                             lgkmcnt(0)
   // fill_sample(...) - end //
 
   // ttmp[2:3], ttmp[4:5], ttmp7, and ttmp13 are free
@@ -590,7 +589,7 @@ trap_entry:
   S_ADD_U32_PCS_TTMP_REG1               ttmp14, ttmp14                  // now ttmp[14:15] points to ...
   s_addc_u32                            ttmp15, ttmp15, 0x0             // buf_written_valX-0x10
   s_mov_b32                             ttmp7, 1                        // atomic increment buf_written_valX
-  s_atomic_add                          ttmp7, ttmp[14:15], 0x10 glc    // ttmp7 will contain 'done'
+  s_atomic_add                          ttmp7, ttmp[14:15], 0x10        // ttmp7 will contain 'done'
   S_LOAD_DWORD_PCS_TTMP_REG1            ttmp[14:15], 0x14               // TTMP_REG1 will hold watermark
   s_waitcnt                             lgkmcnt(0)
   S_CMP_LG_U32_PCS_TTMP_REG1            ttmp7                          // if 'done' not at watermark, exit
@@ -619,13 +618,13 @@ trap_entry:
   s_load_dwordx2                        ttmp[4:5], ttmp[2:3], 0x10      // load event mailbox ptr into 4:5
   s_load_dword                          ttmp7, ttmp[2:3], 0x18          // load event_id into ttmp7
   s_mov_b64                             ttmp[14:15], 0
-  s_store_dwordx2                       ttmp[14:15], ttmp[2:3], 0x8 glc // zero out signal value
+  s_store_dwordx2                       ttmp[14:15], ttmp[2:3], 0x8     // zero out signal value
   s_waitcnt                             lgkmcnt(0)                      // wait for value store to complete
   s_cmp_eq_u64                          ttmp[4:5], 0
   s_cbranch_scc1                        .pc_sampling_exit               // null mailbox means no interrupt
   s_cmp_eq_u32                          ttmp7, 0
   s_cbranch_scc1                        .pc_sampling_exit               // event_id zero means no interrupt
-  s_store_dword                         ttmp7, ttmp[4:5] glc            // send event ID to the mailbox
+  s_store_dword                         ttmp7, ttmp[4:5]               // send event ID to the mailbox
   s_waitcnt                             lgkmcnt(0)
   S_MOV_B32_SRC_PCS_TTMP_REG1           m0                              // save off m0
   s_mov_b32                             m0, ttmp7                       // put ID into message payload
