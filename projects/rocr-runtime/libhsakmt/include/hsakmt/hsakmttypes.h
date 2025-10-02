@@ -586,9 +586,9 @@ typedef struct _HsaMemFlags
             unsigned int ExtendedCoherent: 1;  // system-scope coherence on atomic instructions
             unsigned int GTTAccess:     1;  // default = 0; If 1: The caller indicates this memory will be mapped to GART for MES
 					    // KFD will allocate GTT memory with the Preferred_node set as gpu_id for GART mapping
-            unsigned int Contiguous:	1; // Allocate contiguous VRAM
-            unsigned int ExecuteBlit:	1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
-            unsigned int QueueObject: 1; // AQL queue object, used in windows for CPU access to get the read pointer from amd_queue_t
+            unsigned int Contiguous:    1; // Allocate contiguous VRAM
+            unsigned int ExecuteBlit:   1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
+            unsigned int QueueObject:   1; // AQL queue object, used in windows for CPU access to get the read pointer from amd_queue_t
             unsigned int Reserved:      7;
 
         } ui32;
