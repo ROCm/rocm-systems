@@ -2,15 +2,15 @@ ARG DISTRO=rockylinux/rockylinux
 ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
 
-ENV HOME /root
-ENV SHELL /bin/bash
-ENV BASH_ENV /etc/bash.bashrc
-ENV DEBIAN_FRONTEND noninteractive
+ENV HOME=/root
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/bash.bashrc
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
-ENV PATH /usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
+ENV PATH=/usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
@@ -42,9 +42,14 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
 ARG GPU_TYPE=""
 ARG GPU_TARBALL=""
 RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
+        VERSION=$(echo "$GPU_TARBALL" | sed -nE 's/.*([0-9]\.[0-9]\.[0-9]).*/\1/p'); \
+        if [ -z "$VERSION" ]; then \
+            echo "Error: Could not extract version from GPU_TARBALL ('$GPU_TARBALL')." >&2; \
+            exit 1; \
+        fi; \
         python3 -m pip install -U awscli; \
-        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request; \
-        mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
     fi
 
 WORKDIR /home

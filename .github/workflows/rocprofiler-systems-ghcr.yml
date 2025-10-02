@@ -1,4 +1,4 @@
-name: Publish GHCR Packages for rocprofiler-systems CI Images
+name: rocprofiler-systems GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
@@ -100,7 +100,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.7.9
         with:
-          images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}
+          images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}
 
       - name: Build CI GFX Container (Does not Push on PR)
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
@@ -118,5 +118,5 @@ jobs:
             ELFUTILS_DOWNLOAD_VERSION=0.188
             BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
-            ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}-${{ matrix.system.version }}:systems-ci-${{ matrix.gpu }}
+            ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
