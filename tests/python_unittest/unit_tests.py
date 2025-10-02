@@ -31,6 +31,8 @@ try:
 except ImportError:
     raise ImportError("Could not import /opt/rocm/libexec/amdsmi_cli/amdsmi_cli.py")
 
+
+has_info_printed = False
 not_supported_error_codes = ['2', '3', '49']
 not_supported_error_code_names = ['AMDSMI_STATUS_NOT_SUPPORTED', 'AMDSMI_STATUS_NOT_YET_IMPLEMENTED', 'AMDSMI_STATUS_NO_HSMP_MSG_SUP']
 
@@ -85,6 +87,39 @@ error_map = \
 
 
 class TestAmdSmiPythonBDF(unittest.TestCase):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.verbose = verbose
+        self.max_num_physical_devices = amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
+        global has_info_printed
+        if self.verbose and has_info_printed is False:
+            # Execute the following to print the asic and board info once per test run
+            has_info_printed = True
+            self.setUp()
+            processors = amdsmi.amdsmi_get_processor_handles()
+            self.assertGreaterEqual(len(processors), 1)
+            self.assertLessEqual(len(processors), self.max_num_physical_devices)
+            for i in range(0, len(processors)):
+                try:
+                    # Print asic info
+                    msg = f'asic info(gpu={i})'
+                    ret = amdsmi.amdsmi_get_gpu_asic_info(processors[i])
+                    self._print(msg, ret)
+                except amdsmi.AmdSmiLibraryException as e:
+                    raise e
+            for i in range(0, len(processors)):
+                try:
+                    # Print board info
+                    msg = f'board info(gpu={i})'
+                    ret = amdsmi.amdsmi_get_gpu_board_info(processors[i])
+                    self._print(msg, ret)
+                except amdsmi.AmdSmiLibraryException as e:
+                    raise e
+            self.tearDown()
+        return
+
     valid_bdfs = {
         "00:00.0": [0, 0, 0, 0],
         "01:01.1": [0, 1, 1, 1],
@@ -452,7 +487,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         self.assertEqual(None, result)
 
     @classmethod
-    def _print(self, msg, data=None, cond=None):
+    def _print(self, msg, data=None):
         if verbose == 2:
             if not data:
                 print(msg, flush=True)

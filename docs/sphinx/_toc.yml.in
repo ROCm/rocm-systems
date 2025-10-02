@@ -1,3 +1,10 @@
+# Variables of the form ${<variable>} are substituted, currently the following
+# list is supported:
+#   - ${branch} (or {branch}) the name of the current branch
+#   - ${url} (or {url}) github url of the current project
+#   - ${project:<project_name>} base url of the documentation of <project_name>
+#     based on intersphinx_mapping.
+# These comments will also be removed.
 defaults:
   numbered: false
 root: index
@@ -27,7 +34,7 @@ subtrees:
   - file: reference/amdsmi-cpp-api.md
     title: C++ API
     entries:
-    - file: doxygen/docBin/html/modules
+    - file: doxygen/docBin/html/topics
       title: Modules
     - file: doxygen/docBin/html/files
       title: Files
@@ -50,7 +57,7 @@ subtrees:
 
 - caption: Tutorials
   entries:
-  - url: https://github.com/ROCm/amdsmi/tree/amd-staging/example
+  - url: https://github.com/ROCm/amdsmi/tree/${branch}/example
     title: AMD SMI examples (GitHub)
   - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
     title: AMD SMI CLI walkthrough

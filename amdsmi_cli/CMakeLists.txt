@@ -9,7 +9,7 @@ set(PY_CLI_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}" CACHE STRING "CLI tool inst
 # populate version string
 configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
 
-# hard-linking instead of copying avoids unnecessarry regeneration of packaged files
+# copy only if files are different
 add_custom_command(
     OUTPUT ${PY_PACKAGE_DIR}/__init__.py
            ${PY_PACKAGE_DIR}/amdsmi_cli.py
@@ -24,17 +24,17 @@ add_custom_command(
            ${PY_PACKAGE_DIR}/Release_Notes.md
     DEPENDS amdsmi_cli
     COMMAND mkdir -p ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_commands.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_helpers.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_init.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_logger.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_parser.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli_exceptions.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/BDF.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/Release_Notes.md ${PY_PACKAGE_DIR}/)
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_commands.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_helpers.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_init.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_logger.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_parser.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli_exceptions.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/BDF.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/Release_Notes.md ${PY_PACKAGE_DIR}/)
 
 # The CLI requires the python amdsmi wrapper to be installed
 add_custom_target(

@@ -27,6 +27,7 @@
 #include <cstring>
 #include <memory>
 #include <regex>
+#include "config/amd_smi_config.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
@@ -55,7 +56,7 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
 }
 
 amdsmi_status_t AMDSmiDrm::init() {
-    amdsmi_status_t status = lib_loader_.load("libdrm.so.2");
+    amdsmi_status_t status = lib_loader_.load(LIBDRM_AMDGPU_SONAME);
     if (status != AMDSMI_STATUS_SUCCESS) {
         return status;
     }

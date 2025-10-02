@@ -21,6 +21,7 @@
  */
 
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "rocm_smi/rocm_smi_dyn_gpu_metrics.h" // Dynamic metrics
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -46,6 +47,8 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
+#include <cstddef>
+#include <variant>
 
 using namespace amd::smi;
 
@@ -145,6 +148,7 @@ const AMDGpuMetricVersionTranslationTbl_t amdgpu_metric_version_translation_tabl
   {join_metrics_version(1, 6), AMDGpuMetricVersionFlags_t::kGpuMetricV16},
   {join_metrics_version(1, 7), AMDGpuMetricVersionFlags_t::kGpuMetricV17},
   {join_metrics_version(1, 8), AMDGpuMetricVersionFlags_t::kGpuMetricV18},
+  {join_metrics_version(1, 9), AMDGpuMetricVersionFlags_t::kGpuMetricV19},  // Dynamic GPU Metrics
 };
 
 /**
@@ -365,6 +369,7 @@ AMDGpuMetricFactories_t amd_gpu_metrics_factory_table
   {AMDGpuMetricVersionFlags_t::kGpuMetricV16, std::make_shared<GpuMetricsBase_v16_t>(GpuMetricsBase_v16_t{})},
   {AMDGpuMetricVersionFlags_t::kGpuMetricV17, std::make_shared<GpuMetricsBase_v17_t>(GpuMetricsBase_v17_t{})},
   {AMDGpuMetricVersionFlags_t::kGpuMetricV18, std::make_shared<GpuMetricsBase_v18_t>(GpuMetricsBase_v18_t{})},
+  {AMDGpuMetricVersionFlags_t::kGpuMetricV19, std::make_shared<GpuMetricsBaseDynamic_t>()},
 };
 
 GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t gpu_metric_version)
@@ -416,6 +421,58 @@ constexpr T init_max_uint_types()
     static_assert(is_dependent_false_v<T>, "Error: Type not supported...");
   }
 }
+
+AMDGpuMetricsDataType_t dtype_from_attr(details::AMDGpuMetricAttributeType_t t) {
+  switch (t) {
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT8: {
+      return AMDGpuMetricsDataType_t::kUInt8;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT16: {
+      return AMDGpuMetricsDataType_t::kUInt16;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT32: {
+      return AMDGpuMetricsDataType_t::kUInt32;
+    }
+    default: {
+      return AMDGpuMetricsDataType_t::kUInt64;
+    }
+  }
+}
+
+template<typename Tp>
+constexpr uint64_t safe_way_to_uint64(Tp value) {
+    if constexpr (std::is_signed_v<Tp>) {
+        using intermediate_type = std::conditional_t<sizeof(Tp) <= sizeof(int64_t), int64_t, std::make_signed_t<Tp>>;
+        return static_cast<uint64_t>(static_cast<intermediate_type>(value));
+    } else {
+        return static_cast<uint64_t>(value);
+    }
+}
+
+// Existing format_metric_row doesn't take vectors, so overload and write our own
+template<typename T, typename A>
+AMDGpuDynamicMetricTblValues_t
+format_metric_row(const std::vector<T, A>& vec, const std::string& value_title, details::AMDGpuMetricAttributeType_t attr_type)
+{
+  AMDGpuDynamicMetricTblValues_t out;
+  out.reserve(vec.size());
+
+  const auto n = static_cast<uint16_t>(
+      std::min<std::size_t>(vec.size(), std::numeric_limits<uint16_t>::max()));
+
+  for (uint16_t idx = 0; idx < n; ++idx) {
+    uint64_t u64 = safe_way_to_uint64(vec[idx]);
+    AMDGpuDynamicMetricsValue_t amdgpu_dynamic_metric_value_init{};
+    amdgpu_dynamic_metric_value_init.m_value         = u64;
+    amdgpu_dynamic_metric_value_init.m_info          = value_title + " : " + std::to_string(idx);
+    amdgpu_dynamic_metric_value_init.m_original_type = dtype_from_attr(attr_type);
+    out.emplace_back(std::move(amdgpu_dynamic_metric_value_init));
+  }
+  return out;
+}
+
+template<class T> struct is_vector : std::false_type {};
+template<class U, class A> struct is_vector<std::vector<U,A>> : std::true_type {};
 
 template<typename T>
 AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::string& value_title)
@@ -483,6 +540,235 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
   return multi_values;
 }
 
+rsmi_status_t GpuMetricsBaseDynamic_t::populate_metrics_dynamic_tbl() {
+  std::ostringstream ss;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
+  
+  auto emit = [&](AMDGpuMetricsClassId_t cls, AMDGpuMetricsUnitType_t unit,
+                  const char* label,
+                  const details::AMDGpuMetricAttributeData_t& row) {
+
+    auto rows = std::visit([&](const auto& x) -> AMDGpuDynamicMetricTblValues_t {
+    using S = std::decay_t<decltype(x)>;
+    if constexpr (is_vector<S>::value) { // Would like to use is_multivalued() here, but compiler needs well-formed
+        return format_metric_row(x, std::string(label), row.m_instance.m_attribute_type);
+      } else {
+        return format_metric_row(x, std::string(label));
+      }
+    }, row.m_value);
+
+    m_metrics_dynamic_tbl[cls].insert({unit, std::move(rows)});
+  };
+
+  for (const auto& r : m_dyn.get_metric_rows()) {
+    switch (r.m_instance.m_attribute_id) {
+
+      // Power energy and temperature
+      case details::AMDGpuMetricAttributeId_t::TEMPERATURE_HOTSPOT:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricTemperature, AMDGpuMetricsUnitType_t::kMetricTempHotspot,
+             "temperature_hotspot", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::TEMPERATURE_MEM:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricTemperature, AMDGpuMetricsUnitType_t::kMetricTempMem,
+             "temperature_mem", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::TEMPERATURE_VRSOC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricTemperature, AMDGpuMetricsUnitType_t::kMetricTempVrSoc,
+             "temperature_vrsoc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::CURR_SOCKET_POWER:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy, AMDGpuMetricsUnitType_t::kMetricCurrSocketPower,
+             "curr_socket_power", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::ENERGY_ACCUMULATOR:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy, AMDGpuMetricsUnitType_t::kMetricEnergyAccumulator,
+             "energy_acc", r);
+        break;
+
+      // Utilization
+      case details::AMDGpuMetricAttributeId_t::AVERAGE_GFX_ACTIVITY:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricUtilization, AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity,
+             "average_gfx_activity", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::AVERAGE_UMC_ACTIVITY:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricUtilization, AMDGpuMetricsUnitType_t::kMetricAvgUmcActivity,
+             "average_umc_activity", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::GFX_ACTIVITY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricUtilization, AMDGpuMetricsUnitType_t::kMetricGfxActivityAccumulator,
+             "gfx_activity_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::MEM_ACTIVITY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricUtilization, AMDGpuMetricsUnitType_t::kMetricMemActivityAccumulator,
+             "mem_activity_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::GFXCLK_LOCK_STATUS:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricGfxClkLockStatus, AMDGpuMetricsUnitType_t::kMetricGfxClkLockStatus,
+             "gfxclk_lock_status", r);
+        break;
+
+      // Metric Timestamp
+      case details::AMDGpuMetricAttributeId_t::FIRMWARE_TIMESTAMP:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricTimestamp, AMDGpuMetricsUnitType_t::kMetricTSFirmware,
+             "firmware_timestamp", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::SYSTEM_CLOCK_COUNTER:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricTimestamp, AMDGpuMetricsUnitType_t::kMetricTSClockCounter,
+             "system_clock_counter", r);
+        break;
+
+      // Throttle Residency
+      case details::AMDGpuMetricAttributeId_t::ACCUMULATION_COUNTER:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency, AMDGpuMetricsUnitType_t::kMetricAccumulationCounter,
+             "accumulation_counter", r);
+        break;
+
+      // Link Width Speed
+      case details::AMDGpuMetricAttributeId_t::PCIE_LINK_WIDTH:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieLinkWidth,
+             "pcie_link_width", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_LINK_SPEED:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieLinkSpeed,
+             "pcie_link_speed", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_LINK_WIDTH:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricXgmiLinkWidth,
+             "xgmi_link_width", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_LINK_SPEED:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricXgmiLinkSpeed,
+             "xgmi_link_speed", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_BANDWIDTH_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieBandwidthAccumulator,
+             "pcie_bandwidth_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_BANDWIDTH_INST:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieBandwidthInst,
+             "pcie_bandwidth_inst", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_L0_TO_RECOV_COUNT_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieL0RecovCountAccumulator,
+             "pcie_l0_recov_count_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_REPLAY_COUNT_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieReplayCountAccumulator,
+             "pcie_replay_count_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_REPLAY_ROVER_COUNT_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieReplayRollOverCountAccumulator,
+             "pcie_replay_rollover_count_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_NAK_SENT_COUNT_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieNakSentCountAccumulator,
+             "pcie_nak_sent_count_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_NAK_RCVD_COUNT_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricPcieNakReceivedCountAccumulator,
+             "pcie_nak_rcvd_count_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_READ_DATA_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricXgmiReadDataAccumulator,
+             "xgmi_read_data_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_WRITE_DATA_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricXgmiWriteDataAccumulator,
+             "xgmi_write_data_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_LINK_STATUS:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed, AMDGpuMetricsUnitType_t::kMetricXgmiLinkStatus,
+             "xgmi_link_status", r);
+        break;
+
+      // Current Clock
+      case details::AMDGpuMetricAttributeId_t::CURRENT_GFXCLK:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock, AMDGpuMetricsUnitType_t::kMetricCurrGfxClock,
+             "current_gfxclk", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::CURRENT_SOCCLK:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock, AMDGpuMetricsUnitType_t::kMetricCurrSocClock,
+             "current_socclk", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::CURRENT_VCLK0:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock, AMDGpuMetricsUnitType_t::kMetricCurrVClock0,
+             "current_vclk0", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::CURRENT_DCLK0:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock, AMDGpuMetricsUnitType_t::kMetricCurrDClock0,
+             "current_dclk0", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::CURRENT_UCLK:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock, AMDGpuMetricsUnitType_t::kMetricCurrUClock,
+             "current_uclk", r);
+        break;
+
+      // Throttle Residency
+      case details::AMDGpuMetricAttributeId_t::PROCHOT_RESIDENCY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency, AMDGpuMetricsUnitType_t::kMetricProchotResidencyAccumulator,
+             "prochot_residency_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::PPT_RESIDENCY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency, AMDGpuMetricsUnitType_t::kMetricPPTResidencyAccumulator,
+             "ppt_residency_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::SOCKET_THM_RESIDENCY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency, AMDGpuMetricsUnitType_t::kMetricSocketThmResidencyAccumulator,
+             "socket_thm_residency_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::VR_THM_RESIDENCY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency, AMDGpuMetricsUnitType_t::kMetricVRThmResidencyAccumulator,
+             "vr_thm_residency_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::HBM_THM_RESIDENCY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency, AMDGpuMetricsUnitType_t::kMetricHBMThmResidencyAccumulator,
+             "hbm_thm_residency_acc", r);
+        break;
+
+      // XCP stats
+      case details::AMDGpuMetricAttributeId_t::GFX_BUSY_INST:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricXcpStats, AMDGpuMetricsUnitType_t::kMetricGfxBusyInst,
+             "xcp_stats->gfx_busy_inst", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::JPEG_BUSY:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricXcpStats, AMDGpuMetricsUnitType_t::kMetricJpegBusy,
+             "xcp_stats->jpeg_busy", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::VCN_BUSY:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricXcpStats, AMDGpuMetricsUnitType_t::kMetricVcnBusy,
+             "xcp_stats->vcn_busy", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::GFX_BUSY_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricXcpStats, AMDGpuMetricsUnitType_t::kMetricGfxBusyAcc,
+             "xcp_stats->gfx_busy_acc", r);
+        break;
+
+      default:
+        ss  << __PRETTY_FUNCTION__
+            << " UNKNOWN Attribute "
+            << static_cast<uint32_t>(r.m_instance.m_attribute_id)
+            << " |";
+        LOG_ERROR(ss);
+        break;
+    }
+  }
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success "
+     << " | Returning = " << getRSMIStatusString(status_code) << " |";
+  LOG_TRACE(ss);
+
+  { std::lock_guard<std::mutex> lk(s_base_tbl_mu);
+    // Copy to base class
+    this->m_base_metrics_dynamic_tbl = m_metrics_dynamic_tbl;
+  }
+
+  return status_code;
+}
 
 rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
   std::ostringstream ss;
@@ -1841,6 +2127,199 @@ rsmi_status_t init_max_public_gpu_matrics(AMGpuMetricsPublicLatest_t& rsmi_gpu_m
   LOG_TRACE(ss);
 
   return status_code;
+}
+
+AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_external_metrics() {
+  std::ostringstream ss;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+
+  AMGpuMetricsPublicLatest_t out{};
+  init_max_public_gpu_matrics(out);
+
+  out.common_header.structure_size  = m_header.m_structure_size;
+  out.common_header.format_revision = m_header.m_format_revision;
+  out.common_header.content_revision= m_header.m_content_revision;
+
+  auto assign_by_type = [&](auto& dst,
+                            const details::AMDGpuMetricAttributeData_t& r) {
+    using D = std::decay_t<decltype(dst)>;
+
+    std::visit([&](const auto& x) {
+      using S = std::decay_t<decltype(x)>;
+      if constexpr (std::is_integral_v<S>) {
+        dst = static_cast<D>(x);
+      }
+    }, r.m_value);
+  };
+
+  auto assign_vector = [&]( auto& dst,
+                            const details::AMDGpuMetricAttributeData_t& r,
+                            std::size_t cap) {
+
+    using Dst  = std::remove_reference_t<decltype(dst)>;
+    using T = std::remove_cv_t<std::remove_extent_t<Dst>>; 
+    auto v = std::get_if<std::vector<T>>(&r.m_value);
+    const std::size_t n = std::min<std::size_t>(v->size(), cap);
+    std::copy_n(v->data(), n, dst);
+  };
+
+  for (const auto& r : m_dyn.get_metric_rows()) {
+
+    switch (r.m_instance.m_attribute_id) {
+      // Temps
+      case details::AMDGpuMetricAttributeId_t::TEMPERATURE_HOTSPOT:
+        assign_by_type(out.temperature_hotspot, r); break;
+      case details::AMDGpuMetricAttributeId_t::TEMPERATURE_MEM:
+        assign_by_type(out.temperature_mem, r); break;
+      case details::AMDGpuMetricAttributeId_t::TEMPERATURE_VRSOC:
+        assign_by_type(out.temperature_vrsoc, r); break;
+
+      // Power/Energy
+      case details::AMDGpuMetricAttributeId_t::CURR_SOCKET_POWER:
+        assign_by_type(out.current_socket_power, r); break;
+      case details::AMDGpuMetricAttributeId_t::ENERGY_ACCUMULATOR:
+        assign_by_type(out.energy_accumulator, r); break;
+
+      // Utilization
+      case details::AMDGpuMetricAttributeId_t::AVERAGE_GFX_ACTIVITY:
+        assign_by_type(out.average_gfx_activity, r); break;
+      case details::AMDGpuMetricAttributeId_t::AVERAGE_UMC_ACTIVITY:
+        assign_by_type(out.average_umc_activity, r); break;
+      case details::AMDGpuMetricAttributeId_t::GFX_ACTIVITY_ACC:
+        assign_by_type(out.gfx_activity_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::MEM_ACTIVITY_ACC:
+        assign_by_type(out.mem_activity_acc, r); break;
+
+      // Timestamps / Lock
+      case details::AMDGpuMetricAttributeId_t::SYSTEM_CLOCK_COUNTER:
+        assign_by_type(out.system_clock_counter, r); break;
+      case details::AMDGpuMetricAttributeId_t::FIRMWARE_TIMESTAMP:
+        assign_by_type(out.firmware_timestamp, r); break;
+      case details::AMDGpuMetricAttributeId_t::GFXCLK_LOCK_STATUS:
+        assign_by_type(out.gfxclk_lock_status, r); break;
+
+      // Link width/speed, bandwidth, counts
+      case details::AMDGpuMetricAttributeId_t::PCIE_LINK_WIDTH:
+        assign_by_type(out.pcie_link_width, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_LINK_SPEED:
+        assign_by_type(out.pcie_link_speed, r); break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_LINK_WIDTH:
+        assign_by_type(out.xgmi_link_width, r); break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_LINK_SPEED:
+        assign_by_type(out.xgmi_link_speed, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_BANDWIDTH_ACC:
+        assign_by_type(out.pcie_bandwidth_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_BANDWIDTH_INST:
+        assign_by_type(out.pcie_bandwidth_inst, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_L0_TO_RECOV_COUNT_ACC:
+        assign_by_type(out.pcie_l0_to_recov_count_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_REPLAY_COUNT_ACC:
+        assign_by_type(out.pcie_replay_count_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_REPLAY_ROVER_COUNT_ACC:
+        assign_by_type(out.pcie_replay_rover_count_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_NAK_SENT_COUNT_ACC:
+        assign_by_type(out.pcie_nak_sent_count_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::PCIE_NAK_RCVD_COUNT_ACC:
+        assign_by_type(out.pcie_nak_rcvd_count_acc, r); break;
+
+      // Residency / counters
+      case details::AMDGpuMetricAttributeId_t::ACCUMULATION_COUNTER:
+        assign_by_type(out.accumulation_counter, r); break;
+      case details::AMDGpuMetricAttributeId_t::PROCHOT_RESIDENCY_ACC:
+        assign_by_type(out.prochot_residency_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::PPT_RESIDENCY_ACC:
+        assign_by_type(out.ppt_residency_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::SOCKET_THM_RESIDENCY_ACC:
+        assign_by_type(out.socket_thm_residency_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::VR_THM_RESIDENCY_ACC:
+        assign_by_type(out.vr_thm_residency_acc, r); break;
+      case details::AMDGpuMetricAttributeId_t::HBM_THM_RESIDENCY_ACC:
+        assign_by_type(out.hbm_thm_residency_acc, r); break;
+
+      // VRAM max bandwidth
+      case details::AMDGpuMetricAttributeId_t::MEM_MAX_BANDWIDTH:
+        assign_by_type(out.vram_max_bandwidth, r); break;
+
+      // XGMI accumulators / link status (arrays)
+      case details::AMDGpuMetricAttributeId_t::XGMI_READ_DATA_ACC: {
+        assign_vector(out.xgmi_read_data_acc, r, RSMI_MAX_NUM_XGMI_LINKS); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::XGMI_WRITE_DATA_ACC: {
+        assign_vector(out.xgmi_write_data_acc, r, RSMI_MAX_NUM_XGMI_LINKS); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::XGMI_LINK_STATUS: {
+        assign_vector(out.xgmi_link_status, r, RSMI_MAX_NUM_XGMI_LINKS); break;
+      }
+
+      // Current clocks (arrays) + uclk (scalar)
+      case details::AMDGpuMetricAttributeId_t::CURRENT_GFXCLK: {
+        assign_vector(out.current_gfxclks, r, RSMI_MAX_NUM_GFX_CLKS); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::CURRENT_SOCCLK: {
+        assign_vector(out.current_socclks, r, RSMI_MAX_NUM_CLKS); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::CURRENT_VCLK0: {
+        assign_vector(out.current_vclk0s, r, RSMI_MAX_NUM_CLKS); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::CURRENT_DCLK0: {
+        assign_vector(out.current_dclk0s, r, RSMI_MAX_NUM_CLKS); break;
+      }
+        
+      case details::AMDGpuMetricAttributeId_t::CURRENT_UCLK:
+        assign_by_type(out.current_uclk, r); break;
+
+      case details::AMDGpuMetricAttributeId_t::PCIE_LC_PERF_OTHER_END_RECOVERY:
+        assign_by_type(out.pcie_lc_perf_other_end_recovery, r); break;
+        
+      // XCP stats
+      // Only fill in entry 0
+      case details::AMDGpuMetricAttributeId_t::GFX_BUSY_INST: {
+        assign_vector(out.xcp_stats[0].gfx_busy_inst, r, RSMI_MAX_NUM_XCC); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::JPEG_BUSY: {
+        assign_vector(out.xcp_stats[0].jpeg_busy, r, RSMI_MAX_NUM_JPEG_ENG_V1); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::VCN_BUSY: {
+        assign_vector(out.xcp_stats[0].vcn_busy, r, RSMI_MAX_NUM_VCNS); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::GFX_BUSY_ACC: {
+        assign_vector(out.xcp_stats[0].gfx_busy_acc, r, RSMI_MAX_NUM_XCC); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::GFX_BELOW_HOST_LIMIT_PPT_ACC: {
+        assign_vector(out.xcp_stats[0].gfx_below_host_limit_ppt_acc, r, RSMI_MAX_NUM_XCC); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::GFX_BELOW_HOST_LIMIT_THM_ACC: {
+        assign_vector(out.xcp_stats[0].gfx_below_host_limit_thm_acc, r, RSMI_MAX_NUM_XCC); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::GFX_LOW_UTILIZATION_ACC: {
+        assign_vector(out.xcp_stats[0].gfx_low_utilization_acc, r, RSMI_MAX_NUM_XCC); break;
+      }
+      case details::AMDGpuMetricAttributeId_t::GFX_BELOW_HOST_LIMIT_TOTAL_ACC: {
+        assign_vector(out.xcp_stats[0].gfx_below_host_limit_total_acc, r, RSMI_MAX_NUM_XCC); break;
+      }
+
+    default: break;
+  }
+    
+  }
+
+  out.current_gfxclk = out.current_gfxclks[0];
+  out.current_socclk = out.current_socclks[0];
+  out.current_vclk0  = out.current_vclk0s[0];
+  out.current_vclk1  = out.current_vclk0s[1];
+  out.current_dclk0  = out.current_dclk0s[0];
+  out.current_dclk1  = out.current_dclk0s[1];
+
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Returning = " << getRSMIStatusString(status_code)
+     << " |";
+  LOG_TRACE(ss);
+
+  return std::make_tuple(status_code, out);
 }
 
 AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v18_t::copy_internal_to_external_metrics()
@@ -3874,6 +4353,7 @@ rsmi_status_t Device::dev_read_gpu_metrics_header_data()
   auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
                                 sizeof(AMDGpuMetricsHeader_v1_t),
                                 &m_gpu_metrics_header);
+
   if ((status_code = ErrnoToRsmiStatus(op_result)) !=
       rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__
@@ -3948,24 +4428,54 @@ rsmi_status_t Device::dev_read_gpu_metrics_all_data()
     return status_code;
   }
 
-  auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
-                          m_gpu_metrics_header.m_structure_size,
-                          m_gpu_metrics_ptr->get_metrics_table().get());
-  if ((status_code = ErrnoToRsmiStatus(op_result)) !=
-      rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-                << " | ======= end ======= "
-                << " | Fail "
-                << " | Device #: " << index()
-                << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
-                << " | Cause: readDevInfo(kDevGpuMetrics)"
-                << " | Returning = "
-                << getRSMIStatusString(status_code)
-                << " Could not read Metrics Header: "
-                << print_unsigned_int(m_gpu_metrics_header.m_structure_size)
-                << " |";
-    LOG_ERROR(ss);
-    return status_code;
+  if (m_is_dynamic_gpu_metrics_supported){
+
+    std::string file_name = "/sys/class/drm/card"
+                        + std::to_string(index())
+                        + "/device/gpu_metrics";
+
+    // Parse blob to schema rows AMDGpuDynamicMetrics_t
+    AMDGpuDynamicMetrics_t parsed;
+    rsmi_status_t st = parsed.parse_from_file(file_name, m_gpu_metrics_header.m_structure_size);
+
+    if (st != RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << index()
+         << " | Cause: read_dynamic_gpu_metrics_file()"
+         << " | Returning rocmsmi_status = " << getRSMIStatusString(st) << " |";
+      LOG_ERROR(ss);
+      return rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    }
+    
+    // Store AMDGpuDynamicMetrics_t
+    auto* dyn = static_cast<GpuMetricsBaseDynamic_t*>(m_gpu_metrics_ptr.get());
+    status_code = dyn->set_parsed_dynamic(std::move(parsed));
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      return status_code;
+    }
+
+  } else {
+    auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
+                            m_gpu_metrics_header.m_structure_size,
+                            m_gpu_metrics_ptr->get_metrics_table().get());
+    if ((status_code = ErrnoToRsmiStatus(op_result)) !=
+        rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+                  << " | ======= end ======= "
+                  << " | Fail "
+                  << " | Device #: " << index()
+                  << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
+                  << " | Cause: readDevInfo(kDevGpuMetrics)"
+                  << " | Returning = "
+                  << getRSMIStatusString(status_code)
+                  << " Could not read Metrics Header: "
+                  << print_unsigned_int(m_gpu_metrics_header.m_structure_size)
+                  << " |";
+      LOG_ERROR(ss);
+      return status_code;
+    }
   }
 
   //  All metric units are pushed in.
@@ -4027,6 +4537,9 @@ rsmi_status_t Device::setup_gpu_metrics_reading()
     return status_code;
   }
 
+  m_is_dynamic_gpu_metrics_supported = (static_cast<std::underlying_type_t<AMDGpuMetricVersionFlags_t>>(gpu_metrics_flag_version) >=
+                                        static_cast<std::underlying_type_t<AMDGpuMetricVersionFlags_t>>(AMDGpuMetricVersionFlags_t::kGpuMetricV19));
+
   //
   m_gpu_metrics_ptr.reset();
   m_gpu_metrics_ptr = amdgpu_metrics_factory(gpu_metrics_flag_version);
@@ -4047,7 +4560,6 @@ rsmi_status_t Device::setup_gpu_metrics_reading()
   m_gpu_metrics_ptr->set_device_id(m_device_id);
   m_gpu_metrics_ptr->set_partition_id(m_partition_id);
 
-  //
   // m_gpu_metrics_ptr has the pointer to the proper object type/version.
   status_code = dev_read_gpu_metrics_all_data();
   if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {

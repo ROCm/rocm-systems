@@ -271,6 +271,8 @@ class Device {
     rsmi_status_t get_smi_device_identifiers(uint32_t device_id,
                   rsmi_device_identifiers_t *device_identifiers);
 
+    auto is_dynamic_gpu_metrics_supported() const -> bool { return m_is_dynamic_gpu_metrics_supported; }
+
  private:
     std::shared_ptr<Monitor> monitor_;
     std::shared_ptr<PowerMon> power_monitor_;
@@ -308,6 +310,9 @@ class Device {
     uint64_t m_gpu_metrics_updated_timestamp;
     uint32_t m_device_id;
     uint32_t m_partition_id;
+
+    // New dynamic GPU metrics support
+    bool m_is_dynamic_gpu_metrics_supported = false;
 };
 
 

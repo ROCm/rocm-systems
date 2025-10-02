@@ -1085,7 +1085,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             return
 
         # Subparser help text
-        process_help = "Lists general process information running on the specified GPU"
+        process_help = "Lists compute process information running on the specified GPU"
         process_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
                                 \nIf no process argument is provided, all process information will be displayed."
         process_optionals_title = "Process arguments"
@@ -1093,8 +1093,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Optional Arguments help text
         general_help = "pid, process name, memory usage"
         engine_help = "All engine usages"
-        pid_help = "Gets all process information about the specified process based on Process ID"
-        name_help = "Gets all process information about the specified process based on Process Name.\
+        pid_help = "Gets compute process GPU information about the specified process based on Process ID"
+        name_help = "Gets compute process GPU information about the specified process based on Process Name.\
                     \nIf multiple processes have the same name, information is returned for all of them.\
                     \nProcess Name may require elevated permissions."
 

@@ -37,7 +37,7 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 
 :::{grid-item-card} Reference
 * [C++ API](./reference/amdsmi-cpp-api.md)
-  * [Modules](../doxygen/docBin/html/modules)
+  * [Modules](../doxygen/docBin/html/topics)
   * [Files](../doxygen/docBin/html/files)
   * [Globals](../doxygen/docBin/html/globals)
   * [Data structures](../doxygen/docBin/html/annotated)

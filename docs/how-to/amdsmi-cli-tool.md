@@ -48,7 +48,7 @@ AMD-SMI Commands:
     firmware (ucode)  Gets firmware information about the specified GPU
     bad-pages         Gets bad page information about the specified GPU
     metric            Gets metric/performance information about the specified GPU
-    process           Lists general process information running on the specified GPU
+    process           Lists compute process information running on the specified GPU
     event             Displays event information for the given GPU
     topology          Displays topology information of the devices
     set               Set options for devices
@@ -391,7 +391,7 @@ Command Modifiers:
 (cmd-process)=
 ### amd-smi process
 
-Lists general process information running on the specified GPU.
+Lists compute process information running on the specified GPU.
 
 ```shell-session
 ~$ amd-smi process --help
