@@ -376,7 +376,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
 #if defined(__linux__)
   uint64_t event_age[unique_evts];
 #else
-  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
+  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(uint64_t)));
 #endif
   memset(event_age, 0, unique_evts * sizeof(uint64_t));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
