@@ -51,11 +51,12 @@
 #include <tuple>
 #include <utility>
 #include <thread>
-#include <sys/un.h>
-
 #if defined(__linux__)
+#include <sys/un.h>
 #include <xf86drm.h>
 #include <amdgpu.h>
+#else
+#include <hsakmt/drm/amdgpu.h>
 #endif
 
 #include "core/inc/hsa_ext_interface.h"
@@ -232,6 +233,7 @@ class Runtime {
   /// @param [in] size Copy size in bytes.
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
+  #undef CopyMemory
   hsa_status_t CopyMemory(void* dst, const void* src, size_t size);
 
   /// @brief Non-blocking memory copy from src to dst.
@@ -302,6 +304,7 @@ class Runtime {
   /// @param [in] count Number of uint32_t element to be set.
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
+  #undef FillMemory
   hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
 
   /// @brief Set agents as the whitelist to access ptr.
@@ -455,6 +458,7 @@ class Runtime {
   }
 
   const Flag& flag() const { return flag_; }
+  Flag& flag() { return flag_; }
 
   const ThunkLoader* thunkLoader() const { return thunkLoader_; }
 
@@ -479,6 +483,10 @@ class Runtime {
     if (version.KernelInterfaceMajorVersion == 1 &&
       version.KernelInterfaceMinorVersion >= 14)
       kfd_version.supports_event_age = true;
+
+    if (thunkLoader()->IsDXG()) {
+      kfd_version.supports_event_age = false;
+    }
   }
 
   void KfdVersion(bool exception_debugging, bool core_dump) {
@@ -512,7 +520,8 @@ class Runtime {
 
   static bool IsGPUDriver(DriverType driver_type) {
     return driver_type == core::DriverType::KFD
-#ifdef HSAKMT_VIRTIO_ENABLED
+
+#if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
         || driver_type == core::DriverType::KFD_VIRTIO
 #endif
         ;

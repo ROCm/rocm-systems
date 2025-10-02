@@ -275,5 +275,41 @@ TEST(metrics, check_public_api_query)
             ASSERT_EQ(dim_permutations.insert(dim_ids).second, true);
         }
         ASSERT_EQ(instance_count, dim_permutations.size());
+
+        // Iterate over all dimensions available for this metric. Ex: XCC, SE, SA, Instances.
+        for(size_t i = 0; i < info.dimensions_count; i++)
+        {
+            // Current dimension size, like SE[0:6] has size of 7.
+            size_t current_dimension_size = info.dimensions[i]->instance_size;
+            ASSERT_NE(info.dimensions[i]->name, nullptr);
+            std::string current_dimension_name(info.dimensions[i]->name);
+
+            // Used to store index wise count (like number of instances with SE[0], SE[1], etc.) to
+            // validate permutations included in dimensions_instances
+            auto index_to_count = std::map<int, int>{};
+
+            // Iterate over all instances with unique dimensions indexes.
+            for(size_t j = 0; j < info.dimensions_instances_count; j++)
+            {
+                size_t dimension_size = info.dimensions_instances[j]->dimensions_count;
+
+                for(size_t k = 0; k < dimension_size; k++)
+                {
+                    // Let's say for a metric has XCC[0:7], SE[0:6], Instances[0:10]
+                    // Total Instances count: 8*7*11
+                    if(std::string_view(
+                           info.dimensions_instances[j]->dimensions[k]->dimension_name) ==
+                       current_dimension_name)
+                        index_to_count[info.dimensions_instances[j]->dimensions[k]->index]++;
+                }
+            }
+            for(auto pr : index_to_count)
+            {
+                // Ex: Check there are (8*7*11)/8 counter samples with XCC=0.
+                ASSERT_EQ(pr.second, info.dimensions_instances_count / current_dimension_size);
+            }
+            // Ex: Maximum index of XCC doesn't exceed or be equal to 8.
+            ASSERT_EQ(index_to_count.rbegin()->first + 1, current_dimension_size);
+        }
     }
 }

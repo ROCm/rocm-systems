@@ -2285,7 +2285,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     constexpr bool kParent = false;
     vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
 
     // Calculate the offset from the original pointer.
     vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -

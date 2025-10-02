@@ -33,6 +33,3 @@ APP_TITLE = "ROCm Compute Profiler TUI"
 
 # Widget configurations
 DEFAULT_COLLAPSIBLE_STATE = True  # True = collapsed by default
-
-# File paths
-DEFAULT_START_PATH = None  # None uses cwd
