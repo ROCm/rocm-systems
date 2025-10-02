@@ -236,7 +236,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_MEMORYCHECK_TYPE "{MEMCHECK_TYPE}")
         set(CTEST_MEMORYCHECK_SUPPRESSIONS_FILE "{MEMCHECK_SUPPRESSION_FILE}")
         set(CTEST_MEMORYCHECK_SANITIZER_OPTIONS "{MEMCHECK_SANITIZER_OPTIONS}")
-
+        set(CTEST_TEST_TIMEOUT 60)
         set(CTEST_SITE "{SITE}")
         set(CTEST_BUILD_NAME "{NAME}")
 
