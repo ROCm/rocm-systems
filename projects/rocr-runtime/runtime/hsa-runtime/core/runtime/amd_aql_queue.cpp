@@ -1291,12 +1291,15 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
 
   AqlQueue* queue = (AqlQueue*)arg;
   hsa_status_t errorCode = HSA_STATUS_ERROR;
-
-  if (queue->exceptionState == ERROR_HANDLER_TERMINATE) {
+  auto exceptionHandlerDone = [&]() {
     Signal* signal = queue->exception_signal_;
     queue->exceptionState = ERROR_HANDLER_DONE;
     signal->StoreRelease(0);
     return false;
+  };
+
+  if (queue->exceptionState == ERROR_HANDLER_TERMINATE) {
+    return exceptionHandlerDone();
   }
 
   for (auto& error : QueueErrors) {
@@ -1313,7 +1316,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   // handler.
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
     debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
-    return false;
+    return exceptionHandlerDone();
   }
 
   // Fallback if KFD does not support GPU core dump. In this case, there core dump is
@@ -1335,10 +1338,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   if (queue->errors_callback_ != nullptr) {
     queue->errors_callback_(errorCode, queue->public_handle(), queue->errors_data_);
   }
-  Signal* signal = queue->exception_signal_;
-  queue->exceptionState = ERROR_HANDLER_DONE;
-  signal->StoreRelease(0);
-  return false;
+  return exceptionHandlerDone();
 }
 
 hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) {
