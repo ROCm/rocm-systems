@@ -46,33 +46,16 @@ This approach:
 - **Supports up to 16 levels** of nesting per thread
 - **Uses separate maps** to avoid eBPF verifier stack limit issues
 
-### Kernel Dispatch Duration Tracking
+### Kernel Dispatch Duration Tracking (Optional)
 
-**Enhancement**: Added support for capturing actual GPU kernel execution duration by monitoring DRM scheduler events:
+**Enhancement**: Added optional support for capturing GPU kernel execution duration by monitoring DRM scheduler events. This feature is disabled by default and must be explicitly enabled with the `-k` command-line option.
 
-```c
-SEC("tracepoint/gpu_scheduler/drm_sched_job_run")
-int trace_drm_sched_job_run(struct drm_sched_job_run_args *ctx) {
-    // Store start timestamp
-    __u64 fence_key = create_fence_key(ctx->fence_context, ctx->fence_seqno);
-    bpf_map_update_elem(&kernel_dispatch_starts, &fence_key, &timestamp, BPF_ANY);
-}
-
-SEC("tracepoint/gpu_scheduler/drm_sched_job_done")
-int trace_drm_sched_job_done(struct drm_sched_job_done_args *ctx) {
-    // Calculate duration and emit slice event
-    __u64 *start_time = bpf_map_lookup_elem(&kernel_dispatch_starts, &fence_key);
-    if (start_time) {
-        event->duration = event->timestamp - *start_time;
-        // Write as slice (duration) instead of instant event
-    }
-}
-```
-
-This enables:
+When enabled, this provides:
 - **Accurate GPU kernel timing** separate from HIP API calls
 - **Slice visualization** in Perfetto showing actual execution duration
 - **Correlation** of kernel launches with actual execution
+
+Note: This feature requires specific kernel tracepoints that may not be available on all systems.
 
 ## eBPF Fundamentals
 
@@ -139,20 +122,150 @@ Uprobes (user-space probes) allow eBPF programs to attach to functions in user-s
 
 ### Function Offset Calculation
 
-To attach uprobes, we need the exact offset of the target function in the library:
-
-```bash
-# Extract function offsets using nm
-nm -D /opt/rocm/lib/libamdhip64.so | grep "hipMalloc"
-# Output: 000000000036d790 T hipMalloc@@hip_4.2
-```
-
-The offset `0x36d790` is used to attach the uprobe:
+To attach uprobes, we need the exact offset of the target function in the library. Instead of using the `nm` command which provides unreliable offsets, we use a robust ELF-based implementation:
 
 ```c
-// Attach uprobe to hipMalloc at offset 0x36d790
-link = bpf_program__attach_uprobe(skel->progs.hip_malloc_entry, false,
-                                 -1, lib_path, 0x36d790);
+// get_function_offset.c
+// gcc -O2 -Wall -Wextra -o test_getoff get_function_offset.c -lelf
+
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <gelf.h>
+#include <libelf.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+static bool is_func_sym(const GElf_Sym *sym) {
+    /* STT_FUNC and defined (not SHN_UNDEF), non-zero size preferred */
+    if (GELF_ST_TYPE(sym->st_info) != STT_FUNC) return false;
+    if (sym->st_shndx == SHN_UNDEF) return false;
+    if (sym->st_value == 0) return false;       // avoid PLT/ifunc weirdness
+    /* size can be zero on some builds; prefer >0, but don't strictly require */
+    return true;
+}
+
+static bool section_is_text_like(const char *secname) {
+    if (!secname) return false;
+    /* Accept typical code sections; reject .plt/.plt.sec etc. */
+    if (strncmp(secname, ".text", 5) == 0) return true;
+    if (strcmp(secname, ".init") == 0 || strcmp(secname, ".fini") == 0) return true;
+    /* Reject PLT */
+    if (strncmp(secname, ".plt", 4) == 0) return false;
+    return true; /* fall back to true if unsure */
+}
+
+static off_t compute_file_offset(const GElf_Sym *sym, const GElf_Shdr *shdr) {
+    /* file_off = (virtual_symbol_addr - section_load_addr) + section_file_offset */
+    return (off_t)(sym->st_value - shdr->sh_addr) + (off_t)shdr->sh_offset;
+}
+
+static Elf_Scn *find_symbol_section(Elf *elf, bool dynsym) {
+    size_t shstrndx = 0;
+    if (elf_getshdrstrndx(elf, &shstrndx) != 0) return NULL;
+
+    Elf_Scn *scn = NULL;
+    while ((scn = elf_nextscn(elf, scn))) {
+        GElf_Shdr sh;
+        if (!gelf_getshdr(scn, &sh)) continue;
+        if ((dynsym && sh.sh_type == SHT_DYNSYM) ||
+            (!dynsym && sh.sh_type == SHT_SYMTAB)) {
+            return scn;
+        }
+    }
+    return NULL;
+}
+
+static off_t lookup_one_table(Elf *elf, const char *want, Elf_Scn *sym_scn) {
+    GElf_Shdr sym_sh;
+    if (!gelf_getshdr(sym_scn, &sym_sh)) return -1;
+
+    Elf_Data *sym_data = NULL;
+    if (!(sym_data = elf_getdata(sym_scn, NULL))) return -1;
+
+    /* We ALSO need the section header string table to resolve section names. */
+    size_t shstrndx = 0;
+    if (elf_getshdrstrndx(elf, &shstrndx) != 0) return -1;
+
+    size_t nsyms = sym_sh.sh_size / sym_sh.sh_entsize;
+    for (size_t i = 0; i < nsyms; i++) {
+        GElf_Sym sym;
+        if (!gelf_getsym(sym_data, (int)i, &sym)) continue;
+
+        const char *name = elf_strptr(elf, sym_sh.sh_link, sym.st_name);
+        if (!name || strcmp(name, want) != 0) continue;
+
+        if (!is_func_sym(&sym)) continue;
+
+        /* Get the containing section to compute file offset */
+        Elf_Scn *sec = elf_getscn(elf, sym.st_shndx);
+        if (!sec) continue;
+
+        GElf_Shdr shdr;
+        if (!gelf_getshdr(sec, &shdr)) continue;
+
+        const char *secname = elf_strptr(elf, shstrndx, shdr.sh_name);
+        if (!section_is_text_like(secname)) continue;
+
+        off_t off = compute_file_offset(&sym, &shdr);
+        if (off >= 0) return off;
+    }
+    return -1;
+}
+
+/**
+ * Return a file-relative offset suitable for uprobes (bpf_program__attach_uprobe).
+ * Looks in .dynsym first, then .symtab. Exact name match, skips PLT/stubs.
+ * Returns -1 on failure.
+ */
+off_t get_function_offset(const char *lib_path, const char *func_name) {
+    if (!lib_path || !func_name) { errno = EINVAL; return -1; }
+
+    if (elf_version(EV_CURRENT) == EV_NONE) return -1;
+
+    int fd = open(lib_path, O_RDONLY);
+    if (fd < 0) return -1;
+
+    Elf *elf = elf_begin(fd, ELF_C_READ, NULL);
+    if (!elf) { close(fd); return -1; }
+
+    /* Prefer .dynsym (shared libs’ exported funcs), then fall back to .symtab */
+    off_t off = -1;
+
+    Elf_Scn *dynsym = find_symbol_section(elf, /*dynsym=*/true);
+    if (dynsym) {
+        off = lookup_one_table(elf, func_name, dynsym);
+    }
+    if (off < 0) {
+        Elf_Scn *symtab = find_symbol_section(elf, /*dynsym=*/false);
+        if (symtab) off = lookup_one_table(elf, func_name, symtab);
+    }
+
+    elf_end(elf);
+    close(fd);
+    return off;
+}
+```
+
+This robust implementation:
+- **Uses ELF parsing** instead of unreliable `nm` output
+- **Handles both .dynsym and .symtab** symbol tables
+- **Filters out PLT/stub functions** to avoid incorrect offsets
+- **Computes accurate file offsets** suitable for uprobes
+- **Supports both shared and static libraries**
+
+The calculated offset can then be used to attach the uprobe:
+
+```c
+// Get accurate offset using ELF parsing
+offset = get_function_offset(lib_path, "hipMalloc");
+if (offset > 0) {
+    link = bpf_program__attach_uprobe(skel->progs.hip_malloc_entry, false,
+                                     -1, lib_path, offset);
+}
 ```
 
 ### Argument Capture
@@ -479,19 +592,23 @@ eBPF programs are verified before execution:
 ### Dynamic Function Discovery
 
 ```c
-// Automatically discover HIP functions
+// Automatically discover HIP functions using ELF parsing
 static void discover_hip_functions(const char *lib_path) {
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "nm -D %s | grep 'hip' | grep ' T '", lib_path);
+    // Use the robust get_function_offset() implementation instead of nm
+    const char *hip_functions[] = {
+        "hipMalloc", "hipFree", "hipMemcpy", "hipMemcpyAsync",
+        "hipLaunchKernel", "hipStreamCreate", "hipStreamDestroy",
+        // ... add all 439 HIP functions
+    };
 
-    FILE *fp = popen(cmd, "r");
-    if (fp) {
-        char line[256];
-        while (fgets(line, sizeof(line), fp)) {
-            // Parse function name and offset
-            // Attach uprobes dynamically
+    int num_functions = sizeof(hip_functions) / sizeof(hip_functions[0]);
+
+    for (int i = 0; i < num_functions; i++) {
+        off_t offset = get_function_offset(lib_path, hip_functions[i]);
+        if (offset > 0) {
+            // Attach uprobes using accurate offset
+            attach_uprobe_to_function(hip_functions[i], offset);
         }
-        pclose(fp);
     }
 }
 ```

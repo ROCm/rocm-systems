@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0
+#define _GNU_SOURCE
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
 #include <sys/resource.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
+#include <gelf.h>
+#include <libelf.h>
 #include "hip_trace.skel.h"
 #include "chrome_trace_writer.h"
 // No longer using generated code - reverting to manual approach
@@ -72,6 +77,7 @@ static struct function_call *function_calls = NULL;
 static size_t function_calls_size = 0;
 static size_t function_calls_count = 0;
 static int output_format = 0; // 0 = console, 1 = CSV, 2 = Perfetto
+static bool enable_kernel_dispatches = false; // Kernel dispatch tracing disabled by default
 
 // Function to format timestamp
 static void print_timestamp(__u64 timestamp) {
@@ -447,24 +453,117 @@ static char* find_hip_library() {
     return NULL;
 }
 
-// Function to get function offset from symbol table
-long get_function_offset(const char *lib_path, const char *func_name) {
-    char cmd[512];
-    char line[256];
-    long offset = -1;
+// Function to get function offset using robust ELF parsing
 
-    snprintf(cmd, sizeof(cmd), "nm -D %s | grep '%s' | grep ' T ' | head -1 | awk '{print $1}'",
-             lib_path, func_name);
+static bool is_func_sym(const GElf_Sym *sym) {
+    /* STT_FUNC and defined (not SHN_UNDEF), non-zero size preferred */
+    if (GELF_ST_TYPE(sym->st_info) != STT_FUNC) return false;
+    if (sym->st_shndx == SHN_UNDEF) return false;
+    if (sym->st_value == 0) return false;       // avoid PLT/ifunc weirdness
+    /* size can be zero on some builds; prefer >0, but don't strictly require */
+    return true;
+}
 
-    FILE *fp = popen(cmd, "r");
-    if (fp) {
-        if (fgets(line, sizeof(line), fp)) {
-            offset = strtol(line, NULL, 16);
+static bool section_is_text_like(const char *secname) {
+    if (!secname) return false;
+    /* Accept typical code sections; reject .plt/.plt.sec etc. */
+    if (strncmp(secname, ".text", 5) == 0) return true;
+    if (strcmp(secname, ".init") == 0 || strcmp(secname, ".fini") == 0) return true;
+    /* Reject PLT */
+    if (strncmp(secname, ".plt", 4) == 0) return false;
+    return true; /* fall back to true if unsure */
+}
+
+static off_t compute_file_offset(const GElf_Sym *sym, const GElf_Shdr *shdr) {
+    /* file_off = (virtual_symbol_addr - section_load_addr) + section_file_offset */
+    return (off_t)(sym->st_value - shdr->sh_addr) + (off_t)shdr->sh_offset;
+}
+
+static Elf_Scn *find_symbol_section(Elf *elf, bool dynsym) {
+    size_t shstrndx = 0;
+    if (elf_getshdrstrndx(elf, &shstrndx) != 0) return NULL;
+
+    Elf_Scn *scn = NULL;
+    while ((scn = elf_nextscn(elf, scn))) {
+        GElf_Shdr sh;
+        if (!gelf_getshdr(scn, &sh)) continue;
+        if ((dynsym && sh.sh_type == SHT_DYNSYM) ||
+            (!dynsym && sh.sh_type == SHT_SYMTAB)) {
+            return scn;
         }
-        pclose(fp);
+    }
+    return NULL;
+}
+
+static off_t lookup_one_table(Elf *elf, const char *want, Elf_Scn *sym_scn) {
+    GElf_Shdr sym_sh;
+    if (!gelf_getshdr(sym_scn, &sym_sh)) return -1;
+
+    Elf_Data *sym_data = NULL;
+    if (!(sym_data = elf_getdata(sym_scn, NULL))) return -1;
+
+    /* We also need the section header string table to resolve section names. */
+    size_t shstrndx = 0;
+    if (elf_getshdrstrndx(elf, &shstrndx) != 0)
+        return -1;
+
+    size_t nsyms = sym_sh.sh_size / sym_sh.sh_entsize;
+    for (size_t i = 0; i < nsyms; i++) {
+        GElf_Sym sym;
+        if (!gelf_getsym(sym_data, (int)i, &sym)) continue;
+
+        const char *name = elf_strptr(elf, sym_sh.sh_link, sym.st_name);
+        if (!name || strcmp(name, want) != 0) continue;
+
+        if (!is_func_sym(&sym)) continue;
+
+        /* Get the containing section to compute file offset */
+        Elf_Scn *sec = elf_getscn(elf, sym.st_shndx);
+        if (!sec) continue;
+
+        GElf_Shdr shdr;
+        if (!gelf_getshdr(sec, &shdr)) continue;
+
+        const char *secname = elf_strptr(elf, shstrndx, shdr.sh_name);
+        if (!section_is_text_like(secname)) continue;
+
+        off_t off = compute_file_offset(&sym, &shdr);
+        if (off >= 0) return off;
+    }
+    return -1;
+}
+
+/**
+ * Return a file-relative offset suitable for uprobes (bpf_program__attach_uprobe).
+ * Looks in .dynsym first, then .symtab. Exact name match, skips PLT/stubs.
+ * Returns -1 on failure.
+ */
+off_t get_function_offset(const char *lib_path, const char *func_name) {
+    if (!lib_path || !func_name) { errno = EINVAL; return -1; }
+
+    if (elf_version(EV_CURRENT) == EV_NONE) return -1;
+
+    int fd = open(lib_path, O_RDONLY);
+    if (fd < 0) return -1;
+
+    Elf *elf = elf_begin(fd, ELF_C_READ, NULL);
+    if (!elf) { close(fd); return -1; }
+
+    /* Prefer .dynsym (shared libs’ exported funcs), then fall back to .symtab */
+    off_t off = -1;
+
+    Elf_Scn *dynsym = find_symbol_section(elf, /*dynsym=*/true);
+    if (dynsym) {
+        off = lookup_one_table(elf, func_name, dynsym);
+    }
+    if (off < 0) {
+        Elf_Scn *symtab = find_symbol_section(elf, /*dynsym=*/false);
+        if (symtab) off = lookup_one_table(elf, func_name, symtab);
     }
 
-    return offset;
+    elf_end(elf);
+    close(fd);
+    return off;
 }
 
 
@@ -472,10 +571,10 @@ long get_function_offset(const char *lib_path, const char *func_name) {
 // Function to attach uprobes to HIP functions
 static int attach_uprobes(struct hip_trace_bpf *skel, const char *lib_path) {
     printf("Attaching uprobes to HIP library: %s\n", lib_path);
-    printf("Using real function offsets from symbol table\n\n");
+    printf("Using ELF parsing for accurate function offsets\n\n");
 
     struct bpf_link *link;
-    long offset;
+    off_t offset;
 
     // List of HIP functions to trace
     // Note: Reduced to key functions only to avoid recursive tracing issues
@@ -504,6 +603,11 @@ static int attach_uprobes(struct hip_trace_bpf *skel, const char *lib_path) {
 
 // Function to attach tracepoints for kernel dispatch tracing
 static int attach_tracepoints(struct hip_trace_bpf *skel) {
+    if (!enable_kernel_dispatches) {
+        printf("Kernel dispatch tracing disabled by default (use -k to enable)\n");
+        return 0;
+    }
+
     printf("Attaching tracepoints for kernel dispatch tracing...\n");
 
     struct bpf_link *link;
@@ -732,6 +836,7 @@ static void print_usage(const char *prog_name) {
     printf("  -l <lib>     Path to HIP library (default: auto-detect)\n");
     printf("  -o <file>    Output file for function calls\n");
     printf("  -f <format>  Output format: csv, perfetto (default: console)\n");
+    printf("  -k           Enable kernel dispatch tracing\n");
     printf("  -h           Show this help message\n");
     printf("\n");
     printf("Examples:\n");
@@ -739,7 +844,7 @@ static void print_usage(const char *prog_name) {
     printf("  %s -p 1234                   # Trace process 1234\n", prog_name);
     printf("  %s -l /path/to/libhip.so     # Use specific HIP library\n", prog_name);
     printf("  %s -o trace.csv -f csv       # Output to CSV file\n", prog_name);
-    printf("  %s -o trace.pftrace -f perfetto  # Output to Perfetto format\n", prog_name);
+    printf("  %s -k -o trace.json -f perfetto  # Enable kernel dispatches\n", prog_name);
 }
 
 int main(int argc, char **argv) {
@@ -752,7 +857,7 @@ int main(int argc, char **argv) {
     char *output_file = NULL;
     char *format_str = NULL;
 
-    while ((opt = getopt(argc, argv, "p:l:o:f:h")) != -1) {
+    while ((opt = getopt(argc, argv, "p:l:o:f:kh")) != -1) {
         switch (opt) {
         case 'p':
             // target_pid = atoi(optarg); // TODO: implement PID filtering
@@ -765,6 +870,9 @@ int main(int argc, char **argv) {
             break;
         case 'f':
             format_str = strdup(optarg);
+            break;
+        case 'k':
+            enable_kernel_dispatches = true;
             break;
         case 'h':
             print_usage(argv[0]);

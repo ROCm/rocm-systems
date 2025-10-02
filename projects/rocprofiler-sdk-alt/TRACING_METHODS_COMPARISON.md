@@ -102,8 +102,8 @@ This document provides a comprehensive comparison of the three different approac
 | **Argument Type Parsing** | ⚠️ Manual implementation | ✅ Automatic with types | ⚠️ Basic parsing |
 | **Memory Safety** | ✅ Kernel-verified | ✅ JavaScript sandbox | ✅ ptrace isolation |
 | **Error Handling** | ✅ Comprehensive | ✅ JavaScript try-catch | ⚠️ Basic |
-| **Dynamic Function Discovery** | ⚠️ Manual offset calculation | ✅ Automatic | ✅ Automatic |
-| **Library Version Independence** | ❌ Offset-dependent | ✅ Symbol-based | ✅ Symbol-based |
+| **Dynamic Function Discovery** | ✅ ELF-based offset calculation | ✅ Automatic | ✅ Automatic |
+| **Library Version Independence** | ✅ ELF parsing handles version changes | ✅ Symbol-based | ✅ Symbol-based |
 
 ### Setup and Requirements
 
@@ -130,7 +130,7 @@ This document provides a comprehensive comparison of the three different approac
 - Complex setup and compilation process
 - Requires root privileges
 - Kernel version dependency
-- Manual function offset calculation
+- Requires ELF parsing library (libelf)
 
 **Best Use Cases**:
 - Production monitoring
@@ -225,7 +225,7 @@ sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o production_trace.csv
 
 **High Complexity**:
 - Requires understanding of eBPF programming
-- Manual function offset calculation
+- ELF parsing for accurate offset calculation
 - Complex build process with multiple tools
 - Kernel-space programming concepts
 - Ring buffer management
@@ -312,7 +312,7 @@ sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o production_trace.csv
 
 **Challenges**:
 - Kernel version compatibility
-- Library version changes affect offsets
+- ELF library dependency management
 - Complex debugging of kernel-space issues
 - Requires specialized knowledge
 

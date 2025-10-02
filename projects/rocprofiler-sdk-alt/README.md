@@ -49,7 +49,7 @@ ROCm-API-Tracer/
 
 ### eBPF - The Performance Champion
 
-**Recent Updates**: Added call stack tracking to prevent recursive calls and kernel dispatch duration monitoring for accurate GPU execution timing.
+**Recent Updates**: Added call stack tracking to prevent recursive calls. Optional kernel dispatch tracing available with `-k` flag.
 **Best for**: Production monitoring, high-performance applications, real-time analysis
 
 **Key Features**:

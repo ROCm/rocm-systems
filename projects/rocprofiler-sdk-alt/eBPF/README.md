@@ -14,7 +14,7 @@ A powerful eBPF-based tool for tracing HIP (Heterogeneous-compute Interface for 
 - **High performance** - minimal overhead on target application
 - **Perfetto visualization** - view traces on ui.perfetto.dev
 - **Call stack tracking** - handles nested function calls without recursion
-- **Kernel dispatch duration tracking** - captures GPU kernel execution times
+- **Optional kernel dispatch tracking** - captures GPU kernel execution times (disabled by default)
 
 ## Requirements
 
@@ -215,7 +215,6 @@ Comprehensive support for **all 439 HIP Runtime API functions** (100% coverage) 
 ### Kernel Launch & Execution
 - `hipLaunchKernel` - Launch kernel (with call stack tracking)
 - `hipFuncSetAttribute`, `hipFuncSetCacheConfig`, `hipFuncSetSharedMemConfig`
-- **Kernel dispatch tracking** - Captures GPU kernel execution duration via DRM scheduler events
 
 ### Device Management (30+ functions)
 - `hipSetDevice`, `hipGetDevice`, `hipGetDeviceCount`
@@ -346,7 +345,7 @@ The tool consists of:
 1. **eBPF Program** (`hip_trace.bpf.c`) - Kernel-space tracing logic with:
    - 878 uprobes (439 functions × 2) for HIP API tracing
    - Call stack tracking to handle nested function calls
-   - Kernel dispatch tracepoints for GPU execution duration
+   - Optional kernel dispatch tracepoints (disabled by default)
 2. **User-space Loader** (`hip_trace.c`) - Program loading and event processing
 3. **Dynamic Code Generation** (`generate_hip_functions_from_headers.py`) - Parses HIP headers and generates eBPF programs
 4. **Build System** - CMake-based build with automatic function generation
@@ -360,9 +359,8 @@ The tool consists of:
    - **Call Stack Tracking**: Uses depth-based keys `(tid << 16) | depth` to handle nested function calls
    - **Recursion Prevention**: Prevents infinite recursion when traced functions call other traced functions
 3. **Event Capture**: Captures function entry/exit events with arguments and timestamps
-4. **Kernel Dispatch Tracking**: Monitors DRM scheduler events (`drm_sched_job_run`, `drm_sched_job_done`) for GPU kernel execution duration
-5. **Data Processing**: Processes events in user-space with function name mapping
-6. **Output Generation**: Writes structured data to console, CSV, or Perfetto JSON format
+4. **Data Processing**: Processes events in user-space with function name mapping
+5. **Output Generation**: Writes structured data to console, CSV, or Perfetto JSON format
 
 For detailed technical explanation, see [eBPF_HIP_Tracing_Technical_Guide.md](eBPF_HIP_Tracing_Technical_Guide.md).
 
@@ -382,7 +380,6 @@ For detailed technical explanation, see [eBPF_HIP_Tracing_Technical_Guide.md](eB
 3. **No events captured**: Ensure target application uses HIP functions
 4. **Build errors**: Install required dependencies (`libbpf-dev`, `clang`, `bpftool`)
 5. **Recursive calls**: Fixed with call stack tracking - no longer occurs
-6. **Missing kernel dispatch duration**: Ensure `drm_sched_job_done` tracepoint is enabled
 
 ### Build Issues
 
