@@ -125,7 +125,7 @@ buffer_storage::start_flushing_thread(pid_t _pid)
 buffer_storage::~buffer_storage()
 {
     shutdown();
-    if(m_thread_pool->is_alive())
+    if(m_thread_pool && m_thread_pool->is_alive())
     {
         m_thread_pool->destroy_threadpool();
     }
@@ -153,7 +153,11 @@ buffer_storage::shutdown()
     std::mutex       _exit_mutex;
     std::unique_lock _exit_lock{ _exit_mutex };
     m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
-    m_thread_pool->destroy_threadpool();
+
+    if(m_thread_pool && m_thread_pool->is_alive())
+    {
+        m_thread_pool->destroy_threadpool();
+    }
 }
 
 void
