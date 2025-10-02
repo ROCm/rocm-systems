@@ -240,6 +240,7 @@ jobs:
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          ls -l /opt/rocm/lib/libhsa-runtime64.so*
           echo "Install ROCR-Runtime..."
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -248,6 +249,7 @@ jobs:
             .
           cmake --build build --target all --parallel 16
           cmake --build build --target install
+          ls -l /opt/rocm/lib/libhsa-runtime64.so*
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install Aqlprofile
@@ -728,6 +730,7 @@ jobs:
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
+        ls -l /opt/rocm/lib/libhsa-runtime64.so*
         echo "Install ROCR-Runtime..."
         cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -738,6 +741,7 @@ jobs:
             .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
+        ls -l /opt/rocm/lib/libhsa-runtime64.so*
         echo "✅ ROCR-Runtime Installation complete!"
 
     - name: Build and Install Aqlprofile
