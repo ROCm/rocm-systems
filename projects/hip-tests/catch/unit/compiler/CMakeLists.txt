@@ -94,7 +94,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
-                    -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH} --offload-arch=amdgcnspirv
+                    -I${HIP_PATH}/include/ --hip-path=${HIP_PATH} --offload-arch=amdgcnspirv
                     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
     add_dependencies(CompilerTest hipSpirvTest)
   endif()

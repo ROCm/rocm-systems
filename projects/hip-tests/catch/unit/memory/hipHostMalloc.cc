@@ -127,7 +127,9 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
                             hipHostMallocWriteCombined | hipHostMallocMapped));
     SECTION("hipHostMallocDefault") { flag = hipHostMallocDefault; }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-    SECTION("hipHostMallocUncached") { flag = hipHostMallocUncached; }
+    if (!IsNavi4X()) {
+      SECTION("hipHostMallocUncached") { flag = hipHostMallocUncached; }
+    }
     SECTION("hipHostMallocCoherent") { flag = hipHostMallocCoherent; }
     SECTION("hipHostMallocNonCoherent") { flag = hipHostMallocNonCoherent; }
 #endif
@@ -297,3 +299,17 @@ TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
   }
 }
 #endif
+
+TEST_CASE("Unit_hipHostMalloc_Capture") {
+  int* host_ptr = nullptr;
+  hipError_t capture_error = hipSuccess;
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), sizeBytes), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (host_ptr != nullptr) {
+    HIP_CHECK(hipHostFree(host_ptr));
+  }
+}

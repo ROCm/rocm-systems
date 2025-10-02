@@ -71,6 +71,12 @@ struct att_perfcounter
 
     template <typename ArchiveT>
     void save(ArchiveT&) const;
+
+    friend bool operator==(const att_perfcounter& lhs, const att_perfcounter& rhs)
+    {
+        return std::tie(lhs.counter_name, lhs.simd_mask) ==
+               std::tie(rhs.counter_name, rhs.simd_mask);
+    }
 };
 
 struct config : output_config
@@ -145,6 +151,7 @@ struct config : output_config
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
+    uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
@@ -172,10 +179,56 @@ struct config : output_config
     template <typename ArchiveT>
     void load(ArchiveT&)
     {}
+
+    auto get_attach_invariants() const;
 };
 
 #define CFG_SERIALIZE_MEMBER(VAR)             ar(cereal::make_nvp(#VAR, VAR))
 #define CFG_SERIALIZE_NAMED_MEMBER(NAME, VAR) ar(cereal::make_nvp(NAME, VAR))
+
+inline auto
+config::get_attach_invariants() const
+{
+    return std::make_tuple(kernel_trace,
+                           hsa_core_api_trace,
+                           hsa_amd_ext_api_trace,
+                           hsa_image_ext_api_trace,
+                           hsa_finalizer_ext_api_trace,
+                           marker_api_trace,
+                           memory_copy_trace,
+                           memory_allocation_trace,
+                           scratch_memory_trace,
+                           counter_collection,
+                           hip_runtime_api_trace,
+                           hip_compiler_api_trace,
+                           rccl_api_trace,
+                           rocdecode_api_trace,
+                           rocjpeg_api_trace,
+                           advanced_thread_trace,
+                           att_serialize_all,
+                           att_param_shader_engine_mask,
+                           att_param_buffer_size,
+                           att_param_simd_select,
+                           att_param_target_cu,
+                           att_library_path,
+                           att_param_perfcounters,
+                           att_param_perf_ctrl,
+                           pc_sampling_method,
+                           pc_sampling_unit,
+                           kernel_filter_include,
+                           kernel_filter_exclude,
+                           kernel_filter_range,
+                           extra_counters_contents,
+                           counter_groups_random_seed,
+                           counter_groups_interval,
+                           benchmark_mode);
+}
+
+inline bool
+is_attach_invariant(const config& lhs, const config& rhs)
+{
+    return lhs.get_attach_invariants() == rhs.get_attach_invariants();
+}
 
 template <typename ArchiveT>
 void
@@ -251,6 +304,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_library_path);
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
     CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
+    CFG_SERIALIZE_MEMBER(att_consecutive_kernels);
 
     // serialize the base class
     static_cast<const base_type*>(this)->save(ar);

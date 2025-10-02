@@ -79,9 +79,6 @@ extern const char* BlitImageSourceCode;
 
 bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
 
-#if defined(USE_COMGR_LIBRARY)
-extern amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str);
-#endif
 }  // namespace amd::device
 
 static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone) ==
@@ -350,61 +347,6 @@ const Isa* Isa::begin() { return supportedIsas().first; }
 
 const Isa* Isa::end() { return supportedIsas().second; }
 
-#if defined(USE_COMGR_LIBRARY)
-void Isa::setAvailableSgprVgprCached() const {
-  std::call_once(setSgprVgprFlag, [this]() {
-    std::string buf;
-    amd_comgr_metadata_node_t isaMeta;
-    amd_comgr_metadata_node_t sgprMeta;
-    amd_comgr_metadata_node_t vgprMeta;
-    bool hasIsaMeta = false;
-    bool hasSgprMeta = false;
-    bool hasVgprMeta = false;
-
-    amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isaName().c_str(), &isaMeta);
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasIsaMeta = true;
-      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumSGPRs", &sgprMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasSgprMeta = true;
-      status = amd::device::getMetaBuf(sgprMeta, &buf);
-    }
-
-    sgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumVGPRs", &vgprMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasVgprMeta = true;
-      status = amd::device::getMetaBuf(vgprMeta, &buf);
-    }
-
-    vgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-    if (hasVgprMeta) {
-      amd::Comgr::destroy_metadata(vgprMeta);
-    }
-
-    if (hasSgprMeta) {
-      amd::Comgr::destroy_metadata(sgprMeta);
-    }
-
-    if (hasIsaMeta) {
-      amd::Comgr::destroy_metadata(isaMeta);
-    }
-
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      DevLogPrintfError("Failed to set SGPR/VGPR for ISA: %s", isaName().c_str());
-    }
-  });
-}
-#endif
-
 std::vector<Device*>* Device::devices_ = nullptr;
 AppProfile Device::appProfile_;
 
@@ -584,7 +526,7 @@ bool Device::ValidateVirtualAddressRange(amd::Memory* vaddr_base_obj, amd::Memor
 
 //==================================================================================================
 amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vptr, size_t size,
-                                         int deviceId, bool parent, bool kForceAlloc) {
+                                         int deviceId, int locationType, bool parent, bool kForceAlloc) {
   amd::Memory* vaddr_base_obj = nullptr;
   amd::Memory* vaddr_sub_obj = nullptr;
   constexpr bool kSysMemAlloc = false;
@@ -630,6 +572,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     }
 
     vaddr_sub_obj->getUserData().deviceId = deviceId;
+    vaddr_sub_obj->getUserData().locationType = locationType;
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
@@ -752,6 +695,8 @@ bool Device::init() {
       // Ignore the failure and assume KFD is not installed.
       // abort();
       DevLogError("KFD is not installed \n");
+      // Disable direct dispatch if ROC initialization wasn't successful
+      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
     }
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
@@ -760,6 +705,10 @@ bool Device::init() {
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
   if (GPU_ENABLE_PAL != 0) {
+    if (GPU_ENABLE_PAL == 1) {
+      // PAL path can't support direct dispatch, unless it's forced
+      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
+    }
     ret |= PalDeviceLoad();
   }
 #endif  // WITH_PAL_DEVICE

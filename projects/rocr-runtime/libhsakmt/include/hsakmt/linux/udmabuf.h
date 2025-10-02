@@ -1,8 +1,7 @@
-/* GPL-2.0 WITH Linux-syscall-note */
-/*
- * This file was copied from inux-libc-dev package
- * This header provides interface to linux kernel udmabuf drver
- * Modifications may have been made.
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
+ * This file was copied from Linux Kernel Source code
+ * This header provides interface to linux kernel udmabuf driver
+ * Minor modifications may have been made.
  */
 #ifndef _THUNK_UDMABUF_H
 #define _THUNK_UDMABUF_H

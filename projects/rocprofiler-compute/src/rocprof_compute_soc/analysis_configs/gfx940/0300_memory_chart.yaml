@@ -236,10 +236,6 @@ Panel Config:
         L2 Hit:
           value: ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if
             ((TCC_HIT_sum + TCC_MISS_sum) != 0) else 0)), 0)
-        L2 Rd Lat:
-          value: null
-        L2 Wr Lat:
-          value: null
         Fabric_L2 Rd:
           value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
         Fabric_L2 Wr:

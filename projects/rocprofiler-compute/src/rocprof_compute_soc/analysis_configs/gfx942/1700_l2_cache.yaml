@@ -513,12 +513,12 @@ Panel Config:
           max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
           unit: (Req  + $normUnit)
         Read (64B):
-          avg: AVG(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) /
-            $denom))
-          min: MIN(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) /
-            $denom))
-          max: MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) /
-            $denom))
+          avg: AVG(MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
+            / $denom), 0))
+          min: MIN(MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
+            / $denom), 0))
+          max: MAX(MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
+            / $denom), 0))
           unit: (Req  + $normUnit)
         Read (128B):
           avg: AVG(((TCC_BUBBLE_sum) / $denom))
@@ -541,9 +541,9 @@ Panel Config:
           max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
           unit: (Req  + $normUnit)
         Write and Atomic (32B):
-          avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
-          min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
-          max: MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+          avg: AVG(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
+          min: MIN(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
+          max: MAX(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
           unit: (Req  + $normUnit)
         Write and Atomic (Uncached):
           avg: AVG((TCC_EA0_WR_UNCACHED_32B_sum / $denom))

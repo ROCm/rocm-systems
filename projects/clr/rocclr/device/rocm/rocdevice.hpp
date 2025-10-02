@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "CL/cl.h"
 #include "device/device.hpp"
@@ -34,16 +32,12 @@
 #include "thread/monitor.hpp"
 #include "utils/versions.hpp"
 
+#include "device/rocm/rocrctx.hpp"
 #include "device/rocm/rocsettings.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
-
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
-#include "hsa/hsa_ven_amd_loader.h"
 
 #include <atomic>
 #include <iostream>
@@ -232,7 +226,8 @@ class NullDevice : public amd::Device {
     return true;
   }
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) override {
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) override {
     ShouldNotReachHere();
     return false;
   }
@@ -305,12 +300,6 @@ class NullDevice : public amd::Device {
   }
 #endif
 #endif
-
- protected:
-  //! Initialize compiler instance and handle
-  static bool initCompiler(bool isOffline);
-  //! destroy compiler instance and handle
-  static bool destroyCompiler();
 
  private:
   static constexpr bool offlineDevice_ = true;
@@ -414,7 +403,8 @@ class Device : public NullDevice {
   //! Gets free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory) const;
   virtual void* hostAlloc(size_t size, size_t alignment,
-                          MemorySegment mem_seg = MemorySegment::kNoAtomics) const;
+                          MemorySegment mem_seg = MemorySegment::kNoAtomics,
+                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const;
 
   bool deviceAllowAccess(void* dst) const;
@@ -422,8 +412,9 @@ class Device : public NullDevice {
   bool allowPeerAccess(device::Memory* memory) const;
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
-  void* deviceLocalAlloc(size_t size, bool atomics = false, bool pseudo_fine_grain = false,
-                         bool contiguous = false) const;
+
+  void* deviceLocalAlloc(size_t size,
+                        const AllocationFlags& flags = AllocationFlags{}) const;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
@@ -442,7 +433,8 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment);
   virtual bool virtualFree(void* addr);
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags);
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
 
@@ -464,9 +456,6 @@ class Device : public NullDevice {
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
-
-  //! Allocate host memory from agent info
-  void* hostAgentAlloc(size_t size, const AgentInfo& agentInfo, MemorySegment mem_seg) const;
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
@@ -691,4 +680,4 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 /**
  * @}
  */
-#endif /*WITHOUT_HSA_BACKEND*/
+

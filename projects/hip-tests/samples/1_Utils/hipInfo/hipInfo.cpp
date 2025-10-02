@@ -134,6 +134,11 @@ void printDeviceProp(int deviceId) {
   cout << setw(w1) << "arch.has3dGrid: " << props.arch.has3dGrid << endl;
   cout << setw(w1) << "arch.hasDynamicParallelism: " << props.arch.hasDynamicParallelism << endl;
   cout << setw(w1) << "gcnArchName: " << props.gcnArchName << endl;
+  int maxAvailableVgprsPerThread = 0;
+  checkHipErrors(hipDeviceGetAttribute(&maxAvailableVgprsPerThread,
+                 hipDeviceAttributeMaxAvailableVgprsPerThread, deviceId));
+  cout << setw(w1) << "maxAvailableVgprsPerThread: "
+         << maxAvailableVgprsPerThread << " DWORDs" << endl;
 #endif
   int deviceCnt;
   checkHipErrors(hipGetDeviceCount(&deviceCnt));

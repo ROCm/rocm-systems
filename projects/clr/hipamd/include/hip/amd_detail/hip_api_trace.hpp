@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 14
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 15
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -727,6 +727,7 @@ typedef hipError_t (*t_hipStreamGetCaptureInfo_v2)(
     hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out, size_t* numDependencies_out);
 typedef hipError_t (*t_hipStreamGetDevice)(hipStream_t stream, hipDevice_t* device);
 typedef hipError_t (*t_hipStreamGetFlags)(hipStream_t stream, unsigned int* flags);
+typedef hipError_t (*t_hipStreamGetId)(hipStream_t stream, unsigned long long* streamId);
 typedef hipError_t (*t_hipStreamGetPriority)(hipStream_t stream, int* priority);
 typedef hipError_t (*t_hipStreamIsCapturing)(hipStream_t stream,
                                              hipStreamCaptureStatus* pCaptureStatus);
@@ -1086,6 +1087,23 @@ typedef hipError_t (*t_hipGetDriverEntryPoint)(const char* symbol, void** funcPt
 typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** funcPtr,
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
+typedef hipError_t (*t_hipLibraryLoadData)(hipLibrary_t* library, const void* code,
+                                           hipJitOption** jitOptions, void** jitOptionsValues,
+                                           unsigned int numJitOptions,
+                                           hipLibraryOption** libraryOptions,
+                                           void** libraryOptionValues,
+                                           unsigned int numLibraryOptions);
+typedef hipError_t (*t_hipLibraryLoadFromFile)(hipLibrary_t* library, const char* fileName,
+                                               hipJitOption** jitOptions, void** jitOptionsValues,
+                                               unsigned int numJitOptions,
+                                               hipLibraryOption** libraryOptions,
+                                               void** libraryOptionValues,
+                                               unsigned int numLibraryOptions);
+typedef hipError_t (*t_hipLibraryUnload)(hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t library,
+                                            const char* name);
+typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
+                                                 hipLibrary_t library);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1631,6 +1649,9 @@ struct HipDispatchTable {
   t_hipMemGetHandleForAddressRange hipMemGetHandleForAddressRange_fn;
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 13
+  // removed HIP_MEMSET_NODE_PARAMS replaced by hipMemsetParams
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
   t_hipModuleGetFunctionCount hipModuleGetFunctionCount_fn;
   t_hipMemsetD2D8 hipMemsetD2D8_fn;
   t_hipMemsetD2D8Async hipMemsetD2D8Async_fn;
@@ -1649,11 +1670,17 @@ struct HipDispatchTable {
   t_hipGetDriverEntryPoint_spt hipGetDriverEntryPoint_spt_fn;
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
-  // removed HIP_MEMSET_NODE_PARAMS replaced by hipMemsetParams
+  t_hipStreamGetId hipStreamGetId_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 15
+  t_hipLibraryLoadData hipLibraryLoadData_fn;
+  t_hipLibraryLoadFromFile hipLibraryLoadFromFile_fn;
+  t_hipLibraryUnload hipLibraryUnload_fn;
+  t_hipLibraryGetKernel hipLibraryGetKernel_fn;
+  t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
 
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 14
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
 
   // ******************************************************************************************* //
   //
