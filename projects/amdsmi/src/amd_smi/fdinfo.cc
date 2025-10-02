@@ -33,6 +33,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 
 extern "C" {
 
@@ -67,48 +68,55 @@ amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string &path, const char *bdf) {
   return AMDSMI_STATUS_NOT_FOUND;
 }
 
-amdsmi_status_t gpuvsmi_get_pids(const amdsmi_bdf_t &bdf, std::vector<long int> &pids,
-                                 uint64_t *size) {
-  char bdf_str[13];
-  DIR *d;
-  struct dirent *dir;
+// Determine via kfd whether pid uses specified gpu
+amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t &bdf, long pid) {
 
-  /* 0000:00:00.0 */
-  snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
-           static_cast<uint32_t>(bdf.domain_number & 0xffff),
-           static_cast<uint32_t>(bdf.bus_number & 0xff),
-           static_cast<uint32_t>(bdf.device_number & 0x1f),
-           static_cast<uint32_t>(bdf.function_number & 0x7));
+  // pack (domain,bus,device,function) to the same 64-bit key
+  // (DOMAIN << 32) | (BUS << 8) | (DEVICE << 3) | FUNCTION
+  auto pack_bdf_to_kfd_bdfid = [](const amdsmi_bdf_t& b) -> uint64_t {
+    const uint64_t domain = static_cast<uint64_t>(b.domain_number  & 0xffffu);
+    const uint64_t bus    = static_cast<uint64_t>(b.bus_number     & 0xffu);
+    const uint64_t dev    = static_cast<uint64_t>(b.device_number  & 0x1fu);
+    const uint64_t func   = static_cast<uint64_t>(b.function_number & 0x7u);
+    const uint64_t loc = (bus << 8) | (dev << 3) | func;
+    return (domain << 32) | loc;
+  };
 
-  d = opendir("/proc");
-  if (!d) return AMDSMI_STATUS_NO_PERM;
+  // Build map of KFD nodes
+  std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> nodes;
+  int ret = DiscoverKFDNodes(&nodes);
 
-  pids.clear();
-  /* Find the pid folders in /proc/ that we have access to */
-  while ((dir = readdir(d)) != NULL) {
-    if (dir->d_type == DT_DIR) {
-      /* Try to cast the name of the folder to a
-       * number, if it fails, it is not */
-      char *p;
-      long int pid;
-
-      pid = strtol(dir->d_name, &p, 10);
-      if (*p != 0) continue;
-
-      /* Check if fdinfo is accesible */
-      std::string path = "/proc/" + std::string(dir->d_name) + "/fdinfo/";
-
-      if (access(path.c_str(), R_OK)) continue;
-
-      /* check if GPU is present */
-      if (gpuvsmi_pid_is_gpu(path, bdf_str)) continue;
-      pids.push_back(pid);
-    }
+  if (ret != 0) {
+    return AMDSMI_STATUS_API_FAILED;
   }
-  closedir(d);
 
-  *size = pids.size();
-  return AMDSMI_STATUS_SUCCESS;
+  // Convert bdf and find node
+  const uint64_t key = pack_bdf_to_kfd_bdfid(bdf);
+  auto it = nodes.find(key);
+
+  if (it == nodes.end()) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
+  // Grab gpu id and ensure not cpu
+  const uint64_t target_gid = it->second->gpu_id();
+  if (target_gid == 0) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
+  // Get all KFD GPU ids for pid
+  std::unordered_set<uint64_t> pid_gids;
+  ret = amd::smi::GetKfdGpuIdsForPid(pid, &pid_gids);
+  if (ret != 0) {
+    if (ret == EACCES) {
+      return AMDSMI_STATUS_NO_PERM;
+    }
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
+  // Return success if gpu id is in pid gpu ids
+  return (pid_gids.count(target_gid) ? AMDSMI_STATUS_SUCCESS
+                                     : AMDSMI_STATUS_NOT_FOUND);
 }
 
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
@@ -128,8 +136,14 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
   std::string name_path = "/proc/" + std::to_string(pid) + "/exe";
   std::string cgroup_path = "/proc/" + std::to_string(pid) + "/cgroup";
 
-  if (gpuvsmi_pid_is_gpu(path.c_str(), bdf_str)) {
-    return AMDSMI_STATUS_INVAL;
+  amdsmi_status_t ret = gpu_is_in_kfd_pid(bdf, pid);
+
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    // If kfd process detection fails, fallback on old bdf code
+    ret = gpuvsmi_pid_is_gpu(path.c_str(), bdf_str);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      return ret;
+    }
   }
 
   d = opendir(path.c_str());
