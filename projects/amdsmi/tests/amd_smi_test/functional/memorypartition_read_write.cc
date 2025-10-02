@@ -402,20 +402,6 @@ void TestMemoryPartitionReadWrite::Run(void) {
   // FYI Need to place after saving current compute partitions, since reloading driver will reset
   // all back to SPX/DPX/etc (whatever is default for that NPS mode; see
   // `sudo amd-smi partition -a`).
-  IF_VERB(STANDARD) {
-    std::cout << "\t**"
-              << "======== TEST AMDSMI_GPU_DRIVER_RELOAD() BEFORE"
-              << " MEMORY PARTITION CHECKS ===============" << std::endl;
-  }
-  amdsmi_status_t driver_reload_status = AMDSMI_STATUS_NOT_SUPPORTED;
-  std::string preload_message =
-    "\t  Reloading the AMD GPU driver before memory partition checks."
-    " This may take some time, please wait...";
-  ReloadDriverWithMessages(isVerbose, preload_message,
-    "amdsmi_gpu_driver_reload() successful.",
-    "amdsmi_gpu_driver_reload() failed",
-    "amdsmi_gpu_driver_reload() failed with AMDGPU_RESTART_ERR",
-    &driver_reload_status);
 
   // Run memory partition tests
   IF_VERB(STANDARD) {
@@ -779,7 +765,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
         // amdsmi_set_gpu_memory_partition().
         // This is to allow the user to select the appropriate time to reload the driver
         // since there can be errors if any device has a workload/process running on it.
-        driver_reload_status = AMDSMI_STATUS_NOT_SUPPORTED;
+        amdsmi_status_t driver_reload_status = AMDSMI_STATUS_NOT_SUPPORTED;
         std::string reload_message =
           "\t  Reloading the AMD GPU driver after resetting memory partition to "
           + std::string(orig_memory_partition)

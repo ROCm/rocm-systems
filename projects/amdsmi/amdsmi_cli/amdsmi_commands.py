@@ -1698,7 +1698,7 @@ class AMDSMICommands():
             partition_id = "N/A"
 
         num_partition = gpu_metric['num_partition']
-        if num_partition == "N/A" and isinstance(partition_id, int) and partition_id > 0:
+        if num_partition == "N/A":
             num_partition = 1  # Workaround for XCP metrics not providing num_partition in v1.0
             logging.debug(f"num_partition is N/A and partition_id: {partition_id} (greater > 0).\nModified num_partition: {num_partition} to adjust for XCP metrics.")
 

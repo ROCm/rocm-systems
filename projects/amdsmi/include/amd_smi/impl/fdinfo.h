@@ -29,7 +29,6 @@
 extern "C" {
 #endif
 
-amdsmi_status_t gpuvsmi_get_pids(const amdsmi_bdf_t &bdf, std::vector<long int> &pids, uint64_t *size);
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid, amdsmi_proc_info_t &info);
 
 #ifdef __cplusplus

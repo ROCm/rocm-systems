@@ -312,6 +312,42 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
   return 0;
 }
 
+int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
+
+  if (!out) return EINVAL;
+  out->clear();
+
+  std::string pdir = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  DIR* d = opendir(pdir.c_str());
+
+  if (!d) {
+    perror(("Unable to open KFD process directory for process " + std::to_string(pid)).c_str());
+    return errno ? errno : ESRCH;
+  }
+
+  struct dirent* e;
+
+  while ((e = readdir(d))) {
+
+    if (e->d_name[0] == '.') continue; // skip "."/".." and hidden entries
+
+    // Grab KFD GPU id from one of these fields
+    if (!strncmp(e->d_name, "stats_", 6)) {
+      out->insert(strtoull(e->d_name + 6, nullptr, 10));
+    } else if (!strncmp(e->d_name, "vram_", 5)) {
+      out->insert(strtoull(e->d_name + 5, nullptr, 10));
+    } else if (!strncmp(e->d_name, "counters_", 9)) {
+      out->insert(strtoull(e->d_name + 9, nullptr, 10));
+    } else if (!strncmp(e->d_name, "sdma_", 5)) {
+      out->insert(strtoull(e->d_name + 5, nullptr, 10));
+    }
+  }
+
+  closedir(d);
+  return 0;
+
+}
+
 // Read the gpuid files found in all the <queue id> dirs and put them in
 // gpus_found.
 // Directory structure:
@@ -329,8 +365,6 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
   if (pid == static_cast<uint32_t>(getpid())) {
     return 0;
   }
-
-  errno = 0;
 
   std::string queues_dir = kKFDProcPathRoot;
   queues_dir += "/";
@@ -387,35 +421,9 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
   }
 
   // if no queues were present, fallback to grab KFD GPU IDs from parent dir names
-  if (gpu_set->empty()) {
-
-    std::string pdir = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
-    auto queues_dir_kfd = opendir(pdir.c_str());
-
-    if (queues_dir_kfd == nullptr) {
-      std::string err_str = "Unable to open KFD process directory for process ";
-      err_str += std::to_string(pid);
-      perror(err_str.c_str());
-      return ESRCH;
-    }
-
-    struct dirent* e;
-
-    while ((e = readdir(queues_dir_kfd))) {
-
-      // These files encode the KFD GPU ID when process is running
-      if (!strncmp(e->d_name, "stats_", 6)) {
-        gpu_set->insert(strtoull(e->d_name + 6, nullptr, 10));
-      } else if (!strncmp(e->d_name, "vram_", 5)) {
-        gpu_set->insert(strtoull(e->d_name + 5, nullptr, 10));
-      } else if (!strncmp(e->d_name, "counters_", 9)) {
-        gpu_set->insert(strtoull(e->d_name + 9, nullptr, 10));
-      } else if (!strncmp(e->d_name, "sdma_", 5)) {
-        gpu_set->insert(strtoull(e->d_name + 5, nullptr, 10));
-      }
-    }
-  
-    closedir(queues_dir_kfd);
+  int kfd_ret = GetKfdGpuIdsForPid(pid, gpu_set);
+  if (kfd_ret != 0) {
+    return kfd_ret;
   }
 
   errno = 0;

@@ -11,7 +11,7 @@ This section provides comprehensive documentation for the AMD SMI C++ API.
 Explore these sections to understand the full scope of available
 functionalities and how to implement them in your applications.
 
-- {doc}`Modules <../doxygen/docBin/html/modules>`
+- {doc}`Modules <../doxygen/docBin/html/topics>`
 
 - {doc}`Files <../doxygen/docBin/html/files>`
 

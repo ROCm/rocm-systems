@@ -116,6 +116,8 @@ int read_node_properties(uint32_t node, std::string property_name,
                          uint64_t *val);
 int get_gpu_id(uint32_t node, uint64_t *gpu_id);
 
-} // namespace amd::smi
+int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
+
+}  // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_

@@ -186,7 +186,7 @@ GPU: 0
 
 ### Optimized
 
-- N/A
+- **Optimized the way `amd-smi process` validates which proccesses are running on a GPU**.  
 
 ### Resolved Issues
 

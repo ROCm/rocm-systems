@@ -25,6 +25,7 @@
 
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_dyn_gpu_metrics.h"
 
 #include <array>
 #include <algorithm>
@@ -41,7 +42,6 @@
 #include <tuple>
 #include <variant>
 #include <vector>
-
 
 /**
  *  All 1.4 and newer GPU metrics are now defined in this header.
@@ -89,12 +89,12 @@ constexpr uint32_t kRSMI_MAX_NUM_XCC = 8;
 //  Note: This *must* match MAX_XCP
 constexpr uint32_t kRSMI_MAX_NUM_XCP = 8;
 
-
 struct AMDGpuMetricsHeader_v1_t {
   uint16_t m_structure_size;
   uint8_t  m_format_revision;
   uint8_t  m_content_revision;
 };
+
 struct amdgpu_xcp_metrics {
   /* Utilization Instantaneous (%) */
   uint32_t gfx_busy_inst[kRSMI_MAX_NUM_XCC];
@@ -788,7 +788,7 @@ struct AMDGpuMetrics_v18_t {
   /* PCIE other end recovery counter */
   uint32_t m_pcie_lc_perf_other_end_recovery;
 };
-using AMGpuMetricsLatest_t = AMDGpuMetrics_v18_t;
+using AMGpuMetricsLatest_t = AMDGpuDynamicMetrics_t;
 
 /**
  *  This is GPU Metrics version that gets to public access.
@@ -1053,7 +1053,8 @@ enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t
   kGpuMetricV15 = (0x1 << 5),
   kGpuMetricV16 = (0x1 << 6),
   kGpuMetricV17 = (0x1 << 7),
-  kGpuMetricV18 = (0x1 << 8),  // Added new version flag
+  kGpuMetricV18 = (0x1 << 8),  // Added new version flag: Last static GPU Metrics
+  kGpuMetricV19 = (0x1 << 9),  // Dyn.GPU Metrics
 };
 using AMDGpuMetricVersionTranslationTbl_t = std::map<uint16_t, AMDGpuMetricVersionFlags_t>;
 using GpuMetricTypePtr_t = std::shared_ptr<void>;
@@ -1309,6 +1310,41 @@ class GpuMetricsBase_v18_t final : public GpuMetricsBase_t {
  private:
   AMDGpuMetrics_v18_t m_gpu_metrics_tbl;
   std::shared_ptr<AMDGpuMetrics_v18_t> m_gpu_metric_ptr;
+};
+
+class GpuMetricsBaseDynamic_t final : public GpuMetricsBase_t {
+  public:
+    ~GpuMetricsBaseDynamic_t() = default;
+
+  // Unused
+  size_t sizeof_metric_table() override { return 0; }
+
+  // Unused
+  GpuMetricTypePtr_t get_metrics_table() override { return nullptr; }
+
+  AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override {
+    if (m_header.m_format_revision != 1) {
+        return AMDGpuMetricVersionFlags_t::kGpuMetricNone;
+    }
+
+    return static_cast<AMDGpuMetricVersionFlags_t>(1u << m_header.m_content_revision);
+  }
+
+  // Store header and metrics table
+  inline rsmi_status_t set_parsed_dynamic(AMDGpuDynamicMetrics_t&& parsed) noexcept {
+    m_dyn = std::move(parsed);
+    m_header = m_dyn.get_header();
+    return rsmi_status_t::RSMI_STATUS_SUCCESS;
+  }
+
+  rsmi_status_t populate_metrics_dynamic_tbl() override;
+
+  AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
+
+  private:
+    AMDGpuDynamicMetrics_t m_dyn;
+    details::AMDGpuDynamicMetricsHeader_v1_t m_header{};
+
 };
 
 template<typename T>

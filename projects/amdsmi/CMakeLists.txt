@@ -246,6 +246,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
     "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
     "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi.cc"
     "${ROCM_SRC_DIR}/rocm_smi_logger.cc"
     "${SHR_MUTEX_DIR}/shared_mutex.cc"
@@ -271,6 +272,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_kfd.h"
     "${ROCM_INC_DIR}/rocm_smi_io_link.h"
     "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
+    "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi.h"
     "${ROCM_INC_DIR}/rocm_smi_logger.h"
     "${SHR_MUTEX_DIR}/shared_mutex.h"
@@ -325,8 +327,6 @@ export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 # (this registers the build-tree with a global CMake-registry)
 export(PACKAGE ${AMD_SMI})
 
-# Create the amd_smiConfig.cmake and amd_smiConfigVersion files
-# ... for the build tree
 install(
     EXPORT amd_smiTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
