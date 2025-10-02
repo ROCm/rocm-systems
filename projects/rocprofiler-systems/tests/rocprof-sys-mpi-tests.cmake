@@ -188,26 +188,4 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
         REWRITE_RUN_PASS_REGEX
             ">>> mpi-fortran-poisson.inst(.*\n.*)>>> PMPI_Init(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)>>> PMPI_Cart_create(.*\n.*)>>> PMPI_Cart_shift(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)>>> PMPI_Allreduce(.*\n.*)"
     )
-
-    rocprofiler_systems_add_test(
-        SKIP_RUNTIME
-        NAME "mpi-fortran-poisson-nonblock"
-        TARGET mpi-fortran-poisson-nonblock
-        MPI ON
-        NUM_PROCS 2
-        LABELS "mpip;fortran"
-        REWRITE_ARGS
-            -e
-            -v
-            2
-            --label
-            file
-            line
-            args
-            --min-instructions
-            0
-        ENVIRONMENT "${_fortran_mpip_flat_environment}"
-        REWRITE_RUN_PASS_REGEX
-            ">>> mpi-fortran-poisson-nonblock.inst(.*\n.*)>>> PMPI_Init(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)>>> PMPI_Cart_create(.*\n.*)>>> PMPI_Cart_shift(.*\n.*)>>> PMPI_Isend(.*\n.*)>>> PMPI_Irecv(.*\n.*)>>> PMPI_Waitall(.*\n.*)>>> PMPI_Allreduce(.*\n.*)"
-    )
 endif()

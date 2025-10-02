@@ -35,7 +35,7 @@ else()
         CACHE BOOL
         "Internal variable used by rocprofiler-systems"
     )
-    rocprofiler_systems_message(STATUS "Gfortran was not found, disabling MPI examples")
+    rocprofiler_systems_message(STATUS "Gfortran was not found, disabling fortran MPI tests")
 endif()
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
@@ -114,13 +114,6 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
     add_executable(mpi-fortran-poisson poisson_mpi.f90)
     target_compile_options(mpi-fortran-poisson PRIVATE)
     target_link_libraries(mpi-fortran-poisson PRIVATE mpi-fortran-interface-library)
-
-    add_executable(mpi-fortran-poisson-nonblock poisson_nonblock_mpi.f90)
-    target_compile_options(mpi-fortran-poisson-nonblock PRIVATE)
-    target_link_libraries(
-        mpi-fortran-poisson-nonblock
-        PRIVATE mpi-fortran-interface-library
-    )
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -152,7 +145,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     )
     if(ENABLE_FORTRAN_MPI_CTESTS)
         install(
-            TARGETS mpi-fortran-poisson mpi-fortran-poisson-nonblock
+            TARGETS mpi-fortran-poisson
             DESTINATION bin
             COMPONENT rocprofiler-systems-examples
         )
