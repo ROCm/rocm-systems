@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen

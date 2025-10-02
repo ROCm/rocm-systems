@@ -34,6 +34,9 @@ permissions:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+  PYTHON_VENV_PATH: "rocprofiler-sdk"
+  PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
 
@@ -74,12 +77,12 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy', gpu-target: "gfx1201" }
-          - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy', gpu-target: "gfx1101" }
-          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X",  ci-flags: '--linter clang-tidy', gpu-target: "gfx942" }
+          - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
+          - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.therock-s3 }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -95,8 +98,8 @@ jobs:
         shell: bash
         working-directory: /tmp
         run: |
-          tar -xf /opt/rocm-${{ matrix.system.therock-s3 }}.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-          ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+          tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
@@ -182,7 +185,7 @@ jobs:
         run: |
           echo -e "Building & Installing ROCDecode..."
           cmake -B build-rocdecode \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
@@ -193,7 +196,7 @@ jobs:
           echo -e "ROCDecode Installed Successfully!"
           echo -e "Building & Installing ROCJPEG..."
           cmake -B build-rocjpeg \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
@@ -212,8 +215,8 @@ jobs:
           echo "Install ROCProfiler-Register"
           cmake -B build-rocprofiler-register \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -231,8 +234,8 @@ jobs:
           echo "Install ROCR-Runtime..."
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             .
           cmake --build build --target all --parallel 16
           cmake --build build --target install
@@ -247,8 +250,8 @@ jobs:
           echo "Install Aqlprofile..."
           cmake -B build-aqlprofile \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -264,7 +267,7 @@ jobs:
           echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
           which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
           for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-          cat /opt/rocm/.info/version
+          cat ${{ env.ROCM_PATH }}/.info/version
           ls -la
 
       - name: Enable PC Sampling
@@ -294,7 +297,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
             -DCPACK_GENERATOR='DEB;RPM;TGZ' \
-            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)" \
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath ${{ env.ROCM_PATH }})" \
             -DPython3_EXECUTABLE=$(which python3) \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             ${{ env.GLOBAL_CMAKE_OPTIONS }} -- \
@@ -358,8 +361,8 @@ jobs:
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
-          CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-          CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
           cmake --build build-tests-deb --target all --parallel 16
           ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
@@ -379,25 +382,25 @@ jobs:
   # RHEL/SLES (RPM) job(s)
   # -----------------------------------------------------------------------------
   core-rpm:
-    name: Core • ${{ matrix.runner }} • ${{ matrix.os }}
+    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
-        runner: [ 'mi325' ]
-        os: [ 'rhel-8.8', 'rhel-9.5', 'sles-15.6' ]
-        build-type: [ 'RelWithDebInfo' ]
-        ci-flags: [ '' ]
-    runs-on: linux-mi325-1gpu-ossci-rocm
+        system:
+          - { os: 'rhel-8.8', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+    runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       options: --privileged
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      OS_TYPE: ${{ matrix.os }}
-      GPU_RUNNER: ${{ matrix.runner }}
+      OS_TYPE: ${{ matrix.system.os }}
+      GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
@@ -439,8 +442,8 @@ jobs:
         shell: bash
         working-directory: /tmp
         run: |
-          tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-          ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+          tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
       - name: Install requirements (venv)
@@ -449,8 +452,8 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           git config --global --add safe.directory '*'
-          python3 -m venv rocprofiler-sdk
-          source rocprofiler-sdk/bin/activate
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
@@ -461,7 +464,7 @@ jobs:
             ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
 
       - name: Install Curl for RHEL 8.8
-        if: ${{ matrix.os == 'rhel-8.8' }}
+        if: ${{ matrix.system.os == 'rhel-8.8' }}
         run: |
           dnf install -y curl
           ln -s /usr/local/bin/curl /usr/bin/curl
@@ -469,7 +472,7 @@ jobs:
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
         with:
-          key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}
+          key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           max-size: 2G
           save: true
           variant: sccache
@@ -481,8 +484,8 @@ jobs:
           echo "Install ROCProfiler-Register"
           cmake -B build-rocprofiler-register \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/local/bin/sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/local/bin/sccache \
             .
@@ -495,16 +498,16 @@ jobs:
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
-          python3 -m venv rocprofiler-sdk
-          source rocprofiler-sdk/bin/activate
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade cmake
           echo "Install ROCR-Runtime..."
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             .
           cmake --build build --target all --parallel 16
           cmake --build build --target install
@@ -515,15 +518,15 @@ jobs:
         working-directory: projects/aqlprofile
         run: |
           echo "Install Aqlprofile."
-          python3 -m venv rocprofiler-sdk
-          source rocprofiler-sdk/bin/activate
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade cmake
           cmake -B build-aqlprofile \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/local/bin/sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/local/bin/sccache \
             .
@@ -532,7 +535,7 @@ jobs:
           echo "✅ AQLProfile Installation complete!"
 
       - name: Enable PC Sampling
-        if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
@@ -542,12 +545,12 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          source rocprofiler-sdk/bin/activate
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           echo "PATH: ${PATH}"
           echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
           which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
           for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-          cat /opt/rocm/.info/version
+          cat ${{ env.ROCM_PATH }}/.info/version
           ls -la
 
       - name: Configure, Build, and Test
@@ -555,41 +558,42 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
-          source rocprofiler-sdk/bin/activate;
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
             --mode ${CI_MODE}
             --build-jobs 16
-            --site 'linux-mi325-1gpu-ossci-rocm'
+            --site ${{ matrix.system.runner }}
             --gpu-targets ${{ env.GPU_TARGETS }}
             --run-attempt ${{ github.run_attempt }}
-            ${{ matrix.ci-flags }}
+            ${{ matrix.system.ci-flags }}
             --
             -DROCPROFILER_DEP_ROCMCORE=ON
             -DROCPROFILER_BUILD_DOCS=OFF
-            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+            -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
             -DPython3_EXECUTABLE=$(which python3)
             ${{ env.GLOBAL_CMAKE_OPTIONS }}
             --
-            -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-            -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
-    name: ${{ matrix.sanitizer }} • ${{ matrix.runner }} • ${{ matrix.os }}
+    name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi325']
-        sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
-        os: ['ubuntu-22.04']
-        build-type: ['RelWithDebInfo']
+        system:
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: linux-mi325-1gpu-ossci-rocm
+    runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -601,7 +605,7 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 13
-      GPU_RUNNER: ${{ matrix.runner }}
+      GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
     - name: Install Latest Nightly ROCm
@@ -609,8 +613,8 @@ jobs:
       working-directory: /tmp
       run: |
         ls -lah /opt/
-        tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
@@ -671,11 +675,11 @@ jobs:
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
@@ -683,7 +687,7 @@ jobs:
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
       with:
-        key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}-${{ matrix.sanitizer}}
+        key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
         max-size: 2G
         save: true
 
@@ -694,8 +698,8 @@ jobs:
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -711,8 +715,8 @@ jobs:
         echo "Install ROCR-Runtime..."
         cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -727,8 +731,8 @@ jobs:
         echo "Install Aqlprofile."
         cmake -B build-aqlprofile \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -743,18 +747,18 @@ jobs:
       run:
         sudo sysctl -w vm.mmap_rnd_bits=28;
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
           --build-jobs 16
-          --site 'linux-mi325-1gpu-ossci-rocm'
+          --site ${{ matrix.system.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
-          --memcheck ${{ matrix.sanitizer }}
+          --memcheck ${{ matrix.system.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"

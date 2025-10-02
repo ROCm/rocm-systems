@@ -45,7 +45,7 @@ namespace pcs
 namespace
 {
 constexpr int    MAX_FAILURES      = 10;
-constexpr size_t BUFFER_SIZE_BYTES = 8192;
+constexpr size_t BUFFER_SIZE_BYTES = 65536;  // 64 KiB
 constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 4);
 
 struct tool_agent_info;

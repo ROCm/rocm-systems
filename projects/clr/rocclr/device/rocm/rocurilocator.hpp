@@ -22,7 +22,7 @@
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
 #include "device/devurilocator.hpp"
-
+#include "rocrctx.hpp"
 #include <vector>
 namespace amd::roc {
 class UriLocator : public device::UriLocator {

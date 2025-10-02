@@ -1056,14 +1056,13 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   // Make sure the slot is free for usage
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
-    // Active spin - no yield
+    amd::Os::yield();
   }
 
   // Add blocking command if the original value of read index was behind of the queue size.
   // Note: direct dispatch relies on the slot stall above to keep the forward progress
   // of the app if a dispatched kernel requires some CPU input for completion
-  if (blocking || (!AMD_DIRECT_DISPATCH &&
-                   (index - hsa_queue_load_read_index_relaxed(gpu_queue_)) >= sw_queue_size)) {
+  if (blocking) {
     if (packet->completion_signal.handle == 0) {
       packet->completion_signal = Barriers().ActiveSignal();
     }
@@ -1080,8 +1079,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-          "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
-          "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx, "
+          "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], private_seg_size=%u, "
+          "group_seg_size=%u, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx, "
           "correlation_id=%zu, rptr=%u, wptr=%u",
           gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
@@ -1202,7 +1201,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
     // Make sure the slot is free for usage
     while ((startIndex - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
-      // Active spin - no yield
+      amd::Os::yield();
     }
 
     fence_dirty_ = true;
@@ -1295,8 +1294,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
                   "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
                   "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-                  "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], "
-                  "private_seg_size=%zu, group_seg_size=%zu, kernel_obj=0x%zx, "
+                  "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
+                  "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
                   "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
                   "rptr=%u, wptr=%u",
                   gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
@@ -3691,8 +3690,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   if (!kernel.parameters().deviceKernelArgs() || gpuKernel.isInternalKernel()) {
     // Allocate buffer to hold kernel arguments
     if (isGraphCapture) {
-      argBuffer = command_->getKernArgOffset(gpuKernel.KernargSegmentByteSize(),
-                                             gpuKernel.KernargSegmentAlignment());
+      argBuffer = command_->getGraphKernArg(gpuKernel.KernargSegmentByteSize(),
+                                            gpuKernel.KernargSegmentAlignment(), dev().index());
       command_->SetKernelName(gpuKernel.getDemangledName().c_str());
     } else {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
