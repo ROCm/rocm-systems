@@ -204,6 +204,14 @@ get_initial_environment()
                get_env<int>("ROCPROFSYS_THREAD_POOL_SIZE", 0));
     update_env(_env, "ROCPROFSYS_LAUNCHER", "rocprof-sys-causal");
 
+    // Ensure libomptarget.so can be found by the target (OpenMP/HIP apps)
+    if(auto llvm_dir =
+           rocprofsys::common::discover_llvm_libdir_for_ompt(get_verbose() > 0);
+       !llvm_dir.empty())
+    {
+        update_env(_env, "LD_LIBRARY_PATH", llvm_dir, /*append=*/true);
+    }
+
     return _env;
 }
 
@@ -351,13 +359,13 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
                     if(_env_var == "LD_PRELOAD")
                     {
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
                                        .c_str());
                     }
                     else
                     {
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
                                        .c_str());
                     }
                 }
