@@ -162,7 +162,7 @@ static inline void create_counter_reg_info(counter_reg_info_t* reg_info, uint32_
     reg_info->register_addr_hi = register_addr_hi;
 
     /* Initialize allocation info to FREE state */
-    reg_info->allocation.state = COUNTER_STATE_FREE;
+    atomic_set(&reg_info->allocation.state, COUNTER_STATE_FREE);
     reg_info->allocation.event_id = 0;
     reg_info->allocation.instance_id = 0;
     reg_info->allocation.user_id = 0;

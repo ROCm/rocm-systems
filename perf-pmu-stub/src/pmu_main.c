@@ -150,6 +150,12 @@ static int pmu_stub_event_init(struct perf_event *event)
         return -EOPNOTSUPP;
     }
 
+    /* GPU PMU doesn't support inherit (GPU counters aren't per-process) */
+    if (event->attr.inherit) {
+        pmu_debug("Rejecting inherit flag - GPU counters can't inherit to children\n");
+        return -EOPNOTSUPP;
+    }
+
     // /* We don't support exclude filters */
     // if (event->attr.exclude_user || event->attr.exclude_kernel ||
     //     event->attr.exclude_hv || event->attr.exclude_idle) {
@@ -233,8 +239,8 @@ static void pmu_stub_del(struct perf_event *event, int flags)
             pmu_stub_read(event);
         }
 
-        pmu_debug("del: Stopping AQL hardware event\n");
-        aql_pmu_event_stop(event);
+        /* Destroy handles stopping internally - don't call stop separately
+         * to avoid duplicate work items and use-after-free */
         pmu_debug("del: Destroying AQL hardware event\n");
         aql_pmu_event_destroy(event);
 
@@ -315,16 +321,22 @@ static void pmu_stub_stop(struct perf_event *event, int flags)
 static void pmu_stub_read(struct perf_event *event)
 {
     struct hw_perf_event *hwc = &event->hw;
+    uint64_t old_count, new_count;
 
-    pmu_info("read: ENTRY - config=0x%llx, count=%llu, hwc->config_base=0x%llx\n",
-             event->attr.config, (unsigned long long)local64_read(&event->count), hwc->config_base);
+    old_count = local64_read(&event->count);
+
+    pmu_info("read: ENTRY - config=0x%llx, old_count=%llu, hwc->config_base=0x%llx\n",
+             event->attr.config, (unsigned long long)old_count, hwc->config_base);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        pmu_debug("read: Reading AQL hardware counter\n");
+        pmu_info("read: Reading AQL hardware counter for config=0x%llx\n", event->attr.config);
         uint64_t counter_value = aql_pmu_event_read(event);
         local64_set(&event->count, counter_value);
-        pmu_debug("read: Read AQL hardware counter value: %llu\n", counter_value);
+        new_count = local64_read(&event->count);
+        pmu_info("read: AQL counter read complete - old=%llu, new=%llu, delta=%lld\n",
+                 (unsigned long long)old_count, (unsigned long long)new_count,
+                 (long long)(new_count - old_count));
         return;
     }
 

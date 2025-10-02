@@ -169,7 +169,7 @@ struct kfd_data_alloc;
 
 /* Counter allocation info - tracks what a counter is being used for */
 typedef struct {
-    counter_state_t state;
+    atomic_t state;             /* Atomic state for lock-free allocation */
     uint32_t event_id;          /* Event being monitored */
     uint32_t instance_id;       /* Which instance of the block (0 to instance_count-1) */
     uint32_t user_id;           /* User-defined ID for tracking */

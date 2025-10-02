@@ -21,6 +21,8 @@
 #include "aql_perf.h"
 #include "pmu_stub.h"
 #include "aql_c/arch_creator_common.h"
+#include "aql_c/counter_registry.h"
+#include "aql_c/packet_generation.h"
 
 /* External KFD functions */
 extern int kfd_alloc_device(struct file *filep, struct kfd_process *p,
@@ -661,6 +663,191 @@ void aql_perf_free_counter_buffers(arch_t *arch, struct file *kfd_file,
     }
 }
 
+/* Counter Allocation Functions */
+
+/**
+ * aql_counter_try_allocate - Atomically try to allocate a free counter from a block
+ * @block: Hardware block to allocate counter from
+ * @event_id: Event ID to monitor
+ * @perf_event: Perf event pointer to associate with this counter
+ *
+ * Uses atomic compare-and-swap to claim a free counter without locks.
+ * Returns: Pointer to allocated counter_reg_info_t, or NULL if all counters busy
+ */
+counter_reg_info_t* aql_counter_try_allocate(block_info_t *block,
+                                             uint32_t event_id,
+                                             struct perf_event *perf_event)
+{
+    uint32_t i;
+    int old_state;
+
+    if (!block || !block->counter_reg_info) {
+        aql_err("[PMU] aql_counter_try_allocate: Invalid block pointer");
+        return NULL;
+    }
+
+    aql_debug("[PMU] aql_counter_try_allocate: block=%s, event_id=0x%x, counter_count=%u",
+              block->name, event_id, block->counter_count);
+
+    /* Try to allocate a free counter using atomic operations */
+    for (i = 0; i < block->counter_count; i++) {
+        counter_reg_info_t *reg = &block->counter_reg_info[i];
+
+        /* Log attempt */
+        aql_debug("[PMU] aql_counter_try_allocate: trying counter_index=%u, state=%d",
+                  i, atomic_read(&reg->allocation.state));
+
+        /* Try to atomically claim this counter (FREE -> ALLOCATED) */
+        old_state = atomic_cmpxchg(&reg->allocation.state,
+                                   COUNTER_STATE_FREE,
+                                   COUNTER_STATE_ALLOCATED);
+
+        if (old_state == COUNTER_STATE_FREE) {
+            /* Successfully claimed! Populate fields */
+            reg->allocation.event_id = event_id;
+            reg->allocation.user_id = (uint32_t)(uintptr_t)perf_event;
+            reg->allocation.allocation_time = ktime_get();
+
+            aql_info("[PMU] aql_counter_try_allocate: SUCCESS - allocated counter %u in block %s, event_id=0x%x, user_id=0x%x",
+                     i, block->name, event_id, reg->allocation.user_id);
+
+            return reg;
+        }
+
+        /* Counter was taken by another thread, try next */
+        aql_debug("[PMU] aql_counter_try_allocate: counter_index=%u already allocated (state=%d)",
+                  i, old_state);
+    }
+
+    /* All counters are busy */
+    aql_warn("[PMU] aql_counter_try_allocate: FAILED - all %u counters in block %s are busy",
+             block->counter_count, block->name);
+    return NULL;
+}
+
+/**
+ * aql_counter_release - Atomically release a counter back to free pool
+ * @reg: Counter register info to release
+ *
+ * Sets state back to FREE and clears allocation fields.
+ * GPU buffers (command_buffer, data_buffer) are preserved for reuse.
+ */
+void aql_counter_release(counter_reg_info_t *reg)
+{
+    int old_state;
+
+    if (!reg) {
+        aql_err("[PMU] aql_counter_release: NULL counter pointer");
+        return;
+    }
+
+    old_state = atomic_read(&reg->allocation.state);
+
+    aql_debug("[PMU] aql_counter_release: counter state %d -> %d, event_id=0x%x, user_id=0x%x",
+              old_state, COUNTER_STATE_FREE,
+              reg->allocation.event_id, reg->allocation.user_id);
+
+    /* Atomically set state back to FREE */
+    atomic_set(&reg->allocation.state, COUNTER_STATE_FREE);
+
+    /* Clear allocation tracking fields */
+    reg->allocation.event_id = 0;
+    reg->allocation.user_id = 0;
+    reg->allocation.description = NULL;
+    reg->allocation.allocation_time = 0;
+
+    /* Keep command_buffer and data_buffer - they are pre-allocated and reused */
+
+    aql_info("[PMU] aql_counter_release: counter released successfully (was state %d)", old_state);
+}
+
+/**
+ * aql_get_counter_index_in_block - Get counter index within its block
+ * @block: Hardware block
+ * @reg: Counter register info
+ *
+ * Returns: Counter index (0 to counter_count-1), or 0 if not found
+ */
+uint32_t aql_get_counter_index_in_block(block_info_t *block, counter_reg_info_t *reg)
+{
+    uint32_t i;
+
+    if (!block || !reg || !block->counter_reg_info)
+        return 0;
+
+    for (i = 0; i < block->counter_count; i++) {
+        if (&block->counter_reg_info[i] == reg)
+            return i;
+    }
+
+    return 0;
+}
+
+/**
+ * aql_build_counter_info - Build counter_info_t from allocated counter
+ * @counter_id: Counter ID (from counter_registry)
+ * @arch: Architecture structure
+ * @allocated_counter: Allocated counter register info
+ * @out_info: Output counter_info_t structure to populate
+ * @out_block: Output block_info_t pointer
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int aql_build_counter_info(uint32_t counter_id,
+                           arch_t *arch,
+                           counter_reg_info_t *allocated_counter,
+                           counter_info_t *out_info,
+                           block_info_t **out_block)
+{
+    const counter_def_t *counter_def;
+    uint32_t event_id;
+    block_info_t *block;
+    uint32_t counter_index;
+
+    if (!arch || !allocated_counter || !out_info || !out_block) {
+        aql_err("[PMU] aql_build_counter_info: Invalid parameters");
+        return -EINVAL;
+    }
+
+    /* Look up counter definition by ID */
+    counter_def = lookup_counter_by_id((counter_id_t)counter_id);
+    if (!counter_def) {
+        aql_err("[PMU] aql_build_counter_info: Counter ID %u not found in registry", counter_id);
+        return -EINVAL;
+    }
+
+    /* Get architecture-specific event ID */
+    event_id = lookup_event_id(counter_def, arch);
+    if (event_id == 0) {
+        aql_err("[PMU] aql_build_counter_info: No event mapping for counter %s", counter_def->name);
+        return -ENOTSUPP;
+    }
+
+    /* Get block from architecture */
+    block = arch->block_map.blocks[counter_def->hw_block];
+    if (!block) {
+        aql_err("[PMU] aql_build_counter_info: Block %u not found in architecture", counter_def->hw_block);
+        return -EINVAL;
+    }
+
+    /* Find counter index within block */
+    counter_index = aql_get_counter_index_in_block(block, allocated_counter);
+
+    /* Populate counter_info_t */
+    memset(out_info, 0, sizeof(*out_info));
+    out_info->block_id = counter_def->hw_block;
+    out_info->event_id = event_id;
+    out_info->counter_index = counter_index;
+    out_info->name = counter_def->name;
+
+    *out_block = block;
+
+    aql_debug("[PMU] aql_build_counter_info: block=%s, event_id=0x%x, counter_index=%u, name=%s",
+              block->name, event_id, counter_index, counter_def->name);
+
+    return 0;
+}
+
 EXPORT_SYMBOL_GPL(aql_perf_session_create);
 EXPORT_SYMBOL_GPL(aql_perf_session_initialize);
 EXPORT_SYMBOL_GPL(aql_perf_session_destroy);
@@ -668,3 +855,6 @@ EXPORT_SYMBOL_GPL(aql_perf_session_get);
 EXPORT_SYMBOL_GPL(aql_perf_session_put);
 EXPORT_SYMBOL_GPL(aql_perf_allocate_counter_buffers);
 EXPORT_SYMBOL_GPL(aql_perf_free_counter_buffers);
+EXPORT_SYMBOL_GPL(aql_counter_try_allocate);
+EXPORT_SYMBOL_GPL(aql_counter_release);
+EXPORT_SYMBOL_GPL(aql_build_counter_info);

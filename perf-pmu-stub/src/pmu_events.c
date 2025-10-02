@@ -80,6 +80,7 @@ size_t pmu_stub_get_event_count(void)
     return get_counter_count();
 }
 
+// TODO: Remove legacy stubs. 
 /*
  * NOTE: Counter values are now managed by the AQL hardware layer.
  * The following functions are legacy stubs kept for compatibility.

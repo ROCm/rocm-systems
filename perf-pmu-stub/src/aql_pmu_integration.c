@@ -324,16 +324,24 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
     struct aql_measurement *measurement;
     uint64_t counter_value;
 
-    if (!event->hw.config_base)
+    aql_info("[PMU] READ: Entry - config=0x%llx, config_base=0x%llx",
+             event->attr.config, event->hw.config_base);
+
+    if (!event->hw.config_base) {
+        aql_warn("[PMU] READ: No measurement attached to event");
         return 0;
+    }
 
     measurement = (struct aql_measurement *)event->hw.config_base;
+
+    aql_info("[PMU] READ: Calling aql_perf_measurement_read_atomic for GPU %u",
+             measurement->gpu_id);
 
     /* Use atomic version to return cached value and schedule refresh */
     counter_value = aql_perf_measurement_read_atomic(measurement);
 
-    aql_debug("Read cached counter value %llu from GPU %u",
-              counter_value, measurement->gpu_id);
+    aql_info("[PMU] READ: Got counter value %llu from GPU %u (state=%d, cache_valid=%d)",
+             counter_value, measurement->gpu_id, measurement->state, measurement->cache_valid);
 
     return counter_value;
 }

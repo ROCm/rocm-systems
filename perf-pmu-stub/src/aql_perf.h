@@ -18,6 +18,7 @@
 #include <linux/ktime.h>
 #include <linux/perf_event.h>
 #include "aql_c/aql_structures.h"
+#include "aql_c/packet_generation.h"
 
 /* Forward declarations */
 struct file;
@@ -186,6 +187,9 @@ struct aql_perf_packet {
     size_t packet_size;
 };
 
+/* Forward declaration for counter_reg_info_t */
+typedef struct counter_reg_info counter_reg_info_t;
+
 /* Per-measurement tracking structure */
 struct aql_measurement {
     struct list_head list;
@@ -198,11 +202,15 @@ struct aql_measurement {
     enum measurement_state state;
     uint64_t last_counter_value;
 
+    /* Allocated counter from block (NULL if not allocated) */
+    counter_reg_info_t* allocated_counter;
+
     /* Work queue support for atomic context handling */
     struct workqueue_struct *work_queue;
     spinlock_t cache_lock;           /* Protects cached_counter_value */
     uint64_t cached_counter_value;   /* Cached value for atomic reads */
     bool cache_valid;                /* Whether cached value is valid */
+    bool pending_destroy;            /* Measurement should be freed after async work */
 };
 
 /* Main AQL Performance Session Structure */
@@ -262,21 +270,27 @@ int aql_perf_allocate_counter_buffers(arch_t *arch, struct file *kfd_file,
 void aql_perf_free_counter_buffers(arch_t *arch, struct file *kfd_file,
                                    struct kfd_process *process, uint32_t gpu_id);
 
-/* Packet Operations */
-int aql_perf_create_start_packet(struct aql_perf_session *session,
-                                 uint32_t gpu_id,
-                                 uint32_t counter_id,
-                                 struct aql_perf_packet *packet);
-int aql_perf_create_read_packet(struct aql_perf_session *session,
-                                uint32_t gpu_id,
-                                uint32_t counter_id,
-                                struct aql_perf_packet *packet);
-int aql_perf_create_end_packet(struct aql_perf_session *session,
+/* Counter Allocation Functions */
+counter_reg_info_t* aql_counter_try_allocate(block_info_t *block,
+                                             uint32_t event_id,
+                                             struct perf_event *perf_event);
+void aql_counter_release(counter_reg_info_t *reg);
+int aql_build_counter_info(uint32_t counter_id,
+                           arch_t *arch,
+                           counter_reg_info_t *allocated_counter,
+                           counter_info_t *out_info,
+                           block_info_t **out_block);
+
+/* Packet Operations - New PM4-based implementation */
+int aql_perf_create_start_packet(struct aql_measurement *measurement,
+                                 pm4_buffer_t **out_pm4_buffer);
+int aql_perf_create_read_packet(struct aql_measurement *measurement,
+                                pm4_buffer_t **out_pm4_buffer);
+int aql_perf_create_end_packet(struct aql_measurement *measurement,
+                               pm4_buffer_t **out_pm4_buffer);
+int aql_perf_submit_pm4_packet(struct aql_perf_session *session,
                                uint32_t gpu_id,
-                               uint32_t counter_id,
-                               struct aql_perf_packet *packet);
-int aql_perf_submit_packet(struct aql_perf_session *session,
-                           struct aql_perf_packet *packet);
+                               pm4_buffer_t *pm4_buffer);
 
 /* Measurement Management */
 struct aql_measurement *aql_perf_measurement_create(struct aql_perf_session *session,
