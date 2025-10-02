@@ -15,12 +15,10 @@ else()
     set(_rocm_root "/opt/rocm")
 endif()
 
-set(_rocm_llvm_lib "${_rocm_root}/lib/llvm/lib")
+# Set path to ROCm LLVM library directory containing libomptarget.so
+set(_rocm_llvm_lib "${_rocm_root}/llvm/lib")
 
-set(_rocm_ld_env
-    "LD_PRELOAD=libomptarget.so"
-    "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}"
-)
+set(_rocm_ld_env "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}")
 
 if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
     message(

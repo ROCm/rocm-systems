@@ -75,7 +75,12 @@ set(CMAKE_C_COMPILER   "${HIP_PATH}/bin/${HIPCC_EXEC}")
 set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
 execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
                 OUTPUT_VARIABLE HIP_VERSION
+                RESULT_VARIABLE result
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+if(result AND NOT result EQUAL 0)
+  message(FATAL_ERROR "Failure trying to obtain HIP version via command: ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version: ${result}")
+endif()
 
 if(NOT WIN32)
   if(NOT BUILD_SHARED_LIBS)
