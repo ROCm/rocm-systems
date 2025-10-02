@@ -268,8 +268,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
 		/* TODO: support mixed APU and dGPU configurations */
 		return HSAKMT_STATUS_SUCCESS;
 
+	HsaMemFlags flags;
+	flags.ui32.CoarseGrain = 1;
+	flags.ui32.ExtendedCoherent = 0;
 	return hsakmt_fmm_register_memory(MemoryAddress, MemorySizeInBytes,
-				   NULL, 0, true, false);
+				   NULL, 0, flags);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodes(void *MemoryAddress,
@@ -292,10 +295,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodes(void *MemoryAddress,
 			NumberOfNodes, NodeArray);
 
 	if (ret == HSAKMT_STATUS_SUCCESS) {
+		HsaMemFlags flags;
+		flags.ui32.CoarseGrain = 1;
+		flags.ui32.ExtendedCoherent = 0;
+
 		ret = hsakmt_fmm_register_memory(MemoryAddress, MemorySizeInBytes,
 					  gpu_id_array,
 					  NumberOfNodes*sizeof(uint32_t),
-					  true, false);
+					  flags);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			free(gpu_id_array);
 	}
@@ -325,7 +332,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(void *MemoryAddress,
 		return HSAKMT_STATUS_NOT_SUPPORTED;
 
 	ret = hsakmt_fmm_register_memory(MemoryAddress, MemorySizeInBytes,
-		NULL, 0, MemFlags.ui32.CoarseGrain, MemFlags.ui32.ExtendedCoherent);
+		NULL, 0, MemFlags);
 
 	return ret;
 }
