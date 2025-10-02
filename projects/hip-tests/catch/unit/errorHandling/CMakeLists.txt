@@ -8,6 +8,13 @@ set(TEST_SRC
     hipGetLastError.cc
     hipPeekAtLastError.cc
 )
+
+if(UNIX)
+  set(TEST_SRC
+      ${TEST_SRC}
+      hipGetLastErrorOnAbort.cc)
+endif()
+
 add_executable(hipGetLastErrorEnv_Exe EXCLUDE_FROM_ALL hipGetLastErrorEnv_Exe.cc)
 add_executable(hipPeekAtLastErrorEnv_Exe EXCLUDE_FROM_ALL hipPeekAtLastErrorEnv_Exe.cc)
 if(HIP_PLATFORM MATCHES "amd")
