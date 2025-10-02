@@ -157,13 +157,6 @@ static int pmu_stub_event_init(struct perf_event *event)
     //     return -EOPNOTSUPP;
     // }
 
-    /* Only hardware (AQL) counters are supported */
-    if (!pmu->aql_available) {
-        pmu_err("AQL hardware counters not available - event creation failed for config=0x%llx\n",
-                event->attr.config);
-        return -EOPNOTSUPP;
-    }
-
     /* Initialize AQL hardware counter */
     ret = aql_pmu_event_init(event);
     if (ret != 0) {
@@ -216,54 +209,9 @@ static int pmu_stub_add(struct perf_event *event, int flags)
         return 0;
     }
 
-    pmu_debug("add: Handling simulation event (hwc->config_base=0)\n");
-
-    /* Simulation event handling */
-    spin_lock_irqsave(&pmu->lock, irq_flags);
-
-    /* Get free event slot */
-    idx = pmu_stub_get_event_idx(pmu);
-    if (idx < 0) {
-        pmu_err("add: No free event slots available\n");
-        spin_unlock_irqrestore(&pmu->lock, irq_flags);
-        return -EAGAIN;
-    }
-
-    pmu_debug("add: Allocated simulation event slot %d\n", idx);
-
-    /* Assign event to slot */
-    hwc->idx = idx;
-    pmu->events[idx].event = event;
-    pmu->events[idx].prev_count = 0;
-    pmu->events[idx].active = false;
-    pmu->events[idx].uses_aql_hardware = false;
-
-    /* Set initial counter value */
-    local64_set(&event->count, 0);
-
-    /* Start event if requested */
-    if (flags & PERF_EF_START) {
-        pmu->events[idx].active = true;
-        hwc->state = 0;
-        pmu_debug("add: Started simulation event immediately (PERF_EF_START flag set)\n");
-    } else {
-        hwc->state = PERF_HES_STOPPED;
-        pmu_debug("add: Simulation event added but not started\n");
-    }
-
-    pmu->num_events++;
-
-    /* Start timer if this is the first event */
-    if (pmu->num_events == 1) {
-        hrtimer_start(&pmu->timer, pmu->timer_period, HRTIMER_MODE_REL);
-        pmu_debug("add: Started simulation timer (first event)\n");
-    }
-
-    spin_unlock_irqrestore(&pmu->lock, irq_flags);
-
-    pmu_debug("add: Successfully added simulation event config=0x%llx, slot=%d, total_events=%d\n",
-              event->attr.config, idx, pmu->num_events);
-    return 0;
+    /* Only AQL hardware events are supported */
+    pmu_err("add: Non-AQL event detected, config=0x%llx\n", event->attr.config);
+    return -EINVAL;
 }
 
 /* PMU callback: Remove event from PMU */
@@ -294,40 +242,8 @@ static void pmu_stub_del(struct perf_event *event, int flags)
         return;
     }
 
-    pmu_debug("del: Removing simulation event\n");
-
-    /* Simulation event handling */
-    spin_lock_irqsave(&pmu->lock, irq_flags);
-
-    /* Stop event if running */
-    if (hwc->idx >= 0) {
-        pmu_debug("del: Stopping simulation event slot %d\n", hwc->idx);
-        pmu->events[hwc->idx].active = false;
-
-        /* Update final count */
-        if (flags & PERF_EF_UPDATE) {
-            pmu_debug("del: Reading final count for simulation event (PERF_EF_UPDATE flag set)\n");
-            pmu_stub_read(event);
-        }
-
-        /* Free event slot */
-        pmu_stub_free_event_idx(pmu, hwc->idx);
-        hwc->idx = -1;
-
-        pmu->num_events--;
-        pmu_debug("del: Freed simulation event slot, remaining events=%d\n", pmu->num_events);
-
-        /* Stop timer if no more events */
-        if (pmu->num_events == 0) {
-            hrtimer_cancel(&pmu->timer);
-            pmu_debug("del: Stopped simulation timer (no more events)\n");
-        }
-    } else {
-        pmu_debug("del: Simulation event has no valid slot (hwc->idx=%d)\n", hwc->idx);
-    }
-
-    spin_unlock_irqrestore(&pmu->lock, irq_flags);
-    pmu_debug("del: Successfully removed simulation event config=0x%llx\n", event->attr.config);
+    /* Only AQL hardware events are supported */
+    pmu_err("del: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 }
 
 /* PMU callback: Start event */
@@ -359,29 +275,8 @@ static void pmu_stub_start(struct perf_event *event, int flags)
         return;
     }
 
-    pmu_debug("start: Starting simulation event\n");
-
-    /* Simulation event handling */
-    spin_lock_irqsave(&pmu->lock, irq_flags);
-
-    if (hwc->idx >= 0 && hwc->idx < PMU_STUB_MAX_EVENTS) {
-        pmu_debug("start: Activating simulation event slot %d\n", hwc->idx);
-        pmu->events[hwc->idx].active = true;
-        hwc->state = 0;
-
-        /* Reset counter if requested */
-        if (flags & PERF_EF_RELOAD) {
-            pmu_debug("start: Resetting simulation counter (PERF_EF_RELOAD flag set)\n");
-            local64_set(&event->count, 0);
-            pmu->events[hwc->idx].prev_count = 0;
-        }
-        pmu_debug("start: Successfully started simulation event config=0x%llx, slot=%d\n",
-                  event->attr.config, hwc->idx);
-    } else {
-        pmu_debug("start: Invalid simulation event slot (hwc->idx=%d)\n", hwc->idx);
-    }
-
-    spin_unlock_irqrestore(&pmu->lock, irq_flags);
+    /* Only AQL hardware events are supported */
+    pmu_err("start: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 }
 
 /* PMU callback: Stop event */
@@ -412,28 +307,8 @@ static void pmu_stub_stop(struct perf_event *event, int flags)
         return;
     }
 
-    pmu_debug("stop: Stopping simulation event\n");
-
-    /* Simulation event handling */
-    spin_lock_irqsave(&pmu->lock, irq_flags);
-
-    if (hwc->idx >= 0 && hwc->idx < PMU_STUB_MAX_EVENTS) {
-        pmu_debug("stop: Deactivating simulation event slot %d\n", hwc->idx);
-        pmu->events[hwc->idx].active = false;
-        hwc->state = PERF_HES_STOPPED;
-
-        /* Update count if requested */
-        if (flags & PERF_EF_UPDATE) {
-            pmu_debug("stop: Reading final count for simulation event (PERF_EF_UPDATE flag set)\n");
-            pmu_stub_read(event);
-        }
-        pmu_debug("stop: Successfully stopped simulation event config=0x%llx, slot=%d\n",
-                  event->attr.config, hwc->idx);
-    } else {
-        pmu_debug("stop: Invalid simulation event slot (hwc->idx=%d)\n", hwc->idx);
-    }
-
-    spin_unlock_irqrestore(&pmu->lock, irq_flags);
+    /* Only AQL hardware events are supported */
+    pmu_err("stop: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 }
 
 /* PMU callback: Read event counter */
@@ -453,9 +328,8 @@ static void pmu_stub_read(struct perf_event *event)
         return;
     }
 
-    pmu_debug("read: Reading simulation event counter (already updated by timer)\n");
-    /* Simulation events - counter value is already updated in timer handler */
-    /* This could be enhanced to read from hardware registers in a real driver */
+    /* Only AQL hardware events are supported */
+    pmu_err("read: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 }
 
 /* Initialize event attributes from counter_registry */
@@ -496,7 +370,7 @@ static int pmu_stub_init_event_attrs(void)
         /* Store the counter ID */
         pmu_attr->id = counter->id;
 
-        /* Convert name to lowercase for sysfs */
+        /* Use counter name directly (already lowercase in registry) */
         name_lower = kstrdup(counter->name, GFP_KERNEL);
         if (!name_lower) {
             /* Cleanup on error */
@@ -509,16 +383,6 @@ static int pmu_stub_init_event_attrs(void)
             pmu_stub_event_attrs = NULL;
             pmu_stub_event_attrs_dynamic = NULL;
             return -ENOMEM;
-        }
-
-        /* Convert to lowercase */
-        {
-            char *p = name_lower;
-            while (*p) {
-                if (*p >= 'A' && *p <= 'Z')
-                    *p = *p + ('a' - 'A');
-                p++;
-            }
         }
 
         /* Initialize device_attribute */
@@ -602,7 +466,6 @@ static int __init pmu_stub_init(void)
 
     /* Initialize AQL hardware integration */
     mutex_init(&pmu->aql_mutex);
-    pmu->aql_available = false;
 
     /* Initialize timer */
     hrtimer_setup(&pmu->timer, pmu_stub_timer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -636,11 +499,9 @@ static int __init pmu_stub_init(void)
     /* Initialize AQL PMU integration */
     ret = aql_pmu_init();
     if (ret == 0) {
-        pmu->aql_available = true;
         pmu_info("AQL hardware acceleration enabled\n");
     } else {
         pmu_err("AQL hardware acceleration required but not available: %d\n", ret);
-        pmu->aql_available = false;
         perf_pmu_unregister(&pmu->pmu);
         pmu_stub_cleanup_event_attrs();
         kfree(pmu);
@@ -649,17 +510,6 @@ static int __init pmu_stub_init(void)
 
     pmu_info("PMU Stub module loaded successfully\n");
     pmu_info("Events available under: /sys/bus/event_source/devices/%s/\n", PMU_NAME);
-
-    /* Test KFD ioctl functionality */
-    pmu_info("Testing KFD ioctl functionality...\n");
-    ret = kfd_test_get_version();
-    if (ret == 0) {
-        kfd_test_print_result();
-        pmu_info("KFD integration test completed successfully\n");
-    } else {
-        kfd_test_print_result();
-        pmu_info("KFD integration test failed, but module will continue to load\n");
-    }
 
     return 0;
 }
@@ -673,10 +523,8 @@ static void __exit pmu_stub_exit(void)
 
     if (pmu) {
         /* Cleanup AQL integration first */
-        if (pmu->aql_available) {
-            aql_pmu_cleanup();
-            pmu_info("AQL hardware acceleration disabled\n");
-        }
+        aql_pmu_cleanup();
+        pmu_info("AQL hardware acceleration disabled\n");
 
         /* Cancel timer */
         hrtimer_cancel(&pmu->timer);

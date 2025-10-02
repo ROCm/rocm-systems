@@ -58,7 +58,6 @@ struct pmu_stub {
     ktime_t timer_period;
 
     /* AQL Hardware Integration */
-    bool aql_available;                      /* AQL feature available */
     struct mutex aql_mutex;                  /* Protects AQL operations */
 
     /* Statistics */
