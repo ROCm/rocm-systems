@@ -205,7 +205,7 @@ jobs:
           cmake --build build-rocjpeg --target all --parallel 16
           cmake --build build-rocjpeg --target install
           echo -e "ROCJPEG Installed Successfully!"
-      
+
       - name: Build and Install ROCProfiler-Register
         shell: bash
         working-directory: projects/rocprofiler-register
