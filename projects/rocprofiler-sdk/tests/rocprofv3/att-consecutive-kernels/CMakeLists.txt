@@ -37,6 +37,8 @@ set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+set(att-consecutive-kernels-env "${PRELOAD_ENV}")
+
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
 find_package(rocprofiler-sdk REQUIRED)
@@ -75,7 +77,8 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-att-consecutive-kernels-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+               "${att-consecutive-kernels-env}" DISABLED ${IS_DISABLED})
 
 add_test(NAME rocprofv3-test-att-consecutive-kernels-validate
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
