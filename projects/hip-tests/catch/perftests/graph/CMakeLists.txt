@@ -19,6 +19,7 @@
 set(TEST_SRC
     hipPerfGraphLaunch.cc
     parallelGraph.cc
+    hipGraphTopology.cc
 )
 
 hip_add_exe_to_target(NAME perfGraphTest

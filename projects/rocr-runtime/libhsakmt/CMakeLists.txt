@@ -129,7 +129,8 @@ set ( HSAKMT_SRC "src/debug.c"
                  "src/spm.c"
                  "src/version.c"
                  "src/svm.c"
-                 "src/pc_sampling.c")
+                 "src/pc_sampling.c"
+                 "src/ais.c")
 
 ## Declare the library target name
 add_library (${HSAKMT_TARGET} STATIC "")

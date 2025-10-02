@@ -745,12 +745,14 @@ output_dir = os.path.dirname(OUTPUT)
 if not os.path.exists(output_dir):
   os.makedirs(output_dir)
 
-# Generating output header file
+# Generating output header file (build directory)
 with open(OUTPUT, 'w') as f:
   generate_prof_header(f, api_map, api_callback_ids, opts_map)
 
-if not filecmp.cmp(INPUT, OUTPUT):
-  message("Warning: \"" + INPUT + "\" needs to be re-generated and checked-in with the current changes")
+# Also overwrite the original template file (source directory)
+message("Also writing to original template file: " + INPUT)
+with open(INPUT, 'w') as f:
+  generate_prof_header(f, api_map, api_callback_ids, opts_map)
 
 # Successfull exit
 sys.exit(0)

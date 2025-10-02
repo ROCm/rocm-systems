@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
 from typing import Any
 
 from dash import html

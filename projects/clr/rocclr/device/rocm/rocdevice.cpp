@@ -1980,12 +1980,8 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Using extended fine grained access system memory pool");
         segment = agentInfo->ext_fine_grain_pool;
-      } else {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-                "Falling through on fine grained access system memory pool");
-        segment = agentInfo->fine_grain_pool;
+        break;
       }
-      break;
     default:
       guarantee(false, "Invalid Memory Segment");
       break;

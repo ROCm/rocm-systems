@@ -322,6 +322,15 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
 )
 
+add_test(
+    NAME test_profile_live_attach_detach
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -s -m live_attach_detach
+        --junitxml=tests/test_profile_live_attach_detach.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -601,7 +610,8 @@ add_custom_target(
     # Create VERSION.sha file
     COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
     # Build standalone binary
-    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution and fork
+    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
+    # and fork
     # bombs as explained in
     # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
@@ -613,6 +623,8 @@ add_custom_target(
         --include-package-data=plotly --include-package=kaleido
         --include-package-data=kaleido --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
+        --include-package=rocprof_compute_profile
+        --include-package-data=rocprof_compute_profile
         --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
         --include-package=utils --include-package-data=utils rocprof-compute
