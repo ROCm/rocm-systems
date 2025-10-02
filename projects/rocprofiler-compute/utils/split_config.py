@@ -77,7 +77,7 @@ def update_analysis_config():
         new_panel_config["Panel Config"]["id"] = panel_config["id"]
         new_panel_config["Panel Config"]["title"] = panel_config["title"]
         new_panel_config["Panel Config"]["metrics_description"] = {
-            key: value["plain"]
+            key: value["plain"].replace("\n", " ").strip()
             for key, value in panel_config.get("metrics_description", {}).items()
         }
         panel_id_int = panel_config["id"]
@@ -240,7 +240,9 @@ def update_documentation():
                 # Add metrics info
                 for metric_name in sorted(list(metric_names)):
                     metrics_info[metric_name] = {
-                        "rst": panel_config["metrics_description"][metric_name]["rst"],
+                        "rst": panel_config["metrics_description"][metric_name]["rst"]
+                        .replace("\n", " ")
+                        .strip(),
                         "unit": panel_config["metrics_description"][metric_name][
                             "unit"
                         ],
