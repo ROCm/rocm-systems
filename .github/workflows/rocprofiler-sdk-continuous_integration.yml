@@ -64,7 +64,7 @@ env:
   GLOBAL_CMAKE_OPTIONS: ""
   DISABLE_ROCR_BUILD: "true"
   #Temporary workaround, will remove when TheRock rccl is updated.
-  USE_DEFAULT_RCCL: "true"
+  USE_DEFAULT_RCCL: "false"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
