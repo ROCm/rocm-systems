@@ -30,11 +30,19 @@ RUN apt-get update && \
         python3-pip software-properties-common texinfo unzip wget vim zip zlib1g-dev && \
     apt-get autoclean
 
-RUN if ! pip install 'cmake==3.21' perfetto 2>&1 | tee pip_output.log | grep -q "externally managed environment"; then \
-        echo "pip install succeeded without --break-system-packages"; \
+RUN if [ "$VERSION" = 22.04 ]; then \
+        pip install 'cmake==3.21' perfetto; \
+        echo "pip install ran without --break-system-packages"; \
     else \
-        echo "Retrying with --break-system-packages"; \
         pip install --break-system-packages 'cmake==3.21' perfetto; \
+        echo "pip install ran with --break-system-packages"; \
+    fi
+
+RUN if ! pip show perfetto 2>&1 | tee pip_output.log | grep -q "WARNING"; then \
+        echo "perfetto successfully installed!"; \
+    else \
+        echo "ERROR: perfetto install failed."; \
+        exit 1; \
     fi
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
