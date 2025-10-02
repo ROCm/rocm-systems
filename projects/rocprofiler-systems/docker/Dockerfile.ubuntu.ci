@@ -1,5 +1,5 @@
-ARG DISTRO
-ARG VERSION
+ARG DISTRO=ubuntu
+ARG VERSION=22.04
 FROM ${DISTRO}:${VERSION}
 
 ENV HOME=/root
@@ -17,9 +17,9 @@ ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
 ENV PATH="/usr/local/bin:${PATH}"
-ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}"
-ENV CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH}"
+ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
+ENV CMAKE_PREFIX_PATH="/usr/local"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
@@ -55,10 +55,15 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
 ARG GPU_TYPE=""
 ARG GPU_TARBALL=""
 RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
+        VERSION=$(echo "$GPU_TARBALL" | sed -nE 's/.*([0-9]\.[0-9]\.[0-9]).*/\1/p'); \
+        if [ -z "$VERSION" ]; then \
+            echo "Error: Could not extract version from GPU_TARBALL ('$GPU_TARBALL')." >&2; \
+            exit 1; \
+        fi; \
         pip install --upgrade pip; \
         pip install awscli --break-system-packages; \
-        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request; \
-        mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
     fi
 
 ENV LC_ALL=C.UTF-8

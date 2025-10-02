@@ -30,27 +30,30 @@ Users may checkout `amd-staging` to preview upcoming features.
 
 ## Testing
 
-Populate the empty variables in `Dockerfile.customrocmtest` based on latest CI build information.
+Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.
+Populate the <rocm_build_image> variable in `docker/Dockerfile.customrocmtest` based on latest ROCm CI build information.
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
-* `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d && docker attach docker-customrocmtest-1`
+* If the docker image is not available on the machine, then build the image, otherwise skip this step: `docker compose -f docker-compose.customrocmtest.yml build`
+* Launch the container, and check the name of the container: `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d `
+* Run bash shell on the launched container: `docker exec -it <container_name> bash`
+* If testing is done, kill the container: `docker container kill <container_name>`
 
-Inside the docker container, clean, build and install the project with tests enabled:
+Inside the docker container, clean, build, then install the project with tests enabled:
 ```
 rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -DENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
 ```
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 
-Then, to run the automated test suite, run the following command:
+Then, to run the automated test suite, run the following commands:
 ```
+mkdir build
 ctest
 ```
 
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
-
-NOTE: This Dockerfile uses `ubuntu 22.04` as the base operating system image
 
 ## Standalone binary
 

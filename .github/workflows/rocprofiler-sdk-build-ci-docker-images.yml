@@ -46,6 +46,7 @@ jobs:
       - name: Get the latest therock build
         id: therock
         run: |
+          sudo apt-get update
           sudo apt-get install -y python3-pip
           python3 -m pip install -U pip
           python3 -m pip install -U awscli
