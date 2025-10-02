@@ -383,8 +383,10 @@ def main():
     print(output)
 
     # Write to file
-    prev_arch_dir_name = prev_arch_dir.name
-    output_file = prev_arch_dir / f"{prev_arch_dir_name}_diff.yaml"
+    curr_arch_dir_name = curr_arch_dir.name
+    output_dir = prev_arch_dir / "config_delta"
+    output_dir.mkdir(exist_ok=True)
+    output_file = output_dir / f"{curr_arch_dir_name}_diff.yaml"
 
     with open(output_file, "w") as f:
         f.write(output)
