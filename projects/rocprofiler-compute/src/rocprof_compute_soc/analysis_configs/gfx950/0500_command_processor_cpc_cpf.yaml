@@ -25,7 +25,11 @@ Panel Config:
     CPC-UTCL1 Stall: Percent of CPC busy cycles where the CPC was stalled by address
       translation
     CPC-UTCL2 Utilization: 'Percent of total cycles counted by the CPC''s L2 address
-      translation interface where the CPC was busy doing address translation work.  '
+      translation
+
+      interface where the CPC was busy doing address translation work.
+
+      '
   data source:
   - metric_table:
       id: 501

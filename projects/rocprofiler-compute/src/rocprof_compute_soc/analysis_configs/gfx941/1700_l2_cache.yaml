@@ -188,10 +188,15 @@ Panel Config:
       requests are only considered atomic by Infinity Fabric if they are targeted
       at non-write-cacheable memory, such as fine-grained memory allocations or uncached
       memory allocations on the MI2XX.
-    Read Stall: "The ratio of the total number of cycles the L2-Fabric interface was\
-      \ stalled on a read request to any destination (local HBM, remote PCIe\xAE connected\
-      \ accelerator or CPU, or remote Infinity Fabric connected accelerator or CPU)\
-      \ over the total active L2 cycles."
+    Read Stall: 'The ratio of the total number of cycles the L2-Fabric interface was
+
+      stalled on a read request to any destination (local HBM, remote PCIe\xAE
+
+      connected accelerator or CPU, or remote Infinity Fabric connected accelerator
+
+      or CPU) over the total active L2 cycles.
+
+      '
     Write Stall: The ratio of the total number of cycles the L2-Fabric interface was
       stalled on a write or atomic request to any destination (local HBM, remote accelerator
       or CPU, PCIe connected accelerator or CPU, or remote Infinity Fabric connected
@@ -370,32 +375,32 @@ Panel Config:
           avg: AVG((TCC_REQ_sum / $denom))
           min: MIN((TCC_REQ_sum / $denom))
           max: MAX((TCC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Read Req:
           avg: AVG((TCC_READ_sum / $denom))
           min: MIN((TCC_READ_sum / $denom))
           max: MAX((TCC_READ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Write Req:
           avg: AVG((TCC_WRITE_sum / $denom))
           min: MIN((TCC_WRITE_sum / $denom))
           max: MAX((TCC_WRITE_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Atomic Req:
           avg: AVG((TCC_ATOMIC_sum / $denom))
           min: MIN((TCC_ATOMIC_sum / $denom))
           max: MAX((TCC_ATOMIC_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Streaming Req:
           avg: AVG((TCC_STREAMING_REQ_sum / $denom))
           min: MIN((TCC_STREAMING_REQ_sum / $denom))
           max: MAX((TCC_STREAMING_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Probe Req:
           avg: AVG((TCC_PROBE_sum / $denom))
           min: MIN((TCC_PROBE_sum / $denom))
           max: MAX((TCC_PROBE_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Cache Hit:
           avg: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
@@ -408,17 +413,17 @@ Panel Config:
           avg: AVG((TCC_HIT_sum / $denom))
           min: MIN((TCC_HIT_sum / $denom))
           max: MAX((TCC_HIT_sum / $denom))
-          unit: (Hits  + $normUnit)
+          unit: (Hits + $normUnit)
         Misses:
           avg: AVG((TCC_MISS_sum / $denom))
           min: MIN((TCC_MISS_sum / $denom))
           max: MAX((TCC_MISS_sum / $denom))
-          unit: (Misses  + $normUnit)
+          unit: (Misses + $normUnit)
         Writeback:
           avg: AVG((TCC_WRITEBACK_sum / $denom))
           min: MIN((TCC_WRITEBACK_sum / $denom))
           max: MAX((TCC_WRITEBACK_sum / $denom))
-          unit: (Cachelines  + $normUnit)
+          unit: (Cachelines + $normUnit)
         Writeback (Internal):
           avg: AVG((TCC_NORMAL_WRITEBACK_sum / $denom))
           min: MIN((TCC_NORMAL_WRITEBACK_sum / $denom))
@@ -443,22 +448,22 @@ Panel Config:
           avg: AVG((TCC_NC_REQ_sum / $denom))
           min: MIN((TCC_NC_REQ_sum / $denom))
           max: MAX((TCC_NC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         UC Req:
           avg: AVG((TCC_UC_REQ_sum / $denom))
           min: MIN((TCC_UC_REQ_sum / $denom))
           max: MAX((TCC_UC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         CC Req:
           avg: AVG((TCC_CC_REQ_sum / $denom))
           min: MIN((TCC_CC_REQ_sum / $denom))
           max: MAX((TCC_CC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         RW Req:
           avg: AVG((TCC_RW_REQ_sum / $denom))
           min: MIN((TCC_RW_REQ_sum / $denom))
           max: MAX((TCC_RW_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
   - metric_table:
       id: 1704
       title: L2 Cache Stalls
@@ -507,54 +512,54 @@ Panel Config:
           avg: AVG((TCC_EA0_RDREQ_32B_sum / $denom))
           min: MIN((TCC_EA0_RDREQ_32B_sum / $denom))
           max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Read (64B):
           avg: AVG(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
           min: MIN(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
           max: MAX(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Read (Uncached):
           avg: AVG((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
           min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
           max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         HBM Read:
           avg: AVG((TCC_EA0_RDREQ_DRAM_sum / $denom))
           min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
           max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Remote Read:
           avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
           min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
           max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Write and Atomic (32B):
           avg: AVG(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
           min: MIN(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
           max: MAX(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Write and Atomic (Uncached):
           avg: AVG((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
           min: MIN((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
           max: MAX((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Write and Atomic (64B):
           avg: AVG((TCC_EA0_WRREQ_64B_sum / $denom))
           min: MIN((TCC_EA0_WRREQ_64B_sum / $denom))
           max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         HBM Write and Atomic:
           avg: AVG((TCC_EA0_WRREQ_DRAM_sum / $denom))
           min: MIN((TCC_EA0_WRREQ_DRAM_sum / $denom))
           max: MAX((TCC_EA0_WRREQ_DRAM_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Remote Write and Atomic:
           avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
           min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
           max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Atomic:
           avg: AVG((TCC_EA0_ATOMIC_sum / $denom))
           min: MIN((TCC_EA0_ATOMIC_sum / $denom))
           max: MAX((TCC_EA0_ATOMIC_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)

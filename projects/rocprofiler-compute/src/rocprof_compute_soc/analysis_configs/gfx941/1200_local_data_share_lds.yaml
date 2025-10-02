@@ -27,7 +27,7 @@ Panel Config:
       to, read/write/atomics and HIP's __shfl instructions) executed per normalization
       unit.
     LDS Latency: The average number of round-trip cycles (i.e., from issue to data-return
-      / acknowledgment) required for an LDS instruction to complete.
+      acknowledgment) required for an LDS instruction to complete.
     Bank Conflicts/Access: The ratio of the number of cycles spent in the LDS scheduler
       due to bank conflicts (as determined by the conflict resolution hardware) to
       the base number of cycles that would be spent in the LDS scheduler in a completely
@@ -44,9 +44,14 @@ Panel Config:
       unit.
     Unaligned Stall: The total number of cycles spent in the LDS scheduler due to
       stalls from non-dword aligned addresses per normalization unit.
-    Mem Violations: "The total number of out-of-bounds accesses made to the LDS, per\
-      \ normalization unit. This is unused and expected to be zero in most configurations\
-      \ for modern CDNA\u2122 accelerators."
+    Mem Violations: 'The total number of out-of-bounds accesses made to the LDS, per
+      normalization
+
+      unit. This is unused and expected to be zero in most configurations for
+
+      modern CDNA\u2122 accelerators.
+
+      '
   data source:
   - metric_table:
       id: 1201
@@ -87,7 +92,7 @@ Panel Config:
           avg: AVG((SQ_INSTS_LDS / $denom))
           min: MIN((SQ_INSTS_LDS / $denom))
           max: MAX((SQ_INSTS_LDS / $denom))
-          unit: (Instr  + $normUnit)
+          unit: (Instr + $normUnit)
         Theoretical Bandwidth:
           avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
             / (End_Timestamp - Start_Timestamp)))
@@ -117,27 +122,27 @@ Panel Config:
           avg: AVG((SQ_LDS_IDX_ACTIVE / $denom))
           min: MIN((SQ_LDS_IDX_ACTIVE / $denom))
           max: MAX((SQ_LDS_IDX_ACTIVE / $denom))
-          unit: (Cycles  + $normUnit)
+          unit: (Cycles + $normUnit)
         Atomic Return Cycles:
           avg: AVG((SQ_LDS_ATOMIC_RETURN / $denom))
           min: MIN((SQ_LDS_ATOMIC_RETURN / $denom))
           max: MAX((SQ_LDS_ATOMIC_RETURN / $denom))
-          unit: (Cycles  + $normUnit)
+          unit: (Cycles + $normUnit)
         Bank Conflict:
           avg: AVG((SQ_LDS_BANK_CONFLICT / $denom))
           min: MIN((SQ_LDS_BANK_CONFLICT / $denom))
           max: MAX((SQ_LDS_BANK_CONFLICT / $denom))
-          unit: (Cycles  + $normUnit)
+          unit: (Cycles + $normUnit)
         Addr Conflict:
           avg: AVG((SQ_LDS_ADDR_CONFLICT / $denom))
           min: MIN((SQ_LDS_ADDR_CONFLICT / $denom))
           max: MAX((SQ_LDS_ADDR_CONFLICT / $denom))
-          unit: (Cycles  + $normUnit)
+          unit: (Cycles + $normUnit)
         Unaligned Stall:
           avg: AVG((SQ_LDS_UNALIGNED_STALL / $denom))
           min: MIN((SQ_LDS_UNALIGNED_STALL / $denom))
           max: MAX((SQ_LDS_UNALIGNED_STALL / $denom))
-          unit: (Cycles  + $normUnit)
+          unit: (Cycles + $normUnit)
         Mem Violations:
           avg: AVG((SQ_LDS_MEM_VIOLATIONS / $denom))
           min: MIN((SQ_LDS_MEM_VIOLATIONS / $denom))

@@ -22,15 +22,28 @@ Panel Config:
     Active CUs: Total number of active compute units (CUs) on the accelerator during
       the kernel execution.
     Num CUs: Total number of compute units (CUs) on the accelerator.
-    VGPR: 'The number of architected vector general-purpose registers allocated for
-      the kernel, see VALU. Note: this may not exactly match the number of VGPRs requested
-      by the compiler due to allocation granularity.'
+    VGPR: 'The number of architected vector general-purpose registers allocated
+
+      for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
+
+      requested by the compiler due to allocation granularity.
+
+      '
     SGPR: 'The number of scalar general-purpose registers allocated for the kernel,
+
       see SALU. Note: this may not exactly match the number of SGPRs requested by
-      the compiler due to allocation granularity.'
+
+      the compiler due to allocation granularity.
+
+      '
     LDS Allocation: 'The number of bytes of LDS memory (or, shared memory) allocated
-      for this kernel. Note: This may also be larger than what was requested at compile
-      time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+      for
+
+      this kernel. Note: This may also be larger than what was requested at compile
+
+      time due to both allocation granularity and dynamic per-dispatch LDS allocations.
+
+      '
     Scratch Allocation: The number of bytes of scratch memory requested per work-item
       for this kernel. Scratch memory is used for stack memory on the accelerator,
       as well as for register spills and restores.
@@ -116,8 +129,12 @@ Panel Config:
     HBM Rd: The total number of L2 requests to Infinity Fabric to read 32B or 64B
       of data from the accelerator's local HBM, per normalization unit.
     HBM Wr: 'The total number of L2 requests to Infinity Fabric to write or atomically
+
       update 32B or 64B of data in the accelerator''s local HBM, per normalization
-      unit. '
+
+      unit.
+
+      '
   data source:
   - metric_table:
       id: 301
@@ -252,13 +269,13 @@ Panel Config:
           value: ROUND(AVG((TCC_EA0_ATOMIC_sum / $denom)), 0)
         Fabric Rd Lat:
           value: ROUND(AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
-            != 0) else  0)), 0)
+            != 0) else 0)), 0)
         Fabric Wr Lat:
           value: ROUND(AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
-            != 0) else  0)), 0)
+            != 0) else 0)), 0)
         Fabric Atomic Lat:
           value: ROUND(AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
-            != 0) else  0)), 0)
+            != 0) else 0)), 0)
         HBM Rd:
           value: ROUND(AVG((TCC_EA0_RDREQ_DRAM_sum / $denom)), 0)
         HBM Wr:

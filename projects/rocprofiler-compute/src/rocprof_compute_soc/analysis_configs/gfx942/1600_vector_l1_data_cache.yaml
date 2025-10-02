@@ -43,7 +43,7 @@ Panel Config:
       unit after coalescing per normalization unit.
     Cache BW: The number of bytes looked up in the vL1D cache as a result of VMEM
       instructions divided by total duration. The number of bytes is calculated as
-      the number of cache lines requested multiplied by the cache line size.  This
+      the number of cache lines requested multiplied by the cache line size. This
       value does not consider partial requests, so for instance, if only a single
       value is requested in a cache line, the data movement will still be counted
       as a full cache line.
@@ -108,11 +108,15 @@ Panel Config:
     Hits: The number of translation requests that hit in the UTCL1, and could be reused,
       per normalization unit.
     Translation Misses: The total number of translation requests that missed in the
-      UTCL1 due to  translation not being present in the cache, per normalization
-      unit.
-    Permission Misses: "The total number of translation requests that missed in the\
-      \ UTCL1 due to a permission error, per normalization unit. This is unused and\
-      \ expected to be zero in most configurations for modern CDNA\u2122 accelerators."
+      UTCL1 due to translation not being present in the cache, per normalization unit.
+    Permission Misses: 'The total number of translation requests that missed in the
+      UTCL1 due
+
+      to a permission error, per normalization unit. This is unused and expected
+
+      to be zero in most configurations for modern CDNA\u2122 accelerators.
+
+      '
   data source:
   - metric_table:
       id: 1601
@@ -181,17 +185,17 @@ Panel Config:
           avg: AVG((TCP_TOTAL_ACCESSES_sum / $denom))
           min: MIN((TCP_TOTAL_ACCESSES_sum / $denom))
           max: MAX((TCP_TOTAL_ACCESSES_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Read Req:
           avg: AVG((TCP_TOTAL_READ_sum / $denom))
           min: MIN((TCP_TOTAL_READ_sum / $denom))
           max: MAX((TCP_TOTAL_READ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Write Req:
           avg: AVG((TCP_TOTAL_WRITE_sum / $denom))
           min: MIN((TCP_TOTAL_WRITE_sum / $denom))
           max: MAX((TCP_TOTAL_WRITE_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Atomic Req:
           avg: AVG(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
             / $denom))
@@ -199,7 +203,7 @@ Panel Config:
             / $denom))
           max: MAX(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
             / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Cache BW:
           avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
           min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
@@ -223,7 +227,7 @@ Panel Config:
           avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
           min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
           max: MAX((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Cache Hits:
           avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -234,7 +238,7 @@ Panel Config:
           max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         Invalidations:
           avg: AVG((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
           min: MIN((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
@@ -252,12 +256,12 @@ Panel Config:
           avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_READ_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         L1-L2 Write:
           avg: AVG((TCP_TCC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_WRITE_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         L1-L2 Atomic:
           avg: AVG(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
             / $denom))
@@ -265,7 +269,7 @@ Panel Config:
             / $denom))
           max: MAX(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
             / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
   - metric_table:
       id: 1604
       title: L1D - L2 Transactions
@@ -284,84 +288,84 @@ Panel Config:
           avg: AVG((TCP_TCC_NC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_NC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_NC_READ_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         UC - Read:
           xfer: Read
           coherency: UC
           avg: AVG((TCP_TCC_UC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_UC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_UC_READ_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         CC - Read:
           xfer: Read
           coherency: CC
           avg: AVG((TCP_TCC_CC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_CC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_CC_READ_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         RW - Read:
           xfer: Read
           coherency: RW
           avg: AVG((TCP_TCC_RW_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_RW_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_RW_READ_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         RW - Write:
           xfer: Write
           coherency: RW
           avg: AVG((TCP_TCC_RW_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_RW_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_RW_WRITE_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         NC - Write:
           xfer: Write
           coherency: NC
           avg: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_NC_WRITE_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         UC - Write:
           xfer: Write
           coherency: UC
           avg: AVG((TCP_TCC_UC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_UC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_UC_WRITE_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         CC - Write:
           xfer: Write
           coherency: CC
           avg: AVG((TCP_TCC_CC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_CC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_CC_WRITE_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         NC - Atomic:
           xfer: Atomic
           coherency: NC
           avg: AVG((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         UC - Atomic:
           xfer: Atomic
           coherency: UC
           avg: AVG((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         CC - Atomic:
           xfer: Atomic
           coherency: CC
           avg: AVG((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
         RW - Atomic:
           xfer: Atomic
           coherency: RW
           avg: AVG((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
-          unit: (Req  + $normUnit)
+          unit: (Req + $normUnit)
   - metric_table:
       id: 1605
       title: L1 Unified Translation Cache (UTCL1)
