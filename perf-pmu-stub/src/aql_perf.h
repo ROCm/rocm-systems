@@ -192,7 +192,7 @@ struct aql_measurement {
     struct aql_perf_session *session;
     uint32_t gpu_id;
     uint32_t counter_mask;
-    uint32_t counter_id;  /* Which counter from gfx12_counters to use */
+    uint32_t counter_id;  /* Counter ID from counter_registry (counter_id_t) */
     struct perf_event *event;
     ktime_t start_time;
     enum measurement_state state;
@@ -216,13 +216,11 @@ struct aql_perf_session {
     uint32_t num_gpus;
     uint32_t max_gpus;
 
-    /* Memory allocations - one per GPU */
-    struct kfd_data_alloc *counter_data;
-    struct kfd_data_alloc *packet_data;
-
     /* Thread safety and state management */
     struct mutex session_mutex;
-    refcount_t ref_count;
+    refcount_t ref_count;                /* Reference counting for future multi-session support.
+                                          * Currently only one global session exists, but this
+                                          * infrastructure allows safe sharing if needed. */
     enum session_state state;
 
     /* Resource tracking */
@@ -239,8 +237,8 @@ struct aql_perf_session {
     /* Counter configuration */
     struct counter_config counters;
 
-    /* GPU Architecture */
-    arch_t *arch;
+    /* GPU Architecture - one per GPU */
+    arch_t **archs;  /* Array of architecture pointers, indexed by GPU index */
 
     /* Session ID for debugging */
     uint64_t session_id;
@@ -257,8 +255,12 @@ void aql_perf_session_put(struct aql_perf_session *session);
 
 /* GPU Discovery and Setup */
 int aql_perf_discover_gpus(struct aql_perf_session *session);
-int aql_perf_allocate_gpu_memory(struct aql_perf_session *session);
-void aql_perf_free_gpu_memory(struct aql_perf_session *session);
+
+/* Counter Buffer Management */
+int aql_perf_allocate_counter_buffers(arch_t *arch, struct file *kfd_file,
+                                      struct kfd_process *process, uint32_t gpu_id);
+void aql_perf_free_counter_buffers(arch_t *arch, struct file *kfd_file,
+                                   struct kfd_process *process, uint32_t gpu_id);
 
 /* Packet Operations */
 int aql_perf_create_start_packet(struct aql_perf_session *session,
@@ -303,12 +305,6 @@ void aql_perf_recovery_work(struct work_struct *work);
 /* Statistics */
 void aql_perf_inc_stat(enum aql_stat_type type);
 void aql_perf_get_stats(struct aql_perf_stats *stats);
-
-/* Counter Descriptors */
-extern struct counter_descriptor gfx12_counters[];
-extern size_t gfx12_counters_count;
-
-struct counter_descriptor *aql_perf_find_counter_descriptor(uint32_t counter_id);
 
 /* Error Recovery Functions */
 struct aql_error_context *aql_perf_create_error_context(enum aql_error_severity severity,

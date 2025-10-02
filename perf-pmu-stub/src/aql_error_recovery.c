@@ -88,8 +88,15 @@ static int aql_perf_reinitialize_session(struct aql_perf_session *session)
     /* Stop all active measurements first */
     aql_perf_stop_all_measurements(session);
 
-    /* Free existing GPU memory */
-    aql_perf_free_gpu_memory(session);
+    /* Free existing counter buffers for all GPUs */
+    if (session->archs && session->num_gpus > 0) {
+        for (uint32_t i = 0; i < session->num_gpus; i++) {
+            if (session->archs[i]) {
+                aql_perf_free_counter_buffers(session->archs[i], session->kfd_file,
+                                              session->process, session->gpu_ids[i]);
+            }
+        }
+    }
 
     /* Close existing KFD file */
     if (session->kfd_file) {
@@ -133,12 +140,19 @@ static int aql_perf_reinitialize_session(struct aql_perf_session *session)
         return ret;
     }
 
-    /* Reallocate GPU memory */
-    ret = aql_perf_allocate_gpu_memory(session);
-    if (ret) {
-        aql_err("Session %llu: GPU memory reallocation failed during recovery: %d",
-                session->session_id, ret);
-        return ret;
+    /* Reallocate counter buffers for all GPU architectures */
+    if (session->archs && session->num_gpus > 0) {
+        for (uint32_t i = 0; i < session->num_gpus; i++) {
+            if (session->archs[i]) {
+                ret = aql_perf_allocate_counter_buffers(session->archs[i], session->kfd_file,
+                                                        session->process, session->gpu_ids[i]);
+                if (ret) {
+                    aql_err("Session %llu: Counter buffer reallocation failed for GPU %u during recovery: %d",
+                            session->session_id, session->gpu_ids[i], ret);
+                    return ret;
+                }
+            }
+        }
     }
 
     aql_info("Session %llu: Session reinitialization successful", session->session_id);

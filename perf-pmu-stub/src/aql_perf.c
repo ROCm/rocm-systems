@@ -41,36 +41,6 @@ static atomic64_t session_id_counter = ATOMIC64_INIT(0);
 /* Per-CPU statistics */
 DEFINE_PER_CPU(struct aql_perf_stats, aql_stats);
 
-/* GFX12 Counter Descriptors */
-struct counter_descriptor gfx12_counters[] = {
-    {
-        .counter_id = 0,
-        .counter_select = GFX12_PERF_SEL_SQ_WAVES,
-        .counter_mode = 0x1,
-        .name = "sq_waves",
-        .description = "Number of waves in shader queues",
-        .supported_gpus = BIT(GFX12_GPU_TYPE),
-    },
-    {
-        .counter_id = 1,
-        .counter_select = GFX12_PERF_SEL_SQ_INSTS,
-        .counter_mode = 0x1,
-        .name = "sq_instructions",
-        .description = "Number of shader instructions executed",
-        .supported_gpus = BIT(GFX12_GPU_TYPE),
-    },
-    {
-        .counter_id = 2,
-        .counter_select = GFX12_PERF_SEL_TA_BUSY,
-        .counter_mode = 0x1,
-        .name = "ta_busy",
-        .description = "Texture unit busy cycles",
-        .supported_gpus = BIT(GFX12_GPU_TYPE),
-    }
-};
-
-size_t gfx12_counters_count = ARRAY_SIZE(gfx12_counters);
-
 /* Helper Functions */
 
 /**
@@ -116,23 +86,6 @@ void aql_perf_get_stats(struct aql_perf_stats *stats)
     }
 }
 
-/**
- * aql_perf_find_counter_descriptor - Find counter descriptor by ID
- * @counter_id: Counter ID to find
- *
- * Returns: Counter descriptor or NULL if not found
- */
-struct counter_descriptor *aql_perf_find_counter_descriptor(uint32_t counter_id)
-{
-    size_t i;
-
-    for (i = 0; i < gfx12_counters_count; i++) {
-        if (gfx12_counters[i].counter_id == counter_id)
-            return &gfx12_counters[i];
-    }
-
-    return NULL;
-}
 
 /* GPU Architecture Detection */
 
@@ -288,8 +241,21 @@ static void aql_perf_session_release(struct aql_perf_session *session)
     /* Ensure all measurements are stopped */
     // This will be implemented in measurement management
 
-    /* Free GPU memory allocations */
-    aql_perf_free_gpu_memory(session);
+    /* Free counter buffers and architectures for all GPUs */
+    if (session->archs && session->num_gpus > 0) {
+        for (uint32_t i = 0; i < session->num_gpus; i++) {
+            if (session->archs[i]) {
+                /* Free counter buffers for this GPU */
+                aql_perf_free_counter_buffers(session->archs[i], session->kfd_file,
+                                              session->process, session->gpu_ids[i]);
+                /* Destroy architecture */
+                arch_destroy(session->archs[i]);
+                session->archs[i] = NULL;
+            }
+        }
+        kfree(session->archs);
+        session->archs = NULL;
+    }
 
     /* Close KFD file handle */
     if (session->kfd_file) {
@@ -302,16 +268,8 @@ static void aql_perf_session_release(struct aql_perf_session *session)
 
     /* Free dynamic allocations */
     kfree(session->gpu_ids);
-    kfree(session->counter_data);
-    kfree(session->packet_data);
     kfree(session->counters.descriptors);
     kfree(session->counters.counter_masks);
-
-    /* Free architecture */
-    if (session->arch) {
-        arch_destroy((arch_t *)session->arch);
-        session->arch = NULL;
-    }
 
     aql_debug("Session %llu fully released", session->session_id);
     kfree(session);
@@ -361,6 +319,11 @@ struct aql_perf_session *aql_perf_session_create(void)
 /**
  * aql_perf_session_get - Increment session reference count
  * @session: Session to reference
+ *
+ * Note: Currently only one global session exists, so this refcounting
+ * infrastructure is not strictly necessary. However, it provides safety
+ * for potential future designs with multiple sessions or session sharing
+ * between different subsystems.
  */
 void aql_perf_session_get(struct aql_perf_session *session)
 {
@@ -371,6 +334,12 @@ void aql_perf_session_get(struct aql_perf_session *session)
 /**
  * aql_perf_session_put - Decrement session reference count
  * @session: Session to dereference
+ *
+ * When the reference count reaches zero, the session is released and freed.
+ *
+ * Note: Currently only one global session exists for the module's lifetime,
+ * so the refcount will only reach zero during module unload. This infrastructure
+ * is designed for potential future multi-session or session-sharing scenarios.
  */
 void aql_perf_session_put(struct aql_perf_session *session)
 {
@@ -433,38 +402,52 @@ int aql_perf_session_initialize(struct aql_perf_session *session)
         goto error;
     }
 
-    /* Allocate GPU memory */
-    ret = aql_perf_allocate_gpu_memory(session);
-    if (ret) {
-        aql_err("Session %llu: GPU memory allocation failed: %d",
-                session->session_id, ret);
-        goto error;
-    }
-
-    /* Detect and create GPU architecture */
-    if (session->num_gpus > 0) {
-        const char *arch_name = get_arch_name_from_gpu_sysfs(session->gpu_ids[0]);
-        if (arch_name) {
-            session->arch = arch_create_by_name(arch_name);
-            if (!session->arch) {
-                aql_err("Session %llu: Failed to create architecture %s for GPU %u",
-                        session->session_id, arch_name, session->gpu_ids[0]);
-                ret = -ENOTSUPP;
-                goto error;
-            }
-            aql_info("Session %llu: Created architecture %s for GPU %u",
-                     session->session_id, arch_name, session->gpu_ids[0]);
-        } else {
-            aql_err("Session %llu: Failed to determine architecture for GPU %u",
-                    session->session_id, session->gpu_ids[0]);
-            ret = -ENOTSUPP;
-            goto error;
-        }
-    } else {
+    /* Detect and create GPU architectures for all GPUs */
+    if (session->num_gpus == 0) {
         aql_err("Session %llu: No GPUs available for architecture detection",
                 session->session_id);
         ret = -ENODEV;
         goto error;
+    }
+
+    /* Allocate architecture array */
+    session->archs = kzalloc(session->num_gpus * sizeof(arch_t *), GFP_KERNEL);
+    if (!session->archs) {
+        aql_err("Session %llu: Failed to allocate architecture array", session->session_id);
+        ret = -ENOMEM;
+        goto error;
+    }
+
+    /* Create architecture for each GPU */
+    for (uint32_t i = 0; i < session->num_gpus; i++) {
+        const char *arch_name = get_arch_name_from_gpu_sysfs(session->gpu_ids[i]);
+        if (!arch_name) {
+            aql_err("Session %llu: Failed to determine architecture for GPU %u",
+                    session->session_id, session->gpu_ids[i]);
+            ret = -ENOTSUPP;
+            goto error;
+        }
+
+        session->archs[i] = arch_create_by_name(arch_name);
+        if (!session->archs[i]) {
+            aql_err("Session %llu: Failed to create architecture %s for GPU %u",
+                    session->session_id, arch_name, session->gpu_ids[i]);
+            ret = -ENOTSUPP;
+            goto error;
+        }
+        aql_info("Session %llu: Created architecture %s for GPU %u (index %u)",
+                 session->session_id, arch_name, session->gpu_ids[i], i);
+
+        /* Allocate counter buffers for this GPU's architecture */
+        ret = aql_perf_allocate_counter_buffers(session->archs[i], session->kfd_file,
+                                                session->process, session->gpu_ids[i]);
+        if (ret) {
+            aql_err("Session %llu: Failed to allocate counter buffers for GPU %u: %d",
+                    session->session_id, session->gpu_ids[i], ret);
+            goto error;
+        }
+        aql_info("Session %llu: Allocated counter buffers for GPU %u (index %u)",
+                 session->session_id, session->gpu_ids[i], i);
     }
 
     /* Initialize counter configuration with default GFX12 counter */
@@ -563,120 +546,119 @@ int aql_perf_discover_gpus(struct aql_perf_session *session)
 }
 
 /**
- * aql_perf_allocate_gpu_memory - Allocate memory for all GPUs
- * @session: AQL performance session
+ * aql_perf_allocate_counter_buffers - Allocate KFD device memory for counter buffers
+ * @arch: Architecture structure containing counter info
+ * @kfd_file: KFD file pointer from session
+ * @process: KFD process pointer from session
+ * @gpu_id: GPU ID to allocate memory on
+ *
+ * Iterates through all blocks and allocates command_buffer and data_buffer
+ * (1 page each) for every counter via kfd_alloc_device.
  *
  * Returns: 0 on success, negative error code on failure
  */
-int aql_perf_allocate_gpu_memory(struct aql_perf_session *session)
+int aql_perf_allocate_counter_buffers(arch_t *arch, struct file *kfd_file,
+                                      struct kfd_process *process, uint32_t gpu_id)
 {
-    uint32_t i;
+    uint32_t block_idx, counter_idx;
     int ret;
 
-    if (!session->gpu_ids || session->num_gpus == 0) {
-        aql_err("Session %llu: No GPUs discovered", session->session_id);
-        return -ENODEV;
-    }
+    if (!arch || !kfd_file || !process)
+        return -EINVAL;
 
-    /* Allocate memory allocation arrays */
-    session->counter_data = kzalloc(session->num_gpus * sizeof(struct kfd_data_alloc),
-                                   GFP_KERNEL);
-    session->packet_data = kzalloc(session->num_gpus * sizeof(struct kfd_data_alloc),
-                                  GFP_KERNEL);
+    /* Iterate through all blocks */
+    for (block_idx = 0; block_idx < HW_IP_BLOCK_LAST; block_idx++) {
+        block_info_t *block = arch->block_map.blocks[block_idx];
+        if (!block || !block->counter_reg_info)
+            continue;
 
-    if (!session->counter_data || !session->packet_data) {
-        aql_err("Session %llu: Failed to allocate data structures",
-                session->session_id);
-        ret = -ENOMEM;
-        goto cleanup;
-    }
+        /* Allocate buffers for each counter in this block */
+        for (counter_idx = 0; counter_idx < block->counter_count; counter_idx++) {
+            counter_reg_info_t *reg = &block->counter_reg_info[counter_idx];
 
-    /* Allocate memory for each GPU */
-    for (i = 0; i < session->num_gpus; i++) {
-        /* Allocate counter result buffer */
-        ret = kfd_alloc_device(session->kfd_file, session->process,
-                              session->gpu_ids[i], AQL_PERF_RESULT_BUFFER_SIZE,
-                              &session->counter_data[i]);
-        if (ret) {
-            aql_err("Session %llu: Failed to allocate counter buffer for GPU %u: %d",
-                    session->session_id, session->gpu_ids[i], ret);
-            goto cleanup_partial;
+            /* Allocate command buffer struct and device memory (1 page) */
+            reg->allocation.command_buffer = kzalloc(sizeof(struct kfd_data_alloc), GFP_KERNEL);
+            if (!reg->allocation.command_buffer) {
+                aql_perf_free_counter_buffers(arch, kfd_file, process, gpu_id);
+                return -ENOMEM;
+            }
+
+            ret = kfd_alloc_device(kfd_file, process, gpu_id, PAGE_SIZE,
+                                  reg->allocation.command_buffer);
+            if (ret != 0) {
+                kfree(reg->allocation.command_buffer);
+                reg->allocation.command_buffer = NULL;
+                aql_perf_free_counter_buffers(arch, kfd_file, process, gpu_id);
+                return ret;
+            }
+
+            /* Allocate data buffer struct and device memory (1 page) */
+            reg->allocation.data_buffer = kzalloc(sizeof(struct kfd_data_alloc), GFP_KERNEL);
+            if (!reg->allocation.data_buffer) {
+                aql_perf_free_counter_buffers(arch, kfd_file, process, gpu_id);
+                return -ENOMEM;
+            }
+
+            ret = kfd_alloc_device(kfd_file, process, gpu_id, PAGE_SIZE,
+                                  reg->allocation.data_buffer);
+            if (ret != 0) {
+                kfree(reg->allocation.data_buffer);
+                reg->allocation.data_buffer = NULL;
+                aql_perf_free_counter_buffers(arch, kfd_file, process, gpu_id);
+                return ret;
+            }
         }
-
-        /* Allocate packet buffer */
-        ret = kfd_alloc_device(session->kfd_file, session->process,
-                              session->gpu_ids[i], AQL_PERF_PACKET_BUFFER_SIZE,
-                              &session->packet_data[i]);
-        if (ret) {
-            aql_err("Session %llu: Failed to allocate packet buffer for GPU %u: %d",
-                    session->session_id, session->gpu_ids[i], ret);
-            /* Clean up counter buffer for this GPU */
-            kfd_destroy_device_mem(session->kfd_file, session->process,
-                                  session->gpu_ids[i], &session->counter_data[i]);
-            goto cleanup_partial;
-        }
-
-        aql_debug("Session %llu: Allocated memory for GPU %u (counter=%p, packet=%p)",
-                  session->session_id, session->gpu_ids[i],
-                  session->counter_data[i].cpu_addr,
-                  session->packet_data[i].cpu_addr);
     }
 
-    aql_info("Session %llu: Successfully allocated memory for %u GPUs",
-             session->session_id, session->num_gpus);
     return 0;
-
-cleanup_partial:
-    /* Clean up partially allocated memory */
-    for (uint32_t j = 0; j < i; j++) {
-        kfd_destroy_device_mem(session->kfd_file, session->process,
-                              session->gpu_ids[j], &session->counter_data[j]);
-        kfd_destroy_device_mem(session->kfd_file, session->process,
-                              session->gpu_ids[j], &session->packet_data[j]);
-    }
-
-cleanup:
-    kfree(session->counter_data);
-    kfree(session->packet_data);
-    session->counter_data = NULL;
-    session->packet_data = NULL;
-    return ret;
 }
 
 /**
- * aql_perf_free_gpu_memory - Free all GPU memory allocations
- * @session: AQL performance session
+ * aql_perf_free_counter_buffers - Free KFD device memory for counter buffers
+ * @arch: Architecture structure containing counter info
+ * @kfd_file: KFD file pointer from session
+ * @process: KFD process pointer from session
+ * @gpu_id: GPU ID where memory was allocated
+ *
+ * Frees all command_buffer and data_buffer allocations.
  */
-void aql_perf_free_gpu_memory(struct aql_perf_session *session)
+void aql_perf_free_counter_buffers(arch_t *arch, struct file *kfd_file,
+                                   struct kfd_process *process, uint32_t gpu_id)
 {
-    uint32_t i;
+    uint32_t block_idx, counter_idx;
 
-    if (!session->counter_data || !session->packet_data)
+    if (!arch)
         return;
 
-    aql_debug("Session %llu: Freeing GPU memory for %u GPUs",
-              session->session_id, session->num_gpus);
+    /* Iterate through all blocks */
+    for (block_idx = 0; block_idx < HW_IP_BLOCK_LAST; block_idx++) {
+        block_info_t *block = arch->block_map.blocks[block_idx];
+        if (!block || !block->counter_reg_info)
+            continue;
 
-    for (i = 0; i < session->num_gpus; i++) {
-        if (session->counter_data[i].cpu_addr) {
-            kfd_destroy_device_mem(session->kfd_file, session->process,
-                                  session->gpu_ids[i], &session->counter_data[i]);
-            aql_debug("Session %llu: Freed counter memory for GPU %u",
-                      session->session_id, session->gpu_ids[i]);
-        }
+        /* Free buffers for each counter in this block */
+        for (counter_idx = 0; counter_idx < block->counter_count; counter_idx++) {
+            counter_reg_info_t *reg = &block->counter_reg_info[counter_idx];
 
-        if (session->packet_data[i].cpu_addr) {
-            kfd_destroy_device_mem(session->kfd_file, session->process,
-                                  session->gpu_ids[i], &session->packet_data[i]);
-            aql_debug("Session %llu: Freed packet memory for GPU %u",
-                      session->session_id, session->gpu_ids[i]);
+            /* Free command buffer */
+            if (reg->allocation.command_buffer) {
+                if (kfd_file && process)
+                    kfd_destroy_device_mem(kfd_file, process, gpu_id,
+                                          reg->allocation.command_buffer);
+                kfree(reg->allocation.command_buffer);
+                reg->allocation.command_buffer = NULL;
+            }
+
+            /* Free data buffer */
+            if (reg->allocation.data_buffer) {
+                if (kfd_file && process)
+                    kfd_destroy_device_mem(kfd_file, process, gpu_id,
+                                          reg->allocation.data_buffer);
+                kfree(reg->allocation.data_buffer);
+                reg->allocation.data_buffer = NULL;
+            }
         }
     }
-
-    kfree(session->counter_data);
-    kfree(session->packet_data);
-    session->counter_data = NULL;
-    session->packet_data = NULL;
 }
 
 EXPORT_SYMBOL_GPL(aql_perf_session_create);
@@ -684,3 +666,5 @@ EXPORT_SYMBOL_GPL(aql_perf_session_initialize);
 EXPORT_SYMBOL_GPL(aql_perf_session_destroy);
 EXPORT_SYMBOL_GPL(aql_perf_session_get);
 EXPORT_SYMBOL_GPL(aql_perf_session_put);
+EXPORT_SYMBOL_GPL(aql_perf_allocate_counter_buffers);
+EXPORT_SYMBOL_GPL(aql_perf_free_counter_buffers);

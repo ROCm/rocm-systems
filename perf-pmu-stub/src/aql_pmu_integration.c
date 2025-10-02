@@ -339,9 +339,16 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
 }
 
 /**
- * aql_pmu_get_session - Get global AQL session (for debugging)
+ * aql_pmu_get_session - Get reference to global AQL session
  *
- * Returns: Global AQL session or NULL
+ * Retrieves the global AQL session and increments its reference count.
+ * Caller must call aql_pmu_put_session() when done.
+ *
+ * Note: Currently returns the single global session. The reference counting
+ * is designed for future flexibility if multiple sessions or session lifecycle
+ * management becomes necessary.
+ *
+ * Returns: Global AQL session with incremented refcount, or NULL
  */
 struct aql_perf_session *aql_pmu_get_session(void)
 {
@@ -357,8 +364,14 @@ struct aql_perf_session *aql_pmu_get_session(void)
 }
 
 /**
- * aql_pmu_put_session - Release AQL session reference
+ * aql_pmu_put_session - Release reference to AQL session
  * @session: Session to release
+ *
+ * Decrements the session reference count. If the count reaches zero,
+ * the session is freed.
+ *
+ * Note: For the current single global session, this will only trigger
+ * cleanup during module unload.
  */
 void aql_pmu_put_session(struct aql_perf_session *session)
 {

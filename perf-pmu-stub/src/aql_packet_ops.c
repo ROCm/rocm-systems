@@ -17,16 +17,26 @@
 
 #include "aql_perf.h"
 #include "pmu_stub.h"
+#include "aql_c/counter_registry.h"
 
 /* External KFD functions */
 extern int kfd_ioctl_submit_ib_packet(struct file *filep, struct kfd_process *p,
                                      uint32_t gpu_id, const uint32_t* packet,
                                      size_t ib_len);
 
-/* Helper function to find GPU index in session */
+/**
+ * aql_perf_find_gpu_index - Find GPU index in session from GPU ID
+ * @session: AQL performance session
+ * @gpu_id: GPU ID to find
+ *
+ * Returns: GPU index, or -1 if not found
+ */
 static int aql_perf_find_gpu_index(struct aql_perf_session *session, uint32_t gpu_id)
 {
     uint32_t i;
+
+    if (!session || !session->gpu_ids)
+        return -1;
 
     for (i = 0; i < session->num_gpus; i++) {
         if (session->gpu_ids[i] == gpu_id)
@@ -38,22 +48,46 @@ static int aql_perf_find_gpu_index(struct aql_perf_session *session, uint32_t gp
 
 /**
  * aql_perf_get_counter_select - Get counter select value for a counter ID
- * @counter_id: Counter ID (from event->attr.config)
+ * @session: AQL performance session (contains arch for event ID lookup)
+ * @gpu_id: Target GPU ID
+ * @counter_id: Counter ID (from event->attr.config, maps to counter_id_t)
  *
- * Returns: Counter select value for hardware programming
+ * Returns: Architecture-specific hardware event ID for counter programming
  */
-static uint64_t aql_perf_get_counter_select(uint32_t counter_id)
+static uint64_t aql_perf_get_counter_select(struct aql_perf_session *session, uint32_t gpu_id, uint32_t counter_id)
 {
-    struct counter_descriptor *desc;
+    const counter_def_t *counter;
+    uint32_t event_id;
+    int gpu_idx;
 
-    desc = aql_perf_find_counter_descriptor(counter_id);
-    if (desc) {
-        return desc->counter_select;
+    if (!session || !session->archs) {
+        aql_err("No architectures available for counter lookup");
+        return 0;
     }
 
-    /* Default to SQ_WAVES if counter not found */
-    aql_debug("Counter ID %u not found, defaulting to SQ_WAVES", counter_id);
-    return GFX12_PERF_SEL_SQ_WAVES;
+    /* Find GPU index */
+    gpu_idx = aql_perf_find_gpu_index(session, gpu_id);
+    if (gpu_idx < 0 || !session->archs[gpu_idx]) {
+        aql_err("GPU %u not found or no architecture available", gpu_id);
+        return 0;
+    }
+
+    /* Look up counter definition by ID */
+    counter = lookup_counter_by_id((counter_id_t)counter_id);
+    if (!counter) {
+        aql_err("Counter ID %u not found in registry", counter_id);
+        return 0;
+    }
+
+    /* Get architecture-specific event ID */
+    event_id = lookup_event_id(counter, (const arch_t *)session->archs[gpu_idx]);
+    if (event_id == 0) {
+        aql_err("No event mapping for counter %s on GPU %u architecture", counter->name, gpu_id);
+        return 0;
+    }
+
+    aql_debug("GPU %u: Counter %s (ID=%u) maps to event_id=0x%x", gpu_id, counter->name, counter_id, event_id);
+    return event_id;
 }
 
 /* Packet Creation Functions */
@@ -93,10 +127,11 @@ int aql_perf_create_start_packet(struct aql_perf_session *session,
     packet->gpu_id = gpu_id;
 
     /* Get counter select value for the requested counter */
-    counter_select = aql_perf_get_counter_select(counter_id);
+    counter_select = aql_perf_get_counter_select(session, gpu_id, counter_id);
 
     packet->counter_select = counter_select;
-    packet->result_address = (uint64_t)session->counter_data[gpu_idx].gpu_addr;
+    /* TODO: Update to use arch counter buffers instead of session counter_data */
+    packet->result_address = 0;  /* Placeholder - needs arch counter buffer */
 
     /* Build AQL packet payload for GFX12 counter start */
     packet->packet_data[0] = 0x10000000; /* PM4 header - TYPE3 packet */
@@ -151,10 +186,11 @@ int aql_perf_create_read_packet(struct aql_perf_session *session,
     packet->gpu_id = gpu_id;
 
     /* Get counter select value for the requested counter */
-    counter_select = aql_perf_get_counter_select(counter_id);
+    counter_select = aql_perf_get_counter_select(session, gpu_id, counter_id);
 
     packet->counter_select = counter_select;
-    packet->result_address = (uint64_t)session->counter_data[gpu_idx].gpu_addr;
+    /* TODO: Update to use arch counter buffers instead of session counter_data */
+    packet->result_address = 0;  /* Placeholder - needs arch counter buffer */
 
     /* Build AQL packet payload for GFX12 counter read */
     packet->packet_data[0] = 0x10000000; /* PM4 header - TYPE3 packet */
@@ -209,10 +245,11 @@ int aql_perf_create_end_packet(struct aql_perf_session *session,
     packet->gpu_id = gpu_id;
 
     /* Get counter select value for the requested counter */
-    counter_select = aql_perf_get_counter_select(counter_id);
+    counter_select = aql_perf_get_counter_select(session, gpu_id, counter_id);
 
     packet->counter_select = counter_select;
-    packet->result_address = (uint64_t)session->counter_data[gpu_idx].gpu_addr;
+    /* TODO: Update to use arch counter buffers instead of session counter_data */
+    packet->result_address = 0;  /* Placeholder - needs arch counter buffer */
 
     /* Build AQL packet payload for GFX12 counter end */
     packet->packet_data[0] = 0x10000000; /* PM4 header - TYPE3 packet */
@@ -574,8 +611,9 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
     }
 
     /* Read result from GPU memory */
-    result_buffer = (uint64_t *)session->counter_data[gpu_idx].cpu_addr;
-    counter_value = *result_buffer;
+    /* TODO: Update to use arch counter buffers instead of session counter_data */
+    result_buffer = NULL;  /* Placeholder - needs arch counter buffer */
+    counter_value = result_buffer ? *result_buffer : 0;
 
     /* Update cached value */
     measurement->last_counter_value = counter_value;
