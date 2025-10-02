@@ -358,6 +358,8 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
     }
   }
 
+  // The hsa copy api would result in a dirty cache state
+  gpu().setFenceDirty(false);
   return true;
 }
 
@@ -573,6 +575,8 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent,
 
   if (status == HSA_STATUS_SUCCESS) {
     gpu().addSystemScope();
+    // The hsa copy api would result in a dirty cache state
+    gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
     LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);

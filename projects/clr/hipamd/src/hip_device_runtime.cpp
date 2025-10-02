@@ -671,7 +671,7 @@ hipError_t hipDeviceSynchronize() {
   CHECK_SUPPORTED_DURING_CAPTURE();
   constexpr bool kDoWaitForCpu = false;
   hip::getCurrentDevice()->SyncAllStreams(kDoWaitForCpu);
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN_DURATION(hipSuccess);
 }
 
 int ihipGetDevice() {

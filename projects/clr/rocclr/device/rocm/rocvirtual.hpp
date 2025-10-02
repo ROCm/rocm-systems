@@ -449,6 +449,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void* allocKernArg(size_t size, size_t alignment);
   bool isFenceDirty() const { return fence_dirty_; }
+  void setFenceDirty(bool state) { fence_dirty_ = state; }
   void HiddenHeapInit();
 
   void setLastUsedSdmaEngine(uint32_t mask) { lastUsedSdmaEngineMask_ = mask; }

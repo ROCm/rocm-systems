@@ -159,7 +159,11 @@ void HostQueue::finishCommand(Command* command) {
 
 void HostQueue::finish(bool cpu_wait) {
   Command* command = nullptr;
+  size_t minBatchSize = 0;
+
   if (IS_HIP) {
+    minBatchSize = DEBUG_CLR_BATCH_CPU_SYNC_SIZE;
+
     command = getLastQueuedCommand(true);
     if (command == nullptr) {
       return;
@@ -170,23 +174,33 @@ void HostQueue::finish(bool cpu_wait) {
       cpu_wait = true;
     }
   }
+
+  size_t batchSize = GetSubmissionBatchSize();
+  ClPrint(LOG_DEBUG, LOG_CMD,
+          "finish() called with batch size: %zu, cpu_wait: %d, "
+          "fence dirty: %d",
+          batchSize, cpu_wait, vdev()->isFenceDirty());
+
   // Force marker if the batch wasn't sent for CPU update or fence is dirty
   if (nullptr == command || (GetSubmissionBatch() != nullptr) || vdev()->isFenceDirty()) {
     if (nullptr != command) {
       command->release();
     }
+    const Command::EventWaitList nullWaitList = {};
     // Send a finish to make sure we finished all commands
-    command = new Marker(*this, false);
+    command = new Marker(*this, false, nullWaitList, nullptr, batchSize < minBatchSize);
     if (command == NULL) {
       return;
     }
-    ClPrint(LOG_DEBUG, LOG_CMD, "Marker queued to %p for finish", this);
     command->enqueue();
   }
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
   if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion)) {
-    ClPrint(LOG_DEBUG, LOG_CMD, "No HW event || cpu wait=%d, await command completion", cpu_wait);
+    ClPrint(LOG_DEBUG, LOG_CMD,
+            "No HW event or batch size is less than %zu, "
+            "await command completion",
+            minBatchSize);
     command->awaitCompletion();
 
     if (IS_HIP) {

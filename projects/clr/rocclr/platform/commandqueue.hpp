@@ -251,6 +251,9 @@ class HostQueue : public CommandQueue {
   //! Get the submitted batch
   Command* GetSubmissionBatch() const { return head_; }
 
+  //! Get the current batch size
+  size_t GetSubmissionBatchSize() const { return size_; }
+
   //! Insert a command into the linked list of submitted commands
   void FormSubmissionBatch(Command* command) {
     // Insert the command to the linked list.
