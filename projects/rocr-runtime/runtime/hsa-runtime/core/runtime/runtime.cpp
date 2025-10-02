@@ -521,7 +521,7 @@ hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   const auto& locked_copy = [&](void*& ptr, core::Agent* locking_agent) {
     void* tmp;
     hsa_agent_t agent = locking_agent->public_handle();
-    hsa_status_t err = system_region->Lock(1, &agent, ptr, size, &tmp);
+    hsa_status_t err = system_region->Lock(1, &agent, ptr, 0, size, &tmp);
     if (err != HSA_STATUS_SUCCESS) throw AMD::hsa_exception(err, "Lock failed in hsa_memory_copy.");
     gpuPtr = ptr;
     ptr = tmp;
