@@ -2268,6 +2268,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     trap_handler_tma_region_ = NULL;
   }
 
+   InvalidateCodeCaches(tma_addr, tma_size);
   // Bind the trap handler to this node.
   return driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr,
                                  tma_size);
@@ -2333,11 +2334,25 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   }
 
   // Invalidate caches which may hold lines of code object allocation.
-  uint32_t cache_inv[8] = {0};
+  // For multi-XCC GPUs (GFX9+), wrap ACQUIRE_MEM in PRED_EXEC to broadcast
+  // cache invalidation to all XCCs. Without this, only XCC0 would be invalidated,
+  // leaving other XCCs with stale cached data.
+  constexpr uint32_t pred_exec_cmd_sz = 2;
+  constexpr uint32_t max_packet_size_dw = 8;
+  constexpr uint32_t max_cmd_size = pred_exec_cmd_sz + max_packet_size_dw;
+  uint32_t cache_inv[max_cmd_size] = {0};
   uint32_t cache_inv_size_dw;
+  uint32_t cmd_offset = 0;
 
+  // For multi-XCC GPUs (GFX9+), reserve space for PRED_EXEC header
+  bool needs_pred_exec = (isa_->GetMajorVersion() >= 9 && properties_.NumXcc > 1);
+  if (needs_pred_exec) {
+    cmd_offset = pred_exec_cmd_sz;
+  }
+
+  // Build ACQUIRE_MEM packet
   if (isa_->GetMajorVersion() < 10) {
-      cache_inv[1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(
+      cache_inv[cmd_offset + 1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(
           PM4_ACQUIRE_MEM_COHER_CNTL_SH_ICACHE_ACTION_ENA |
           PM4_ACQUIRE_MEM_COHER_CNTL_SH_KCACHE_ACTION_ENA |
           PM4_ACQUIRE_MEM_COHER_CNTL_TC_ACTION_ENA |
@@ -2345,7 +2360,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 
       cache_inv_size_dw = 7;
   } else {
-      cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
+      cache_inv[cmd_offset + 7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
           PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV |
@@ -2355,22 +2370,34 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
       cache_inv_size_dw = 8;
   }
 
-  cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw,
+  cache_inv[cmd_offset] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw,
              isa_->GetMajorVersion());
 
   if (ptr) {
     size_t size_granule = (size + 0xFF) >> 8;
-    cache_inv[2] = PM4_ACQUIRE_MEM_DW2_COHER_SIZE(size_granule);
-    cache_inv[3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(size_granule >> 32);
-    cache_inv[4] = PM4_ACQUIRE_MEM_DW4_COHER_BASE((uint64_t)ptr);
-    cache_inv[5] = PM4_ACQUIRE_MEM_DW4_COHER_BASE_HI((uint64_t)ptr);
+    cache_inv[cmd_offset + 2] = PM4_ACQUIRE_MEM_DW2_COHER_SIZE(size_granule);
+    cache_inv[cmd_offset + 3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(size_granule >> 32);
+    cache_inv[cmd_offset + 4] = PM4_ACQUIRE_MEM_DW4_COHER_BASE((uint64_t)ptr);
+    cache_inv[cmd_offset + 5] = PM4_ACQUIRE_MEM_DW4_COHER_BASE_HI((uint64_t)ptr);
   } else {
-    cache_inv[2] = PM4_ACQUIRE_MEM_DW2_COHER_SIZE(0xFFFFFFFF);
-    cache_inv[3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(0xFF);
+    cache_inv[cmd_offset + 2] = PM4_ACQUIRE_MEM_DW2_COHER_SIZE(0xFFFFFFFF);
+    cache_inv[cmd_offset + 3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(0xFF);
+  }
+
+  // Build PRED_EXEC wrapper for multi-XCC broadcast (GFX9+)
+  uint32_t total_cmd_size_dw = cache_inv_size_dw;
+  if (needs_pred_exec) {
+    // PRED_EXEC wraps the entire ACQUIRE_MEM packet
+    cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz,
+                           isa_->GetMajorVersion());
+    // EXEC_COUNT specifies how many dwords follow the PRED_EXEC header
+    cache_inv[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(cache_inv_size_dw) |
+                   PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+    total_cmd_size_dw = pred_exec_cmd_sz + cache_inv_size_dw;
   }
 
   // Submit the command to the utility queue and wait for it to complete.
-  queues_[QueueUtility]->ExecutePM4(cache_inv, cache_inv_size_dw * sizeof(uint32_t));
+  queues_[QueueUtility]->ExecutePM4(cache_inv, total_cmd_size_dw * sizeof(uint32_t));
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {

@@ -283,7 +283,7 @@ trap_entry:
   // - Set bit 21 in TTMP13 to indicate a stochastic trap.
   // - Branch to the profile trap handler logic.
 
-  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0 glc   // ttmp[14:15]=*host_trap_buffers
+  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0      // ttmp[14:15]=*host_trap_buffers
 .if .amdgcn.gfx_generation_minor >= 4
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT, 1), 0
   s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
@@ -326,7 +326,7 @@ trap_entry:
 
   // Handle stochastic trap
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
-  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8 glc // ttmp[14:15]=*stoch_trap_buf
+  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8 // ttmp[14:15]=*stoch_trap_buf
   s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 25 in TTMP13
   s_waitcnt                             lgkmcnt(0)
