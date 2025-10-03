@@ -65,7 +65,7 @@ jobs:
       # fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi300a', runner: 'linux-rocm-docker-mi300-1gpu-ossci', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
+          - { gpu: 'mi300a', runner: 'vultr-linux-rocm', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
