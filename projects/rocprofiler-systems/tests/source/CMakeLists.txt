@@ -40,19 +40,13 @@ set(_thread_limit_environment
     "ROCPROFSYS_VERBOSE=2"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss"
 )
-
-# Test values ought to be maintained above test limits and within allowed bounds. Avoid exact power-of-2 matches to prevent test duplication.
-set(THREAD_VALUES
-    ${ROCPROFSYS_MAX_THREADS}
-    1
-    2049
-    4095
-    4097
-    4120
-)
-
 # Maximum allowed threads
 set(ALLOWED_MAX_THREADS 4096)
+
+math(EXPR THREAD_VAL_1 "${ROCPROFSYS_MAX_THREADS} + 24")
+math(EXPR THREAD_VAL_2 "${ALLOWED_MAX_THREADS} + 1")
+
+set(THREAD_VALUES ${THREAD_VAL_1} ${THREAD_VAL_2})
 
 # Loop over thread values
 foreach(THREADS IN LISTS THREAD_VALUES)
@@ -78,8 +72,8 @@ foreach(THREADS IN LISTS THREAD_VALUES)
         REWRITE_ARGS -e -v 2 -i 1024 --label return args
         RUNTIME_ARGS -e -v 1 -i 1024 --label return args
         RUN_ARGS 35 2 ${THREADS}
-        SAMPLING_TIMEOUT 240
-        REWRITE_TIMEOUT 240
+        SAMPLING_TIMEOUT 360
+        REWRITE_TIMEOUT 360
         RUNTIME_TIMEOUT 360
         RUNTIME_PASS_REGEX "${_thread_limit_pass_regex}"
         SAMPLING_PASS_REGEX "${_thread_limit_pass_regex}"

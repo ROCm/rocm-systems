@@ -28,7 +28,6 @@
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
-#include "library/rocprofiler-sdk/counters.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -63,8 +62,10 @@ namespace component
 {
 using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
-constexpr size_t allowed_max_threads = tim::operation::set_storage<
-    rocprofsys::rocprofiler_sdk::counter_data_tracker>::max_threads;
+// The maximum limit for the number of threads is set at 4096. declared and stored in the
+// set_storage struct's `types.hpp` file.
+constexpr size_t allowed_max_threads = 4096;
+
 namespace
 {
 auto* is_shutdown   = new bool{ false };  // intentional data leak
@@ -186,12 +187,16 @@ pthread_create_gotcha::wrapper::operator()() const
     auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
     if(static_cast<size_t>(_sequent_value) >= allowed_max_threads)
     {
-        ROCPROFSYS_WARNING_F(1,
-                             "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
-                             "reached. Further thread creation and profiling will be "
-                             "disabled to prevent resource exhaustion.\n",
-                             allowed_max_threads);
-        return nullptr;
+        static std::once_flag thread_limit_warning_flag;
+        std::call_once(thread_limit_warning_flag, []() {
+            ROCPROFSYS_WARNING_F(
+                1,
+                "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
+                "reached. Further thread creation and profiling will be "
+                "disabled to prevent resource exhaustion.\n",
+                allowed_max_threads);
+        });
+        return m_routine(m_arg);
     }
     auto _dtor = [&]() {
         set_thread_state(ThreadState::Internal);
