@@ -361,11 +361,14 @@ write_perfetto(
     // trace events
     {
         auto get_category_string = [](std::string_view _category) {
-            static auto buffer_names  = sdk::get_buffer_tracing_names();
-            auto        _category_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+            static auto buffer_names    = sdk::get_buffer_tracing_names();
+            auto        _category_idx   = ROCPROFILER_BUFFER_TRACING_NONE;
+            auto        _category_upper = std::string{_category};
+            std::transform(
+                begin(_category_upper), end(_category_upper), begin(_category_upper), ::toupper);
             for(const auto& citr : buffer_names)
             {
-                if(_category == citr.name) _category_idx = citr.value;
+                if(_category_upper == citr.name) _category_idx = citr.value;
             }
             return sdk::get_perfetto_category(_category_idx);
         };
@@ -385,13 +388,15 @@ write_perfetto(
                               "\"field2\": {\"nullopt\": false, \"data\": \"msg1\"}, "
                               "\"field3\": {\"nullopt\": true, \"data\": \"msg1\"}}";
 
-                if(itr.has_extdata())
+                /*if(itr.has_extdata())
                 {
                     if(auto _extdata = itr.get_extdata(); !_extdata.message.empty())
                         _name = _extdata.message;
-                }
+                }*/
 
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
+                ::perfetto::DynamicCategory _category =
+                    ::perfetto::DynamicCategory{get_category_string(itr.category)};
+
                 TRACE_EVENT_BEGIN(_category,
                                   ::perfetto::DynamicString{_name},
                                   track,
@@ -428,13 +433,11 @@ write_perfetto(
                 auto& track = thread_tracks.at(itr.tid);
                 auto  _name = itr.name;
 
-                if(itr.has_extdata())
-                {
-                    if(auto _extdata = itr.get_extdata(); !_extdata.message.empty())
-                        _name = _extdata.message;
-                }
+                ::perfetto::DynamicCategory _category =
+                    ::perfetto::DynamicCategory{get_category_string(itr.category)};
 
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
+                continue;
+
                 TRACE_EVENT_INSTANT(_category,
                                     ::perfetto::DynamicString{_name},
                                     track,

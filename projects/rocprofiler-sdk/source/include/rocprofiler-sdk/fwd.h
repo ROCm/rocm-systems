@@ -226,6 +226,14 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,  ///< @see rocprofiler_kfd_page_migrate_operation_t
     ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,    ///< @see rocprofiler_kfd_page_fault_operation_t
     ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
+
+    ROCPROFILER_BUFFER_TRACING_ROCM_HIP_API,
+    ROCPROFILER_BUFFER_TRACING_THREAD_CONTEXT_SWITCH,
+    ROCPROFILER_BUFFER_TRACING_THREAD_CPU_TIME,
+    ROCPROFILER_BUFFER_TRACING_THREAD_PAGE_FAULT,
+    ROCPROFILER_BUFFER_TRACING_THREAD_PEAK_MEMORY,
+    ROCPROFILER_BUFFER_TRACING_TIMER_SAMPLING,
+
     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                        ///< ::rocprofiler_marker_core_range_api_id_t
     ROCPROFILER_BUFFER_TRACING_LAST,
