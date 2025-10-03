@@ -147,6 +147,7 @@ set(TEST_SRC
     tex2DLod.cc
     tex2DLayeredLod.cc
     tex3DLod.cc
+    hipMipmappedArrayGetMemoryRequirements.cc
 )
 endif()
 

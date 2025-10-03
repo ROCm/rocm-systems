@@ -517,3 +517,4 @@ hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
 hipStreamCopyAttributes
+hipMipmappedArrayGetMemoryRequirements

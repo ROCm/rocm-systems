@@ -463,7 +463,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryGetKernelCount = 443,
   HIP_API_ID_hipMemGetHandleForAddressRange = 444,
   HIP_API_ID_hipStreamCopyAttributes = 445,
-  HIP_API_ID_LAST = 445,
+  HIP_API_ID_hipMipmappedArrayGetMemoryRequirements = 446,
+  HIP_API_ID_LAST = 446,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -933,6 +934,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipUserObjectRelease: return "hipUserObjectRelease";
     case HIP_API_ID_hipUserObjectRetain: return "hipUserObjectRetain";
     case HIP_API_ID_hipWaitExternalSemaphoresAsync: return "hipWaitExternalSemaphoresAsync";
+    case HIP_API_ID_hipMipmappedArrayGetMemoryRequirements: return "hipMipmappedArrayGetMemoryRequirements";
   };
   return "unknown";
 };
@@ -1372,6 +1374,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipUserObjectRelease", name) == 0) return HIP_API_ID_hipUserObjectRelease;
   if (strcmp("hipUserObjectRetain", name) == 0) return HIP_API_ID_hipUserObjectRetain;
   if (strcmp("hipWaitExternalSemaphoresAsync", name) == 0) return HIP_API_ID_hipWaitExternalSemaphoresAsync;
+  if (strcmp("hipMipmappedArrayGetMemoryRequirements", name) == 0) return HIP_API_ID_hipMipmappedArrayGetMemoryRequirements;
   return HIP_API_ID_NONE;
 }
 
@@ -4010,6 +4013,12 @@ typedef struct hip_api_data_s {
       unsigned int numExtSems;
       hipStream_t stream;
     } hipWaitExternalSemaphoresAsync;
+    struct {
+      hipArrayMemoryRequirements* memoryRequirements;
+      hipArrayMemoryRequirements memoryRequirements__val;
+      hipMipmappedArray_t mipmap;
+      hipDevice_t device;
+    } hipMipmappedArrayGetMemoryRequirements;
   } args;
   uint64_t *phase_data;
 } hip_api_data_t;
@@ -6664,6 +6673,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipWaitExternalSemaphoresAsync.numExtSems = (unsigned int)numExtSems; \
   cb_data.args.hipWaitExternalSemaphoresAsync.stream = (hipStream_t)stream; \
 };
+// hipMipmappedArrayGetMemoryRequirements[('hipArrayMemoryRequirements*', 'memoryRequirements'), ('hipMipmappedArray_t', 'mipmap'), ('hipDevice_t', 'device')]
+#define INIT_hipMipmappedArrayGetMemoryRequirements_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements = (hipArrayMemoryRequirements*) memoryRequirements; \
+  cb_data.args.hipMipmappedArrayGetMemoryRequirements.mipmap = (hipMipmappedArray_t) mipmap; \
+  cb_data.args.hipMipmappedArrayGetMemoryRequirements.device = (hipDevice_t) device; \
+};
+
 #define INIT_CB_ARGS_DATA(cb_id, cb_data) INIT_##cb_id##_CB_ARGS_DATA(cb_data)
 
 // Macros for non-public API primitives
@@ -8437,7 +8453,14 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipWaitExternalSemaphoresAsync.extSemArray) data->args.hipWaitExternalSemaphoresAsync.extSemArray__val = *(data->args.hipWaitExternalSemaphoresAsync.extSemArray);
       if (data->args.hipWaitExternalSemaphoresAsync.paramsArray) data->args.hipWaitExternalSemaphoresAsync.paramsArray__val = *(data->args.hipWaitExternalSemaphoresAsync.paramsArray);
       break;
-    default: break;
+// hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
+    case HIP_API_ID_hipModuleGetFunctionCount:
+      if (data->args.hipModuleGetFunctionCount.count)
+        data->args.hipModuleGetFunctionCount.count__val =
+            *(data->args.hipModuleGetFunctionCount.count);
+      break;
+    default:
+      break;
   };
 }
 
@@ -11957,7 +11980,16 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipWaitExternalSemaphoresAsync.stream);
       oss << ")";
     break;
-    default: oss << "unknown";
+    case HIP_API_ID_hipMipmappedArrayGetMemoryRequirements:
+      oss << "hipMipmappedArrayGetMemoryRequirements(";
+      if (data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements == NULL) oss << "memoryRequirements=NULL";
+      else { oss << "memoryRequirements="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements__val); }
+      oss << ", mipmap="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetMemoryRequirements.mipmap);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetMemoryRequirements.device);
+      oss << ")";
+      break;
+    default:
+      oss << "unknown";
   };
   return strdup(oss.str().c_str());
 }

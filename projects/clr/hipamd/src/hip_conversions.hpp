@@ -994,4 +994,9 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DPeerParms& desc) {
   params.kind = hipMemcpyDeviceToDevice;
   return params;
 }
+
+inline hipArrayMemoryRequirements getArrayMemoryRequirements(
+    const hipArrayMemoryRequirements& desc) {
+  return hipArrayMemoryRequirements { desc.alignment, desc.size };
+}
 };  // namespace hip
