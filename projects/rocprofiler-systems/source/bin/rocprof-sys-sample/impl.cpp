@@ -752,18 +752,20 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
+    (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
 
-#if !defined(ROCPROFSYS_USE_OMPT)
+#if !defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM)
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
     _backend_choices.erase("rocm");
     _backend_choices.erase("amd-smi");
     _backend_choices.erase("rcclp");
+    _backend_choices.erase("ompt");
 #endif
 
     parser.start_group("BACKEND OPTIONS",
