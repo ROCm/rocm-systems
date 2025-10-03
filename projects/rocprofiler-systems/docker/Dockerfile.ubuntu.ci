@@ -25,16 +25,24 @@ RUN apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
         bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
-        gzip iproute2 libiberty-dev libpapi-dev libpfm4-dev libsqlite3-dev libtool \
-        locales lsb-release m4 ninja-build python3-pip software-properties-common \
-        texinfo unzip wget vim zip zlib1g-dev && \
+        gzip iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
+        libsqlite3-dev libtool locales lsb-release m4 ninja-build nlohmann-json3-dev \
+        python3-pip software-properties-common texinfo unzip wget vim zip zlib1g-dev && \
     apt-get autoclean
 
-RUN if ! pip install 'cmake==3.21' perfetto 2>&1 | tee pip_output.log | grep -q "externally managed environment"; then \
-        echo "pip install succeeded without --break-system-packages"; \
+RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
+        python3 -m pip install 'cmake==3.21' perfetto; \
     else \
-        echo "Retrying with --break-system-packages"; \
-        pip install --break-system-packages 'cmake==3.21' perfetto; \
+        python3 -m pip install --break-system-packages 'cmake==3.21' perfetto; \
+    fi
+
+RUN if ! pip show perfetto 2>&1 | tee pip_output.log | grep -q "WARNING"; then \
+        echo "perfetto successfully installed!"; \
+    else \
+        echo "ERROR: perfetto install failed."; \
+        exit 1; \
     fi
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
@@ -42,7 +50,7 @@ ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
     bash miniforge.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
-    conda config --set always_yes yes --set changeps1 no && \
+    conda config --set always_yes yes --set changeps1 no --set solver classic && \
     conda update -c conda-forge -n base conda && \
     for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c conda-forge python=3.${i} pip numpy; done && \
     for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \

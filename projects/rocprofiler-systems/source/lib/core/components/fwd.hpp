@@ -107,17 +107,18 @@ struct functors;
 }  // namespace component
 }  // namespace rocprofsys
 
-#if !defined(ROCPROFSYS_USE_RCCL)
+#if !defined(ROCPROFSYS_USE_RCCL) || ROCPROFSYS_USE_RCCL == 0
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, category::rocm_rccl, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_handle, false_type)
 #endif
 
-#if !defined(ROCPROFSYS_USE_RCCL) && !defined(ROCPROFSYS_USE_MPI)
+#if(!defined(ROCPROFSYS_USE_RCCL) || ROCPROFSYS_USE_RCCL == 0) &&                        \
+    (!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data_tracker_t, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data, false_type)
 #endif
 
-#if !defined(TIMEMORY_USE_LIBUNWIND)
+#if(!defined(TIMEMORY_USE_LIBUNWIND) || TIMEMORY_USE_LIBUNWIND == 0)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, category::sampling, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_metrics, false_type)
@@ -127,7 +128,8 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_cpu_clock, fa
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_percent, false_type)
 #endif
 
-#if !defined(TIMEMORY_USE_LIBUNWIND) || !defined(ROCPROFSYS_USE_ROCM)
+#if(!defined(TIMEMORY_USE_LIBUNWIND) || TIMEMORY_USE_LIBUNWIND == 0) ||                  \
+    (!defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy_gfx,
                                  false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy_umc,
