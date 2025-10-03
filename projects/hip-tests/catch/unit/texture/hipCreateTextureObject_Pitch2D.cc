@@ -71,11 +71,11 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
   hipTextureObject_t texObj;
   hipDeviceProp_t devProp;
   size_t devPitchA;
-  float *devPtrA;
+  float* devPtrA;
 
   // Initialization
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA,
-                                             SIZE_W*sizeof(float), SIZE_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA, SIZE_W * sizeof(float),
+                           SIZE_H));
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   memset(&resDesc, 0, sizeof(resDesc));
   memset(&texDesc, 0, sizeof(texDesc));
@@ -100,8 +100,7 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
   SECTION("hipResourceTypePitch2D and devicePtr un-aligned") {
     if (devProp.textureAlignment > UNALIGN_OFFSET) {
       // Populate resource descriptor
-      resDesc.res.pitch2D.devPtr = reinterpret_cast<char *>(devPtrA)
-                                                        + UNALIGN_OFFSET;
+      resDesc.res.pitch2D.devPtr = reinterpret_cast<char*>(devPtrA) + UNALIGN_OFFSET;
       resDesc.res.pitch2D.height = SIZE_H;
       resDesc.res.pitch2D.width = SIZE_W;
       resDesc.res.pitch2D.pitchInBytes = devPitchA;
@@ -131,23 +130,18 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
   }
 
   SECTION("hipResourceTypePitch2D and height(0)") {
-    if ((TestContext::get()).isAmd()) {
-      // Populate resource descriptor
-      resDesc.res.pitch2D.devPtr = devPtrA;
-      resDesc.res.pitch2D.height = 0;
-      resDesc.res.pitch2D.width = SIZE_W;
-      resDesc.res.pitch2D.pitchInBytes = devPitchA;
-      resDesc.res.pitch2D.desc = hipCreateChannelDesc<float>();
+    // Populate resource descriptor
+    resDesc.res.pitch2D.devPtr = devPtrA;
+    resDesc.res.pitch2D.height = 0;
+    resDesc.res.pitch2D.width = SIZE_W;
+    resDesc.res.pitch2D.pitchInBytes = devPitchA;
+    resDesc.res.pitch2D.desc = hipCreateChannelDesc<float>();
 
-      // Populate texture descriptor
-      texDesc.readMode = hipReadModeElementType;
+    // Populate texture descriptor
+    texDesc.readMode = hipReadModeElementType;
 
-      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
-      REQUIRE(ret != hipSuccess);
-    } else {
-      // Test expected to return error with height(0).
-      WARN("Resourcetype Pitch2D/height(0) skipped on nvidia");
-    }
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
+    HIP_CHECK(hipDestroyTextureObject(texObj));
   }
 
   SECTION("hipResourceTypePitch2D and height(0)/devptr(nullptr)") {
@@ -181,24 +175,19 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
   }
 
   SECTION("hipResourceTypePitch2D and width(0)") {
-    if ((TestContext::get()).isAmd()) {
-      // Populate resource descriptor
-      resDesc.resType = hipResourceTypePitch2D;
-      resDesc.res.pitch2D.devPtr = devPtrA;
-      resDesc.res.pitch2D.height = SIZE_H;
-      resDesc.res.pitch2D.width = 0;
-      resDesc.res.pitch2D.pitchInBytes = devPitchA;
-      resDesc.res.pitch2D.desc = hipCreateChannelDesc<float>();
+    // Populate resource descriptor
+    resDesc.resType = hipResourceTypePitch2D;
+    resDesc.res.pitch2D.devPtr = devPtrA;
+    resDesc.res.pitch2D.height = SIZE_H;
+    resDesc.res.pitch2D.width = 0;
+    resDesc.res.pitch2D.pitchInBytes = devPitchA;
+    resDesc.res.pitch2D.desc = hipCreateChannelDesc<float>();
 
-      // Populate texture descriptor
-      texDesc.readMode = hipReadModeElementType;
+    // Populate texture descriptor
+    texDesc.readMode = hipReadModeElementType;
 
-      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
-      REQUIRE(ret != hipSuccess);
-    } else {
-      // api expected to return failure when width(0) is passed.
-      WARN("ResourceType Pitch2D/width(0) skipped on nvidia");
-    }
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
+    HIP_CHECK(hipDestroyTextureObject(texObj));
   }
 
   SECTION("hipResourceTypePitch2D and width(0)/devPtr(nullptr)") {
@@ -252,6 +241,6 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
 
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

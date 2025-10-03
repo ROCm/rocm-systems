@@ -129,8 +129,7 @@ TEST_CASE("Unit_clz") {
   HIP_CHECK(hipMalloc((void**)&deviceD, NUM * sizeof(unsigned long long int)));
 
   HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceD, hostD, NUM * sizeof(unsigned long long int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceD, hostD, NUM * sizeof(unsigned long long int), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(clz_HIP_kernel,
                      dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),

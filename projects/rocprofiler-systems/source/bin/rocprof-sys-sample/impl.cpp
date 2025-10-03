@@ -125,44 +125,55 @@ get_initial_environment()
     auto _dl_libpath   = get_realpath(get_internal_libpath("librocprof-sys-dl.so"));
     auto _omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so"));
     auto _libexecpath  = get_realpath(get_internal_script_path());
+    auto _rootpath     = get_realpath(get_rocprofsys_root());
 
+    update_env(_env, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
     update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
     update_env(_env, "LD_LIBRARY_PATH", tim::filepath::dirname(_dl_libpath), UPD_APPEND);
     update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
+
+    // Discover LLVM libdir containing libomptarget.so and append to LD_LIBRARY_PATH
+    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose > 0);
+       !llvm_dir.empty())
+    {
+        update_env(_env, "LD_LIBRARY_PATH", llvm_dir, UPD_APPEND);
+    }
 
     auto _mode = get_env<std::string>("ROCPROFSYS_MODE", "sampling", false);
 
     update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"));
 
-#if defined(ROCPROFSYS_USE_OMPT)
-    if(!getenv("OMP_TOOL_LIBRARIES"))
-        update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
-#endif
     return _env;
+}
+
+std::string
+get_rocprofsys_root(void)
+{
+    char*       _tmp = realpath("/proc/self/exe", nullptr);
+    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
+
+    if(_tmp) free(_tmp);
+
+    auto _pos = _exe.find_last_of('/');
+    auto _dir = std::string{ "./" };
+
+    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
+
+    return rocprofsys::common::join("/", _dir, "..");
 }
 
 std::string
 get_internal_libpath(const std::string& _lib)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "lib", _lib);
 }
 
 std::string
 get_internal_script_path(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir =
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems");
-
-    return _script_dir;
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 void
@@ -219,9 +230,15 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
 {
     updated_envs.emplace(_env_var);
 
-    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
-    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
-    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
+    auto _prepend  = (_mode & UPD_PREPEND) != 0;
+    auto _append   = (_mode & UPD_APPEND) != 0;
+    auto _weak_upd = (_mode & UPD_WEAK) != 0;
+
+    // if both flags are set, prefer append
+    if(_prepend && _append)
+    {
+        _prepend = false;
+    }
 
     auto _key = join("", _env_var, "=");
     for(auto& itr : _environ)
@@ -245,11 +262,11 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
                     free(itr);
                     if(_prepend)
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
                                        .c_str());
                     else
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
                                        .c_str());
                 }
             }
@@ -735,18 +752,20 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
+    (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
 
-#if !defined(ROCPROFSYS_USE_OMPT)
+#if !defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM)
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
     _backend_choices.erase("rocm");
     _backend_choices.erase("amd-smi");
     _backend_choices.erase("rcclp");
+    _backend_choices.erase("ompt");
 #endif
 
     parser.start_group("BACKEND OPTIONS",
@@ -769,9 +788,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
-            if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
-
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                 update_env(_env, "KOKKOS_TOOLS_LIBS", _omni_libpath, UPD_APPEND);
         });
@@ -792,15 +808,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
-
-            // if(_v.count("all") > 0 || _v.count("rocprofiler") > 0)
-            // {
-            //     remove_env(_env, "ROCP_TOOL_LIB");
-            //     remove_env(_env, "ROCP_HSA_INTERCEPT");
-            // }
-
-            if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                remove_env(_env, "OMP_TOOL_LIBRARIES");
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                 remove_env(_env, "KOKKOS_TOOLS_LIBS");

@@ -1,0 +1,86 @@
+name: rocprofiler-sdk Build CI Docker Images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
+      - 'projects/rocprofiler-sdk/docker/Dockerfile.ci'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
+      - 'projects/rocprofiler-sdk/docker/Dockerfile.ci'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Needed to push/pull cached Docker layers + GHCR images
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # -----------------------------------------------------------------------------
+  # Build a cached CI base image per OS using Buildx + GHA cache (Item #6)
+  # -----------------------------------------------------------------------------
+  build-ci-base:
+    name: Build CI Base Image • ${{ matrix.gpu }} • ${{ matrix.os }}
+    runs-on: azure-linux-scale-rocm
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ 'ubuntu-22.04', 'rhel-8.8', 'rhel-9.5', 'sles-15.6' ]
+        gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-sdk/requirements.txt
+            projects/rocprofiler-sdk/docker/Dockerfile.ci
+
+      - name: Get the latest therock build
+        id: therock
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          python3 -m pip install -U pip
+          python3 -m pip install -U awscli
+          export PATH=~/.local/bin:$PATH
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+          password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build & Push (to Docker Hub; cache to GHA)
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          file: projects/rocprofiler-sdk/docker/Dockerfile.ci
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            BASE_TAG=${{ matrix.os }}
+            GPU_TYPE=${{ matrix.gpu }}
+            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
+          tags: |
+            docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-latest
+          cache-from: type=gha,scope=rocprofiler-ci-${{ matrix.os }}-${{ matrix.gpu }}
+          cache-to: type=gha,mode=max,scope=rocprofiler-ci-${{ matrix.os }}-${{ matrix.gpu }}

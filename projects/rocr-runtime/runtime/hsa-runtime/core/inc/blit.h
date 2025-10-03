@@ -63,7 +63,7 @@ class Blit {
   /// @param agent Agent passed to Initialize.
   ///
   /// @return hsa_status_t
-  virtual hsa_status_t Destroy(const core::Agent& agent) = 0;
+  virtual hsa_status_t Destroy() = 0;
 
   /// @brief Submit a linear copy command to the the underlying compute device's
   /// control block. The call is blocking until the command execution is

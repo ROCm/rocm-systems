@@ -31,10 +31,10 @@ This testfile verifies the following scenarios of hipMemcpyPeerAsync API
 #include <iostream>
 
 /*This testcase verifies the negative scenarios of hipmemcpypeerAsync
-*/
+ */
 TEST_CASE("Unit_hipMemcpyPeerAsync_Negative") {
   constexpr auto numElements{10};
-  constexpr auto copy_bytes{numElements*sizeof(int)};
+  constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -47,48 +47,39 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative") {
       hipStream_t stream;
       HIP_CHECK(hipSetDevice(0));
       HIP_CHECK(hipStreamCreate(&stream));
-      HipTest::initArrays<int>(&A_d, nullptr, nullptr,
-          &A_h, &B_h, nullptr, numElements*sizeof(int));
+      HipTest::initArrays<int>(&A_d, nullptr, nullptr, &A_h, &B_h, nullptr,
+                               numElements * sizeof(int));
       HipTest::setDefaultData<int>(numElements, A_h, B_h, nullptr);
       HIP_CHECK(hipSetDevice(1));
-      HipTest::initArrays<int>(nullptr, &B_d, nullptr,
-          nullptr, nullptr, nullptr, numElements*sizeof(int));
-      HIP_CHECK(hipMemcpy(B_d, B_h, numElements*sizeof(int),
-                          hipMemcpyHostToDevice));
+      HipTest::initArrays<int>(nullptr, &B_d, nullptr, nullptr, nullptr, nullptr,
+                               numElements * sizeof(int));
+      HIP_CHECK(hipMemcpy(B_d, B_h, numElements * sizeof(int), hipMemcpyHostToDevice));
 
       SECTION("Nullptr to Destination Pointer") {
-        REQUIRE(hipMemcpyPeerAsync(nullptr, 1, A_d, 0, copy_bytes,
-              stream) != hipSuccess);
+        REQUIRE(hipMemcpyPeerAsync(nullptr, 1, A_d, 0, copy_bytes, stream) != hipSuccess);
       }
 
       SECTION("Nullptr to Source Pointer") {
-        REQUIRE(hipMemcpyPeerAsync(B_d, 1, nullptr, 0, copy_bytes,
-              stream) != hipSuccess);
+        REQUIRE(hipMemcpyPeerAsync(B_d, 1, nullptr, 0, copy_bytes, stream) != hipSuccess);
       }
 
       SECTION("Pass NumElements as 0") {
-        HIP_CHECK(hipMemcpy(A_d, A_h, numElements*sizeof(int),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpyPeerAsync(B_d, 1, A_d, 0, 0,
-                                     stream));
-        HIP_CHECK(hipMemcpy(A_h, B_d, numElements*sizeof(int),
-                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(A_d, A_h, numElements * sizeof(int), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpyPeerAsync(B_d, 1, A_d, 0, 0, stream));
+        HIP_CHECK(hipMemcpy(A_h, B_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
         HipTest::checkTest<int>(A_h, B_h, numElements);
       }
 
       SECTION("Passing more than allocated size") {
-        REQUIRE(hipMemcpyPeerAsync(B_d, 1, A_d, 0,
-              100*sizeof(int), stream) != hipSuccess);
+        REQUIRE(hipMemcpyPeerAsync(B_d, 1, A_d, 0, 100 * sizeof(int), stream) != hipSuccess);
       }
 
       SECTION("Passing invalid Destination device ID") {
-        REQUIRE(hipMemcpyPeerAsync(B_d, numDevices, A_d, 0, copy_bytes,
-              stream) != hipSuccess);
+        REQUIRE(hipMemcpyPeerAsync(B_d, numDevices, A_d, 0, copy_bytes, stream) != hipSuccess);
       }
 
       SECTION("Passing invalid Source device ID") {
-        REQUIRE(hipMemcpyPeerAsync(B_d, 0, A_d, numDevices, copy_bytes,
-              stream) != hipSuccess);
+        REQUIRE(hipMemcpyPeerAsync(B_d, 0, A_d, numDevices, copy_bytes, stream) != hipSuccess);
       }
 
       HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
@@ -110,7 +101,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative") {
 
 TEST_CASE("Unit_hipMemcpyPeerAsync_Basic") {
   constexpr auto numElements{10};
-  constexpr auto copy_bytes{numElements*sizeof(int)};
+  constexpr auto copy_bytes{numElements * sizeof(int)};
 
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -124,52 +115,41 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Basic") {
       int *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
       hipStream_t stream;
       HIP_CHECK(hipSetDevice(0));
-      HipTest::initArrays<int>(&A_d, &B_d, &C_d,
-          &A_h, &B_h, &C_h, numElements*sizeof(int));
+      HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, numElements * sizeof(int));
       HipTest::setDefaultData<int>(numElements, A_h, B_h, nullptr);
-      HIP_CHECK(hipMemcpy(A_d, A_h, numElements*sizeof(int),
-                          hipMemcpyHostToDevice));
-      HIP_CHECK(hipMemcpy(B_d, B_h, numElements*sizeof(int),
-                          hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(A_d, A_h, numElements * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(B_d, B_h, numElements * sizeof(int), hipMemcpyHostToDevice));
       HIP_CHECK(hipStreamCreate(&stream));
 
       // Initialization of Variables in GPU-1
       HIP_CHECK(hipSetDevice(1));
-      HipTest::initArrays<int>(&X_d, &Y_d, &Z_d, nullptr,
-          nullptr, nullptr, numElements*sizeof(int));
+      HipTest::initArrays<int>(&X_d, &Y_d, &Z_d, nullptr, nullptr, nullptr,
+                               numElements * sizeof(int));
 
       // Launching kernel and performing vector addition in GPU-0
       HIP_CHECK(hipSetDevice(0));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1),
-          0, 0, static_cast<const int*>(A_d),
-          static_cast<const int*>(B_d), C_d, numElements*sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
+                         static_cast<const int*>(B_d), C_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, C_d, numElements*sizeof(int),
-               hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(C_h, C_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
 
       // Copying data from GPU-0 to GPU-1 and performing vector addition
       HIP_CHECK(hipSetDevice(1));
       SECTION("Calling hipMemcpyPerAsync() using user defined stream obj") {
-        HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes,
-                                     stream));
-        HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes,
-                                     stream));
+        HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes, stream));
+        HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes, stream));
         HIP_CHECK(hipStreamSynchronize(stream));
       }
       SECTION("Calling hipMemcpyPerAsync() using hipStreamPerThread") {
-        HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes,
-                                     hipStreamPerThread));
-        HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes,
-                                     hipStreamPerThread));
+        HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes, hipStreamPerThread));
+        HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes, hipStreamPerThread));
         HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
       }
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1),
-          0, 0, static_cast<const int*>(X_d),
-          static_cast<const int*>(Y_d), Z_d, numElements*sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
+                         static_cast<const int*>(Y_d), Z_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, Z_d, numElements*sizeof(int),
-               hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(C_h, Z_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
 
       // Cleaning the Memory
@@ -197,7 +177,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Basic") {
  */
 TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice") {
   constexpr auto numElements{10};
-  constexpr auto copy_bytes{numElements*sizeof(int)};
+  constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -211,14 +191,11 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice") {
       HIP_CHECK(hipSetDevice(0));
 
       // Initialization of all variables in GPU-0
-      HipTest::initArrays<int>(&A_d, &B_d, &C_d,
-          &A_h, &B_h, &C_h, numElements*sizeof(int));
-      HIP_CHECK(hipMemcpy(A_d, A_h, numElements*sizeof(int),
-               hipMemcpyHostToDevice));
-      HIP_CHECK(hipMemcpy(B_d, B_h, numElements*sizeof(int),
-            hipMemcpyHostToDevice));
-      HipTest::initArrays<int>(&X_d, &Y_d, &Z_d, nullptr,
-          nullptr, nullptr, numElements*sizeof(int));
+      HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, numElements * sizeof(int));
+      HIP_CHECK(hipMemcpy(A_d, A_h, numElements * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(B_d, B_h, numElements * sizeof(int), hipMemcpyHostToDevice));
+      HipTest::initArrays<int>(&X_d, &Y_d, &Z_d, nullptr, nullptr, nullptr,
+                               numElements * sizeof(int));
 
       // Stream created in GPU-1
       HIP_CHECK(hipSetDevice(1));
@@ -226,26 +203,20 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice") {
 
       // Performing vector addition and validate the data
       HIP_CHECK(hipSetDevice(0));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1),
-          0, 0, static_cast<const int*>(A_d),
-          static_cast<const int*>(B_d), C_d, numElements*sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
+                         static_cast<const int*>(B_d), C_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, C_d, numElements*sizeof(int),
-               hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(C_h, C_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
 
       // Copying the data from GPU-0 to GPU-1 where stream is from diff device
-      HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes,
-               stream));
-      HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes,
-               stream));
+      HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes, stream));
+      HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1),
-          0, 0, static_cast<const int*>(X_d),
-          static_cast<const int*>(Y_d), Z_d, numElements*sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
+                         static_cast<const int*>(Y_d), Z_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, Z_d, numElements*sizeof(int),
-               hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(C_h, Z_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
 
       // Cleaning the data
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
@@ -259,4 +230,3 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice") {
     SUCCEED("Number of devices are < 2");
   }
 }
-

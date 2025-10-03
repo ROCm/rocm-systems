@@ -53,12 +53,10 @@
 
 #define DYNINST_BREAKPOINT_SIGNUM (SIGRTMIN + 4)
 
+#include "dyninstRTExport.h"
+#include "h/compiler_diagnostics.h"
 #include <stdint.h>
 #include <stdio.h>
-
-#include "h/Types.h"
-
-#include "dyninstRTExport.h"
 
 /* If we must make up a boolean type, we should make it unique */
 typedef unsigned char   RT_Boolean;
@@ -191,15 +189,10 @@ typedef struct
 #define TRAP_HEADER_SIG 0x759191D6
 #define DT_DYNINST      0x6D191957
 
-#if defined(_MSC_VER)
-#    pragma warning(disable : 4200)
-#endif
-#if defined(__GNUC__)
-#    pragma GCC diagnostic push
-#    pragma GCC diagnostic ignored "-Wpedantic"
-// Disable warning about flexible array members in C++
-// FIXME: Flexible array member, traps[], in structure below
-#endif
+// Suppress warning about flexible array members not valid in C++
+// FIXME: invalid flexible array member, traps[], in structure below
+DYNINST_DIAGNOSTIC_BEGIN_SUPPRESS_FLEX_ARRAY
+
 struct trap_mapping_header
 {
     uint32_t signature;
@@ -211,9 +204,8 @@ struct trap_mapping_header
     trapMapping_t
         traps[];  // Don't change this to a pointer, despite any compiler warnings
 };
-#if defined(__GNUC__)
-#    pragma GCC diagnostic pop
-#endif
+
+DYNINST_DIAGNOSTIC_END_SUPPRESS_FLEX_ARRAY
 
 #define MAX_MEMORY_MAPPER_ELEMENTS 1024
 
@@ -277,8 +269,6 @@ struct MemoryMapper64
 };
 
 DLLEXPORT extern struct MemoryMapper RTmemoryMapper;
-
-extern int RTuntranslatedEntryCounter;
 
 #include "dyninstRTExport.h"
 #endif /* _DYNINSTAPI_RT_H */

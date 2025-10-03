@@ -186,6 +186,6 @@ TEMPLATE_TEST_CASE("Unit_tex3DLod_Positive_ReadModeNormalizedFloat", "", char, u
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

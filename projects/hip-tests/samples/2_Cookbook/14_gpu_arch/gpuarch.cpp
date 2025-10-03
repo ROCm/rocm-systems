@@ -21,10 +21,10 @@ THE SOFTWARE.
 #include <iostream>
 #include "hip_helper.h"
 
-#define THREADS_PER_BLOCK   64
-#define BLOCKS_PER_GRID     4
-#define SIZE                (BLOCKS_PER_GRID * THREADS_PER_BLOCK)
-#define NOT_SUPPORTED       -99  // dummy number indicates unsupported operation
+#define THREADS_PER_BLOCK 64
+#define BLOCKS_PER_GRID 4
+#define SIZE (BLOCKS_PER_GRID * THREADS_PER_BLOCK)
+#define NOT_SUPPORTED -99  // dummy number indicates unsupported operation
 
 // Using __gfx*__ macro one can have GPU architecture specific code flow
 // For example: If below kernel runs on gfx908 it will increment 'in' by 'value' and store into

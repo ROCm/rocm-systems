@@ -23,12 +23,12 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 namespace hipHostUnregisterTests {
-constexpr unsigned int allFlags = hipHostRegisterDefault &  // 0
-    hipHostRegisterPortable &                               // 1
-    hipHostRegisterMapped &                                 // 2
-    hipHostRegisterIoMemory                                 // 4
+constexpr unsigned int allFlags = hipHostRegisterDefault &   // 0
+                                  hipHostRegisterPortable &  // 1
+                                  hipHostRegisterMapped &    // 2
+                                  hipHostRegisterIoMemory    // 4
 #if HT_NVIDIA
-    & cudaHostRegisterReadOnly;  // 8
+                                  & cudaHostRegisterReadOnly;  // 8
 #else
     ;
 #endif
@@ -72,6 +72,7 @@ TEST_CASE("Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register") {
   std::vector<int> alloc(2);
   HIP_CHECK(hipHostRegister(alloc.data(), alloc.size(), 0));
   HIP_CHECK_ERROR(hipHostUnregister(&alloc.data()[1]), hipErrorHostMemoryNotRegistered);
+  HIP_CHECK(hipHostUnregister(alloc.data()));
 }
 
 TEST_CASE("Unit_hipHostUnregister_NotRegisteredPointer") {
@@ -91,6 +92,23 @@ TEST_CASE("Unit_hipHostUnregister_AlreadyUnregisteredPointer") {
       HIP_CHECK(hipHostUnregister(x.get()));
       HIP_CHECK_ERROR(hipHostUnregister(x.get()), hipErrorHostMemoryNotRegistered);
     }
+  }
+}
+
+TEST_CASE("Unit_hipHostUnregister_Capture") {
+  constexpr size_t kBufferSize = 1024;
+  auto buffer = std::make_unique<int[]>(kBufferSize);
+  hipError_t capture_error = hipSuccess;
+
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostUnregister(buffer.get()), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error != hipSuccess) {
+    HIP_CHECK(hipHostUnregister(buffer.get()));
   }
 }
 

@@ -63,9 +63,8 @@ bool IPCEvent::createIpcEventShmemIfNeeded() {
   }
 
   // device sets 0 to this ptr when the ipc event is completed
-  hipError_t status = ihipHostRegister(&ipc_evt_.ipc_shmem_->signal,
-                                       sizeof(uint32_t) * IPC_SIGNALS_PER_EVENT,
-                                       0);
+  hipError_t status =
+      ihipHostRegister(&ipc_evt_.ipc_shmem_->signal, sizeof(uint32_t) * IPC_SIGNALS_PER_EVENT, 0);
   if (status != hipSuccess) {
     return false;
   }
@@ -110,15 +109,14 @@ hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
 }
 
 // ================================================================================================
-hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream,
-                                   uint32_t flags, bool batch_flush) {
+hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t flags,
+                                   bool batch_flush) {
   command = new amd::Marker(*stream, kMarkerDisableFlush);
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
-
   amd::Event& tEvent = command->event();
   createIpcEventShmemIfNeeded();
   int write_index = ipc_evt_.ipc_shmem_->write_index++;
@@ -185,9 +183,8 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
   ipc_evt_.ipc_shmem_->owners += 1;
   // device sets 0 to this ptr when the ipc event is completed
   hipError_t status = hipSuccess;
-  status = ihipHostRegister(&ipc_evt_.ipc_shmem_->signal,
-                            sizeof(uint32_t) * IPC_SIGNALS_PER_EVENT,
-                            0);
+  status =
+      ihipHostRegister(&ipc_evt_.ipc_shmem_->signal, sizeof(uint32_t) * IPC_SIGNALS_PER_EVENT, 0);
   return status;
 }
 

@@ -28,8 +28,7 @@ THE SOFTWARE.
 /*
  * Square each element in the array A and write to array C.
  */
-template <typename T>
-__global__ void vector_square(T* C_d, const T* A_d, size_t N) {
+template <typename T> __global__ void vector_square(T* C_d, const T* A_d, size_t N) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 

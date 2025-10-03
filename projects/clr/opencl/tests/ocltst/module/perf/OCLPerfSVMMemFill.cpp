@@ -66,24 +66,21 @@ static const cl_svm_mem_flags FGFlags[NUM_FG_FLAGS] = {
 OCLPerfSVMMemFill::OCLPerfSVMMemFill() {
   num_typeSize_ = sizeof(typeSizeList) / sizeof(size_t);
   num_elements_ = sizeof(eleNumList) / sizeof(unsigned int);
-  _numSubTests =
-      num_elements_ * num_typeSize_ * (NUM_FG_FLAGS * NUM_CG_FLAGS + 1);
+  _numSubTests = num_elements_ * num_typeSize_ * (NUM_FG_FLAGS * NUM_CG_FLAGS + 1);
   failed_ = false;
   skip_ = false;
 }
 
 OCLPerfSVMMemFill::~OCLPerfSVMMemFill() {}
 
-void OCLPerfSVMMemFill::open(unsigned int test, char *units, double &conversion,
+void OCLPerfSVMMemFill::open(unsigned int test, char* units, double& conversion,
                              unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
 
 #if defined(CL_VERSION_2_0)
-  FGSystem_ =
-      (test >= (num_elements_ * num_typeSize_ * NUM_FG_FLAGS * NUM_CG_FLAGS));
-  testFGFlag_ =
-      (test / (num_elements_ * num_typeSize_ * NUM_CG_FLAGS)) % NUM_FG_FLAGS;
+  FGSystem_ = (test >= (num_elements_ * num_typeSize_ * NUM_FG_FLAGS * NUM_CG_FLAGS));
+  testFGFlag_ = (test / (num_elements_ * num_typeSize_ * NUM_CG_FLAGS)) % NUM_FG_FLAGS;
   testCGFlag_ = (test / (num_elements_ * num_typeSize_)) % NUM_CG_FLAGS;
   testTypeSize_ = typeSizeList[(test / num_elements_) % num_typeSize_];
   testNumEle_ = eleNumList[test % num_elements_];
@@ -112,8 +109,8 @@ void OCLPerfSVMMemFill::open(unsigned int test, char *units, double &conversion,
   }
 
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -129,9 +126,8 @@ void OCLPerfSVMMemFill::open(unsigned int test, char *units, double &conversion,
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfSVMMemFill::run(void) {
   if (skip_) {
@@ -142,49 +138,44 @@ void OCLPerfSVMMemFill::run(void) {
     return;
   }
 #if defined(CL_VERSION_2_0)
-  cl_uint *buffer = NULL;
+  cl_uint* buffer = NULL;
   CPerfCounter timer;
   size_t iter = 100, bufSize = testNumEle_ * 4;
 
   cl_mem_flags flags = CGFlags[testCGFlag_] | FGFlags[testFGFlag_];
 
-  void *data = malloc(bufSize);
+  void* data = malloc(bufSize);
 
   timer.Reset();
 
   if (!FGSystem_) {
-    buffer =
-        (cl_uint *)clSVMAlloc(context_, flags, bufSize, (cl_uint)testTypeSize_);
+    buffer = (cl_uint*)clSVMAlloc(context_, flags, bufSize, (cl_uint)testTypeSize_);
     CHECK_RESULT(buffer == 0, "Allocation failed");
   } else {  // FGSystem_ = true
-    buffer = (cl_uint *)malloc(bufSize);
+    buffer = (cl_uint*)malloc(bufSize);
     CHECK_RESULT(buffer == 0, "Allocation failed");
   }
 
   timer.Start();
   for (size_t i = 0; i < iter; ++i) {
-    error_ = clEnqueueSVMMemFill(cmdQueues_[_deviceId], buffer, data,
-                                 testTypeSize_, bufSize, 0, NULL, NULL);
+    error_ = clEnqueueSVMMemFill(cmdQueues_[_deviceId], buffer, data, testTypeSize_, bufSize, 0,
+                                 NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueSVMMemFill() failed");
   }
   _wrapper->clFinish(cmdQueues_[_deviceId]);
   timer.Stop();
 
   if (!FGSystem_) {
-    clSVMFree(context_, (void *)buffer);
+    clSVMFree(context_, (void*)buffer);
   } else {
     free(buffer);
   }
 
   char pFlags[5];
-  pFlags[0] =
-      (testCGFlag_ == 0 || testCGFlag_ == 2) ? 'R' : '_';  // CL_MEM_READ_ONLY
-  pFlags[1] =
-      (testCGFlag_ == 0 || testCGFlag_ == 1) ? 'W' : '_';  // CL_MEM_WRITE_ONLY
-  pFlags[2] = (testFGFlag_ == 1 || testFGFlag_ == 2)
-                  ? 'F'
-                  : '_';                       // CL_MEM_SVM_FINE_GRAIN_BUFFER
-  pFlags[3] = (testFGFlag_ == 2) ? 'A' : '_';  // CL_MEM_SVM_ATOMICS
+  pFlags[0] = (testCGFlag_ == 0 || testCGFlag_ == 2) ? 'R' : '_';  // CL_MEM_READ_ONLY
+  pFlags[1] = (testCGFlag_ == 0 || testCGFlag_ == 1) ? 'W' : '_';  // CL_MEM_WRITE_ONLY
+  pFlags[2] = (testFGFlag_ == 1 || testFGFlag_ == 2) ? 'F' : '_';  // CL_MEM_SVM_FINE_GRAIN_BUFFER
+  pFlags[3] = (testFGFlag_ == 2) ? 'A' : '_';                      // CL_MEM_SVM_ATOMICS
 
   char buf[256];
 

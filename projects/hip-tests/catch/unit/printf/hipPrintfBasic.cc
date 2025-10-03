@@ -21,24 +21,25 @@ THE SOFTWARE.
 #include <map>
 #include "printf_common.h"  // NOLINT
 
-const char *msg_short = "Carpe diem.";
-const char *msg_long1 = "Lorem ipsum dolor sit amet, consectetur nullam. In mollis imperdiet nibh nec ullamcorper."; // NOLINT
-const char *msg_long2 = "Curabitur nec metus sit amet augue vehicula ultrices ut id leo. Lorem ipsum dolor sit amet, consectetur adipiscing elit amet.";  // NOLINT
+const char* msg_short = "Carpe diem.";
+const char* msg_long1 =
+    "Lorem ipsum dolor sit amet, consectetur nullam. In mollis imperdiet nibh nec ullamcorper.";  // NOLINT
+const char* msg_long2 =
+    "Curabitur nec metus sit amet augue vehicula ultrices ut id leo. Lorem ipsum dolor sit amet, "
+    "consectetur adipiscing elit amet.";  // NOLINT
 
-__global__ void kernel_uniform0(int *retval) {
+__global__ void kernel_uniform0(int* retval) {
   uint tid = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   retval[tid] = printf("Hello World\n");
 }
 
-static void test_uniform0(int *retval, uint num_blocks,
-                          uint threads_per_block) {
+static void test_uniform0(int* retval, uint num_blocks, uint threads_per_block) {
   CaptureStream captured(stdout);
   uint num_threads = num_blocks * threads_per_block;
   for (uint i = 0; i != num_threads; ++i) {
     retval[i] = 0x23232323;
   }
-  hipLaunchKernelGGL(kernel_uniform0, dim3(num_blocks), dim3(threads_per_block),
-                     0, 0, retval);
+  hipLaunchKernelGGL(kernel_uniform0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
   HIP_CHECK(hipStreamSynchronize(0));
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
@@ -52,23 +53,21 @@ static void test_uniform0(int *retval, uint num_blocks,
   REQUIRE(linecount["Hello World"] == num_threads);
 }
 
-__global__ void kernel_uniform1(int *retval) {
+__global__ void kernel_uniform1(int* retval) {
   uint tid = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   retval[tid] = printf("Six times Eight is %d\n", 42);
 }
 
-static void test_uniform1(int *retval, uint num_blocks,
-                          uint threads_per_block) {
+static void test_uniform1(int* retval, uint num_blocks, uint threads_per_block) {
   CaptureStream captured(stdout);
   uint num_threads = num_blocks * threads_per_block;
   for (uint i = 0; i != num_threads; ++i) {
     retval[i] = 0x23232323;
   }
-  hipLaunchKernelGGL(kernel_uniform1, dim3(num_blocks), dim3(threads_per_block),
-                     0, 0, retval);
+  hipLaunchKernelGGL(kernel_uniform1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
   HIP_CHECK(hipStreamSynchronize(0));
   auto CapturedData = captured.getCapturedData();
-    for (uint ii = 0; ii != num_threads; ++ii) {
+  for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen("Six times Eight is 42") + 1);
   }
   std::map<std::string, int> linecount;
@@ -79,20 +78,18 @@ static void test_uniform1(int *retval, uint num_blocks,
   REQUIRE(linecount["Six times Eight is 42"] == num_threads);
 }
 
-__global__ void kernel_divergent0(int *retval) {
+__global__ void kernel_divergent0(int* retval) {
   uint tid = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   retval[tid] = printf("Thread ID: %d\n", tid);
 }
 
-static void test_divergent0(int *retval, uint num_blocks,
-                            uint threads_per_block) {
+static void test_divergent0(int* retval, uint num_blocks, uint threads_per_block) {
   CaptureStream captured(stdout);
   uint num_threads = num_blocks * threads_per_block;
   for (uint i = 0; i != num_threads; ++i) {
     retval[i] = 0x23232323;
   }
-  hipLaunchKernelGGL(kernel_divergent0, dim3(num_blocks),
-                     dim3(threads_per_block), 0, 0, retval);
+  hipLaunchKernelGGL(kernel_divergent0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
   HIP_CHECK(hipStreamSynchronize(0));
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != 10; ++ii) {
@@ -112,7 +109,7 @@ static void test_divergent0(int *retval, uint num_blocks,
   REQUIRE(threadIds.back() == num_threads - 1);
 }
 
-__global__ void kernel_divergent1(int *retval) {
+__global__ void kernel_divergent1(int* retval) {
   uint tid = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   if (tid % 2) {
     retval[tid] = printf("Hello World\n");
@@ -121,15 +118,13 @@ __global__ void kernel_divergent1(int *retval) {
   }
 }
 
-static void test_divergent1(int *retval, uint num_blocks,
-                            uint threads_per_block) {
+static void test_divergent1(int* retval, uint num_blocks, uint threads_per_block) {
   CaptureStream captured(stdout);
   uint num_threads = num_blocks * threads_per_block;
   for (uint i = 0; i != num_threads; ++i) {
     retval[i] = 0x23232323;
   }
-    hipLaunchKernelGGL(kernel_divergent1, dim3(num_blocks),
-                     dim3(threads_per_block), 0, 0, retval);
+  hipLaunchKernelGGL(kernel_divergent1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
   HIP_CHECK(hipStreamSynchronize(0));
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
@@ -147,7 +142,7 @@ static void test_divergent1(int *retval, uint num_blocks,
   REQUIRE(linecount["Hello World"] == num_threads / 2);
 }
 
-__global__ void kernel_series(int *retval) {
+__global__ void kernel_series(int* retval) {
   const uint tid = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   int result = 0;
   result += printf("%s\n", msg_long1_dev);
@@ -156,22 +151,19 @@ __global__ void kernel_series(int *retval) {
   retval[tid] = result;
 }
 
-static void test_series(int *retval, uint num_blocks, uint threads_per_block) {
+static void test_series(int* retval, uint num_blocks, uint threads_per_block) {
   CaptureStream captured(stdout);
   uint num_threads = num_blocks * threads_per_block;
   for (uint i = 0; i != num_threads; ++i) {
     retval[i] = 0x23232323;
   }
-  hipLaunchKernelGGL(kernel_series, dim3(num_blocks), dim3(threads_per_block),
-                     0, 0, retval);
+  hipLaunchKernelGGL(kernel_series, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
   HIP_CHECK(hipStreamSynchronize(0));
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
-    REQUIRE(retval[ii] ==
-            strlen(msg_long1) + strlen(msg_short) +
-            strlen(msg_long2) + 3);
+    REQUIRE(retval[ii] == strlen(msg_long1) + strlen(msg_short) + strlen(msg_long2) + 3);
   }
-    std::map<std::string, int> linecount;
+  std::map<std::string, int> linecount;
   for (std::string line; std::getline(CapturedData, line);) {
     linecount[line]++;
   }
@@ -181,28 +173,26 @@ static void test_series(int *retval, uint num_blocks, uint threads_per_block) {
   REQUIRE(linecount[msg_short] == num_threads);
 }
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify basic functionality of printf API.
-* Test source
-* ------------------------
-* - catch/unit/printf/hipPrintfBasic.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify basic functionality of printf API.
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/hipPrintfBasic.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
 TEST_CASE("Unit_Printf_PrintfBasicTsts") {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic,
-                                  hipDeviceAttributeHostNativeAtomicSupported,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
@@ -210,9 +200,9 @@ TEST_CASE("Unit_Printf_PrintfBasicTsts") {
   uint num_blocks = 1;
   uint threads_per_block = 64;
   uint num_threads = num_blocks * threads_per_block;
-  void *retval_void;
+  void* retval_void;
   HIP_CHECK(hipHostMalloc(&retval_void, 4 * num_threads));
-  auto retval = reinterpret_cast<int *>(retval_void);
+  auto retval = reinterpret_cast<int*>(retval_void);
   test_uniform0(retval, num_blocks, threads_per_block);
   test_uniform1(retval, num_blocks, threads_per_block);
   test_divergent0(retval, num_blocks, threads_per_block);
@@ -221,6 +211,6 @@ TEST_CASE("Unit_Printf_PrintfBasicTsts") {
   HIP_CHECK(hipFree(retval_void));
 }
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

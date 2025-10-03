@@ -96,6 +96,7 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hip_api, ROCPROFSYS_CATEGORY_ROCM_HIP_
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hsa_api, ROCPROFSYS_CATEGORY_ROCM_HSA_API, "rocm_hsa_api", "ROCm HSA functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kernel_dispatch, ROCPROFSYS_CATEGORY_ROCM_KERNEL_DISPATCH, "rocm_kernel_dispatch", "ROCm Kernel dispatch")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_memory_copy, ROCPROFSYS_CATEGORY_ROCM_MEMORY_COPY, "rocm_memory_copy", "ROCm Async Memory Copy")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_memory_allocate, ROCPROFSYS_CATEGORY_ROCM_MEMORY_ALLOCATE, "rocm_memory_allocate", "ROCm Memory Allocations")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hip_stream, ROCPROFSYS_CATEGORY_ROCM_HIP_STREAM, "rocm_hip_stream", "ROCm HIP Stream")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_scratch_memory, ROCPROFSYS_CATEGORY_ROCM_SCRATCH_MEMORY, "rocm_scratch_memory", "ROCm kernel scratch memory reallocations")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_page_migration, ROCPROFSYS_CATEGORY_ROCM_PAGE_MIGRATION, "rocm_page_migration", "ROCm memory page migration")
@@ -104,6 +105,7 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_marker_api, ROCPROFSYS_CATEGORY_ROCM_M
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocdecode_api, ROCPROFSYS_CATEGORY_ROCM_ROCDECODE_API, "rocm_rocdecode_api", "ROCm RocDecode API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocjpeg_api, ROCPROFSYS_CATEGORY_ROCM_ROCJPEG_API, "rocm_rocjpeg_api", "ROCm RocJPEG API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl_api, ROCPROFSYS_CATEGORY_ROCM_RCCL_API, "rocm_rccl_api", "ROCm RCCL API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_GFX, "device_busy_gfx", "Busy percentage of GFX engine on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_umc_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_UMC, "device_busy_umc", "Busy percentage of UMC engin on a GPU device")
@@ -117,7 +119,6 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
-ROCPROFSYS_DEFINE_CATEGORY(category, ompt, ROCPROFSYS_CATEGORY_OMPT, "ompt", "OpenMP tools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
 ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL counters for tracking amount of data sent or received")
 ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
@@ -167,6 +168,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hsa_api),                            \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kernel_dispatch),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_memory_copy),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_memory_allocate),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hip_stream),                         \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_scratch_memory),                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_page_migration),                     \
@@ -175,6 +177,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocdecode_api),                      \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocjpeg_api),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
@@ -188,7 +191,6 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::ompt),                                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_sampling),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \
