@@ -1,369 +1,334 @@
-import argparse
+#!/usr/bin/env python3
+"""
+Apply delta YAML to base architecture to produce target architecture.
+Usage: python apply_delta.py <base_arch_dir> <delta_yaml> <output_dir>
+"""
+
+import os
+import shutil
 import sys
 from pathlib import Path
-from typing import Any, Optional
 
 import yaml
 
 
-def update_nested_dict(
-    dictionary: dict[str, Any], keys: list[str], new_value: Any
-) -> dict[str, Any]:
-    """Update a nested dictionary value using a list of keys."""
-    if not keys:
-        raise ValueError("Keys list cannot be empty")
-
-    current = dictionary
-    for key in keys[:-1]:
-        if not isinstance(current, dict):
-            raise TypeError(f"Cannot navigate through non-dict value at key '{key}'")
-        if key not in current:
-            raise KeyError(f"Key '{key}' not found in dictionary")
-        current = current[key]
-
-    if not isinstance(current, dict):
-        raise TypeError(f"Cannot set key '{keys[-1]}' on non-dict value")
-
-    current[keys[-1]] = new_value
-    return dictionary
+def load_yaml(filepath: str) -> dict:
+    """Load YAML file and return as dictionary."""
+    with open(filepath, "r") as f:
+        return yaml.safe_load(f)
 
 
-def get_nested_value(d: dict[str, Any], keys: list[str]) -> Optional[Any]:
-    """Get value from nested dictionary using list of keys."""
-    for key in keys:
-        if isinstance(d, dict) and key in d:
-            d = d[key]
-        else:
-            return None
-    return d
+def save_yaml(data: dict, filepath: str):
+    """Save dictionary as YAML file with clean formatting."""
+    with open(filepath, "w") as f:
+        yaml.dump(
+            data,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            default_style="",  # Don't add quotes
+            width=float("inf"),
+        )
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Apply YAML configuration modifications based on rules",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+def find_table_by_id(tables: list[dict], table_id: int) -> tuple:
+    """Find table in list by id. Returns (index, table) or (None, None)."""
+    for idx, table in enumerate(tables):
+        if table.get("id") == table_id:
+            return idx, table
+    return None, None
+
+
+def apply_table_level_addition(config: dict, metric_table: dict):
+    """Add entire new table to config."""
+    if "Panel Config" not in config or "data source" not in config["Panel Config"]:
+        print("[ERROR] Invalid config structure")
+        return
+
+    # Add as new metric_table entry
+    config["Panel Config"]["data source"].append({"metric_table": metric_table})
+    print(
+        f"[DEBUG] Added table-level: {metric_table.get('id')} - "
+        f"{metric_table.get('title')}"
     )
 
-    parser.add_argument(
-        "--rules", "-r", type=Path, required=True, help="Path to the rules YAML file"
-    )
 
-    parser.add_argument(
-        "--config-dir",
-        "-c",
-        type=Path,
-        required=True,
-        help="Directory containing YAML configuration files to modify",
-    )
+def apply_metric_level_addition(config: dict, table_id: int, metrics: list[dict]):
+    """Add new metrics to existing table."""
+    if "Panel Config" not in config or "data source" not in config["Panel Config"]:
+        print("[ERROR] Invalid config structure")
+        return
 
-    parser.add_argument(
-        "--output-dir",
-        "-o",
-        type=Path,
-        help="Output directory for modified files (default: current directory)",
-    )
+    # Find the table
+    for item in config["Panel Config"]["data source"]:
+        if "metric_table" in item:
+            table = item["metric_table"]
+            if table.get("id") == table_id:
+                # Found the table, add metrics
+                if "metric" not in table:
+                    table["metric"] = {}
 
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be modified without writing files",
-    )
+                for metric_dict in metrics:
+                    for metric_name, metric_data in metric_dict.items():
+                        table["metric"][metric_name] = metric_data
+                        print(
+                            f"[DEBUG] Added metric: {metric_name} to table {table_id}"
+                        )
+                return
 
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose output"
-    )
-
-    return parser.parse_args()
+    print(f"[WARNING] Table {table_id} not found for metric-level addition")
 
 
-def validate_paths(args: argparse.Namespace) -> bool:
-    """Validate that input paths exist."""
-    errors = []
+def apply_table_level_deletion(config: dict, table_id: int):
+    """Remove entire table from config."""
+    if "Panel Config" not in config or "data source" not in config["Panel Config"]:
+        print("[ERROR] Invalid config structure")
+        return
 
-    if not args.rules.exists():
-        errors.append(f"Rules file not found: {args.rules}")
+    data_source = config["Panel Config"]["data source"]
+    for idx, item in enumerate(data_source):
+        if "metric_table" in item:
+            table = item["metric_table"]
+            if table.get("id") == table_id:
+                data_source.pop(idx)
+                print(f"[DEBUG] Deleted table-level: {table_id} - {table.get('title')}")
+                return
 
-    if not args.config_dir.exists():
-        errors.append(f"Config directory not found: {args.config_dir}")
-    elif not args.config_dir.is_dir():
-        errors.append(f"Config path is not a directory: {args.config_dir}")
-
-    if errors:
-        for error in errors:
-            print(f"Error: {error}", file=sys.stderr)
-        return False
-
-    return True
+    print(f"[WARNING] Table {table_id} not found for deletion")
 
 
-def load_rules(rules_path: Path) -> dict[str, Any]:
-    """Load rules from YAML file."""
-    try:
-        with rules_path.open() as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error reading rules file: {e}", file=sys.stderr)
-        sys.exit(1)
+def apply_metric_level_deletion(config: dict, table_id: int, metrics: list[dict]):
+    """Remove specific metrics from existing table."""
+    if "Panel Config" not in config or "data source" not in config["Panel Config"]:
+        print("[ERROR] Invalid config structure")
+        return
+
+    # Find the table
+    for item in config["Panel Config"]["data source"]:
+        if "metric_table" in item:
+            table = item["metric_table"]
+            if table.get("id") == table_id:
+                # Found the table, delete metrics
+                if "metric" not in table:
+                    print(f"[WARNING] Table {table_id} has no metrics to delete")
+                    return
+
+                for metric_dict in metrics:
+                    for metric_name in metric_dict.keys():
+                        if metric_name in table["metric"]:
+                            del table["metric"][metric_name]
+                            print(
+                                f"[DEBUG] Deleted metric: {metric_name} from "
+                                f"table {table_id}"
+                            )
+                        else:
+                            print(
+                                f"[WARNING] Metric {metric_name} not found in "
+                                f"table {table_id}"
+                            )
+                return
+
+    print(f"[WARNING] Table {table_id} not found for metric-level deletion")
 
 
-def find_yaml_files(config_dir: Path, exclude_name: str) -> list[Path]:
-    """Find all YAML files in directory, optionally excluding a specific filename."""
-    yaml_files = [
-        f
-        for f in config_dir.glob("*.yaml")
-        if exclude_name is None or f.name != exclude_name
-    ]
+def apply_modification(config: dict, table_id: int, metrics: list[dict]):
+    """Modify specific fields in existing metrics."""
+    if "Panel Config" not in config or "data source" not in config["Panel Config"]:
+        print("[ERROR] Invalid config structure")
+        return
 
-    if not yaml_files:
-        print(f"No YAML files found in {config_dir}")
+    print(f"[DEBUG] Looking for table {table_id} to apply modifications...")
 
-    return yaml_files
+    # Find the table
+    for item in config["Panel Config"]["data source"]:
+        if "metric_table" in item:
+            table = item["metric_table"]
+            if table.get("id") == table_id:
+                print(f"[DEBUG] Found table {table_id}")
+
+                # Found the table, modify metrics
+                if "metric" not in table:
+                    print(f"[WARNING] Table {table_id} has no metrics to modify")
+                    return
+
+                print(f"[DEBUG] Table {table_id} has {len(table['metric'])} metrics")
+
+                for metric_dict in metrics:
+                    for metric_name, new_fields in metric_dict.items():
+                        print(f"[DEBUG] Attempting to modify metric: {metric_name}")
+
+                        if metric_name not in table["metric"]:
+                            print(
+                                f"[WARNING] Metric '{metric_name}' not found in "
+                                f"table {table_id}"
+                            )
+                            print(
+                                "[DEBUG] Available metrics: "
+                                f"{list(table['metric'].keys())}"
+                            )
+                            continue
+
+                        print(
+                            f"[DEBUG] Found metric '{metric_name}', updating fields: "
+                            f"{list(new_fields.keys())}"
+                        )
+
+                        # Update only the specified fields
+                        for field_name, field_value in new_fields.items():
+                            old_value = table["metric"][metric_name].get(
+                                field_name, "N/A"
+                            )
+                            table["metric"][metric_name][field_name] = field_value
+                            print(f"[DEBUG] Modified {metric_name}.{field_name}")
+                            print(f"[DEBUG]   Old: {old_value}")
+                            print(f"[DEBUG]   New: {field_value}")
+                return
+
+    print(f"[WARNING] Table {table_id} not found for modification")
 
 
-def load_panel_from_file(
-    yaml_file: Path, verbose: bool = False
-) -> Optional[dict[str, Any]]:
-    """Load and validate a panel configuration from a YAML file."""
-    try:
-        with yaml_file.open() as f:
-            yaml_obj = yaml.safe_load(f)
-    except Exception as e:
-        print(f"Warning: Failed to load {yaml_file.name}: {e}")
-        return None
+def apply_delta_to_config(config: dict, delta_changes: list[dict], category: str):
+    """Apply delta changes to a configuration in-place."""
+    for change in delta_changes:
+        panel_config = change.get("Panel Config", {})
+        metric_tables = change.get("metric_tables", [])
 
-    if "Panel Config" not in yaml_obj:
-        if verbose:
-            print(f"Skipping {yaml_file.name} - no 'Panel Config' section")
-        return None
+        print(f"\n[DEBUG] Processing {category} for Panel {panel_config.get('id')}")
 
-    return yaml_obj
+        for mt in metric_tables:
+            mt = mt.get("metric_table", {})
+            table_id = mt.get("id")
+
+            if category == "Addition":
+                # Check if this is table-level or metric-level addition
+                if "metrics" in mt:
+                    # Metric-level addition (has 'metrics' list with new metrics only)
+                    apply_metric_level_addition(config, table_id, mt["metrics"])
+                elif "metric" in mt:
+                    # Table-level addition (has complete 'metric' dict)
+                    apply_table_level_addition(config, mt)
+
+            elif category == "Deletion":
+                # Check if this is table-level or metric-level deletion
+                if "metrics" in mt:
+                    # Metric-level deletion
+                    apply_metric_level_deletion(config, table_id, mt["metrics"])
+                elif "metric" in mt:
+                    # Table-level deletion
+                    apply_table_level_deletion(config, table_id)
+
+            elif category == "Modification":
+                # Always metric-level for modifications
+                if "metrics" in mt:
+                    apply_modification(config, table_id, mt["metrics"])
 
 
-def build_panel_mappings(
-    yaml_files: list[Path], verbose: bool = False
-) -> tuple[dict[str, dict], dict[str, dict[str, int]], dict[str, Path]]:
-    """Load all panels and build table mappings."""
-    panels = {}
-    table_mapping = {}
-    file_mapping = {}
+def apply_delta(base_dir: str, delta_file: str, output_dir: str):
+    """Apply delta YAML to all files in base directory."""
+    print(f"[DEBUG] Loading delta file: {delta_file}")
+    delta = load_yaml(delta_file)
 
-    for yaml_file in yaml_files:
-        yaml_obj = load_panel_from_file(yaml_file, verbose)
-        if not yaml_obj:
+    print(f"[DEBUG] Base directory: {base_dir}")
+    print(f"[DEBUG] Output directory: {output_dir}")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Group delta changes by panel ID
+    files_to_process = {}
+
+    # Process each category
+    for category in ["Addition", "Deletion", "Modification"]:
+        if category not in delta or not delta[category]:
+            print(f"[DEBUG] No {category} changes in delta")
             continue
 
-        panel_config = yaml_obj["Panel Config"]
-        panel_title = panel_config.get("title", "Untitled")
+        print(f"[DEBUG] Processing {category}: {len(delta[category])} panel changes")
 
-        print(f"Loading panel: {panel_title}")
-        if verbose:
-            print(f"  From file: {yaml_file.name}")
+        for change in delta[category]:
+            panel_id = change.get("Panel Config", {}).get("id")
+            print(f"[DEBUG] {category} has panel_id: {panel_id}")
 
-        file_mapping[panel_title] = yaml_file
+            if panel_id not in files_to_process:
+                files_to_process[panel_id] = {
+                    "Addition": [],
+                    "Deletion": [],
+                    "Modification": [],
+                }
 
-        # Build table mapping
-        table_map = {}
-        for i, source in enumerate(panel_config.get("data source", [])):
-            if "metric_table" in source:
-                table_title = source["metric_table"].get("title", f"Table_{i}")
-                table_map[table_title] = i
-                if verbose:
-                    print(f"  Table: {table_title}")
-
-        table_mapping[panel_title] = table_map
-        panels[panel_title] = yaml_obj
-
-    return panels, table_mapping, file_mapping
-
-
-def apply_single_modification(
-    rule: dict[str, Any],
-    panels: dict[str, dict],
-    table_mapping: dict[str, dict[str, int]],
-    rule_num: int,
-) -> bool:
-    """Apply a single modification rule. Returns True if successful."""
-    print(f"\nRule {rule_num}: {rule}")
-
-    panel_title = rule.get("panel_title")
-    field_hierarchy = rule.get("field_hierarychy", "")  # Note typo
-    new_value = rule.get("new_value")
-
-    if not panel_title or not field_hierarchy:
-        print("  Skipping - missing panel_title or field_hierarychy")
-        return False
-
-    fields = field_hierarchy.split(",")
-    if len(fields) < 2:
-        print(f"  Skipping - invalid field hierarchy: {field_hierarchy}")
-        return False
-
-    table_name = fields[0]
-    field_path = fields[1:]
-
-    # Validate panel and table exist
-    if panel_title not in table_mapping:
-        print(f"  Warning: Panel '{panel_title}' not found")
-        return False
-
-    if table_name not in table_mapping[panel_title]:
-        print(f"  Warning: Table '{table_name}' not found in panel '{panel_title}'")
-        return False
-
-    # Get target table
-    table_idx = table_mapping[panel_title][table_name]
-    target_table = panels[panel_title]["Panel Config"]["data source"][table_idx][
-        "metric_table"
-    ]
-
-    # Show before value
-    before_value = get_nested_value(target_table, field_path)
-    print(f"  Before: {before_value}")
-
-    # Update value
-    try:
-        update_nested_dict(target_table, field_path, new_value)
-        after_value = get_nested_value(target_table, field_path)
-        print(f"  After: {after_value}")
-        return True
-    except (KeyError, TypeError) as e:
-        print(f"  Error updating: {e}")
-        return False
-
-
-def apply_modifications(
-    rules: dict[str, Any],
-    panels: dict[str, dict],
-    table_mapping: dict[str, dict[str, int]],
-) -> set[str]:
-    """Apply all modifications and return set of modified panel titles."""
-    modified_panels = set()
-    modifications = rules.get("rule", {}).get("Modification", [])
-
-    print(f"\nApplying {len(modifications)} modification(s)...")
-
-    for i, rule in enumerate(modifications, 1):
-        panel_title = rule.get("panel_title")
-        if apply_single_modification(rule, panels, table_mapping, i):
-            if panel_title:
-                modified_panels.add(panel_title)
-
-    return modified_panels
-
-
-def save_modified_panel(
-    panel_title: str,
-    panel_data: dict[str, Any],
-    output_dir: Path,
-    dry_run: bool = False,
-) -> bool:
-    """Save a single modified panel. Returns True if successful."""
-    safe_title = panel_title.lower().replace(" ", "_").replace("/", "_")
-    output_filename = f"{safe_title}_modified.yaml"
-    output_path = output_dir / output_filename
-
-    print(f"  {'Would write' if dry_run else 'Writing'}: {output_path}")
-
-    if not dry_run:
-        try:
-            with output_path.open("w") as f:
-                yaml.safe_dump(panel_data, f, default_flow_style=False, sort_keys=False)
-            return True
-        except Exception as e:
-            print(f"    Error writing file: {e}", file=sys.stderr)
-            return False
-
-    return True
-
-
-def save_modified_panels(
-    modified_panels: set[str],
-    panels: dict[str, dict],
-    file_mapping: dict[str, Path],
-    output_dir: Path,
-    dry_run: bool = False,
-) -> int:
-    """Save all modified panels. Returns count of successfully saved files."""
-    if not modified_panels:
-        print("\nNo panels were modified")
-        return 0
+            files_to_process[panel_id][category].append(change)
 
     print(
-        f"\n{'Would save' if dry_run else 'Saving'} {len(modified_panels)} modified panel(s)..."
+        "\n[DEBUG] Panel IDs in delta that need processing: "
+        f"{list(files_to_process.keys())}"
     )
 
-    saved_count = 0
-    for panel_title in modified_panels:
-        if panel_title not in file_mapping:
-            continue
+    # Find all YAML files in base directory
+    base_path = Path(base_dir)
+    yaml_files = list(base_path.glob("*.yaml")) + list(base_path.glob("*.yml"))
 
-        if save_modified_panel(panel_title, panels[panel_title], output_dir, dry_run):
-            saved_count += 1
+    print(f"\n[DEBUG] Found {len(yaml_files)} YAML files in base directory")
 
-    return saved_count
+    # Process each file
+    for yaml_file in yaml_files:
+        print(f"\n[DEBUG] Processing file: {yaml_file.name}")
+
+        # Load the file to get its panel ID
+        file_config = load_yaml(str(yaml_file))
+        panel_id = file_config.get("Panel Config", {}).get("id")
+
+        print(f"[DEBUG] File {yaml_file.name} has Panel Config ID: {panel_id}")
+
+        if panel_id in files_to_process:
+            print(
+                f"[DEBUG] *** MATCH FOUND *** Applying deltas to {yaml_file.name} "
+                f"(Panel ID: {panel_id})"
+            )
+
+            # Apply changes in order: Deletion, Modification, Addition
+            for category in ["Deletion", "Modification", "Addition"]:
+                if files_to_process[panel_id][category]:
+                    print(f"\n[DEBUG] Applying {category}...")
+                    apply_delta_to_config(
+                        file_config, files_to_process[panel_id][category], category
+                    )
+
+            # Save modified file
+            output_file = os.path.join(output_dir, yaml_file.name)
+            save_yaml(file_config, output_file)
+            print(f"[DEBUG] Saved: {output_file}")
+        else:
+            # No changes for this file, just copy it
+            output_file = os.path.join(output_dir, yaml_file.name)
+            shutil.copy(str(yaml_file), output_file)
+            print(f"[DEBUG] Copied unchanged: {yaml_file.name}")
+
+    print("\n[DEBUG] Delta application complete!")
 
 
-def setup_output_directory(output_dir: Optional[Path], dry_run: bool) -> Path:
-    """Setup output directory, creating if needed."""
-    if not output_dir:
-        output_dir = Path.cwd()
-
-    if not dry_run:
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-    return output_dir
-
-
-def print_configuration(args: argparse.Namespace, output_dir: Path) -> None:
-    """Print configuration summary."""
-    print(f"Rules file: {args.rules}")
-    print(f"Config directory: {args.config_dir}")
-    print(f"Output directory: {output_dir}")
-    if args.dry_run:
-        print("DRY RUN MODE - No files will be written")
-    print("-" * 60)
-
-
-def main() -> None:
-    # Parse and validate arguments
-    args = parse_arguments()
-    if not validate_paths(args):
+def main():
+    if len(sys.argv) != 4:
+        print("Usage: python apply_delta.py <base_arch_dir> <delta_yaml> <output_dir>")
+        print("  base_arch_dir: Directory with base architecture YAML files")
+        print("  delta_yaml: Delta YAML file to apply")
+        print("  output_dir: Directory to write modified YAML files")
         sys.exit(1)
 
-    # Setup output directory
-    output_dir = setup_output_directory(args.output_dir, args.dry_run)
-    print_configuration(args, output_dir)
+    base_dir = sys.argv[1]
+    delta_file = sys.argv[2]
+    output_dir = sys.argv[3]
 
-    # Load rules
-    rules = load_rules(args.rules)
+    # Validate inputs
+    if not os.path.isdir(base_dir):
+        print(f"Error: {base_dir} is not a directory")
+        sys.exit(1)
 
-    # Find YAML files
-    yaml_files = find_yaml_files(args.config_dir, args.rules.name)
-    if not yaml_files:
-        sys.exit(0)
+    if not os.path.isfile(delta_file):
+        print(f"Error: {delta_file} is not a file")
+        sys.exit(1)
 
-    print(f"Found {len(yaml_files)} YAML file(s) to process\n")
-
-    # Load panels and build mappings
-    panels, table_mapping, file_mapping = build_panel_mappings(yaml_files, args.verbose)
-    if not panels:
-        print("No valid panels found to process")
-        sys.exit(0)
-
-    # Apply modifications
-    modified_panels = apply_modifications(rules, panels, table_mapping)
-
-    # Save modified panels
-    saved_count = save_modified_panels(
-        modified_panels, panels, file_mapping, output_dir, args.dry_run
-    )
-
-    print(f"\nCompleted. Output directory: {output_dir}")
-    if saved_count > 0:
-        print(
-            f"Successfully {'would save' if args.dry_run else 'saved'} {saved_count} file(s)"
-        )
+    apply_delta(base_dir, delta_file, output_dir)
 
 
 if __name__ == "__main__":
