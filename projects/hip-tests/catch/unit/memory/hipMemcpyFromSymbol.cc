@@ -209,6 +209,10 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
       }
     }
   }
+
+  if (streamType == StreamTestType::CreatedStream) {
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
 }
 
 /**

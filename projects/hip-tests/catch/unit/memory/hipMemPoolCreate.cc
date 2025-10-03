@@ -114,6 +114,7 @@ TEST_CASE("Unit_hipMemPoolCreate_With_maxSize") {
   HIP_CHECK(
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
 #endif
+  HIP_CHECK(hipFreeAsync(A, stream));
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipStreamDestroy(stream));
 }

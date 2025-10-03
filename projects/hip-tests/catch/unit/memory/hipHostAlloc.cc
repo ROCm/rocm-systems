@@ -240,10 +240,10 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
 TEST_CASE("Unit_hipHostAlloc_Default") {
   int* A = nullptr;
   HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault));
-  const char* ptrType = "default";
-  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_DEVICE, ptrType);
-  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_STREAM, ptrType);
-  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_EVENT, ptrType);
+  std::string kPtrType{"default"};
+  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_DEVICE, kPtrType);
+  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_STREAM, kPtrType);
+  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_EVENT, kPtrType);
   HIP_CHECK(hipHostFree(A));
 }
 

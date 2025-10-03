@@ -189,6 +189,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_BufferID") {
   HIP_CHECK(hipPointerGetAttribute(&bufid2, HIP_POINTER_ATTRIBUTE_BUFFER_ID,
                                    reinterpret_cast<hipDeviceptr_t>(A_d)));
   REQUIRE(bufid1 != bufid2);
+  HIP_CHECK(hipFree(A_d));
 }
 
 /* Allocate host memory and get the device ordinal by calling
@@ -240,6 +241,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_MappedMem") {
   REQUIRE(mallocManaged == 1);
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipHostFree(ptr1));
+  HIP_CHECK(hipFree(ptr2));
   free(A_h);
 }
 
@@ -276,8 +278,6 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
                                    reinterpret_cast<hipDeviceptr_t>(B_d)) == hipErrorInvalidValue);
   }
   SECTION("Get Start address of host pointer") {
-    char* A_h;
-    A_h = reinterpret_cast<char*>(malloc(Nbytes));
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR,
                                    reinterpret_cast<hipDeviceptr_t>(A_h)) == hipErrorInvalidValue);
   }
