@@ -3551,7 +3551,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
     shareable_handle(shareable_handle)
 {
   /* Create a CPU mapping with PROT_NONE */
-  auto cpu_agent = ((AMD::GpuAgent*)agentOwner())->GetNearestCpuAgent();
+  auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
                        std::forward_as_tuple(cpu_agent),
                        std::forward_as_tuple(this, cpu_agent, va,
