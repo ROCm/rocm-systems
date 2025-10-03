@@ -34,8 +34,6 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
   ROCM_VERSION: "7.0.0"
-  PYTHON_VENV_NAME: "rocprofiler-systems"
-  PYTHON_VENV_ACTIVATE: "rocprofiler-systems/bin/activate"
 
 jobs:
   ubuntu:
