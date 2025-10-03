@@ -59,6 +59,7 @@ class LibraryContainer {
 
   // Enumerate atmost maxKernels kernel handles in this library
   hipError_t EnumerateKernels(hipKernel_t* k, unsigned int maxKernels);
+  hipError_t GetKernelName(const char** name, hipKernel_t kernel);
 
  private:
   LibraryContainer() = delete;

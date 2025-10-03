@@ -874,9 +874,10 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
 hipError_t hipLibraryUnload(hipLibrary_t library);
 hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
 hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
-hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
 }  // namespace hip
 
 namespace hip {
@@ -1417,8 +1418,9 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipLibraryUnload_fn = hip::hipLibraryUnload;
   ptrDispatchTable->hipLibraryGetKernel_fn = hip::hipLibraryGetKernel;
   ptrDispatchTable->hipLibraryGetKernelCount_fn = hip::hipLibraryGetKernelCount;
-  ptrDispatchTable->hipKernelGetLibrary_fn = hip::hipKernelGetLibrary;
   ptrDispatchTable->hipLibraryEnumerateKernels_fn = hip::hipLibraryEnumerateKernels;
+  ptrDispatchTable->hipKernelGetLibrary_fn = hip::hipKernelGetLibrary;
+  ptrDispatchTable->hipKernelGetName_fn = hip::hipKernelGetName;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2089,17 +2091,19 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadFromFile_fn, 497);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryUnload_fn, 498);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernel_fn, 499);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
-HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetLibrary_fn, 501);
-HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryEnumerateKernels_fn, 502);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 16
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryEnumerateKernels_fn, 501);
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetLibrary_fn, 502);
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetName_fn, 503);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 503)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 504)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 15,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 16,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

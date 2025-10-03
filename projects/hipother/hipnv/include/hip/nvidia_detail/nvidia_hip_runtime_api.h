@@ -3664,13 +3664,17 @@ inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrar
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
 
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  return hipCUDAErrorTohipError(cudaLibraryEnumerateKernels(kernels, numKernels, library));
+}
+
 inline static hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
   return hipCUResultTohipError(cuKernelGetLibrary(library, kernel));
 }
 
-hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
-                                      hipLibrary_t library) {
-  return hipCUDAErrorTohipError(cudaLibraryEnumerateKernels(kernels, numKernels, library));
+inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetName(name, kernel));
 }
 
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,

@@ -516,5 +516,6 @@ hipLibraryLoadFromFile
 hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
-hipKernelGetLibrary
 hipLibraryEnumerateKernels
+hipKernelGetLibrary
+hipKernelGetName

@@ -6412,15 +6412,6 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 
 /**
- * @brief Returns a Library Handle
- *
- * @param [out] library Returned Library handle
- * @param [in] kernel Kernel to retrieve library Handle
- * @return #hipSuccess, #hipErrorInvalidValue
-*/
-hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
-
-/**
  * @brief Retrieve kernel handles within a library
  *
  * @param [out] kernels Buffer for kernel handles
@@ -6430,6 +6421,24 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
 */
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
+
+/**
+ * @brief Returns a Library Handle
+ *
+ * @param [out] library Returned Library handle
+ * @param [in] kernel Kernel to retrieve library Handle
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+
+/**
+ * @brief Returns a Kernel Name
+ *
+ * @param [out] name Returned Kernel Name
+ * @param [in] kernel Kernel handle to retrieve name
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
 
 /**
  * @brief Find out attributes for a given function.

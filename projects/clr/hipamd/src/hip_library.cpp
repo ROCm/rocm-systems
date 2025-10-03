@@ -42,9 +42,34 @@ void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
     }
   }
 }
-hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
-  if (maxKernels > 0 && kernels_.empty()) {
+
+hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel) {
+  if (kernels_.empty()) {
     return hipErrorInvalidValue;
+  }
+
+  for (const auto &it : kernels_) {
+    if (it.second == kernel) {
+      *name = it.first.first.c_str(); 
+      return hipSuccess;
+    }
+  }
+  return hipErrorInvalidValue;
+}
+
+hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
+  if (maxKernels == 0 || maxKernels > functions_.size()) {
+    return hipErrorInvalidValue;
+  }
+
+  auto device_id = hip::ihipGetDevice();
+  auto m = fatbin_->Module(device_id);
+  for (const auto&f : functions_) {
+    // build library only for un-registered kernels
+    if (kernels_.find({f.first, device_id}) == kernels_.end())  {
+      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
+      Register(f.first, device_id, *k);
+    } 
   }
   auto count = 0;
   for (const auto& it : kernels_) {
@@ -105,9 +130,11 @@ hipError_t LibraryContainer::BuildIt() {
   IHIP_RETURN_ONFAIL(fatbin_->BuildProgram(device_id));
 
   auto program =
-      fatbin_->GetProgram(device_id)->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+    fatbin_->GetProgram(device_id)->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+  auto mod =
+    fatbin_->Module(device_id);
 
-  // Process Functions
+  // Process Functions and create kernel handles
   std::vector<std::string> function_names;
   program->getGlobalFuncFromCodeObj(&function_names);
   for (auto& name : function_names) {
@@ -190,6 +217,24 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
   HIP_RETURN(ret);
 }
 
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  HIP_INIT_API(hipLibraryEnumerateKernels, kernels, numKernels, library);
+  if (kernels == nullptr || library == nullptr || numKernels == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+
+  ret = l->EnumerateKernels(kernels, numKernels);
+
+  HIP_RETURN(ret);
+}
+
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
   HIP_INIT_API(hipKernelGetLibrary, library, kernel);
   if (library == nullptr || kernel == nullptr) {
@@ -203,17 +248,21 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
-                                      hipLibrary_t library) {
-  HIP_INIT_API(hipLibraryEnumerateKernels, kernels, numKernels, library);
-  if (kernels == nullptr || library == nullptr || numKernels == 0) {
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetName, name, kernel);
+  if (name == nullptr || kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  auto l = reinterpret_cast<hip::LibraryContainer*>(library);
+  hipLibrary_t library;
+  if (!hip::PlatformState::instance().GetLibraryFunction(kernel, &library)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
 
-  auto ret = l->EnumerateKernels(kernels, numKernels);
+  auto l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->GetKernelName(name, kernel);
 
   HIP_RETURN(ret);
 }
+
 }  // namespace hip
