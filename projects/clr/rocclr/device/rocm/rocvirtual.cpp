@@ -2344,29 +2344,18 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   srcDevMem->syncCacheFromHost(*this);
 
   bool result = false;
-  amd::Memory* bufferFromImageSrc = nullptr;
-  amd::Memory* bufferFromImageDst = nullptr;
+  bool srcImageBuffer = false;
+  bool dstImageBuffer = false;
 
-  // Force buffer read for IMAGE1D_BUFFER
+  // Force buffer copy for IMAGE1D_BUFFER
   if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    bufferFromImageSrc = createBufferFromImage(srcMem);
-    if (nullptr == bufferFromImageSrc) {
-      LogError("We should not fail buffer creation from image_buffer!");
-    } else {
-      srcDevMem = dev().getRocMemory(bufferFromImageSrc);
-    }
+    srcImageBuffer = true;
+    type = CL_COMMAND_COPY_BUFFER;
   }
-  // Force buffer write for IMAGE1D_BUFFER
   if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    bufferFromImageDst = createBufferFromImage(dstMem);
-    if (nullptr == bufferFromImageDst) {
-      LogError("We should not fail buffer creation from image_buffer!");
-    } else {
-      dstDevMem = dev().getRocMemory(bufferFromImageDst);
-    }
+    dstImageBuffer = true;
+    type = CL_COMMAND_COPY_BUFFER;
   }
-
-  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
 
   switch (type) {
     case CL_COMMAND_SVM_MEMCPY:
@@ -2375,14 +2364,14 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       amd::Coord3D realDstOrigin(dstOrigin[0]);
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
 
-      if (nullptr != bufferFromImageSrc) {
+      if (srcImageBuffer) {
         const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
         realSrcOrigin.c[0] *= elemSize;
-        if (nullptr != bufferFromImageDst) {
+        if (dstImageBuffer) {
           realDstOrigin.c[0] *= elemSize;
         }
         realSize.c[0] *= elemSize;
-      } else if (nullptr != bufferFromImageDst) {
+      } else if (dstImageBuffer) {
         const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
         realDstOrigin.c[0] *= elemSize;
         realSize.c[0] *= elemSize;
@@ -2403,35 +2392,22 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       break;
     }
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
-      amd::Coord3D realDstOrigin(dstOrigin);
-      if (nullptr != bufferFromImageDst) {
-        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
-        realDstOrigin.c[0] *= elemSize;
-      }
-      result = blitMgr().copyImageToBuffer(*srcDevMem, *dstDevMem, srcOrigin, realDstOrigin, size,
-                                   entire, dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
+      result =
+          blitMgr().copyImageToBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire,
+                                      dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
-      amd::Coord3D realSrcOrigin(srcOrigin);
-      if (nullptr != bufferFromImageSrc) {
-        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
-        realSrcOrigin.c[0] *= elemSize;
-      }
-      result = blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, realSrcOrigin, dstOrigin, size,
-                                   entire, srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
+      result =
+          blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire,
+                                      srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
       break;
     }
     default:
       ShouldNotReachHere();
       break;
   }
-  if (nullptr != bufferFromImageSrc) {
-    bufferFromImageSrc->release();
-  }
-  if (nullptr != bufferFromImageDst) {
-    bufferFromImageDst->release();
-  }
+
   if (!result) {
     LogError("submitCopyMemory failed!");
     return false;
