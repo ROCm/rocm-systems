@@ -113,11 +113,7 @@ class RocProfCompute:
 
     def detect_profiler(self) -> None:
         profiler_mode = detect_rocprof(self.__args)
-        if str(profiler_mode).endswith("rocprof"):
-            self.__profiler_mode = "rocprofv1"
-        elif str(profiler_mode).endswith("rocprofv2"):
-            self.__profiler_mode = "rocprofv2"
-        elif str(profiler_mode).endswith("rocprofv3"):
+        if str(profiler_mode).endswith("rocprofv3"):
             self.__profiler_mode = "rocprofv3"
         elif str(profiler_mode) == "rocprofiler-sdk":
             self.__profiler_mode = "rocprofiler-sdk"
@@ -220,32 +216,6 @@ class RocProfCompute:
         if getattr(self.__args, "list_available_metrics", False):
             return
 
-        # Add --name to workload path if --path is not given
-        if self.__args.path == str(Path.cwd() / "workloads"):
-            if not hasattr(self.__args, "name") or not self.__args.name:
-                console_error("-n/--name is required")
-            self.__args.path = str(Path(self.__args.path) / self.__args.name)
-        # Add node name to workload path
-        if self.__args.subpath == "node_name":
-            self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-        # Or, add gpu model name to workload path
-        elif self.__args.subpath == "gpu_model":
-            if self.__mspec.gpu_model:
-                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
-            else:
-                self.__args.path = str(Path(self.__args.path) / self.__args.name)
-                console_warning(
-                    f"No gpu model found, using default path: {self.__args.path}"
-                )
-
-        # Create workload directory if it does not exist
-        p = Path(self.__args.path)
-        if not p.exists():
-            try:
-                p.mkdir(parents=True, exist_ok=False)
-            except FileExistsError:
-                console_error("Directory already exists.")
-
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         # Block all filters during spatial-multiplexing
@@ -329,16 +299,32 @@ class RocProfCompute:
 
         sys.exit(0)
 
+        profiler_classes = {
+            "rocprofv3": (
+                "rocprof_compute_profile.profiler_rocprof_v3",
+                "rocprof_v3_profiler",
+            ),
+            "rocprofiler-sdk": (
+                "rocprof_compute_profile.profiler_rocprofiler_sdk",
+                "rocprofiler_sdk_profiler",
+            ),
+        }
+
+        if self.__profiler_mode not in profiler_classes:
+            console_error("Unsupported profiler")
+
+        module_name, class_name = profiler_classes[self.__profiler_mode]
+        module = importlib.import_module(module_name)
+        profiler_class = getattr(module, class_name)
+
+        return profiler_class(
+            self.__args,
+            self.__profiler_mode,
+            self.__soc[self.__mspec.gpu_arch],
+        )
+
     def create_profiler(self) -> object:
         profiler_classes = {
-            "rocprofv1": (
-                "rocprof_compute_profile.profiler_rocprof_v1",
-                "rocprof_v1_profiler",
-            ),
-            "rocprofv2": (
-                "rocprof_compute_profile.profiler_rocprof_v2",
-                "rocprof_v2_profiler",
-            ),
             "rocprofv3": (
                 "rocprof_compute_profile.profiler_rocprof_v3",
                 "rocprof_v3_profiler",
@@ -379,11 +365,27 @@ class RocProfCompute:
 
         # instantiate desired profiler
         profiler = self.create_profiler()
-
-        # -----------------------
-        # run profiling workflow
-        # -----------------------
         profiler.sanitize()
+
+        # Add --name to workload path if --path is not given
+        if self.__args.path == str(Path.cwd() / "workloads"):
+            if not hasattr(self.__args, "name") or not self.__args.name:
+                console_error("-n/--name is required")
+            self.__args.path = str(Path(self.__args.path) / self.__args.name)
+            # Add node name to workload path
+            if self.__args.subpath == "node_name":
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add gpu model name to workload path
+            elif self.__args.subpath == "gpu_model":
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+
+        # Create workload directory if it does not exist
+        p = Path(self.__args.path)
+        if not p.exists():
+            try:
+                p.mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                console_error("Directory already exists.")
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)

@@ -695,6 +695,8 @@ bool Device::init() {
       // Ignore the failure and assume KFD is not installed.
       // abort();
       DevLogError("KFD is not installed \n");
+      // Disable direct dispatch if ROC initialization wasn't successful
+      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
     }
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
@@ -703,6 +705,10 @@ bool Device::init() {
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
   if (GPU_ENABLE_PAL != 0) {
+    if (GPU_ENABLE_PAL == 1) {
+      // PAL path can't support direct dispatch, unless it's forced
+      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
+    }
     ret |= PalDeviceLoad();
   }
 #endif  // WITH_PAL_DEVICE

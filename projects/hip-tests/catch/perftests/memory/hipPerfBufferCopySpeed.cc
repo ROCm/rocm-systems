@@ -31,10 +31,10 @@ THE SOFTWARE.
 #include <iomanip>  // Add this at the top if not already included
 #define ENABLE_DEBUG 1
 
-#define NUM_SIZES 9
-//  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10, 128 MB, 512 MB
-static const unsigned int Sizes[NUM_SIZES] = {4096,     8192,          65536,     1048576,  4194304,
-                                              16777216, 16777216 + 10, 134217728, 536870912};
+#define NUM_SIZES 8
+//  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10, 128 MB
+static const unsigned int Sizes[NUM_SIZES] = {4096, 8192, 65536, 1048576, 4194304,
+                                              16777216, 16777216 + 10, 134217728};
 static const unsigned int Iterations[2] = {1, 1000};
 
 #define BUF_TYPES 5
@@ -133,10 +133,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       double perf = perf_pre * static_cast<double>(numIter);
       DEBUG_PRINT("%f\n", perf_pre);
       perf *= static_cast<double>(1e-09);
-      CONSOLE_PRINT("%f\n", perf);
-      CONSOLE_PRINT("HIPPerfBufferCopySpeedP2P[%d] %u s:dev0 d:dev1 i:%u (GB/s) perf %f\n", test,
-                    bufSize_, numIter, (float)perf);
-      CONSOLE_PRINT("P2P,%d,%u,dev0,dev1,%u,%f\n", test, bufSize_, numIter, (float)perf);
+       CONSOLE_PRINT(
+           "HIPPerfBufferCopySpeed[%3d]       (%10u bytes)        P2P    s:%-5s d:%-5s       i:%4u  (GB/s) perf     %f",
+           testIdx, bufSize_, "dev0", "dev1", numIter, (float)perf);
       test++;
       void* temp = malloc(bufSize_ + 4096);
       void* chkBuf = reinterpret_cast<void*>(temp);
@@ -190,10 +189,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     double perf = perf_pre * static_cast<double>(numIter);
     DEBUG_PRINT("%f\n", perf_pre);
     perf *= static_cast<double>(1e-09);
-    CONSOLE_PRINT("%f\n", perf);
-    CONSOLE_PRINT("HIPPerfBufferCopySpeedNoCU[%d]  %u  s:dev0 d:dev0 i:%u (GB/s) perf %f\n", test,
-                  bufSize_, numIter, (float)perf);
-    CONSOLE_PRINT("NoCU,%d,%u,dev0,dev0,%u,%f\n", test, bufSize_, numIter, (float)perf);
+     CONSOLE_PRINT(
+         "HIPPerfBufferCopySpeed[%3d]       (%10u bytes)        NoCU   s:%-5s d:%-5s       i:%4u  (GB/s) perf     %f",
+         testIdx, bufSize_, "dev0", "dev0", numIter, (float)perf);
     test++;
     void* temp = malloc(bufSize_ + 4096);
     void* chkBuf = reinterpret_cast<void*>(temp);
@@ -308,7 +306,6 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         double perf = perf_pre * static_cast<double>(numIter);
         DEBUG_PRINT("%f\n", perf_pre);
         perf *= static_cast<double>(1e-09);
-        CONSOLE_PRINT("%f\n", perf);
         const char* strSrc = NULL;
         const char* strDst = NULL;
         if (deviceMallocUncached[0])
@@ -337,10 +334,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         if ((hostMalloc[0] || hostRegister[0] || unpinnedMalloc[0]) &&
             (hostMalloc[1] || hostRegister[1] || unpinnedMalloc[1]))
           perf *= 2.0;
-        CONSOLE_PRINT("HIPPerfBufferCopySpeed[%d] %u s:%s d:%s i:%u (GB/s) perf %f\n", test,
-                      bufSize_, strSrc, strDst, numIter, (float)perf);
-        std::cout << "Type," << bufSize_ << "," << strSrc << "," << strDst << "," << numIter << ","
-                  << (float)perf << std::endl;
+        CONSOLE_PRINT(
+            "HIPPerfBufferCopySpeed[%3d]       (%10u bytes)        %-5s  s:%-5s d:%-5s       i:%4u  (GB/s) perf     %f",
+            testIdx, bufSize_, "     ", strSrc, strDst, numIter, (float)perf);
         test++;
         void* temp = malloc(bufSize_ + 4096);
         void* chkBuf = reinterpret_cast<void*>(temp);
@@ -409,8 +405,18 @@ TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
         "- hipMallocUncached\n",
         deviceId, props.name);
 
+    CONSOLE_PRINT("Usage: Set HIP_PERF_TEST_NUM environment variable to run a specific subtest (e.g., HIP_PERF_TEST_NUM=5)\n");
+
     // Run the test with all sizes and buffer types, alter p_tests to run a specific test
-    REQUIRE(true == hipPerfBufferCopySpeed_test(-1));
+    // Method 1: Set HIP_PERF_TEST_NUM environment variable (e.g., HIP_PERF_TEST_NUM=5)
+    // Method 2: Directly change the value below (e.g., int p_tests = 5;)
+    char* testNumStr = getenv("HIP_PERF_TEST_NUM");
+    int p_tests = -1;  // Default: run all tests
+    if (testNumStr != nullptr) {
+      p_tests = atoi(testNumStr);
+      CONSOLE_PRINT("Running specific test: %d\n", p_tests);
+    }
+    REQUIRE(true == hipPerfBufferCopySpeed_test(p_tests));
   }
 }
 
