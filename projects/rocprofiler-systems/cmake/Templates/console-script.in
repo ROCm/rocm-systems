@@ -24,7 +24,7 @@ add_so_paths_to_ld_library_path()
 
         for dir in $so_dirs; do
             if [ -d "$dir" ] && [[ ":$LD_LIBRARY_PATH:" != *":$dir:"* ]]; then
-                export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${dir}"
+                export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${dir}"
             fi
         done
     fi
