@@ -2747,6 +2747,7 @@ enum MgpuMode : uint32
     MgpuModeCount
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 943
 /// Specifies input arguments for IDevice::SetMgpuMode(). A client set a particular MGPU compositing mode and whether
 /// frame pacing is enabled for a display.
 struct SetMgpuModeInput
@@ -2756,6 +2757,7 @@ struct SetMgpuModeInput
     bool        isFramePacingEnabled;   ///< True if frame pacing enabled. If so, the client creates a timer queue
                                         ///  to delay the present, and the delay value is calculated by KMD.
 };
+#endif
 
 constexpr uint32 XdmaMaxDevices = 8;    ///< Maximum number of Devices for XDMA compositing.
 
@@ -3591,6 +3593,7 @@ public:
     virtual Result SetStaticVmidMode(
         bool enable) = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 943
     /// Set up MGPU compositing mode of a display provided by client.
     ///
     /// This function should not be called by clients that rely on PAL for compositor management.  Basically, if your
@@ -3599,8 +3602,9 @@ public:
     /// @param [in] setMgpuModeInput        Set MGPU compositing mode input arguments.
     ///
     /// @returns Success if the MGPU compositing mode were successfully set.
-    virtual Result SetMgpuMode(
-        const SetMgpuModeInput& setMgpuModeInput) const = 0;
+    inline Result SetMgpuMode(
+        const SetMgpuModeInput& setMgpuModeInput) const { return Result::Success; }
+#endif
 
     /// Get XDMA cache buffer information of each GPU based upon video present source ID provided by client.
     ///

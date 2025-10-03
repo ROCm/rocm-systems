@@ -414,6 +414,12 @@ struct GraphicsPipelineCreateInfo
     size_t              pipelineBinarySize;    ///< Size of Pipeline ELF binary in bytes.
     const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. pPipelineBinary
                                                ///  and ppShaderLibraries can't be valid at the same time.
+                                               ///  If the client does not know whether the pipeline is complete,
+                                               ///  it can add the shader library for a "dummy partial pipeline" to
+                                               ///  the end of the array to ensure the pipeline is complete.
+                                               ///  In practice, "complete" means "has a PS on hardware that requires
+                                               ///  it", although that is an implementation detail that the client
+                                               ///  does not need to know.
     size_t              numShaderLibraries;    ///< Number of graphics shaderLibrary object in ppShaderLibraries.
     bool                useLateAllocVsLimit;   ///< If set, use the specified lateAllocVsLimit instead of PAL internally
                                                ///  determining the limit.
