@@ -69,8 +69,9 @@ using tracing_count_categories_t =
 
 // convert these categories to throughput points
 using causal_throughput_categories_t =
-    type_list<category::host, category::kokkos, category::ompt, category::rocm_hip_api,
-              category::rocm_hsa_api, category::rocm_rccl, category::rocm_marker_api>;
+    type_list<category::host, category::kokkos, category::rocm_ompt_api,
+              category::rocm_hip_api, category::rocm_hsa_api, category::rocm_rccl,
+              category::rocm_marker_api>;
 
 // define this outside of category region functions so that the
 // static thread_local is global instead of per-template instantiation
