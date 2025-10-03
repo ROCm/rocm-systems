@@ -55,7 +55,7 @@ jobs:
           submodules: recursive
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@3.6.0
+        uses: docker/login-action@3.6
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -98,12 +98,12 @@ jobs:
       
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5.8.0
+        uses: docker/metadata-action@v5.8
         with:
           images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}
 
       - name: Build CI GFX Container (Does not Push on PR)
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v6.18
         with:
           file: projects/rocprofiler-compute/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
