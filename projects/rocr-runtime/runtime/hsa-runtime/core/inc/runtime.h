@@ -878,7 +878,6 @@ class Runtime {
     MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
                  hsa_access_permission_t perm, ShareableHandle shareable_handle);
-     ~MappedHandle();
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
