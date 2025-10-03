@@ -26,6 +26,8 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include "aqlprofile-sdk/version.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -199,6 +201,23 @@ typedef struct {
 typedef struct {
   uint64_t handle;
 } aqlprofile_agent_handle_t;
+
+/**
+ * @brief Versioning info.
+ */
+typedef struct aqlprofile_version_t {
+  uint32_t major;
+  uint32_t minor;
+  uint32_t patch;
+} aqlprofile_version_t;
+
+/**
+ * @brief Query the version of aqlprofile library.
+ * @param[out] version aqlprofile version info is stored if non-NULL
+ * @retval HSA_STATUS_SUCCESS returned when version is a valid pointer
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if version is a null
+ */
+hsa_status_t aqlprofile_get_version(aqlprofile_version_t* version);
 
 /**
  * @brief Registers an agent to be used with AQL profile.

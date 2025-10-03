@@ -3323,6 +3323,7 @@ hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* dev_ptr) {
 
   device = hip::getCurrentDevice()->devices()[0];
   ihandle = reinterpret_cast<amd::MemObjMap::IpcMemHandle*>(handle);
+  ihandle->owners_device_id = hip::getCurrentDevice()->deviceId();
 
   if (!device->IpcCreate(dev_ptr, &(ihandle->psize), ihandle->ipc_handle, &(ihandle->poffset))) {
     LogPrintfError("IPC memory creation failed for memory: 0x%x", dev_ptr);
@@ -3355,6 +3356,13 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
   if (ihandle->owners_process_id == amd::Os::getProcessId()) {
     HIP_RETURN(hipErrorInvalidContext);
   }
+
+  if (ihandle->owners_device_id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  amd::Device* peer_device = g_devices[ihandle->owners_device_id]->asContext()->devices()[0];
+  device->enableP2P(peer_device);
 
   amd_mem_obj = amd::MemObjMap::FindIpcHandleMemObj(*ihandle);
   if (amd_mem_obj == nullptr) {

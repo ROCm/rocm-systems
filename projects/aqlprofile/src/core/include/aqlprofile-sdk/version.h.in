@@ -1,0 +1,115 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#pragma once
+
+/**
+ * @def AQLPROFILE_VERSION_MAJOR
+ * @brief The major version of the interface as a macro so it can be used
+ * by the preprocessor.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_VERSION_MINOR
+ * @brief The minor version of the interface as a macro so it can be used
+ * by the preprocessor.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_VERSION_PATCH
+ * @brief The patch version of the interface as a macro so it can be used
+ * by the preprocessor.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_VERSION
+ * @brief Numerically increasing version number encoding major, minor, and patch via
+          computing `((10000 * <MAJOR>) + (100 * <MINOR>) + <PATCH>)`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_SOVERSION
+ * @brief Shared object versioning value whose value is at least `(10000 * <MAJOR>)`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_VERSION_STRING
+ * @brief Version string in form: `<MAJOR>.<MINOR>.<PATCH>`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_GIT_DESCRIBE
+ * @brief String encoding of `git describe --tags` when aqlprofile was built.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_GIT_REVISION
+ * @brief String encoding of `git rev-parse HEAD` when aqlprofile was built.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_LIBRARY_ARCH
+ * @brief Architecture triplet of aqlprofile build.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_SYSTEM_NAME
+ * @brief Target operating system for aqlprofile build, e.g. Linux.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_SYSTEM_PROCESSOR
+ * @brief Target architecture for aqlprofile build.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_SYSTEM_VERSION
+ * @brief Version of the operating system which built aqlprofile
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_COMPILER_ID
+ * @brief C++ compiler identifier which built aqlprofile, e.g., GNU
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def AQLPROFILE_COMPILER_VERSION
+ * @brief C++ compiler version which built aqlprofile
+ * @addtogroup VERSIONING_GROUP
+ *
+ */
+
+// clang-format off
+#define AQLPROFILE_VERSION_MAJOR   @BUILD_VERSION_MAJOR@
+#define AQLPROFILE_VERSION_MINOR   @BUILD_VERSION_MINOR@
+#define AQLPROFILE_VERSION_PATCH   @BUILD_VERSION_PATCH@
+#define AQLPROFILE_SOVERSION       @BUILD_VERSION_MAJOR@
+#define AQLPROFILE_VERSION_STRING "@VERSION_STRING@"
+#define AQLPROFILE_GIT_REVISION   "@AQLPROFILE_GIT_REVISION@"
+
+// system info during compilation
+#define AQLPROFILE_LIBRARY_ARCH     "@CMAKE_LIBRARY_ARCHITECTURE@"
+#define AQLPROFILE_SYSTEM_NAME      "@CMAKE_SYSTEM_NAME@"
+#define AQLPROFILE_SYSTEM_PROCESSOR "@CMAKE_SYSTEM_PROCESSOR@"
+#define AQLPROFILE_SYSTEM_VERSION   "@CMAKE_SYSTEM_VERSION@"
+
+// compiler information
+#define AQLPROFILE_COMPILER_ID      "@CMAKE_CXX_COMPILER_ID@"
+#define AQLPROFILE_COMPILER_VERSION "@CMAKE_CXX_COMPILER_VERSION@"
+// clang-format on
+
+#define AQLPROFILE_COMPUTE_VERSION_VALUE(MAX_VERSION_VALUE, MAJOR, MINOR, PATCH) \
+  (((MAX_VERSION_VALUE * MAX_VERSION_VALUE) * MAJOR) + (MAX_VERSION_VALUE * MINOR) + (PATCH))
+
+#define AQLPROFILE_COMPUTE_VERSION(MAJOR, MINOR, PATCH) \
+  AQLPROFILE_COMPUTE_VERSION_VALUE(100, MAJOR, MINOR, PATCH)
+
+#define AQLPROFILE_VERSION                                                       \
+  AQLPROFILE_COMPUTE_VERSION(AQLPROFILE_VERSION_MAJOR, AQLPROFILE_VERSION_MINOR, \
+                             AQLPROFILE_VERSION_PATCH)

@@ -54,7 +54,7 @@ class RocprofTUIApp(App):
     TITLE = f"{APP_TITLE} v{VERSION}"
     SUB_TITLE = "Workload Analysis Tool"
 
-    CSS_PATH = "assets/style.css"
+    CSS_PATH = str(Path(__file__).parent / "assets" / "style.css")
     BINDINGS = [
         Binding(key="q", action="quit", description="Quit"),
         Binding(key="r", action="refresh", description="Refresh"),
@@ -105,7 +105,7 @@ class RocprofTUIApp(App):
             json.dump(self.recent_dirs, f, indent=2)
 
     def add_recent_dir(self, directory: str) -> None:
-        directory = str(Path(directory).absolute())
+        directory = str(Path(directory).resolve())
 
         # Remove if exists, add to front, keep max 5
         if directory in self.recent_dirs:
@@ -113,11 +113,6 @@ class RocprofTUIApp(App):
         self.recent_dirs.insert(0, directory)
         self.recent_dirs = self.recent_dirs[:5]
         self._save_recent_dirs()
-
-    def on_recent_selected(self, selected_dir: Optional[str]) -> None:
-        if selected_dir:
-            self.main_view.selected_path = Path(selected_dir)
-            self.main_view.run_analysis()
 
     @on(Button.Pressed, "#menu-open-workload")
     @work
