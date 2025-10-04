@@ -67,6 +67,7 @@ def merge_sqlite_dbs(
 
     uuids = []
     views = []
+    data_views = []
     schema_versions = []
 
     with sqlite3.connect(str(dest_path)) as conn:
@@ -209,6 +210,11 @@ def merge_sqlite_dbs(
                     if name in existing_views:
                         log(f"View {name} exists; skipping")
                         continue
+                    # If the view name does not start with "rocpd_", collect it for later recreation
+                    if not name.startswith("rocpd_") and not any(
+                        name == _name for _name, _ in data_views
+                    ):
+                        data_views.append((name, create_sql))
                     existing_views.add(name)
 
                 views += [itr for itr in list(existing_views) if itr.startswith("rocpd_")]
@@ -250,7 +256,11 @@ def merge_sqlite_dbs(
                 [f"SELECT * FROM {titr}" for titr in matching_tables]
             )
             conn.execute(f"CREATE VIEW {vitr} AS {tables_union}")
+        conn.commit()
 
+        # Now that the rocpd_ views are created, re-create the data-views using all the data
+        for _, sql_view in data_views:
+            conn.execute(sql_view)
         conn.commit()
 
 

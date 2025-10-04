@@ -33,7 +33,7 @@ from . import output_config
 rocpd_package_version = "1.0"
 rocpd_metadata_param_version = "rocpd_package_version"
 
-IDEAL_NUMBER_OF_DATABASE_FILES = 5
+IDEAL_NUMBER_OF_DATABASE_FILES = 1
 
 
 def create_output_folder(output_path, consolidate) -> str:
