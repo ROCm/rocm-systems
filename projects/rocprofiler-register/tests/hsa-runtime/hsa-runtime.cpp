@@ -53,7 +53,7 @@ get_hsa_api_table_impl()
     return _table;
 }
 
-void
+bool
 register_profiler_impl()
 {
     static auto _const_api_table = HsaApiTable{};
@@ -96,8 +96,9 @@ register_profiler_impl()
     {
         std::cerr << "HSA library failed to register with rocprofiler-register: "
                   << rocprofiler_register_error_string(success) << "\n";
-        exit(EXIT_FAILURE);
+        return false;
     }
+    return true;
 }
 
 void
@@ -122,28 +123,38 @@ register_profiler()
         using auto_lock_t  = std::unique_lock<mutex_t>;
         static auto _once  = std::once_flag{};
         static auto _mutex = mutex_t{};
+        bool registration_succeeded = false;
 
-        // defer the lock so we can check for recursion
-        auto _lk = auto_lock_t{ _mutex, std::defer_lock };
+        {
+            // defer the lock so we can check for recursion
+            auto _lk = auto_lock_t{ _mutex, std::defer_lock };
 
-        // this will be true if the same thread currently executing the call_once invokes
-        // the library's API while registering the profiler (e.g. tool which wants to
-        // instrument HSA API invokes a HSA function while registering with the profiler)
-        // we allow this thread to proceed and access the "const" API table but
-        // return so it does not flip _is_registered to true, which would result
-        // in any subsequent threads not waiting until the library is fully registered,
-        // resulting in missed callbacks for the tools
-        if(_lk.owns_lock()) return;
+            // this will be true if the same thread currently executing the call_once invokes
+            // the library's API while registering the profiler (e.g. tool which wants to
+            // instrument HSA API invokes a HSA function while registering with the profiler)
+            // we allow this thread to proceed and access the "const" API table but
+            // return so it does not flip _is_registered to true, which would result
+            // in any subsequent threads not waiting until the library is fully registered,
+            // resulting in missed callbacks for the tools
+            if(_lk.owns_lock()) return;
 
-        // ensures any subsequent threads wait until the first thread
-        // finishes registration
-        _lk.lock();
-        // call_once to ensure that we only register once
-        std::call_once(_once, register_profiler_impl);
-        // the first thread has completed registration and all
-        // threads waiting on lock will be released and this
-        // block will not be entered again
-        _is_registered.exchange(true, std::memory_order_release);
+            // ensures any subsequent threads wait until the first thread
+            // finishes registration
+            _lk.lock();
+            // call_once to ensure that we only register once
+            std::call_once(_once, [&]() {
+                registration_succeeded = register_profiler_impl();
+            });
+            // the first thread has completed registration and all
+            // threads waiting on lock will be released and this
+            // block will not be entered again
+            _is_registered.exchange(true, std::memory_order_release);
+        }
+
+        // The lock is destroyed, it is safe to call exit in case of failure
+        if (!registration_succeeded) {
+            exit(EXIT_FAILURE);
+        }
     }
 }
 }  // namespace
