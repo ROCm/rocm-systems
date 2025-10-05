@@ -278,6 +278,8 @@ metadata_registry::get_kernel_symbol_list() const
     return result;
 }
 
+// As the underlying implementation of callback_name_info_t resizes the category storage
+// during emplace, this special method is required
 void
 metadata_registry::overwrite_callback_names(
     std::initializer_list<

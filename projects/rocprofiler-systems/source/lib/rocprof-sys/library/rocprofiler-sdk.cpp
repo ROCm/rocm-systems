@@ -936,25 +936,24 @@ get_kernel_dispatch_timestamps()
 
 #if(ROCPROFILER_VERSION >= 600)
 
-auto&
-get_ompt_standard_cb_storage()
+// An instant event is one that has its beg_ts = end_ts
+void
+ompt_cache_instant_event(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_timestamp_t _instant_ts,
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    // uint64_t -> internal id from rocprofiler_correlation_id_t
-    static thread_local auto _v =
-        std::unordered_map<uint64_t, rocprofsys_ompt_data_storage_t>{};
-    return _v;
+    auto args = function_args_t{};
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 2, &args);
+    auto call_stack = get_backtrace(_bt_data);
+
+    cache_category<category::rocm_ompt_api>();
+    cache_add_thread_info(record.thread_id);
+    cache_region(&record, _instant_ts, _instant_ts, call_stack->to_string(),
+                 get_args_string(args), trait::name<category::rocm_ompt_api>::value);
 }
 
-auto&
-get_ompt_parallel_cb_storage()
-{
-    // uintptr_t -> parallel_data (cb definition)
-    static thread_local auto _v =
-        std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
-    return _v;
-}
-
-// Treat events with no start/end as instant
+// OMPT callbacks with no corresponding begin/end are treated as "instant"
 void
 ompt_cache_orphan_event(
     const rocprofsys_ompt_data_storage_t&                     stored_data,
@@ -966,6 +965,33 @@ ompt_cache_orphan_event(
     cache_region(&stored_data.record, stored_data._beg_ts, stored_data._beg_ts,
                  call_stack->to_string(), get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
+}
+
+// Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
+//  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
+//  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
+auto&
+get_ompt_standard_cb_storage()
+{
+    // uint64_t -> internal id from rocprofiler_correlation_id_t
+    static thread_local auto _v =
+        std::unordered_map<uint64_t, rocprofsys_ompt_data_storage_t>{};
+    return _v;
+}
+
+// An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
+// ROCPROFILER_OMPT_ID_parallel_end
+//  As the beginning and end can only occur on the same thread, they are connected into a
+//  single track called "omp_parallel" for clarity. In this track, the information
+//  contained within parallel_begin should be displayed as it contains all the information
+//  that parallel_end has as well as the flags and number of threads/teams that were requested.
+auto&
+get_ompt_parallel_cb_storage()
+{
+    // uintptr_t -> parallel_data (see callback definition)
+    static thread_local auto _v =
+        std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
+    return _v;
 }
 
 void
@@ -987,6 +1013,7 @@ ompt_pop_standard_callback(
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
     auto it = get_ompt_standard_cb_storage().find(record.correlation_id.internal);
+
     if(it == get_ompt_standard_cb_storage().end())
     {
         auto args = function_args_t{};
@@ -996,6 +1023,7 @@ ompt_pop_standard_callback(
                                 _bt_data);
         return;
     }
+
     auto stored_data = it->second;
     get_ompt_standard_cb_storage().erase(it);
 
@@ -1035,6 +1063,7 @@ ompt_pop_parallel_callback(
 
     auto it = get_ompt_parallel_cb_storage().find(
         reinterpret_cast<uintptr_t>(parallel_data_address));
+
     if(it == get_ompt_parallel_cb_storage().end())
     {
         auto args = function_args_t{};
@@ -1044,6 +1073,7 @@ ompt_pop_parallel_callback(
                                 _bt_data);
         return;
     }
+
     auto stored_data = it->second;
     get_ompt_parallel_cb_storage().erase(it);
     auto call_stack = get_backtrace(_bt_data);
@@ -1074,24 +1104,8 @@ ompt_finalize_orphan_events()
     get_ompt_standard_cb_storage().clear();
 }
 
-void
-ompt_cache_instant_event(
-    rocprofiler_callback_tracing_record_t record, rocprofiler_timestamp_t _instant_ts,
-    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
-{
-    auto args = function_args_t{};
-    rocprofiler_iterate_callback_tracing_kind_operation_args(
-        record, iterate_args_callback, 2, &args);
-    auto call_stack = get_backtrace(_bt_data);
-
-    cache_category<category::rocm_ompt_api>();
-    cache_add_thread_info(record.thread_id);
-    cache_region(&record, _instant_ts, _instant_ts, call_stack->to_string(),
-                 get_args_string(args), trait::name<category::rocm_ompt_api>::value);
-}
-
 // To handle events without finalization, perfetto push must occur in start
-// Allows capture of worker thread implicit and sync tasks
+// Allows capture of worker thread implicit tasks and sync regions
 void
 ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/,
