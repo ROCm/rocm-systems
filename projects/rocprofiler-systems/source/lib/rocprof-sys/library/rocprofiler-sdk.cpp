@@ -1069,6 +1069,9 @@ ompt_finalize_orphan_events()
     {
         ompt_cache_orphan_event(stored_data, empty_call_stack);
     }
+
+    get_ompt_parallel_cb_storage().clear();
+    get_ompt_standard_cb_storage().clear();
 }
 
 void

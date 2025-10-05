@@ -279,25 +279,25 @@ metadata_registry::get_kernel_symbol_list() const
 }
 
 void
-metadata_registry::overwrite_cb_names(
+metadata_registry::overwrite_callback_names(
     std::initializer_list<
-        std::pair<rocprofiler_callback_tracing_kind_t, std::map<int, std::string_view>>>
-        categories_info)
+        std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+        rename_table)
 {
-    if(categories_info.size() == 0) return;
+    if(rename_table.size() == 0) return;
 
-    using category   = rocprofiler_callback_tracing_kind_t;
-    using operations = std::vector<std::string_view>;
+    using callback_kind_t   = rocprofiler_callback_tracing_kind_t;
+    using operation_names_t = std::vector<std::string_view>;
 
     auto category_names = std::vector<std::string_view>{};
-    auto modified_ops   = std::map<category, operations>{};
+    auto modified_ops   = std::map<callback_kind_t, operation_names_t>{};
 
-    auto extract_operations = [&](category cat) -> operations {
+    auto extract_operations = [&](callback_kind_t cat) -> operation_names_t {
         auto        items           = m_callback_tracing_info.items();
         const auto* target_category = items[static_cast<size_t>(cat)];
 
-        auto       operations_data = target_category->items();
-        operations operation_names;
+        auto              operations_data = target_category->items();
+        operation_names_t operation_names;
         operation_names.reserve(operations_data.size());
 
         for(const auto& [op_idx, op_name] : operations_data)
@@ -308,49 +308,56 @@ metadata_registry::overwrite_cb_names(
 
     // Store category names
     category_names.resize(ROCPROFILER_CALLBACK_TRACING_LAST);
-    for(category i = ROCPROFILER_CALLBACK_TRACING_NONE;
+    for(callback_kind_t i = ROCPROFILER_CALLBACK_TRACING_NONE;
         i < ROCPROFILER_CALLBACK_TRACING_LAST;
-        i = static_cast<category>(static_cast<int>(i) + 1))
+        i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
     {
         category_names[i] = m_callback_tracing_info.at(i);
     }
 
     // Process list
-    for(const auto& category_info : categories_info)
+    for(const auto& category_info : rename_table)
     {
-        auto cat = category_info.first;
+        auto callback_kind = category_info.first;
         // Store operations of all following categories
         //  as they will be deleted
-        for(category i = static_cast<category>(static_cast<int>(cat) + 1);
+        for(callback_kind_t i =
+                static_cast<callback_kind_t>(static_cast<int>(callback_kind) + 1);
             i < ROCPROFILER_CALLBACK_TRACING_LAST;
-            i = static_cast<category>(static_cast<int>(i) + 1))
+            i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
         {
             if(modified_ops.find(i) != modified_ops.end()) break;
             modified_ops[i] = extract_operations(i);
         }
 
-        assert(modified_ops.find(cat) == modified_ops.end() &&
-               "Overwriting a previously overwritten entry is forbidden");
+        ROCPROFSYS_CI_THROW(modified_ops.find(callback_kind) != modified_ops.end(),
+                            "Overwriting a previously overwritten entry is forbidden");
 
-        assert((modified_ops.empty() || cat < modified_ops.begin()->first) &&
-               "Category must have a smaller enum value than all previously modified_ops "
-               "categories");
+        ROCPROFSYS_CI_THROW(!modified_ops.empty() &&
+                                callback_kind >= modified_ops.begin()->first,
+                            "Category must have a larger enum value than all previously "
+                            "modified_ops categories");
 
         // Overwrite desired category
-        auto operation_names = extract_operations(cat);
+        auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
+        {
+            ROCPROFSYS_CI_THROW(index < 0 ||
+                                    static_cast<size_t>(index) >= operation_names.size(),
+                                "Index is invalid");
             operation_names[index] = new_value;
-
-        modified_ops[cat] = std::move(operation_names);
+        }
+        modified_ops[callback_kind] = std::move(operation_names);
     }
     if(modified_ops.empty()) return;
 
     // Emplace the changed category operations
-    for(category i = modified_ops.begin()->first; i < ROCPROFILER_CALLBACK_TRACING_LAST;
-        i          = static_cast<category>(static_cast<int>(i) + 1))
+    for(callback_kind_t i = modified_ops.begin()->first;
+        i < ROCPROFILER_CALLBACK_TRACING_LAST;
+        i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
     {
-        auto        it             = modified_ops.find(i);
-        const auto& operations_vec = it->second;
+        auto        renaming_entry = modified_ops.find(i);
+        const auto& operations_vec = renaming_entry->second;
         m_callback_tracing_info.emplace(i, category_names.at(i).data());
         for(size_t op_idx = 0; op_idx < operations_vec.size(); ++op_idx)
         {
@@ -378,7 +385,7 @@ metadata_registry::get_callback_tracing_info() const
 metadata_registry::metadata_registry()
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    overwrite_cb_names({
+    overwrite_callback_names({
 #    if(ROCPROFILER_VERSION >= 600)
         { ROCPROFILER_CALLBACK_TRACING_OMPT,
           { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },

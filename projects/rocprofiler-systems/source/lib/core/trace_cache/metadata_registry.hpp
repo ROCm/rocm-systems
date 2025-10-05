@@ -25,6 +25,7 @@
 #include "common/synchronized.hpp"
 #include "core/agent.hpp"
 #include "core/categories.hpp"
+#include "core/debug.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -242,10 +243,14 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
-    void overwrite_cb_names(
-        std::initializer_list<std::pair<rocprofiler_callback_tracing_kind_t,
-                                        std::map<int, std::string_view>>>
-            categories_info);
+
+    using callback_rename_map_t =
+        std::map<rocprofiler_tracing_operation_t, std::string_view>;
+
+    void overwrite_callback_names(
+        std::initializer_list<
+            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+            rename_table);
 #endif
 };
 
