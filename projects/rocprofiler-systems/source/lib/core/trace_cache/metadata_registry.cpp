@@ -358,7 +358,11 @@ metadata_registry::overwrite_callback_names(
         i < ROCPROFILER_CALLBACK_TRACING_LAST;
         i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
     {
-        auto        renaming_entry = modified_ops.find(i);
+        auto renaming_entry = modified_ops.find(i);
+
+        ROCPROFSYS_CI_THROW(renaming_entry == modified_ops.end(),
+                            "A category that needs to be emplaced is missing");
+
         const auto& operations_vec = renaming_entry->second;
         m_callback_tracing_info.emplace(i, category_names.at(i).data());
         for(size_t op_idx = 0; op_idx < operations_vec.size(); ++op_idx)
