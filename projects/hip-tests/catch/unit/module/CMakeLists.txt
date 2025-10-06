@@ -68,7 +68,7 @@ add_custom_target(coopKernel.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
@@ -85,7 +85,8 @@ if(HIP_PLATFORM MATCHES "amd")
 set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
-    hipHccModuleLaunchKernel.cc)
+    hipHccModuleLaunchKernel.cc
+    hipLinkCreate.cc)
 
 if(BUILD_SHARED_LIBS)
   set(TEST_SRC
@@ -120,6 +121,21 @@ add_custom_target(addKernel.code
                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
+add_custom_target(addKernel.spv
+                  COMMAND ${CMAKE_CXX_COMPILER} --genco --offload-arch=amdgcnspirv
+                  --no-gpu-bundle-output
+                  ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+add_custom_target(addKernel-bundle.spv
+                  COMMAND ${CMAKE_CXX_COMPILER} --genco --offload-arch=amdgcnspirv
+                  ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
 add_custom_target(copyKernelCompressed.code
                   COMMAND ${CMAKE_CXX_COMPILER} -mcode-object-version=5 --offload-compress --genco ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
@@ -146,6 +162,8 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
   ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
+  ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+  ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
@@ -160,56 +178,56 @@ add_custom_target(copiousArgKernel.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel0.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=0
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel0.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel1.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=1
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel1.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel2.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=2
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel2.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel3.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=3
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel3.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel16.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=16
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel16.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel17.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=17
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel17.code
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code
@@ -245,6 +263,8 @@ if(HIP_PLATFORM MATCHES "amd")
 add_dependencies(build_tests empty_module.code)
 add_dependencies(build_tests copyKernel.code copyKernel.s)
 add_dependencies(build_tests addKernel.code)
+add_dependencies(build_tests addKernel.spv)
+add_dependencies(build_tests addKernel-bundle.spv)
 add_dependencies(build_tests copyKernelCompressed.code)
 add_dependencies(build_tests copyKernelGenericTarget.code)
 add_dependencies(build_tests copyKernelGenericTargetCompressed.code)
