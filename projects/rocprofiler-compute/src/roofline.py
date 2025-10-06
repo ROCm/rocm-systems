@@ -247,17 +247,8 @@ class Roofline:
         ceiling_data: dict[str, Any],
     ) -> str:
         """
-        Determine if a kernel point is memory-bound or compute-bound
-        based on its own cache level's roofline.
-
-        Args:
-            ai_value: Arithmetic intensity of the kernel
-            performance: Performance (GFLOP/s) of the kernel
-            cache_level: Cache level (ai_l1, ai_l2, ai_hbm, ai_lds)
-            ceiling_data: Ceiling data for the current datatype
-
-        Returns:
-            String -> "L1 Memory Bound", "L2 Compute Bound", etc.
+        Calculates if a kernel point is memory-bound or compute-bound
+        based on its own cache level's roofline
         """
         cache_key = cache_level.replace("ai_", "")
         cache_name = cache_key.upper()
@@ -336,7 +327,7 @@ class Roofline:
         ops_figure = flops_figure = None
         ops_dt_list = flops_dt_list = kernel_list = ""
 
-        # collect ceiling data for all datatypes to find global minimums
+        # Collect ceiling data for all datatypes to find mins
         all_ops_ceiling_data = {}
         all_flops_ceiling_data = {}
 
@@ -503,9 +494,9 @@ class Roofline:
                     ],
                     vertical_spacing=0.08,
                     specs=[
-                        [{"type": "scatter"}],  # Roofline plot
-                        [{"type": "scatter"}],  # Plot points table
-                        [{"type": "scatter"}],  # Kernel names table
+                        [{"type": "scatter"}],  # 1. Roofline plot
+                        [{"type": "scatter"}],  # 2. Plot points table
+                        [{"type": "scatter"}],  # 3. Kernel names table
                     ],
                 )
 
