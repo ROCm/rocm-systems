@@ -8,6 +8,22 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added the following API's to amdsmi_interface.py**.  
+  - amdsmi_get_cpu_handle()
+  - amdsmi_get_esmi_err_msg()
+  - amdsmi_get_gpu_event_notification()
+  - amdsmi_get_processor_count_from_handles()
+  - amdsmi_get_processor_handles_by_type()
+  - amdsmi_gpu_validate_ras_eeprom()
+  - amdsmi_init_gpu_event_notification()
+  - amdsmi_set_gpu_event_notification_mask()
+  - amdsmi_stop_gpu_event_notification()
+  - amdsmi_get_gpu_busy_percent()
+
+- **Added additional return value to API amdsmi_get_xgmi_plpd()**.  
+  - The entry `policies` is added to the end of the dictionary to match API definition.
+  - The entry `plpds` is marked for deprecation as it has the same information as `policies`.
+
 - **Added `amdsmi_get_gpu_revision()` to Python API**  
   - This function retrieves the GPU revision ID. Available in `amdsmi_interface.py` as `amdsmi_get_gpu_revision()`.
 
@@ -189,6 +205,9 @@ GPU: 0
 - **Optimized the way `amd-smi process` validates which proccesses are running on a GPU**.  
 
 ### Resolved Issues
+
+- **Fixed an issue where amdsmi_get_gpu_od_volt_info() returned a reference to a python object**.  
+  - The returned dictionary was changed to return values in all fields
 
 - **Fixed an issue where using `amd-smi ras --folder <folder_name>` was forcing the created folder's name to be lowercase**.  
   - This fix also allows all string input options to be case insensitive.

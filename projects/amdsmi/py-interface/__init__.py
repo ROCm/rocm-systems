@@ -29,6 +29,8 @@ from .amdsmi_interface import amdsmi_get_processor_type
 from .amdsmi_interface import amdsmi_get_processor_handles
 from .amdsmi_interface import amdsmi_get_socket_handles
 from .amdsmi_interface import amdsmi_get_socket_info
+from .amdsmi_interface import amdsmi_get_processor_count_from_handles
+from .amdsmi_interface import amdsmi_get_processor_handles_by_type
 
 # ESMI Dependent Functions
 try:
@@ -78,6 +80,7 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_family
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
+    from .amdsmi_interface import amdsmi_get_cpu_handles
 except AttributeError:
     pass
 
@@ -101,6 +104,7 @@ from .amdsmi_interface import amdsmi_get_power_cap_info
 from .amdsmi_interface import amdsmi_get_gpu_vram_info
 from .amdsmi_interface import amdsmi_get_gpu_cache_info
 from .amdsmi_interface import amdsmi_get_gpu_xcd_counter
+from .amdsmi_interface import amdsmi_get_gpu_revision
 
 # # Microcode and VBIOS Information
 from .amdsmi_interface import amdsmi_get_gpu_vbios_info
@@ -111,13 +115,19 @@ from .amdsmi_interface import amdsmi_get_gpu_activity
 from .amdsmi_interface import amdsmi_get_gpu_vram_usage
 from .amdsmi_interface import amdsmi_get_power_info
 from .amdsmi_interface import amdsmi_get_clock_info
+from .amdsmi_interface import amdsmi_get_gpu_busy_percent
 
 from .amdsmi_interface import amdsmi_get_pcie_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_threshold
 from .amdsmi_interface import amdsmi_get_violation_status
 from .amdsmi_interface import amdsmi_get_gpu_xgmi_link_status
-from .amdsmi_interface import amdsmi_get_gpu_revision
+
+# # Event Notification
+from .amdsmi_interface import amdsmi_init_gpu_event_notification
+from .amdsmi_interface import amdsmi_set_gpu_event_notification_mask
+from .amdsmi_interface import amdsmi_get_gpu_event_notification
+from .amdsmi_interface import amdsmi_stop_gpu_event_notification
 
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
@@ -132,6 +142,7 @@ from .amdsmi_interface import amdsmi_get_gpu_board_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_feature_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_block_features_enabled
 from .amdsmi_interface import amdsmi_get_gpu_cper_entries
+from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 
 # # Unsupported Functions In Virtual Environment
 from .amdsmi_interface import amdsmi_set_gpu_pci_bandwidth
@@ -150,9 +161,12 @@ from .amdsmi_interface import amdsmi_set_gpu_fan_speed
 from .amdsmi_interface import amdsmi_reset_gpu_fan
 from .amdsmi_interface import amdsmi_set_clk_freq
 from .amdsmi_interface import amdsmi_set_gpu_overdrive_level
+from .amdsmi_interface import amdsmi_get_soc_pstate
 from .amdsmi_interface import amdsmi_set_soc_pstate
 from .amdsmi_interface import amdsmi_set_xgmi_plpd
+from .amdsmi_interface import amdsmi_get_xgmi_plpd
 from .amdsmi_interface import amdsmi_clean_gpu_local_data
+from .amdsmi_interface import amdsmi_get_gpu_process_isolation
 from .amdsmi_interface import amdsmi_set_gpu_process_isolation
 
 # # Physical State Queries
@@ -193,6 +207,7 @@ from .amdsmi_interface import amdsmi_get_gpu_compute_process_info_by_pid
 from .amdsmi_interface import amdsmi_get_gpu_compute_process_gpus
 from .amdsmi_interface import amdsmi_gpu_xgmi_error_status
 from .amdsmi_interface import amdsmi_reset_gpu_xgmi_error
+from .amdsmi_interface import amdsmi_get_esmi_err_msg
 
 # # PCIE information
 from .amdsmi_interface import amdsmi_get_gpu_bdf_id
@@ -255,6 +270,7 @@ from .amdsmi_interface import amdsmi_get_lib_version
 from .amdsmi_interface import amdsmi_get_rocm_version
 
 # # Enums
+from .amdsmi_interface import AmdSmiStatus
 from .amdsmi_interface import AmdSmiInitFlags
 from .amdsmi_interface import AmdSmiContainerTypes
 from .amdsmi_interface import AmdSmiDeviceType
