@@ -868,16 +868,16 @@ def run_prof(
         format_rocprof_output, workload_dir, is_timestamps
     )
 
-        if rocprof_cmd == "rocprofiler-sdk":
-            # TODO: as rocprofv3 --kokkos-trace feature improves,
-            # rocprof-compute should make updates accordingly
-            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-                process_hip_trace_output(workload_dir, fbase)
-        else:
-            if "--kokkos-trace" in options:
-                process_kokkos_trace_output(workload_dir, fbase)
-            elif "--hip-trace" in options:
-                process_hip_trace_output(workload_dir, fbase)
+    if rocprof_cmd == "rocprofiler-sdk":
+        # TODO: as rocprofv3 --kokkos-trace feature improves,
+        # rocprof-compute should make updates accordingly
+        if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
+            process_hip_trace_output(workload_dir, fbase)
+    else:
+        if "--kokkos-trace" in options:
+            process_kokkos_trace_output(workload_dir, fbase)
+        elif "--hip-trace" in options:
+            process_hip_trace_output(workload_dir, fbase)
 
     # Combine results into single CSV file
     if results_files:

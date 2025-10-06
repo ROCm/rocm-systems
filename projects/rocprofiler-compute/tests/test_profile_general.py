@@ -1762,7 +1762,8 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
 
     options = ["--kokkos-trace", "--format-rocprof-output", "csv"]
     workload_dir = test_utils.get_output_dir()
-
+    default_env = os.environ.get("ROCPROF", "")
+    os.environ["ROCPROF"] = "rocprofv3"
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -1771,7 +1772,7 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
         roof=False,
         app_name="app_kokkos",
     )
-
+    os.environ["ROCPROF"] = default_env
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if use_mock_kokkos:
         # If using mock Kokkos, marker trace files won't be generated
