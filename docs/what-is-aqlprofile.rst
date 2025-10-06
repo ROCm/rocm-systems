@@ -10,8 +10,8 @@ open source library that enables advanced GPU profiling and tracing on
 AMD platforms. It works in conjunction with
 `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__ to
 support profiling methods such as `performance counters
-(PMC) <examples/pmc-workflow.rst>`__ and `SQ thread trace
-(SQTT) <examples/sqtt-workflow.rst>`__. AQLprofile provides the
+(PMC) <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/examples/pmc-workflow.html>`__ and `SQ thread trace
+(SQTT) <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/examples/sqtt-workflow.html>`__. AQLprofile provides the
 foundational mechanisms for constructing AQL packets and managing
 profiling operations across multiple AMD GPU architecture families. The
 development of AQLprofile is aligned with ROCprofiler-SDK, ensuring
