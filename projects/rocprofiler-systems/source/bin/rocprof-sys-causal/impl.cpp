@@ -26,6 +26,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
@@ -60,6 +61,7 @@ namespace color    = ::tim::log::color;
 namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
+namespace path     = rocprofsys::common::path;
 using namespace ::timemory::join;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
@@ -252,41 +254,11 @@ prepare_environment_for_run(std::vector<char*>& _env)
     {
         update_env(_env, "LD_PRELOAD",
                    join(":", LIBPTHREAD_SO,
-                        get_realpath(get_internal_libpath("librocprof-sys-dl.so"))),
+                        get_realpath(path::get_internal_libpath("librocprof-sys-dl.so"))),
                    true);
-        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", get_internal_script_path());
-        update_env(_env, "ROCPROFSYS_ROOT", get_rocprofsys_root());
+        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", path::get_internal_script_path());
+        update_env(_env, "ROCPROFSYS_ROOT", path::get_rocprofsys_root());
     }
-}
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 void

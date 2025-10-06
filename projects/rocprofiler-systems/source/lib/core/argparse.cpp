@@ -22,6 +22,7 @@
 
 #include "argparse.hpp"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "config.hpp"
 #include "defines.hpp"
 #include "exception.hpp"
@@ -39,6 +40,7 @@ namespace argparse
 namespace
 {
 namespace filepath   = ::tim::filepath;
+namespace path       = rocprofsys::common::path;
 using array_config_t = ::timemory::join::array_config;
 using ::tim::get_env;
 using ::timemory::join::join;
@@ -170,36 +172,6 @@ remove_env(parser_data& _data, std::string_view _env_var)
     }
 }
 
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
-}
-
 }  // namespace
 
 bool
@@ -245,13 +217,15 @@ init_parser(parser_data& _data)
         }
     }
 
-    _data.dl_libpath = get_realpath(get_internal_libpath("librocprof-sys-dl.so").c_str());
-    _data.omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so").c_str());
+    _data.dl_libpath =
+        get_realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
+    _data.omni_libpath =
+        get_realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
-    auto _libexecpath = get_realpath(get_internal_script_path());
+    auto _libexecpath = get_realpath(path::get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
 
-    auto _rootpath = get_realpath(get_rocprofsys_root());
+    auto _rootpath = get_realpath(path::get_rocprofsys_root());
     update_env(_data, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
 
     return _data;

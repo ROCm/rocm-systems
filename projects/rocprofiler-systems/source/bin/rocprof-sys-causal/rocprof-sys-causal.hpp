@@ -52,15 +52,6 @@ prepare_command_for_run(char*, std::vector<char*>&);
 void
 prepare_environment_for_run(std::vector<char*>&);
 
-std::string
-get_rocprofsys_root(void);
-
-std::string
-get_internal_libpath(const std::string& _lib);
-
-std::string
-get_internal_script_path(void);
-
 template <typename Tp>
 void
 update_env(std::vector<char*>&, std::string_view, Tp&&, bool _append = false,

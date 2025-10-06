@@ -26,6 +26,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "core/argparse.hpp"
 #include "core/config.hpp"
@@ -66,6 +67,7 @@ namespace filepath = ::tim::filepath;  // NOLINT
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
+namespace path     = rocprofsys::common::path;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
@@ -90,36 +92,6 @@ enum update_mode : int
     UPD_APPEND  = 1 << 1,  // 0x02
     UPD_WEAK    = 1 << 2,  // 0x04
 };
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
-}
 
 std::string
 get_realpath(const std::string& _v)
@@ -217,7 +189,7 @@ get_initial_environment(parser_data_t& _data)
         }
     }
 
-    auto _libexecpath = get_realpath(get_internal_script_path());
+    auto _libexecpath = get_realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
         update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);

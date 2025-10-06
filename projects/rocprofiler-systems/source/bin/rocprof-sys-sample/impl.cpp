@@ -25,6 +25,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 
 #include <timemory/environment.hpp>
@@ -45,6 +46,7 @@
 #include <vector>
 
 namespace color = tim::log::color;
+namespace path  = rocprofsys::common::path;
 using namespace timemory::join;
 using tim::get_env;
 using tim::log::monochrome;
@@ -122,10 +124,10 @@ get_initial_environment()
         }
     }
 
-    auto _dl_libpath   = get_realpath(get_internal_libpath("librocprof-sys-dl.so"));
-    auto _omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so"));
-    auto _libexecpath  = get_realpath(get_internal_script_path());
-    auto _rootpath     = get_realpath(get_rocprofsys_root());
+    auto _dl_libpath   = get_realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = get_realpath(path::get_internal_libpath("librocprof-sys.so"));
+    auto _libexecpath  = get_realpath(path::get_internal_script_path());
+    auto _rootpath     = get_realpath(path::get_rocprofsys_root());
 
     update_env(_env, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
     update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
@@ -144,36 +146,6 @@ get_initial_environment()
     update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"));
 
     return _env;
-}
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 void
@@ -328,9 +300,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     };
 
     auto* _dl_libpath =
-        realpath(get_internal_libpath("librocprof-sys-dl.so").c_str(), nullptr);
+        realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str(), nullptr);
     auto* _omni_libpath =
-        realpath(get_internal_libpath("librocprof-sys.so").c_str(), nullptr);
+        realpath(path::get_internal_libpath("librocprof-sys.so").c_str(), nullptr);
 
     auto parser = parser_t(argv[0]);
 
