@@ -86,12 +86,12 @@ set(TEST_SRC
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
-  hipDrvGraphAddMemFreeNode.cc)
+  hipDrvGraphAddMemFreeNode.cc
+  hipStreamBeginCaptureToGraph.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
     hipStreamCaptureExtModuleLaunchKernel.cc
-    hipStreamBeginCaptureToGraph.cc
     hipGetProcAddressGraphApis.cc
     # Below files are disbled in NVIDIA as PSDB builds are failing due to lower CUDA version.
     hipGraphExecNodeSetParams.cc
