@@ -419,7 +419,7 @@ jobs:
         system:
           - { os: 'rhel-8.8', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
           - { os: 'rhel-9.5', runner: 'linux-rocm-docker-mi300-1gpu-ossci', gpu: 'mi300', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', runner: 'linux-mi350-1gpu-ossci-rocm', gpu: 'mi350', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', runner: 'linux-mi350-1gpu-ossci-rocm', gpu: 'mi350', gpu-target: 'gfx950', build-type: 'RelWithDebInfo', ci-flags: '' }
     runs-on: ${{ matrix.system.runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
