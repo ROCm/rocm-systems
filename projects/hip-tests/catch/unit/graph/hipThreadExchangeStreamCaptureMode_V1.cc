@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include "stream_capture_common.hh"
 
+
 /**
  * @addtogroup hipThreadExchangeStreamCaptureMode
  * hipThreadExchangeStreamCaptureMode
@@ -48,9 +49,7 @@ static void hipGraphLaunchWithMode(hipStream_t stream, hipStreamCaptureMode mode
   LinearAllocGuard<float> B_d(LinearAllocs::hipMalloc, Nbytes);
   float* C_d;
 
-  std::cout << "At Line : " << __LINE__ << " Before : mode = " << mode << std::endl;  
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode));
-  std::cout << "At Line : " << __LINE__ << " After : mode = " << mode << std::endl;  
 
   HIP_CHECK(hipStreamBeginCapture(stream, mode));
 
@@ -108,18 +107,9 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional") {
   const hipStreamCaptureMode captureModeThread = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
 
-  std::cout << "At Line : " << __LINE__ << "======================================= ++++" << std::endl;  
-
-  std::cout << "At Line : " << __LINE__ << " captureModeMain = " << captureModeMain << std::endl;  
-
-  std::cout << "At Line : " << __LINE__ << " captureModeThread = " << captureModeThread << std::endl;  
-
   hipGraphLaunchWithMode(stream, captureModeMain);
   std::thread t(threadFuncCaptureMode, stream, captureModeThread);
   t.join();
-  
-  std::cout << "At Line : " << __LINE__ << "======================================= --------" << std::endl;  
-
 }
 
 /**
@@ -184,53 +174,35 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_1") {
   HIP_CHECK(hipMalloc(&devMem, Nbytes));
   REQUIRE(devMem != nullptr);
 
-  hipStreamCaptureMode modeAtStart = hipStreamCaptureModeThreadLocal;
-                                    /*GENERATE(hipStreamCaptureModeRelaxed,
-                                     hipStreamCaptureModeGlobal,
-                                     hipStreamCaptureModeThreadLocal
-                                     );*/
-  std::cout << "At Line : " << __LINE__ << " modeAtStart = " << modeAtStart << std::endl;  // 1
-  hipStreamCaptureMode exchangeMode =  hipStreamCaptureModeGlobal;/*
-                                     GENERATE(
-                                      hipStreamCaptureModeGlobal,
-                                      hipStreamCaptureModeThreadLocal,
-                                      hipStreamCaptureModeRelaxed); */
- 
-  {
-  hipStream_t stream = nullptr;
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
+  hipStreamCaptureMode modeAtStart = GENERATE(
+                                     hipStreamCaptureModeGlobal,
+                                     hipStreamCaptureModeThreadLocal,
+                                     hipStreamCaptureModeRelaxed);
+  std::cout << "modeAtStart = " << modeAtStart << std::endl;
+
   HIP_CHECK(hipStreamBeginCapture(stream, modeAtStart));
+
+  hipStreamCaptureMode exchangeMode = GENERATE(
+                                      hipStreamCaptureModeGlobal,
+                                      hipStreamCaptureModeThreadLocal,
+                                      hipStreamCaptureModeRelaxed);
+
+  std::cout << "BEFORE : exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
   
+  std::cout << "AFTER s1 : exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
+
+  std::cout << "AFTER s2 : exchangeMode = " << exchangeMode << std::endl;
+
   HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
                            hipMemcpyHostToDevice, stream));
-
-  std::cout << "At Line : " << __LINE__ << " BEFORE : exchangeMode = " << exchangeMode << std::endl;  // 0
-  
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  // 1 -> 0
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s1 : exchangeMode = " << exchangeMode << std::endl; // 1
-
   addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode)); // 1 -> 0
-  std::cout << "At Line : " << __LINE__ << " AFTER s2 : exchangeMode = " << exchangeMode << std::endl;  // 1
-
-  /*
-  hipStreamCaptureMode exchangeMode1 = hipStreamCaptureMode(-2); // -2 
-  std::cout << "At Line : " << __LINE__ << " Before : (Going to) exchangeMode1 = " << exchangeMode1 << std::endl;  
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode1)); 
-  std::cout << "At Line : " << __LINE__ << " AFTER : exchangeMode1 = " << exchangeMode1 << std::endl;  
-
-  exchangeMode1 = hipStreamCaptureMode(-1);
-  std::cout << "At Line : " << __LINE__ << " Before : (Going to) exchangeMode1 = " << exchangeMode1 << std::endl;  
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode1)); 
-  std::cout << "At Line : " << __LINE__ << " AFTER : exchangeMode1 = " << exchangeMode1 << std::endl;  
-  */
-
-  //HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
-  //                         hipMemcpyHostToDevice, stream));
-  //addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
   HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem, Nbytes,
                            hipMemcpyDeviceToHost, stream));
 
@@ -253,8 +225,6 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_1") {
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
-  }
-  
   HIP_CHECK(hipFree(devMem));
 
 }
@@ -273,47 +243,30 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_2") {
   HIP_CHECK(hipMalloc(&devMem, Nbytes));
   REQUIRE(devMem != nullptr);
 
-  hipStreamCaptureMode modeAtStart = GENERATE(hipStreamCaptureModeRelaxed,
-                                     hipStreamCaptureModeGlobal,
-                                     hipStreamCaptureModeThreadLocal
-                                     );
-  std::cout << "At Line : " << __LINE__ << " modeAtStart = " << modeAtStart << std::endl;  // 1
-
-  hipStreamCaptureMode exchangeMode =  GENERATE(
-                                      hipStreamCaptureModeGlobal,
-                                      hipStreamCaptureModeThreadLocal,
-                                      hipStreamCaptureModeRelaxed); 
-
-  {
-  hipStream_t stream = nullptr;
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipStreamBeginCapture(stream, modeAtStart)); // 1
+  hipStreamCaptureMode modeAtStart = hipStreamCaptureModeRelaxed;
 
-  /////////////// Extra step
-  hipStreamCaptureMode startMode = modeAtStart;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&startMode)); // 1
-  ////////////////
+  std::cout << "modeAtStart = " << modeAtStart << std::endl;
+
+  HIP_CHECK(hipStreamBeginCapture(stream, modeAtStart));
+
+  hipStreamCaptureMode exchangeMode = hipStreamCaptureModeGlobal;
+
+  std::cout << "BEFORE : exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
+  
+  std::cout << "AFTER s1 : exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
+
+  std::cout << "AFTER s2 : exchangeMode = " << exchangeMode << std::endl;
 
   HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
                            hipMemcpyHostToDevice, stream));
-
-
-  std::cout << "At Line : " << __LINE__ << " BEFORE : exchangeMode = " << exchangeMode << std::endl;  // 0
-  
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  // 1 -> 0
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s1 : exchangeMode = " << exchangeMode << std::endl; // 0
-
   addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode)); // 1 -> 0
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s2 : exchangeMode = " << exchangeMode << std::endl;  // 1
-
-  //HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
-  //                         hipMemcpyHostToDevice, stream));
-  //addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
   HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem, Nbytes,
                            hipMemcpyDeviceToHost, stream));
 
@@ -333,68 +286,39 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_2") {
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));
-
-  }
-  
+  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devMem));
 
 }
 
 TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_3") {
 
-  std::cout << "====================================================== Start " << std::endl;
+  std::cout << "====================================================== " << std::endl;
 
-  constexpr int N = 40;
-  constexpr int Nbytes = N * sizeof(int);
-
-  std::vector<int> hostMem(N);
-  std::fill(hostMem.begin(), hostMem.end(), 5);
-
-  int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, Nbytes));
-  REQUIRE(devMem != nullptr);
-
-  hipStreamCaptureMode exchangeMode1 = GENERATE(
-                                       hipStreamCaptureModeGlobal,
-                                       hipStreamCaptureModeThreadLocal,
-                                       hipStreamCaptureModeRelaxed
-                                       );
-
-  hipStreamCaptureMode exchangeMode2 =  GENERATE(
-                                        hipStreamCaptureModeGlobal,
-                                        hipStreamCaptureModeThreadLocal,
-                                        hipStreamCaptureModeRelaxed); 
-
-  {
-  hipStream_t stream = nullptr;
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal)); // 0
+  hipStreamCaptureMode *modeAtStart = new hipStreamCaptureMode;
+  *modeAtStart = hipStreamCaptureModeRelaxed;
+
+  std::cout << "modeAtStart = " << *modeAtStart << std::endl;
+
+  HIP_CHECK(hipStreamBeginCapture(stream, *modeAtStart));
+
+  hipStreamCaptureMode *exchangeMode = new hipStreamCaptureMode;
+  *exchangeMode = hipStreamCaptureModeGlobal;
+
+  std::cout << "BEFORE : exchangeMode = " << *exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(exchangeMode));
   
-  std::cout << "At Line : " << __LINE__ << " modeAtStart = " << hipStreamCaptureModeGlobal << std::endl;  // 1
+  std::cout << "AFTER s1 : exchangeMode = " << *exchangeMode << std::endl;
 
-  HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
-                           hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(exchangeMode));
 
-  std::cout << "At Line : " << __LINE__ << " BEFORE s1 : (Going to) exchangeMode1 = " << exchangeMode1 << std::endl;  
-  
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode1));  
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s1 : exchangeMode1 = " << exchangeMode1 << std::endl; 
-
-  addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
-
-  std::cout << "At Line : " << __LINE__ << " Before s2 : (Going to) exchangeMode2 = " << exchangeMode2 << std::endl;  
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode2)); 
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s2 : exchangeMode2 = " << exchangeMode2 << std::endl;  
-
-  HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem, Nbytes,
-                           hipMemcpyDeviceToHost, stream));
+  std::cout << "AFTER s2 : exchangeMode = " << *exchangeMode << std::endl;
 
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -403,134 +327,21 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_3") {
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  for (int i = 0; i < N; i++) {
-    if (hostMem[i] != 6) {
-      std::cout << "At index : " << i << " Got value : " << hostMem[i]
-                << " Expected value : 6 \n"
-                << std::endl;
-      REQUIRE(false);
-    }
-  }
-
-  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));
-
-  }
-  
-  HIP_CHECK(hipFree(devMem));
-
-  std::cout << "====================================================== End " << std::endl;
+  HIP_CHECK(hipStreamDestroy(stream));
 
 }
 
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_null") {
-  hipStreamCaptureMode exchangeMode = hipStreamCaptureMode(-1);
+TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_G_R_G_TL") {
 
-  std::cout << "At Line : " << __LINE__ << " Before : (Going to) exchangeMode = " << exchangeMode << std::endl;
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
-
-  std::cout << "At Line : " << __LINE__ << " AFTER : exchangeMode = " << exchangeMode << std::endl;
-}
-
-void launchFunction() {
   std::cout << "====================================================== " << std::endl;
 
   constexpr int N = 40;
   constexpr int Nbytes = N * sizeof(int);
 
-  std::vector<int> hostMem(N);
-  std::fill(hostMem.begin(), hostMem.end(), 5);
-
-  int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, Nbytes));
-  REQUIRE(devMem != nullptr);
-
-
-  hipStreamCaptureMode modeAtStart = hipStreamCaptureModeThreadLocal;
-                                    /*GENERATE(hipStreamCaptureModeRelaxed,
-                                     hipStreamCaptureModeGlobal,
-                                     hipStreamCaptureModeThreadLocal
-                                     );*/
-  std::cout << "At Line : " << __LINE__ << " modeAtStart = " << modeAtStart << std::endl;  // 1
-  hipStreamCaptureMode exchangeMode =  hipStreamCaptureModeGlobal;/*
-                                     GENERATE(
-                                      hipStreamCaptureModeGlobal,
-                                      hipStreamCaptureModeThreadLocal,
-                                      hipStreamCaptureModeRelaxed); */
-
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  HIP_CHECK(hipStreamBeginCapture(stream, modeAtStart));
-  
-  HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
-                           hipMemcpyHostToDevice, stream));
-
-
-  std::cout << "At Line : " << __LINE__ << " BEFORE : exchangeMode = " << exchangeMode << std::endl;  // 1
-  
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  // 0 -> 1
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s1 : exchangeMode = " << exchangeMode << std::endl; // 0
-
-  addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode)); // 1 -> 0
-
-  std::cout << "At Line : " << __LINE__ << " AFTER s2 : exchangeMode = " << exchangeMode << std::endl;  // 1
-
-  //HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes,
-  //                         hipMemcpyHostToDevice, stream));
-  //addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
-  HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem, Nbytes,
-                           hipMemcpyDeviceToHost, stream));
-
-  hipGraph_t graph = nullptr;
-  hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  for (int i = 0; i < N; i++) {
-    if (hostMem[i] != 6) {
-      std::cout << "At index : " << i << " Got value : " << hostMem[i]
-                << " Expected value : 6 \n"
-                << std::endl;
-      REQUIRE(false);
-    }
-  }
-
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-
-  HIP_CHECK(hipFree(devMem));
-}
-
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_InThread") {
-  std::thread t1(launchFunction);
-  t1.join();
-}
-
-/*
-hostMem                            Before capture
-hipMalloc(devMem1)                 Before capture
-hipMemcpyAsync hostMem->devMem1    Global
-hipMalloc(devMem2)                 Relaxed
-hipMemcpyAsync devMem1->devMem2    Global
-Kernel                             Thread local
-hipMemcpyAsync devMem2->hostMem    Global
-*/
-
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_G_R_G_TL_G") {
-
-  std::cout << "====================================================== " << std::endl;
-
-  constexpr int N = 40;
-  constexpr int Nbytes = N * sizeof(int);
+  //h-> D -> D -> Kernel-> h
+  //G   G    R    G        G 
 
   std::vector<int> hostMem(N);
   std::fill(hostMem.begin(), hostMem.end(), 5);
@@ -560,17 +371,11 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_G_R_G_TL_G") {
   int* devMem2 = nullptr;
   HIP_CHECK(hipMalloc(&devMem2, Nbytes));
   REQUIRE(devMem2 != nullptr);
-
-  exchangeMode = hipStreamCaptureModeGlobal;
-
-  std::cout << "exchangeMode = " << exchangeMode << std::endl;
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
   
   HIP_CHECK(hipMemcpyAsync(devMem2, devMem1, Nbytes,
                            hipMemcpyDeviceToDevice, stream));
 
-  exchangeMode = hipStreamCaptureModeThreadLocal;
+  exchangeMode = hipStreamCaptureModeGlobal;
 
   std::cout << "exchangeMode = " << exchangeMode << std::endl;
 
@@ -578,7 +383,7 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_G_R_G_TL_G") {
 
   addOneKernel<<< 1, 1, 0, stream >>>(devMem2 , N);
   
-  exchangeMode = hipStreamCaptureModeGlobal;
+  exchangeMode = hipStreamCaptureModeThreadLocal;
 
   std::cout << "exchangeMode = " << exchangeMode << std::endl;
 
@@ -610,112 +415,7 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_G_R_G_TL_G") {
   HIP_CHECK(hipFree(devMem2));
 }
 
-/*
-hostMem                            Before capture
-hipMalloc(devMem1)                 Before capture
-hipMemcpyAsync hostMem->devMem1    Thread local
-hipMalloc(devMem2)                 Relaxed
-hipMemcpyAsync devMem1->devMem2    Thread local
-Kernel                             Global
-hipMemcpyAsync devMem2->hostMem    Thread local
-*/
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_TL_R_TL_G_TL") {
-
-  std::cout << "====================================================== " << std::endl;
-
-  constexpr int N = 40;
-  constexpr int Nbytes = N * sizeof(int);
-
-  std::vector<int> hostMem(N);
-  std::fill(hostMem.begin(), hostMem.end(), 5);
-
-  int* devMem1 = nullptr;
-  HIP_CHECK(hipMalloc(&devMem1, Nbytes));
-  REQUIRE(devMem1 != nullptr);
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  hipStreamCaptureMode modeAtStart = hipStreamCaptureModeThreadLocal;
-
-  std::cout << "modeAtStart = " << modeAtStart << std::endl;
-
-  HIP_CHECK(hipStreamBeginCapture(stream, modeAtStart));
-
-  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem.data(), Nbytes,
-                           hipMemcpyHostToDevice, stream));
-						   
-  hipStreamCaptureMode exchangeMode = hipStreamCaptureModeRelaxed;
-
-  std::cout << "exchangeMode = " << exchangeMode << std::endl;
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
-
-  int* devMem2 = nullptr;
-  HIP_CHECK(hipMalloc(&devMem2, Nbytes));
-  REQUIRE(devMem2 != nullptr);
-
-  exchangeMode = hipStreamCaptureModeThreadLocal;
-
-  std::cout << "exchangeMode = " << exchangeMode << std::endl;
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
-  
- 
-  HIP_CHECK(hipMemcpyAsync(devMem2, devMem1, Nbytes,
-                           hipMemcpyDeviceToDevice, stream));
-
-  exchangeMode = hipStreamCaptureModeGlobal;
-
-  std::cout << "exchangeMode = " << exchangeMode << std::endl;
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
-
-
-  addOneKernel<<< 1, 1, 0, stream >>>(devMem2 , N);
-
-  exchangeMode = hipStreamCaptureModeThreadLocal;
-
-  std::cout << "exchangeMode = " << exchangeMode << std::endl;
-
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
-
-  HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem2, Nbytes,
-                           hipMemcpyDeviceToHost, stream));
-
-  hipGraph_t graph = nullptr;
-  hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  for (int i = 0; i < N; i++) {
-    if (hostMem[i] != 6) {
-      std::cout << "At index : " << i << " Got value : " << hostMem[i]
-                << " Expected value : 6 \n"
-                << std::endl;
-      REQUIRE(false);
-    }
-  }
-
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(devMem1));
-  HIP_CHECK(hipFree(devMem2));
-}
-
-/*
-hostMem                            Before capture
-hipMalloc(devMem1)                 Relaxed
-hipMemcpyAsync hostMem->devMem1    Global
-hipMalloc(devMem2)                 Relaxed
-hipMemcpyAsync devMem1->devMem2    Thread local
-Kernel                             Relaxed
-hipMemcpyAsync devMem2->hostMem    Relaxed
-*/
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_R_G_R_TL_R") {
+TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_R_G_R_TL") {
 
   std::cout << "====================================================== " << std::endl;
 
@@ -756,21 +456,99 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_R_G_R_TL_R") {
   int* devMem2 = nullptr;
   HIP_CHECK(hipMalloc(&devMem2, Nbytes));
   REQUIRE(devMem2 != nullptr);
-
-  exchangeMode = hipStreamCaptureModeThreadLocal;
-  std::cout << "exchangeMode = " << exchangeMode << std::endl;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
-
+  
   HIP_CHECK(hipMemcpyAsync(devMem2, devMem1, Nbytes,
                            hipMemcpyDeviceToDevice, stream));
 
-  exchangeMode = hipStreamCaptureModeRelaxed;
+  exchangeMode = hipStreamCaptureModeThreadLocal;
 
   std::cout << "exchangeMode = " << exchangeMode << std::endl;
 
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
 
   addOneKernel<<< 1, 1, 0, stream >>>(devMem2 , N);  
+  HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem2, Nbytes,
+                           hipMemcpyDeviceToHost, stream));
+
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t graph_exec = nullptr;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  for (int i = 0; i < N; i++) {
+    if (hostMem[i] != 6) {
+      std::cout << "At index : " << i << " Got value : " << hostMem[i]
+                << " Expected value : 6 \n"
+                << std::endl;
+      REQUIRE(false);
+    }
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(devMem1));
+  HIP_CHECK(hipFree(devMem2));
+}
+
+TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_StreamCapture_TL_R_TL_G") {
+
+  std::cout << "====================================================== " << std::endl;
+
+  constexpr int N = 40;
+  constexpr int Nbytes = N * sizeof(int);
+
+  //h-> D -> D -> Kernel-> h
+  //G   G    R    G        G 
+
+  std::vector<int> hostMem(N);
+  std::fill(hostMem.begin(), hostMem.end(), 5);
+
+  int* devMem1 = nullptr;
+  HIP_CHECK(hipMalloc(&devMem1, Nbytes));
+  REQUIRE(devMem1 != nullptr);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipStreamCaptureMode modeAtStart = hipStreamCaptureModeThreadLocal;
+
+  std::cout << "modeAtStart = " << modeAtStart << std::endl;
+
+  HIP_CHECK(hipStreamBeginCapture(stream, modeAtStart));
+
+  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem.data(), Nbytes,
+                           hipMemcpyHostToDevice, stream));
+						   
+  hipStreamCaptureMode exchangeMode = hipStreamCaptureModeRelaxed;
+
+  std::cout << "exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));
+
+  int* devMem2 = nullptr;
+  HIP_CHECK(hipMalloc(&devMem2, Nbytes));
+  REQUIRE(devMem2 != nullptr);
+  
+  HIP_CHECK(hipMemcpyAsync(devMem2, devMem1, Nbytes,
+                           hipMemcpyDeviceToDevice, stream));
+
+  exchangeMode = hipStreamCaptureModeThreadLocal;
+
+  std::cout << "exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
+
+  addOneKernel<<< 1, 1, 0, stream >>>(devMem2 , N);
+  
+  exchangeMode = hipStreamCaptureModeGlobal;
+
+  std::cout << "exchangeMode = " << exchangeMode << std::endl;
+
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&exchangeMode));  
+  
   HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem2, Nbytes,
                            hipMemcpyDeviceToHost, stream));
 
