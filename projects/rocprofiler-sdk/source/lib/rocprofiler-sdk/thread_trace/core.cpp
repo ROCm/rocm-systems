@@ -496,9 +496,12 @@ DeviceThreadTracer::stop_context()
     for(auto& [_, tracer] : agents)
     {
         auto packet = tracer->get_control(false);
+        packet->after_krn_pkt.emplace_back(packet->query_status);
         packet->populate_after();
 
         auto signal = tracer->SubmitAndSignalLast(packet->after_krn_pkt);
+        signal->WaitOn();
+        packet->query_buffer_status();
         if(signal) wait_list.emplace_back(tracer.get(), packet->GetHandle(), std::move(signal));
     }
 
