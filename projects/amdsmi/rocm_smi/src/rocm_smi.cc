@@ -7357,8 +7357,23 @@ rsmi_event_notification_get(int timeout_ms,
         return;
       }
 
-      FILE *anon_fp =
-         smi.devices()[fd_indx_to_dev_id[i]]->evt_notif_anon_file_ptr();
+      const uint32_t dv_ind = fd_indx_to_dev_id[i];
+      auto& dev = *smi.devices()[dv_ind];
+
+      // Ensure protected access of anon_fp
+      amd::smi::pthread_wrap pw(*amd::smi::GetMutex(dv_ind));
+      amd::smi::ScopedPthread lock(pw);
+
+      FILE *anon_fp = dev.evt_notif_anon_file_ptr();
+      if (!anon_fp) {
+        std::ostringstream ss;
+        ss << "Null evt_notif_anon_file_ptr() for dv_ind=" << dv_ind;
+        LOG_ERROR(ss);
+        continue;
+      }
+      
+      flockfile(anon_fp); // serialize stdio on this stream
+
       data_item =
            reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
 
@@ -7614,6 +7629,7 @@ rsmi_event_notification_get(int timeout_ms,
         data_item =
              reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
       }
+      funlockfile(anon_fp); // // paired with flockfile; RAII unlock of device mutex on scope exit
     }
   };
 

@@ -206,6 +206,9 @@ GPU: 0
 
 ### Resolved Issues
 
+- **Fixed event monitoring segfaults causing RDC to crash**.  
+  - Adds mutex locking around access to device event notification file pointer
+
 - **Fixed an issue where amdsmi_get_gpu_od_volt_info() returned a reference to a python object**.  
   - The returned dictionary was changed to return values in all fields
 
