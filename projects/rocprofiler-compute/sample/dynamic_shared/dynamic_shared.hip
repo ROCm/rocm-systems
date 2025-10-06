@@ -77,82 +77,87 @@ std::vector<float> matrix_transpose_reference(const std::vector<float>& input,
     return output;
 }
 
-int main()
+// argv: Array of command-line arguments. Run with "--enable-sleep" to enable 
+// the mode with delay implemented by thread sleep
+int main(int argc, char* argv[])
 {
-    // Number of rows and columns in the transposed square matrix.
+    bool enable_sleep = false;
+
+    // Check command-line arguments
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if(arg == "--enable-sleep")
+        {
+            enable_sleep = true;
+        }
+    }
+
     constexpr unsigned int width = 4;
-
-    // Number of threads in each kernel block along the X dimension.
-    // Because each thread will process exactly one element, this value
-    // is equal to the width of the matrix.
     constexpr unsigned int threads_per_block_x = width;
-
-    // Number of threads in each kernel block along the Y dimension.
-    // Because each thread will process exactly one element, this value
-    // is equal to the width of the matrix.
     constexpr unsigned int threads_per_block_y = width;
-
-    // Total element count of the transposed matrix.
     constexpr unsigned int size = width * width;
-
-    // Total size (in bytes) of the transposed matrix.
     constexpr size_t size_bytes = sizeof(float) * size;
-
-    // Total amount of shared memory that each block is going to use.
-    // Exactly one matrix will be stored in shared memory.
     constexpr size_t shared_memory_bytes = size_bytes;
+
     std::cout << "Run transpose continuously" << std::endl;
 
-    // Set a timer to 30 seconds for rocprofv3 preparation
-    std::this_thread::sleep_for(std::chrono::seconds(30));
-    
+    if(enable_sleep)
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+
+    unsigned int pass_count = 0;
+    unsigned int fail_count = 0;
+    unsigned int cycle_count = 0;
+
+    constexpr float eps = 1.0E-6f;
+
     while (true) 
     {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-        // Allocate host vectors.
+        if(enable_sleep)
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+
+        // Allocate host vectors
         std::vector<float> h_matrix(size);
         std::vector<float> h_transposed_matrix(size);
 
-        // Set up input data.
+        // Set up input data
         for(unsigned int i = 0; i < size; i++)
         {
             h_matrix[i] = i * 10.0f;
         }
 
-        // Allocate device memory for the input and output matrices.
+        // Allocate device memory
         float* d_matrix{};
         float* d_transposed_matrix{};
         HIP_CHECK(hipMalloc(&d_matrix, size_bytes));
         HIP_CHECK(hipMalloc(&d_transposed_matrix, size_bytes));
 
-        // Transfer the input matrix to the device memory.
+        // Copy input to device
         HIP_CHECK(hipMemcpy(d_matrix, h_matrix.data(), size_bytes, hipMemcpyHostToDevice));
 
-        // Lauching kernel from host.
+        // Launch kernel
         matrix_transpose_kernel<<<dim3(width / threads_per_block_x, width / threads_per_block_y),
-                                dim3(threads_per_block_x, threads_per_block_y),
-                                shared_memory_bytes,
-                                hipStreamDefault>>>(d_transposed_matrix, d_matrix, width);
+                                  dim3(threads_per_block_x, threads_per_block_y),
+                                  shared_memory_bytes,
+                                  hipStreamDefault>>>(d_transposed_matrix, d_matrix, width);
 
-        // Check if the kernel launch was successful.
         HIP_CHECK(hipGetLastError());
 
-        // Transfer the result back to the host.
+        // Copy result back
         HIP_CHECK(hipMemcpy(h_transposed_matrix.data(),
                             d_transposed_matrix,
                             size_bytes,
                             hipMemcpyDeviceToHost));
 
-        // Free the resources on the device.
+        // Free device memory
         HIP_CHECK(hipFree(d_matrix));
         HIP_CHECK(hipFree(d_transposed_matrix));
 
-        // Perform the reference (CPU) calculation.
+        // CPU reference transpose
         std::vector<float> ref_transposed_matrix = matrix_transpose_reference(h_matrix, width);
 
-        // Check the results' validity.
-        constexpr float eps = 1.0E-6f;
-        unsigned int    errors{};
+        // Validate
+        unsigned int errors = 0;
         for(unsigned int i = 0; i < size; i++)
         {
             if(std::fabs(h_transposed_matrix[i] - ref_transposed_matrix[i]) > eps)
@@ -161,14 +166,25 @@ int main()
             }
         }
 
-        if(errors != 0)
-        {
-            std::cout << "Validation failed. Errors: " << errors << std::endl;
-            return error_exit_code;
-        }
+        // Update pass/fail counters
+        if(errors == 0)
+            pass_count++;
         else
+            fail_count++;
+
+        cycle_count++;
+
+        // Every 10000 cycles, print summary and reset counters
+        if(cycle_count == 10000)
         {
-            std::cout << "Validation passed." << std::endl;
+            std::cout << "10000 Validation cycles completed: "
+                      << "Passes = " << pass_count
+                      << ", Failures = " << fail_count << std::endl;
+
+            // Reset counters
+            cycle_count = 0;
+            pass_count = 0;
+            fail_count = 0;
         }
     }
 }
