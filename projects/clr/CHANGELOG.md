@@ -30,7 +30,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipStreamGetId`          queries the id of a stream
 * New HIP flags
     - `hipMemLocationTypeHost`, allowing to extend the capability of handling the virtual memory management in host memory location, in addition to device memory.
-    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`.
+    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP
+    runtime so it can be accessed by the GPU.
 * Support for nested tile partitioning within cooperative groups, matching corresponding CUDA's functionality.
 
 ### Resolved issues
@@ -44,10 +45,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Improved hip module loading latency.
 * Optimized kernel metadata retrieval during module post load.
 * Optimized doorbell ring in HIP runtime, advantages the following for performance improvement,
-    - Makes efficient packet batching for HIP graphic launch,
-    - Dynamically copies packets based on the max threshold if defined, otherwise staggers copy with power of 2.
+    - Makes efficient packet batching for HIP graph launch,
+    - Dynamic packet copying based on defined maximum threshold or power-of-2 staggered copy pattern,
     - If timestamps are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
-
 
 ## HIP 7.0.2 for ROCm 7.0.2
 
