@@ -1,4 +1,3 @@
-
 ARG DISTRO=rockylinux
 ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
@@ -24,12 +23,12 @@ RUN yum groupinstall -y "Development Tools" && \
 
 ARG PYTHON_VERSIONS="8 9 10 11 12"
 
-RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
-    bash miniconda.sh -b -p /opt/conda && \
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
+    bash miniforge.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no --set solver classic && \
-    conda update -c defaults -n base conda && \
-    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip numpy; done && \
+    conda update -c conda-forge -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c conda-forge python=3.${i} pip numpy; done && \
     for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy pandas dataclasses; done && \
     conda clean -a -y && \
     cd /tmp && \
