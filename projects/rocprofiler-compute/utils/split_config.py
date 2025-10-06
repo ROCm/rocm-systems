@@ -55,6 +55,13 @@ HASH_FILE_MAP = {}
 GFX_VERSIONS = ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]
 METRIC_ID_TO_NAME_MAP = {gfx_version: {} for gfx_version in GFX_VERSIONS}
 
+def str_representer(dumper, data):
+    if '\n' in data:
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+
+yaml.add_representer(str, str_representer)
 
 def get_autogen_text(config_file="utils/unified_config.yaml"):
     return (
@@ -77,7 +84,7 @@ def update_analysis_config():
         new_panel_config["Panel Config"]["id"] = panel_config["id"]
         new_panel_config["Panel Config"]["title"] = panel_config["title"]
         new_panel_config["Panel Config"]["metrics_description"] = {
-            key: value["plain"].replace("\n", " ").strip()
+            key: value["plain"].strip()
             for key, value in panel_config.get("metrics_description", {}).items()
         }
         panel_id_int = panel_config["id"]
@@ -241,7 +248,6 @@ def update_documentation():
                 for metric_name in sorted(list(metric_names)):
                     metrics_info[metric_name] = {
                         "rst": panel_config["metrics_description"][metric_name]["rst"]
-                        .replace("\n", " ")
                         .strip(),
                         "unit": panel_config["metrics_description"][metric_name][
                             "unit"
