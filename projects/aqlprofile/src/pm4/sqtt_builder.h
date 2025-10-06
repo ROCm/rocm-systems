@@ -116,7 +116,7 @@ struct TraceControl
   uint32_t status{0};
   uint32_t cntr{0};
   uint32_t wptr{0};
-  uint32_t _reserved{0};
+  uint32_t status_double_buffer{0};
   uint64_t gpu_clock_cnt_start{0};
   uint64_t gpu_clock_cnt_end{0};
 };
@@ -648,6 +648,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     builder.BuildWriteWaitIdlePacket(cmd_buffer);
     builder.BuildCopyRegDataPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, addr, Primitives::COPY_DATA_SEL_COUNT_1DW_PRM, true);
     builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    //builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, Primitives::sqtt_ctrl_value(true));
 
     builder.BuildCacheFlushPacket(cmd_buffer, size_t(addr), sizeof(uint32_t));
     SetGRBMToBroadcast(cmd_buffer);

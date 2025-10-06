@@ -368,7 +368,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_status(
   auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
   if (manager == nullptr) return HSA_STATUS_ERROR;
 
-  uint32_t status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status;
+  uint32_t status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status_double_buffer;
   
   out->_size       = sizeof(aqlprofile_att_buffer_status_v0_t);
   out->is_too_late = false;
@@ -386,8 +386,10 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_status(
 }
 
 PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
+  uint64_t* header,
   hsa_ext_amd_aql_pm4_packet_t* query_status,
   hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+  uint64_t* num_buffer_packets,
   aqlprofile_handle_t handle,
   int shader_engine_id,
   int flags)
@@ -405,6 +407,14 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   pm4_builder::SqttBuilder* sqttbuilder = pm4_factory->GetSqttBuilder();
   pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
 
+  if (buffers.size() > *num_buffer_packets) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  *num_buffer_packets = buffers.size();
+
+  if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
+    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask()).raw;
+  else
+    *header = 0;
+
   for (size_t i=0; i<buffers.size(); i++)
   {
     pm4_builder::CmdBuffer commands;
@@ -416,7 +426,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   }
   
   pm4_builder::CmdBuffer commands;
-  uint32_t& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status;
+  uint32_t& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status_double_buffer;
   sqttbuilder->GetStatusPacket(&commands, &manager->config, &status, shader_engine_id);
 
   void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
