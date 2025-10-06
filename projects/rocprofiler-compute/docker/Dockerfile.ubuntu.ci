@@ -22,10 +22,18 @@ ENV CMAKE_PREFIX_PATH="/usr/local"
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 cmake curl environment-modules git-core gnupg2 gzip libtool locales lsb-release m4 python3-pip unzip wget zip zlib1g-dev && \
-    python3 -m pip install 'cmake==3.28.4' && \
     apt-get autoclean && \
-    locale -a && \
-    wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
+    locale -a
+
+RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
+        python3 -m pip install 'cmake==3.28.4'; \
+    else \
+        python3 -m pip install --break-system-packages 'cmake==3.28.4'; \
+    fi
+
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
     bash miniforge.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no --set solver classic && \
