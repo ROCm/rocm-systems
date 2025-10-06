@@ -1,5 +1,5 @@
 set(CMAKE_HIP_COMPILER
-    "/opt/rocm/llvm/bin/amdclang++"
+    "amdclang++"
     CACHE STRING
     "desired c++ compiler"
     FORCE
