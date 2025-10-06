@@ -984,7 +984,8 @@ get_ompt_standard_cb_storage()
 //  As the beginning and end can only occur on the same thread, they are connected into a
 //  single track called "omp_parallel" for clarity. In this track, the information
 //  contained within parallel_begin should be displayed as it contains all the information
-//  that parallel_end has as well as the flags and number of threads/teams that were requested.
+//  that parallel_end has as well as the flags and number of threads/teams that were
+//  requested.
 auto&
 get_ompt_parallel_cb_storage()
 {
