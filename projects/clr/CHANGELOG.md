@@ -28,16 +28,25 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
-* Changed HIP APIs
-    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
-    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
-      hipMemAllocationType and allocates uncached memory if so
-    - `hipHostRegister` now supports hipHostRegisterIoMemory flag
+* New HIP flags
+    - `hipMemLocationTypeHost`, allowing to extend the capability of handling the virtual memory management in host memory location, in addition to device memory.
+    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`.
+
+### Resolved issues
+
+* A segmentation fault occurred in application when capturing the same HIP graph from multiple streams with cross-stream dependencies.  HIP runtime fixed an issue where a forked stream joined to a parent stream which was not originally created with the API `hipStreamBeginCapture`.
+* Different behavior of en-queuing command on a legacy stream during stream capture on AMD ROCM platform, compared with NVIDIA CUDA. HIP runtime now returns an error in this specific situation, to behave the same as CUDA.
+* Failure of memory access fault occurred in rocm-examples test suite. When Heterogeneous Memory Management(HMM) is not supported in the driver, `hipMallocManaged` will only allocate system memory in HIP runtime.
 
 ### Optimized
 
-* Improved hip module loading latency
-* Optimized kernel metadata retrieval during module post load
+* Improved hip module loading latency.
+* Optimized kernel metadata retrieval during module post load.
+* Optimized doorbell ring in HIP runtime, advantages the following for performance improvement,
+    - Makes efficient packet batching for HIP graphic launch,
+    - Dynamically copies packets based on the max threshold if defined, otherwise staggers copy with power of 2.
+    - If timestamp are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
+
 
 ## HIP 7.0.2 for ROCm 7.0.2
 
