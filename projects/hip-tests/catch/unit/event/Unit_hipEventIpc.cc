@@ -27,6 +27,35 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
+#include <hip_test_defgroups.hh>
+#include <hip_test_helper.hh>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <utils.hh>
+
+__global__ void addOneKernel(int *a, int size) {
+  int offset = blockDim.x * blockIdx.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = offset; i < size; i += stride) {
+    a[i] += 1;
+  }
+}
+bool validateHostArray(int *arr, int size, int refValue) {
+  for (int i = 0; i < size; i++) {
+    if (arr[i] != refValue) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void fillHostArray(int *arr, int size, int value) {
+  for (int i = 0; i < size; i++) {
+    arr[i] = value;
+  }
+}
+
 /**
  * @addtogroup hipEventCreateWithFlags hipEventCreateWithFlags
  * @{
@@ -50,11 +79,15 @@ TEST_CASE("Unit_hipEventIpc") {
   int iterations = 1;
 
   unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
-  if (blocks > 1024) blocks = 1024;
-  if (blocks == 0) blocks = 1;
+  if (blocks > 1024)
+    blocks = 1024;
+  if (blocks == 0)
+    blocks = 1;
 
-  printf("N=%zu (A+B+C= %6.1f MB total) blocks=%u threadsPerBlock=%u iterations=%d\n", N,
-         ((double)3 * N * sizeof(float)) / 1024 / 1024, blocks, threadsPerBlock, iterations);
+  printf("N=%zu (A+B+C= %6.1f MB total) blocks=%u threadsPerBlock=%u "
+         "iterations=%d\n",
+         N, ((double)3 * N * sizeof(float)) / 1024 / 1024, blocks,
+         threadsPerBlock, iterations);
   printf("iterations=%d\n", iterations);
 
   size_t Nbytes = N * sizeof(float);
@@ -66,12 +99,13 @@ TEST_CASE("Unit_hipEventIpc") {
   hipEvent_t start, stop;
 
   // NULL stream check:
-  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming | hipEventInterprocess));
-  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming | hipEventInterprocess));
+  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming |
+                                                hipEventInterprocess));
+  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming |
+                                               hipEventInterprocess));
 
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-
 
   for (int i = 0; i < iterations; i++) {
     //--- START TIMED REGION
@@ -79,8 +113,9 @@ TEST_CASE("Unit_hipEventIpc") {
     // Record the start event
     HIP_CHECK(hipEventRecord(start, NULL));
 
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
-                       static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d, N);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock),
+                       0, 0, static_cast<const float *>(A_d),
+                       static_cast<const float *>(B_d), C_d, N);
     HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(hipEventRecord(stop, NULL));
@@ -88,7 +123,6 @@ TEST_CASE("Unit_hipEventIpc") {
     HIP_CHECK(hipEventQuery(stop));
     long long hostStop = HipTest::get_time();
     //--- STOP TIMED REGION
-
 
     float eventMs = 1.0f;
     // should fail due to hipEventDisableTiming
@@ -110,12 +144,13 @@ TEST_CASE("Unit_hipEventIpc") {
   // always different process Id on Windows
   HIP_CHECK(err);
 #else
-  // hipIpcOpenEventHandle() should be called in a different process, hence it should fail here
+  // hipIpcOpenEventHandle() should be called in a different process, hence it
+  // should fail here
   REQUIRE(err == hipErrorInvalidContext);
 #endif
   HIP_CHECK(hipEventDestroy(start));
   HIP_CHECK(hipEventDestroy(stop));
-#if HT_WIN
+#if HT_AMD
   HIP_CHECK(hipEventDestroy(ipc_event));
 #endif
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
@@ -124,6 +159,317 @@ TEST_CASE("Unit_hipEventIpc") {
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  -This test will validate the basic functionality of hipIpcGetEventHandle
+ *  and hipIpcOpenEventHandle apis using stream capture apis in
+ *  hipStreamCaptureModeGlobal mode.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventIpc.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+
+TEST_CASE("Unit_hipIpc_EventHandle_Stream_hipStreamCaptureModeGlobal") {
+  int fd[2];
+  REQUIRE(pipe(fd) == 0);
+
+  auto pid = fork();
+
+  if (pid != 0) {  // parent process
+  // Validating hipIpcGetEventHandle API
+    hipEvent_t start = nullptr;
+    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventInterprocess |
+                                                  hipEventDisableTiming));
+    REQUIRE(start != nullptr);
+
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+    hipIpcEventHandle_t handle;
+    HIP_CHECK(hipIpcGetEventHandle(&handle, start));
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    REQUIRE(write(fd[1], &handle, sizeof(hipIpcEventHandle_t)) >= 0);
+    REQUIRE(close(fd[1]) == 0);
+
+    REQUIRE(wait(NULL) >= 0);
+
+    HIP_CHECK(hipEventDestroy(start));
+  } else {  // child process
+    // Validating hipIpcOpenMemHandle API
+    hipIpcEventHandle_t handle;
+    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[0]) == 0);
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+    hipEvent_t start = nullptr;
+    HIP_CHECK(hipIpcOpenEventHandle(&start, handle));
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    REQUIRE(start != nullptr);
+    hipEvent_t stop = nullptr;
+    HIP_CHECK(hipEventCreate(&stop));
+    REQUIRE(stop != nullptr);
+
+    int N = 40;
+    int Nbytes = N * sizeof(int);
+
+    int *hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+    REQUIRE(hostMem != nullptr);
+    fillHostArray(hostMem, N, 10);
+
+    int *devMem = nullptr;
+    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    REQUIRE(devMem != nullptr);
+
+    hipStream_t stream1;
+    HIP_CHECK(hipStreamCreate(&stream1));
+
+    HIP_CHECK(hipEventRecord(start, stream1));
+
+    HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice,
+                             stream1));
+    addOneKernel<<<1, 1>>>(devMem, N);
+    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost,
+                             stream1));
+
+    HIP_CHECK(hipEventRecord(stop, stream1));
+    HIP_CHECK(hipEventSynchronize(stop));
+
+    REQUIRE(validateHostArray(hostMem, N, 11) == true);
+
+    HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipStreamDestroy(stream1));
+    free(hostMem);
+    HIP_CHECK(hipFree(devMem));
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  -This test will validate the basic functionality of hipIpcGetEventHandle
+ *  and hipIpcOpenEventHandle apis using stream capture apis in
+ *  hipStreamCaptureModeThreadLocal mode.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventIpc.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+
+TEST_CASE("Unit_hipIpc_EventHandle_Stream_hipStreamCaptureModeThreadLocal") {
+  int fd[2];
+  REQUIRE(pipe(fd) == 0);
+
+  auto pid = fork();
+
+  if (pid != 0) {  // parent process
+  // Validating hipIpcGetEventHandle API
+    hipEvent_t start = nullptr;
+    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventInterprocess |
+                                                  hipEventDisableTiming));
+    REQUIRE(start != nullptr);
+
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+
+    hipIpcEventHandle_t handle;
+    HIP_CHECK(hipIpcGetEventHandle(&handle, start));
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    REQUIRE(write(fd[1], &handle, sizeof(hipIpcEventHandle_t)) >= 0);
+    REQUIRE(close(fd[1]) == 0);
+
+    REQUIRE(wait(NULL) >= 0);
+
+    HIP_CHECK(hipEventDestroy(start));
+  } else {  // child process
+    // Validating hipIpcOpenMemHandle API
+    hipIpcEventHandle_t handle;
+    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[0]) == 0);
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+
+    hipEvent_t start = nullptr;
+    HIP_CHECK(hipIpcOpenEventHandle(&start, handle));
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    REQUIRE(start != nullptr);
+    hipEvent_t stop = nullptr;
+    HIP_CHECK(hipEventCreate(&stop));
+    REQUIRE(stop != nullptr);
+
+    int N = 40;
+    int Nbytes = N * sizeof(int);
+
+    int *hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+    REQUIRE(hostMem != nullptr);
+    fillHostArray(hostMem, N, 10);
+
+    int *devMem = nullptr;
+    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    REQUIRE(devMem != nullptr);
+
+    hipStream_t stream1;
+    HIP_CHECK(hipStreamCreate(&stream1));
+
+    HIP_CHECK(hipEventRecord(start, stream1));
+
+    HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice,
+                             stream1));
+    addOneKernel<<<1, 1>>>(devMem, N);
+    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost,
+                             stream1));
+
+    HIP_CHECK(hipEventRecord(stop, stream1));
+    HIP_CHECK(hipEventSynchronize(stop));
+
+    REQUIRE(validateHostArray(hostMem, N, 11) == true);
+
+    HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipStreamDestroy(stream1));
+    free(hostMem);
+    HIP_CHECK(hipFree(devMem));
+  }
+}
+/**
+ * Test Description
+ * ------------------------
+ *  -This test will validate the basic functionality of hipIpcGetEventHandle
+ *  and hipIpcOpenEventHandle apis using stream capture apis in
+ *  hipStreamCaptureModeRelaxed mode.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventIpc.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+
+TEST_CASE("Unit_hipIpc_EventHandle_Stream_hipStreamCaptureModeRelaxed") {
+  int fd[2];
+  REQUIRE(pipe(fd) == 0);
+
+  auto pid = fork();
+
+  if (pid != 0) {  // parent process
+  // Validating hipIpcGetEventHandle API
+    hipEvent_t start = nullptr;
+    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventInterprocess |
+                                                  hipEventDisableTiming));
+    REQUIRE(start != nullptr);
+
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
+
+    hipIpcEventHandle_t handle;
+    HIP_CHECK(hipIpcGetEventHandle(&handle, start));
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    REQUIRE(write(fd[1], &handle, sizeof(hipIpcEventHandle_t)) >= 0);
+    REQUIRE(close(fd[1]) == 0);
+
+    REQUIRE(wait(NULL) >= 0);
+
+    HIP_CHECK(hipEventDestroy(start));
+  } else {  // child process
+    // Validating hipIpcOpenMemHandle API
+    hipIpcEventHandle_t handle;
+    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[0]) == 0);
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
+
+    hipEvent_t start = nullptr;
+    HIP_CHECK(hipIpcOpenEventHandle(&start, handle));
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    REQUIRE(start != nullptr);
+    hipEvent_t stop = nullptr;
+    HIP_CHECK(hipEventCreate(&stop));
+    REQUIRE(stop != nullptr);
+
+    int N = 40;
+    int Nbytes = N * sizeof(int);
+
+    int *hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+    REQUIRE(hostMem != nullptr);
+    fillHostArray(hostMem, N, 10);
+
+    int *devMem = nullptr;
+    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    REQUIRE(devMem != nullptr);
+
+    hipStream_t stream1;
+    HIP_CHECK(hipStreamCreate(&stream1));
+
+    HIP_CHECK(hipEventRecord(start, stream1));
+
+    HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice,
+                             stream1));
+    addOneKernel<<<1, 1>>>(devMem, N);
+    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost,
+                             stream1));
+
+    HIP_CHECK(hipEventRecord(stop, stream1));
+    HIP_CHECK(hipEventSynchronize(stop));
+
+    REQUIRE(validateHostArray(hostMem, N, 11) == true);
+
+    HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipStreamDestroy(stream1));
+    free(hostMem);
+    HIP_CHECK(hipFree(devMem));
+  }
+}
 /**
  * End doxygen group EventTest.
  * @}
