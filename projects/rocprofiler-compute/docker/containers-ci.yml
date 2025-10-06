@@ -8,7 +8,7 @@ matrix:
     version: "24.04"
   # opensuse
   - distro: "opensuse"
-    version: "15.7"
+    version: "15.6"
   # RHEL8
   - distro: "rhel"
     version: "8.10"
