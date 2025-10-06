@@ -155,7 +155,7 @@ jobs:
             -LE "rccl|runtime|ompvv"
 
       - name: Output Logs
-        if: steps.run_ci.outcome == 'failure'
+        if: failure() && steps.run_ci.outcome == 'failure'
         working-directory: projects/rocprofiler-systems
         run: |
           echo "❌ Run Failed: Now Outputting LastTest.log for detailed logs..."
