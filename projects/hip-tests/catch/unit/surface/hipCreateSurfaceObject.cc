@@ -54,11 +54,13 @@ TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters") {
   resc.res.array.array = array;
 
   SECTION("pSurfObject is nullptr") {
-    HIP_CHECK_ERROR(hipCreateSurfaceObject(nullptr, &resc), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(nullptr, &resc),
+                    hipErrorInvalidValue);
   }
 
   SECTION("pResDesc is nullptr") {
-    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, nullptr),
+                    hipErrorInvalidValue);
   }
 
   SECTION("invalid resource type") {
@@ -69,20 +71,64 @@ TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters") {
 #if HT_NVIDIA  // DIsalbed due to defect EXSWHTEC-366
   SECTION("array handle is nullptr") {
     resc.res.array.array = nullptr;
-    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidHandle);
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc),
+                    hipErrorInvalidHandle);
   }
 #endif
 
 #if HT_NVIDIA  // Disalbed due to defect EXSWHTEC-367
   SECTION("freed array handle") {
     hipArray_t invalid_array;
-    HIP_CHECK(hipMallocArray(&invalid_array, &desc, 64, 0, hipArraySurfaceLoadStore));
+    HIP_CHECK(
+        hipMallocArray(&invalid_array, &desc, 64, 0, hipArraySurfaceLoadStore));
     HIP_CHECK(hipFreeArray(invalid_array));
     resc.res.array.array = invalid_array;
-    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorContextIsDestroyed);
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc),
+                    hipErrorContextIsDestroyed);
   }
 #endif
 
+  HIP_CHECK(hipFreeArray(array));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test validates the basic functionality of hipCreateSurfaceObject
+ *  - and hipDestorySurfaceObject apis during stream capture.
+ * Test source
+ * ------------------------
+ *  - unit/surface/hipCreateSurfaceObject.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
+TEST_CASE("Unit_StreamCapture_SurfaceObject_Create_Destroy") {
+  CHECK_IMAGE_SUPPORT
+
+  hipArray_t array = nullptr;
+  size_t width = 64;
+  size_t height = 64;
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+  unsigned int flags = hipArraySurfaceLoadStore;
+
+  HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+
+  hipError_t error_capture = hipSuccess;
+  BEGIN_CAPTURE_SYNC(error_capture, true);
+
+  hipResourceDesc pResDesc;
+  pResDesc.resType = hipResourceTypeArray;
+  pResDesc.res.array.array = array;
+  hipSurfaceObject_t pSurfObject;
+#if HT_AMD  // SWDEV-510271 it will be removed once the defect is fixed.
+  error_capture = hipSuccess;
+#endif
+  HIP_CHECK_ERROR(hipCreateSurfaceObject(&pSurfObject, &pResDesc),
+                  error_capture);
+  HIP_CHECK_ERROR(hipDestroySurfaceObject(pSurfObject), error_capture);
+
+  END_CAPTURE_SYNC(error_capture);
   HIP_CHECK(hipFreeArray(array));
 }
 
