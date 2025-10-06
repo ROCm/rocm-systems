@@ -1,9 +1,5 @@
-set(CMAKE_HIP_COMPILER
-    "amdclang++"
-    CACHE STRING
-    "desired c++ compiler"
-    FORCE
-)
+set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
+
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
