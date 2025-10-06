@@ -31,12 +31,13 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP flags
     - `hipMemLocationTypeHost`, allowing to extend the capability of handling the virtual memory management in host memory location, in addition to device memory.
     - `hipHostRegisterIoMemory` is supported in `hipHostRegister`.
+* Support for nested tile partitioning within cooperative groups, matching corresponding CUDA's functionality.
 
 ### Resolved issues
 
 * A segmentation fault occurred in application when capturing the same HIP graph from multiple streams with cross-stream dependencies.  HIP runtime fixed an issue where a forked stream joined to a parent stream which was not originally created with the API `hipStreamBeginCapture`.
 * Different behavior of en-queuing command on a legacy stream during stream capture on AMD ROCM platform, compared with NVIDIA CUDA. HIP runtime now returns an error in this specific situation, to behave the same as CUDA.
-* Failure of memory access fault occurred in rocm-examples test suite. When Heterogeneous Memory Management(HMM) is not supported in the driver, `hipMallocManaged` will only allocate system memory in HIP runtime.
+* Failure of memory access fault occurred in rocm-examples test suite. When Heterogeneous Memory Management (HMM) is not supported in the driver, `hipMallocManaged` will only allocate system memory in HIP runtime.
 
 ### Optimized
 
@@ -45,7 +46,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Optimized doorbell ring in HIP runtime, advantages the following for performance improvement,
     - Makes efficient packet batching for HIP graphic launch,
     - Dynamically copies packets based on the max threshold if defined, otherwise staggers copy with power of 2.
-    - If timestamp are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
+    - If timestamps are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
 
 
 ## HIP 7.0.2 for ROCm 7.0.2
@@ -207,7 +208,7 @@ HIP runtime has the following functional improvements which greatly improve runt
 
 * Reduced usage of the lock scope in events and kernel handling.
     - Switches to `shared_mutex` for event validation, uses `std::unique_lock` in HIP runtime to create/destroy event, instead of `scopedLock`.
-    - Reduces the `scopedLock` in handling of kernel execution. HIP runtime now calls `scopedLock` during kernel binary creation/initialization, doesn't call it again during kernel vector iteration before launch.
+    - Reduces the `scopedLock` in handling of kernel execution. HcorrespondingIP runtime now calls `scopedLock` during kernel binary creation/initialization, doesn't call it again during kernel vector iteration before launch.
 * Implementation of unifying managed buffer and kernel argument buffer so HIP runtime doesn't need to create/load a separate kernel argument buffer.
 * Refactored memory validation, creates a unique function to validate a variety of memory copy operations.
 * Improved kernel logging using demangling shader names.
