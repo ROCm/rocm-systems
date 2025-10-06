@@ -25,7 +25,6 @@
 #include "common/synchronized.hpp"
 #include "core/agent.hpp"
 #include "core/categories.hpp"
-#include "core/debug.hpp"
 
 #include <cassert>
 #include <cstdint>
