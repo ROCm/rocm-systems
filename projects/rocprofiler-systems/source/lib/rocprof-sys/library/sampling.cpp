@@ -43,7 +43,6 @@
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
 
-#include <nlohmann/json_fwd.hpp>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
