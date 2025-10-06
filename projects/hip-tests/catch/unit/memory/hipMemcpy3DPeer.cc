@@ -138,6 +138,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
+  CHECK_IMAGE_SUPPORT
   constexpr int numW = 16;
   constexpr int numH = 16;
   constexpr int depth = 4;
