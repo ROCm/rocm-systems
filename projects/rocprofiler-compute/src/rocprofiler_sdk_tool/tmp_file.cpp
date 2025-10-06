@@ -53,7 +53,7 @@ tmp_file::tmp_file(std::string _filename)
 tmp_file::~tmp_file()
 {
     close();
-    remove();
+    // remove();
 }
 
 bool
@@ -88,7 +88,7 @@ tmp_file::close()
 
     if(stream.is_open())
     {
-        // ROCP_INFO << "closing temporary file: '" << filename << "'...";
+        std::cerr << "closing temporary file: '" << filename << "'...";
         stream.close();
         return !stream.is_open();
     }

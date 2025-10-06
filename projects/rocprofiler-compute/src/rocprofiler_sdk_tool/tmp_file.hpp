@@ -31,6 +31,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <iostream>
 
 struct tmp_file
 {
@@ -95,6 +96,9 @@ tmp_file::write(const Tp& data)
 
     auto   pos         = stream.tellp();
     size_t num_records = 1;
+    std::cerr << "Writing " << num_records << " records at pos " << pos << "\n";
+    std::cerr << "Record size: " << sizeof(Tp) << " bytes\n";
+    std::cerr << "tellg=" << stream.tellg() << ", tellp=" << stream.tellp() << "\n";
     stream.write(reinterpret_cast<const char*>(&num_records), sizeof(size_t));
     stream.write(reinterpret_cast<const char*>(&data), num_records * sizeof(Tp));
     return pos;
@@ -105,11 +109,17 @@ std::vector<Tp>
 tmp_file::read(std::streampos seekpos)
 {
     auto lk = std::unique_lock<std::mutex>{file_mutex};
-    if(!stream.is_open()) open();
+    std::cerr << "Stream is open: " << stream.is_open() << "\n";
+    std::cerr << "Reading from file: " << filename << "\n";
+    if(!stream.is_open()) open(std::ifstream::binary | std::ifstream::in);
 
     stream.seekg(seekpos);
     size_t num_elements = 0;
     stream.read(reinterpret_cast<char*>(&num_elements), sizeof(size_t));
+
+    std::cerr << "Reading " << num_elements << " records from pos " << seekpos << "\n";
+    std::cerr << "Record size: " << sizeof(Tp) << " bytes\n";
+    std::cerr << "tellg=" << stream.tellg() << ", tellp=" << stream.tellp() << "\n";
 
     auto ret = std::vector<Tp>{};
     ret.resize(num_elements, Tp{});

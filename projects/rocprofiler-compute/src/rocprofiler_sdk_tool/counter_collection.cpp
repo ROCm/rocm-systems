@@ -22,6 +22,7 @@
 
 #include "counter_collection.hpp"
 #include "tmp_file.hpp"
+#include "generateCSV.hpp"
 
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -66,6 +67,20 @@ struct tool_data_t
     std::ostream* output_stream{nullptr};
 };
 
+enum class cleanup_mode
+{
+    destroy,
+    reset,
+};
+
+struct output_data
+{
+    uint64_t num_output = 0;
+    uint64_t num_bytes  = 0;
+};
+
+using cleanup_vec_t      = std::vector<std::function<void(cleanup_mode)>>;
+
 rocprofiler_context_id_t&
 get_client_ctx()
 {
@@ -73,10 +88,17 @@ get_client_ctx()
     return ctx;
 }
 
+// rocprofiler_buffer_id_t&
+// get_buffer()
+// {
+//     static rocprofiler_buffer_id_t buf = {};
+//     return buf;
+// }
+
 tmp_file&
 get_tmp_file()
 {
-    static tmp_file file{std::string("/home/amdtest/abhinab/iteration_multiplexing/projects/rocprofiler-compute/tmp/rocprofiler_compute_counter_collection.tmp")};
+    static tmp_file file{std::string("/home/amdtest/abhinab/iteration_multiplexing/projects/rocprofiler-compute/proof_of_concept/tmp/counters.tmp")};
     return file;
 }
 
@@ -147,7 +169,8 @@ record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     if(!tool || !tool->output_stream) throw std::runtime_error{"nullptr to output stream"};
 
     auto _lk = std::unique_lock{tool->mut};
-    *tool->output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+    // std::cerr << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+    // *tool->output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
 
     auto serialized_records      = std::vector<std::pair<rocprofiler_counter_id_t, double>>{};
     serialized_records.reserve(record_count);
@@ -164,6 +187,7 @@ record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     if(!serialized_records.empty())
     {
         get_tmp_file().write(serialized_records);
+        get_tmp_file().flush();
     }
 }
 
@@ -264,6 +288,14 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
               << dispatch_data.dispatch_info.agent_id.handle << "\n";
 }
 
+void
+generate_output(cleanup_mode _cleanup_mode){
+    std::cerr << "Generating output\n";
+    auto&       file = get_tmp_file();
+
+    rocprofiler::tool::generate_csv(file);
+}
+
 /**
  * Initialize the tool. This function is called once when the tool is loaded.
  * The function is responsible for creating the context, buffer, profile configs
@@ -289,6 +321,8 @@ tool_fini(void* user_data)
     assert(user_data);
     std::clog << "In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
+    get_tmp_file().flush();
+    generate_output(cleanup_mode::destroy);
     auto* tool_data = static_cast<tool_data_t*>(user_data);
 
     {
