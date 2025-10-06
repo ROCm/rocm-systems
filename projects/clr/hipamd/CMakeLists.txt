@@ -94,11 +94,12 @@ option(HIP_MAINLINE_CI "Enable mainline CI build version computation" OFF)
 
 if(HIP_MAINLINE_CI OR (DEFINED ENV{HIP_MAINLINE_CI} AND "$ENV{HIP_MAINLINE_CI}"))
   execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0
+    COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0 HEAD
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
     RESULT_VARIABLE _tag_res
     OUTPUT_VARIABLE _tag
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
 
   if(_tag_res EQUAL 0 AND _tag)
     string(REGEX MATCH "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)" _m "${_tag}")
@@ -111,7 +112,6 @@ if(HIP_MAINLINE_CI OR (DEFINED ENV{HIP_MAINLINE_CI} AND "$ENV{HIP_MAINLINE_CI}")
       message(STATUS "Wrote HIP version: ${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3} -> ${HIP_COMMON_DIR}/VERSION")
     endif()
   endif()
-else()
 endif()
 
 # Determine HIP_BASE_VERSION
