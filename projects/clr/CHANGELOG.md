@@ -7,21 +7,21 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `hipModuleGetFunctionCount`  returns the number of functions within a module
-    - `hipMemsetD2D8` Used for setting 2D memory range with specified 8-bit values
-    - `hipMemsetD2D8Async` Used for setting 2D memory range with specified 8-bit values asynchronously
-    - `hipMemsetD2D16` Used for setting 2D memory range with specified 16-bit values
-    - `hipMemsetD2D16Async` Used for setting 2D memory range with specified 16-bit values asynchronously
-    - `hipMemsetD2D32` Used for setting 2D memory range with specified 32-bit values
-    - `hipMemsetD2D32Async` Used for setting 2D memory range with specified 32-bit values asynchronously
+    - `hipModuleGetFunctionCount` returns the number of functions within a module
+    - `hipMemsetD2D8` used for setting 2D memory range with specified 8-bit values
+    - `hipMemsetD2D8Async` used for setting 2D memory range with specified 8-bit values asynchronously
+    - `hipMemsetD2D16` used for setting 2D memory range with specified 16-bit values
+    - `hipMemsetD2D16Async` used for setting 2D memory range with specified 16-bit values asynchronously
+    - `hipMemsetD2D32` used for setting 2D memory range with specified 32-bit values
+    - `hipMemsetD2D32Async` used for setting 2D memory range with specified 32-bit values asynchronously
     - `hipStreamSetAttribute` sets attributes such as synchronization policy for a given stream
     - `hipStreamGetAttribute` returns attributes such as priority for a given stream
     - `hipModuleLoadFatBinary`  loads fatbin binary to a module
-    - `hipMemcpyBatchAsync` Performs a batch of 1D or 2D memory copied asynchronously
-    - `hipMemcpy3DBatchAsync` Performs a batch of 3D memory copied asynchronously
-    - `hipMemcpy3DPeer` Copies memory between devices
-    - `hipMemcpy3DPeerAsync`Copied memory between devices asynchronously
-    - `hipMemsetD2D32Async` Used for setting 2D memory range with specified 32-bit values
+    - `hipMemcpyBatchAsync` performs a batch of 1D or 2D memory copied asynchronously
+    - `hipMemcpy3DBatchAsync` performs a batch of 3D memory copied asynchronously
+    - `hipMemcpy3DPeer` copies memory between devices
+    - `hipMemcpy3DPeerAsync`copied memory between devices asynchronously
+    - `hipMemsetD2D32Async` used for setting 2D memory range with specified 32-bit values
       asynchronously
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
     - `hipMemAdvise_v2`         advise about the usage of a given memory range
@@ -29,10 +29,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
 * New HIP flags
-    - `hipMemLocationTypeHost`, allowing to extend the capability of handling the virtual memory management in host memory location, in addition to device memory.
-    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP
-    runtime so it can be accessed by the GPU.
-* Support for nested tile partitioning within cooperative groups, matching corresponding CUDA's functionality.
+    - `hipMemLocationTypeHost` enables handling virtual memory management in host memory location, in addition to device memory.
+    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+* Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
 
 ### Resolved issues
 
