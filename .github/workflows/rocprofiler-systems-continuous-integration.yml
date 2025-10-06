@@ -158,5 +158,5 @@ jobs:
         if: failure() && steps.run_ci.outcome == 'failure'
         working-directory: projects/rocprofiler-systems
         run: |
-          echo "❌ Run Failed: Now Outputting LastTest.log for detailed logs..."
-          cat build/Testing/Temporary/LastTest.log
+          echo "❌ Run Failed: Now outputting LastTest.log for detailed logs..."
+          cat build/Testing/Temporary/LastTest*.log
