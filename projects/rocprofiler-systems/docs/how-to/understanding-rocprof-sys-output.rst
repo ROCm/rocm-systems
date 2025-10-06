@@ -349,6 +349,7 @@ To generate profiling data in the rocpd format, add "ROCPROFSYS_USE_ROCPD=ON" to
 .. code-block:: shell
 
    export ROCPROFSYS_USE_ROCPD=ON
+   export ROCPROFSYS_USE_TRACE=OFF # disabling default Perfetto output
    rocprof-sys-sample -- ./your_application
 
 See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
