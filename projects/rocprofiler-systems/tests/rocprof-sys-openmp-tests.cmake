@@ -7,25 +7,12 @@
 #
 # ----------------------------------------------------------------------------- #
 
-if(ROCmVersion_DIR)
-    set(_rocm_root "${ROCmVersion_DIR}")
-elseif(DEFINED ENV{ROCM_PATH})
-    set(_rocm_root "$ENV{ROCM_PATH}")
-else()
-    set(_rocm_root "/opt/rocm")
-endif()
-
-# Set path to ROCm LLVM library directory containing libomptarget.so
-set(_rocm_llvm_lib "${_rocm_root}/llvm/lib")
-
-set(_rocm_ld_env "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}")
-
-if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
+if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
     message(
         FATAL_ERROR
-        "libomptarget.so not found in ${_rocm_llvm_lib}. "
-        "Verify that ROCm is installed correctly and that _rocm_root "
-        "(${_rocm_root}) points at the right location."
+        "libomptarget.so not found in \"${ROCM_LLVM_LIB_PATH}\". "
+        "Verify that ROCm is installed correctly and that ROCM_PATH "
+        "(${ROCM_PATH}) points at the right location."
     )
 endif()
 

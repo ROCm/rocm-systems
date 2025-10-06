@@ -48,7 +48,7 @@ jobs:
         build-type: ['Release']
         build-dyninst: ['ON']
         os-release: ['12']
-        rocm-version: ['6.4']
+        rocm-version: ['6.4', '7.0']
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
