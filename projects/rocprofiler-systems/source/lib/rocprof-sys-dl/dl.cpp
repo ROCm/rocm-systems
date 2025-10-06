@@ -647,6 +647,13 @@ extern "C"
 
     void rocprofsys_finalize(void)
     {
+        static bool ignored_first_call = false;
+        if(!ignored_first_call)
+        {
+            ignored_first_call = true;
+            return;
+        }
+
         if(dl::get_inited() && dl::get_finied())
         {
             ROCPROFSYS_DL_LOG(2, "%s() ignored :: already initialized and finalized\n",
