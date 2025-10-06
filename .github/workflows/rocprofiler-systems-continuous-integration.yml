@@ -150,5 +150,5 @@ jobs:
             -DROCPROFSYS_USE_ROCM=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm|network" \
+            -L "rocm" \
             -LE "rccl|runtime|ompvv"
