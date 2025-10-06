@@ -33,7 +33,8 @@ set(TEST_SRC
 
 if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
   set(AMD_SRC
-      hipGetProcAddressDevMgmt.cc)
+      hipGetProcAddressDevMgmt.cc
+      hipGetDriverEntryPoint.cc)
   if(UNIX)
     set(AMD_SRC ${AMD_SRC} hipGetProcAddressIpcApis.cc)
   endif()
