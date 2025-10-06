@@ -25,7 +25,6 @@
 
 import argparse
 import textwrap
-import time
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -327,7 +326,7 @@ class Roofline:
         ops_figure = flops_figure = None
         ops_dt_list = flops_dt_list = kernel_list = ""
 
-        # Collect ceiling data for all datatypes to find mins
+        # collect ceiling data for all datatypes to find global minimums
         all_ops_ceiling_data = {}
         all_flops_ceiling_data = {}
 
@@ -387,17 +386,14 @@ class Roofline:
                     kernel_list += "_" + name
 
             # Re-save to remove loading MathJax pop up
-            for _ in range(2):
-                if ops_figure:
-                    ops_figure.write_image(
-                        f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.pdf"
-                    )
-                if flops_figure:
-                    flops_figure.write_image(
-                        f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.pdf"
-                    )
-
-                time.sleep(1)
+            if ops_figure:
+                ops_figure.write_image(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.pdf",
+                )
+            if flops_figure:
+                flops_figure.write_image(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.pdf",
+                )
 
             console_log("roofline", "Empirical Roofline PDFs saved!")
         else:
@@ -462,27 +458,79 @@ class Roofline:
                 raw_kernel_names = kernel_names_data.get("kernel_names", [])
                 num_kernels = len(raw_kernel_names)
 
-                ROOFLINE_PLOT_HEIGHT = 500
-                PLOT_POINTS_HEIGHT = 300
-                KERNEL_NAMES_HEIGHT = 200
-                SPACING = 100
+                wrapped_kernel_names = [wrap_text(name) for name in raw_kernel_names]
+                lines_per_kernel = [
+                    text.count("<br>") + 1 for text in wrapped_kernel_names
+                ]
+                temp_ceiling_data = construct_roof(
+                    roofline_parameters=self.__run_parameters,
+                    dtype=dtype,
+                    ai_data=self.__ai_data,
+                )
+
+                plot_points_data = []
+                cache_colors = {
+                    "ai_l1": "blue",
+                    "ai_l2": "green",
+                    "ai_hbm": "red",
+                    "ai_lds": "orange",
+                }
+
+                for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+                    if cache_level in self.__ai_data:
+                        x_vals = self.__ai_data[cache_level][0]
+                        y_vals = self.__ai_data[cache_level][1]
+
+                        for i in range(min(len(x_vals), num_kernels)):
+                            if x_vals[i] > 0 and y_vals[i] > 0:
+                                status = self._determine_kernel_bound_status(
+                                    ai_value=x_vals[i],
+                                    performance=y_vals[i],
+                                    cache_level=cache_level,
+                                    ceiling_data=temp_ceiling_data,
+                                )
+
+                                plot_points_data.append({
+                                    "symbol": None,  # Will be filled in later
+                                    "color": cache_colors.get(cache_level, "gray"),
+                                    "cache_level": cache_level,
+                                    "ai": f"{x_vals[i]:.2e}",
+                                    "performance": f"{y_vals[i]:.2e}",
+                                    "status": status,
+                                    "kernel_idx": i,
+                                })
+
+                ######################################
+                # Define Figure Measurement Constants
+                ######################################
+
+                ROOFLINE_PLOT_HEIGHT = 500  # Default height of plot itself
+
+                POINTS_ROW_HEIGHT = 25  # Pixel height of each plot point row
+                num_plot_points = len(plot_points_data)  # Number of plot points
+                PLOT_POINTS_HEIGHT = (
+                    num_plot_points + 2
+                ) * POINTS_ROW_HEIGHT  # +2 for header and spacing
+
+                BASE_ROW_HEIGHT = 15  # Base pixel height of each kernel name row
+                KERNEL_PADDING = 8  # Padding in between each kernel name row
+                KERNEL_NAMES_HEIGHT = (
+                    sum(lines_per_kernel) * BASE_ROW_HEIGHT
+                    + (num_kernels - 1) * KERNEL_PADDING
+                    + BASE_ROW_HEIGHT
+                )
 
                 total_figure_height = (
-                    ROOFLINE_PLOT_HEIGHT
-                    + PLOT_POINTS_HEIGHT
-                    + KERNEL_NAMES_HEIGHT
-                    + SPACING
+                    ROOFLINE_PLOT_HEIGHT + PLOT_POINTS_HEIGHT + KERNEL_NAMES_HEIGHT
                 )
 
-                # Calculate row height ratios
-                roofline_ratio = ROOFLINE_PLOT_HEIGHT / (
+                total_content_height = (
                     ROOFLINE_PLOT_HEIGHT + PLOT_POINTS_HEIGHT + KERNEL_NAMES_HEIGHT
                 )
-                plot_points_ratio = PLOT_POINTS_HEIGHT / (
-                    ROOFLINE_PLOT_HEIGHT + PLOT_POINTS_HEIGHT + KERNEL_NAMES_HEIGHT
-                )
+                roofline_ratio = ROOFLINE_PLOT_HEIGHT / total_content_height
+                plot_points_ratio = PLOT_POINTS_HEIGHT / total_content_height
                 kernel_names_ratio = 1 - roofline_ratio - plot_points_ratio
-
+                SUBPLOT_SPACING_PX = 80  # Constant - num of pixels between each subplot
                 fig = make_subplots(
                     rows=3,
                     cols=1,
@@ -492,19 +540,15 @@ class Roofline:
                         "Plot Points & Values",
                         "Full Kernel Names",
                     ],
-                    vertical_spacing=0.08,
+                    vertical_spacing=SUBPLOT_SPACING_PX / total_figure_height,
                     specs=[
-                        [{"type": "scatter"}],  # 1. Roofline plot
-                        [{"type": "scatter"}],  # 2. Plot points table
-                        [{"type": "scatter"}],  # 3. Kernel names table
+                        [{"type": "scatter"}],  # Roofline plot
+                        [{"type": "scatter"}],  # Plot points table
+                        [{"type": "scatter"}],  # Kernel names table
                     ],
                 )
 
                 subplot_row = 1
-                skipAI = False
-            else:
-                # New figure without kernel names
-                fig = go.Figure()
                 skipAI = False
         else:
             # Adding to existing figure
@@ -707,221 +751,204 @@ class Roofline:
         # Plot Points Table
         #######################
         if is_new_figure and has_kernel_names:
-            raw_kernel_names = kernel_names_data.get("kernel_names", [])
-            num_kernels = len(raw_kernel_names)
-
-            # Collect plot points data
-            plot_points_data = []
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(num_kernels)]
 
-            for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
-                if cache_level in self.__ai_data:
-                    x_vals = self.__ai_data[cache_level][0]
-                    y_vals = self.__ai_data[cache_level][1]
+            for point in plot_points_data:
+                point["symbol"] = symbols_list[point["kernel_idx"]]
 
-                    for i in range(min(len(x_vals), num_kernels)):
-                        if x_vals[i] > 0 and y_vals[i] > 0:
-                            status = self._determine_kernel_bound_status(
-                                ai_value=x_vals[i],
-                                performance=y_vals[i],
-                                cache_level=cache_level,
-                                ceiling_data=self.__ceiling_data,
-                            )
-
-                            plot_points_data.append({
-                                "symbol": symbols_list[i],
-                                "color": cache_colors.get(cache_level, "gray"),
-                                "cache_level": cache_level,
-                                "ai": f"{x_vals[i]:.2e}",
-                                "performance": f"{y_vals[i]:.2e}",
-                                "status": status,
-                                "kernel_idx": i,
-                            })
-
-            ROW_HEIGHT = 1.0
-
-            header_y = len(plot_points_data) * ROW_HEIGHT + ROW_HEIGHT
-            header_positions = {
-                "Symbol": 0.025,
-                "Cache Level": 0.15,
-                f"AI ({ops_flops}s/Byte)": 0.30,
-                f"Performance (G{ops_flops}/s)": 0.50,
-                "Status": 0.80,
-            }
-
-            for header_text, x_pos in header_positions.items():
+            if not plot_points_data or len(plot_points_data) == 0:
                 fig.add_annotation(
-                    x=x_pos,
-                    y=header_y,
-                    text=f"<b>{header_text}</b>",
+                    x=0.5,
+                    y=1,
+                    text="<b>No plot points available</b>",
                     showarrow=False,
-                    xanchor="left",
+                    xanchor="center",
                     yanchor="middle",
-                    font=dict(size=11, color="black"),
+                    font=dict(size=12, color="black"),
                     row=2,
                     col=1,
                 )
+                
+                fig.update_xaxes(visible=False, range=[0, 1], row=2, col=1)
+                fig.update_yaxes(visible=False, range=[0, 2], row=2, col=1)
 
-            # Add scatter plot for symbols
-            symbol_x = []
-            symbol_y = []
-            symbol_markers = []
-            symbol_colors = []
+            else:
+                
+                header_y = len(plot_points_data) + 1
+                header_positions = {
+                    "Symbol": 0.020,
+                    "Cache Level": 0.15,
+                    f"AI ({ops_flops}s/Byte)": 0.30,
+                    f"Performance (G{ops_flops}/s)": 0.50,
+                    "Status": 0.80,
+                }
 
-            for idx, point in enumerate(plot_points_data):
-                symbol_x.append(0.05)
-                symbol_y.append((len(plot_points_data) - idx) * ROW_HEIGHT)
-                symbol_markers.append(point["symbol"])
-                symbol_colors.append(point["color"])
-
-            fig.add_trace(
-                go.Scatter(
-                    x=symbol_x,
-                    y=symbol_y,
-                    mode="markers",
-                    marker=dict(
-                        symbol=symbol_markers,
-                        size=11,
-                        color=symbol_colors,
-                        line=dict(width=0, color="black"),
-                    ),
-                    customdata=[
-                        [point["kernel_idx"], point["cache_level"]]
-                        for point in plot_points_data
-                    ],
-                    hovertemplate=(
-                        "<b>Kernel %{customdata[0]}</b><br>Cache: %{customdata[1]}"
-                        "<extra></extra>"
-                    ),
-                    showlegend=False,
-                ),
-                row=2,
-                col=1,
-            )
-
-            data_positions = [0.15, 0.30, 0.50, 0.80]  # cache_level, ai, perf, status
-
-            for idx, point in enumerate(plot_points_data):
-                y_pos = (len(plot_points_data) - idx) * ROW_HEIGHT
-
-                # Background shading for every other row
-                if idx % 2 == 0:
-                    fig.add_shape(
-                        type="rect",
-                        x0=0,
-                        x1=1,
-                        y0=y_pos - ROW_HEIGHT / 2,
-                        y1=y_pos + ROW_HEIGHT / 2,
-                        fillcolor="rgba(220, 220, 220, 0.3)",
-                        line_width=0,
-                        layer="below",
+                for header_text, x_pos in header_positions.items():
+                    fig.add_annotation(
+                        x=x_pos,
+                        y=header_y,
+                        text=f"<b>{header_text}</b>",
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="middle",
+                        font=dict(size=11, color="black"),
                         row=2,
                         col=1,
                     )
 
-                # Add border lines for this row
-                fig.add_shape(
-                    type="line",
-                    x0=0,
-                    x1=1,
-                    y0=y_pos - ROW_HEIGHT / 2,
-                    y1=y_pos - ROW_HEIGHT / 2,
-                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1),
+                # Add scatter plot for symbols
+                symbol_x = []
+                symbol_y = []
+                symbol_markers = []
+                symbol_colors = []
+
+                for idx, point in enumerate(plot_points_data):
+                    symbol_x.append(0.05)
+                    symbol_y.append(len(plot_points_data) - idx)
+                    symbol_markers.append(point["symbol"])
+                    symbol_colors.append(point["color"])
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=symbol_x,
+                        y=symbol_y,
+                        mode="markers",
+                        marker=dict(
+                            symbol=symbol_markers,
+                            size=11,
+                            color=symbol_colors,
+                            line=dict(width=0, color="black"),
+                        ),
+                        customdata=[
+                            [point["kernel_idx"], point["cache_level"]]
+                            for point in plot_points_data
+                        ],
+                        showlegend=False,
+                        hoverinfo='skip',
+                    ),
                     row=2,
                     col=1,
                 )
 
-                fig.add_annotation(
-                    x=data_positions[0],
-                    y=y_pos,
-                    text=point["cache_level"],
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="middle",
-                    font=dict(size=10, color="black"),
-                    row=2,
-                    col=1,
-                )
-                fig.add_annotation(
-                    x=data_positions[1],
-                    y=y_pos,
-                    text=point["ai"],
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="middle",
-                    font=dict(size=10, color="black"),
-                    row=2,
-                    col=1,
-                )
-                fig.add_annotation(
-                    x=data_positions[2],
-                    y=y_pos,
-                    text=point["performance"],
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="middle",
-                    font=dict(size=10, color="black"),
-                    row=2,
-                    col=1,
-                )
+                data_positions = [0.15, 0.30, 0.50, 0.80]  # cache_level, ai, perf, status
 
-                if "Compute Bound" in point["status"]:
-                    status_color = "orange"
-                elif "Memory Bound" in point["status"]:
-                    status_color = "blue"
-                else:
-                    status_color = "gray"
-                fig.add_annotation(
-                    x=data_positions[3],
-                    y=y_pos,
-                    text=point["status"],
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="middle",
-                    font=dict(size=10, color=status_color),
+                for idx, point in enumerate(plot_points_data):
+                    y_pos = len(plot_points_data) - idx
+
+                    # Background shading for every other row
+                    if idx % 2 == 0:
+                        fig.add_shape(
+                            type="rect",
+                            x0=0,
+                            x1=1,
+                            y0=y_pos - 1 / 2,
+                            y1=y_pos + 1 / 2,
+                            fillcolor="rgba(220, 220, 220, 0.3)",
+                            line_width=0,
+                            layer="below",
+                            row=2,
+                            col=1,
+                        )
+
+                    # Add border lines for this row
+                    fig.add_shape(
+                        type="line",
+                        x0=0,
+                        x1=1,
+                        y0=y_pos - 0.5,
+                        y1=y_pos - 0.5,
+                        line=dict(color="rgba(150, 150, 150, 0.5)", width=1),
+                        row=2,
+                        col=1,
+                    )
+
+                    fig.add_annotation(
+                        x=data_positions[0],
+                        y=y_pos,
+                        text=point["cache_level"],
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="middle",
+                        font=dict(size=10, color="black"),
+                        row=2,
+                        col=1,
+                    )
+                    fig.add_annotation(
+                        x=data_positions[1],
+                        y=y_pos,
+                        text=point["ai"],
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="middle",
+                        font=dict(size=10, color="black"),
+                        row=2,
+                        col=1,
+                    )
+                    fig.add_annotation(
+                        x=data_positions[2],
+                        y=y_pos,
+                        text=point["performance"],
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="middle",
+                        font=dict(size=10, color="black"),
+                        row=2,
+                        col=1,
+                    )
+
+                    if "Compute Bound" in point["status"]:
+                        status_color = "orange"
+                    elif "Memory Bound" in point["status"]:
+                        status_color = "blue"
+                    else:
+                        status_color = "gray"
+                    fig.add_annotation(
+                        x=data_positions[3],
+                        y=y_pos,
+                        text=point["status"],
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="middle",
+                        font=dict(size=10, color=status_color),
+                        row=2,
+                        col=1,
+                    )
+
+                # Add vertical column separators
+                column_x_positions = [0.12, 0.27, 0.47, 0.75]
+                for x_pos in column_x_positions:
+                    fig.add_shape(
+                        type="line",
+                        x0=x_pos,
+                        x1=x_pos,
+                        y0=0.5,
+                        y1=header_y + 0.5,
+                        line=dict(color="rgba(150, 150, 150, 0.5)", width=1),
+                        row=2,
+                        col=1,
+                    )
+
+                # Configure Plot Points subplot axes
+                fig.update_xaxes(visible=False, range=[0, 1], fixedrange=True, row=2, col=1)
+                fig.update_yaxes(
+                    visible=False,
+                    range=[0, (len(plot_points_data) + 1.5)],
+                    fixedrange=True,
                     row=2,
                     col=1,
                 )
-
-            # Add vertical column separators
-            column_x_positions = [0.12, 0.27, 0.47, 0.75]
-            for x_pos in column_x_positions:
-                fig.add_shape(
-                    type="line",
-                    x0=x_pos,
-                    x1=x_pos,
-                    y0=ROW_HEIGHT / 2,
-                    y1=header_y + ROW_HEIGHT / 2,
-                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1),
-                    row=2,
-                    col=1,
-                )
-
-            # Configure Plot Points subplot axes
-            fig.update_xaxes(visible=False, range=[0, 1], row=2, col=1)
-            fig.update_yaxes(
-                visible=False,
-                range=[0, (len(plot_points_data) + 1.5) * ROW_HEIGHT],
-                row=2,
-                col=1,
-            )
 
             #######################
             # Kernel Names Table
             #######################
-            wrapped_kernel_names = [wrap_text(name) for name in raw_kernel_names]
-
-            lines_per_kernel = [text.count("<br>") + 1 for text in wrapped_kernel_names]
-            BASE_ROW_HEIGHT = 1.0  # Base height per line of text
-            KERNEL_PADDING = 0.3  # Padding between kernel entries
 
             y_positions = []
             row_heights = []
             current_y = 0
-
+            KERNEL_PADDING = 0
             for i in range(num_kernels):
                 # Height for this kernel is proportional to its number of lines
-                kernel_height = lines_per_kernel[i] * BASE_ROW_HEIGHT
+                kernel_height = lines_per_kernel[i]
                 row_heights.append(kernel_height)
                 # Position at the center of this kernel's allocated space
                 current_y += kernel_height / 2
@@ -1004,7 +1031,7 @@ class Roofline:
                         symbol=kernel_symbol_markers,
                         size=11,
                         color="black",
-                        line=dict(width=1, color="black"),
+                        line=dict(width=0, color="black"),
                     ),
                     showlegend=False,
                     hoverinfo="skip",
@@ -1014,8 +1041,8 @@ class Roofline:
             )
 
             # Configure Kernel Names subplot axes
-            fig.update_xaxes(visible=False, range=[0, 1], row=3, col=1)
-            fig.update_yaxes(visible=False, range=[min_y, max_y], row=3, col=1)
+            fig.update_xaxes(visible=False, range=[0, 1], fixedrange=True, row=3, col=1)
+            fig.update_yaxes(visible=False, range=[min_y, max_y], fixedrange=True, row=3, col=1)
 
         #######################
         # Layout Configuration
