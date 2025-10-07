@@ -738,24 +738,24 @@ rocprofsys_reset_preload_hidden(void)
 }
 
 //======================================================================================//
-bool
-is_fortran_main(const char* name)
-{
-    if(!name) return false;
-    std::string func_name{ name };
+// bool
+// is_fortran_main(const char* name)
+// {
+//     if(!name) return false;
+//     std::string func_name{ name };
 
-    // Common Fortran MAIN function regex patterns
-    static const std::vector<std::regex> patterns = {
-        std::regex(R"(^_?MAIN__\(?\))", std::regex::icase),  // _MAIN__, MAIN__, MAIN__()
-        std::regex(R"(^_?main_)", std::regex::icase)         // main_ and _main_
-    };
+//     // Common Fortran MAIN function regex patterns
+//     static const std::vector<std::regex> patterns = {
+//         std::regex(R"(^_?MAIN__\(?\))", std::regex::icase),  // _MAIN__, MAIN__, MAIN__()
+//         std::regex(R"(^_?main_)", std::regex::icase)         // main_ and _main_
+//     };
 
-    for(const auto& pat : patterns)
-    {
-        if(std::regex_search(func_name, pat)) return true;
-    }
-    return false;
-}
+//     for(const auto& pat : patterns)
+//     {
+//         if(std::regex_search(func_name, pat)) return true;
+//     }
+//     return false;
+// }
 
 extern "C" void
 rocprofsys_finalize_hidden(void)
@@ -909,8 +909,8 @@ rocprofsys_finalize_hidden(void)
                 ++_pop_count;
                 _lvl = 4;
             }
-            // For fortrain applications with additional MAIN subroutine
-            if(is_fortran_main(itr->back()->key().c_str())) ++_pop_count;
+            // // For fortrain applications with additional MAIN subroutine
+            // if(is_fortran_main(itr->back()->key().c_str())) ++_pop_count;
 
             ROCPROFSYS_VERBOSE_F(
                 _lvl,

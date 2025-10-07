@@ -259,6 +259,7 @@ program main
     call timestamp ( )
   end if
 
+  stop
 end
 subroutine get_norm ( nx, s, e, a, cartesian_comm, cartesian_master, anorm )
 
