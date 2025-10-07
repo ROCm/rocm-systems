@@ -2717,7 +2717,7 @@ class hipGraphExternalSemSignalNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphExternalSemSignalNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2770,7 +2770,7 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphExternalSemWaitNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2822,7 +2822,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;

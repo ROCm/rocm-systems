@@ -32,7 +32,7 @@ namespace {
 inline bool IsMemPoolValid(MemoryPool* mem_pool) {
   bool result = false;
   for (auto it : g_devices) {
-    if (result = it->IsMemoryPoolValid(mem_pool) == true) {
+    if ((result = it->IsMemoryPoolValid(mem_pool)) == true) {
       break;
     }
   }

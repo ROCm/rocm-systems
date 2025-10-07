@@ -62,7 +62,7 @@ THE SOFTWARE.
 #define HIP_INTERNAL_EXPORTED_API
 #endif
 
-#if __HIP_DEVICE_COMPILE__ == 0
+#if !defined(__HIP_DEVICE_COMPILE__) || ( __HIP_DEVICE_COMPILE__ == 0)
 // 32-bit Atomics
 #define __HIP_ARCH_HAS_GLOBAL_INT32_ATOMICS__ (0)
 #define __HIP_ARCH_HAS_GLOBAL_FLOAT_ATOMIC_EXCH__ (0)

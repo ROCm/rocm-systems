@@ -536,7 +536,7 @@ def generate_prof_header(f, api_map, callback_ids, opts_map):
     f.write('#define INIT_'+ name + '_CB_ARGS_DATA(cb_data) {};\n')
   f.write('\n#define INIT_NONE_CB_ARGS_DATA(cb_data) {};\n')
 
-  f.write('\n#if HIP_PROF_HIP_API_STRING\n')
+  f.write('\n#if defined(HIP_PROF_HIP_API_STRING) && HIP_PROF_HIP_API_STRING\n')
   # Generating the method for the API args filling
   f.write('// HIP API args filling helper\n')
   f.write('static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {\n')

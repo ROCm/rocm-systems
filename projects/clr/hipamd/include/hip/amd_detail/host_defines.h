@@ -232,7 +232,7 @@ typedef __hip_internal::int64_t __hip_int64_t;
 
 #define __forceinline__ inline __attribute__((always_inline))
 
-#if __HIP_NO_IMAGE_SUPPORT
+#if defined(__HIP_NO_IMAGE_SUPPORT) && __HIP_NO_IMAGE_SUPPORT
 #define __hip_img_chk__                                                                            \
   __attribute__((unavailable("The image/texture API not supported on the device")))
 #else
