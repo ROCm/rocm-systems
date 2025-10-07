@@ -24,9 +24,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-event_list=
-for nic in $nic_list
-do
-  event_list="$event_list net:::$nic:tx:byte net:::$nic:rx:byte net:::$nic:tx:packet net:::$nic:rx:packet"
-done
+events=() 
+
+for nic in $nic_list; do  
+  events+=("net:::${nic}:tx:byte" "net:::${nic}:rx:byte" "net:::${nic}:tx:packet" "net:::${nic}:rx:packet")  
+done  
+
+event_list="${events[*]}" 
 echo $event_list
