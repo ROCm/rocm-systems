@@ -92,15 +92,6 @@ auto clock_id_choices = []() {
 }();
 }  // namespace
 
-std::string
-get_realpath(const std::string& _v)
-{
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
-}
-
 void
 print_command(const std::vector<char*>& _argv)
 {
@@ -124,10 +115,10 @@ get_initial_environment()
         }
     }
 
-    auto _dl_libpath   = get_realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
-    auto _omni_libpath = get_realpath(path::get_internal_libpath("librocprof-sys.so"));
-    auto _libexecpath  = get_realpath(path::get_internal_script_path());
-    auto _rootpath     = get_realpath(path::get_rocprofsys_root());
+    auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
+    auto _libexecpath  = path::realpath(path::get_internal_script_path());
+    auto _rootpath     = path::realpath(path::get_rocprofsys_root());
 
     update_env(_env, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
     update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
@@ -299,10 +290,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         exit(_pec);
     };
 
-    auto* _dl_libpath =
-        realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str(), nullptr);
-    auto* _omni_libpath =
-        realpath(path::get_internal_libpath("librocprof-sys.so").c_str(), nullptr);
+    auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
     auto parser = parser_t(argv[0]);
 
@@ -846,9 +835,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     if(parser.exists("profile") && parser.exists("flat-profile"))
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
-
-    free(_dl_libpath);
-    free(_omni_libpath);
 
     return _outv;
 }

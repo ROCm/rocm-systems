@@ -81,12 +81,6 @@ get_clock_id_choices()
     return std::make_pair(_choices, _aliases);
 }
 
-auto
-get_realpath(const std::string& _path)
-{
-    return filepath::realpath(_path, nullptr, false);
-}
-
 enum update_mode : int
 {
     UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
@@ -218,14 +212,14 @@ init_parser(parser_data& _data)
     }
 
     _data.dl_libpath =
-        get_realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
+        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
     _data.omni_libpath =
-        get_realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
+        path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
-    auto _libexecpath = get_realpath(path::get_internal_script_path());
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
 
-    auto _rootpath = get_realpath(path::get_rocprofsys_root());
+    auto _rootpath = path::realpath(path::get_rocprofsys_root());
     update_env(_data, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
 
     return _data;

@@ -34,9 +34,6 @@ enum update_mode : int
     UPD_WEAK    = 1 << 2,  // 0x04
 };
 
-std::string
-get_realpath(const std::string& _fpath);
-
 void
 print_command(const std::vector<char*>& _argv);
 

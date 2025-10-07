@@ -93,18 +93,6 @@ enum update_mode : int
     UPD_WEAK    = 1 << 2,  // 0x04
 };
 
-std::string
-get_realpath(const std::string& _v)
-{
-    if(auto* _tmp = realpath(_v.c_str(), nullptr))
-    {
-        std::string _ret{ _tmp };
-        free(_tmp);
-        return _ret;
-    }
-    return {};
-}
-
 template <typename Tp>
 void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
@@ -189,7 +177,7 @@ get_initial_environment(parser_data_t& _data)
         }
     }
 
-    auto _libexecpath = get_realpath(path::get_internal_script_path());
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
         update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);

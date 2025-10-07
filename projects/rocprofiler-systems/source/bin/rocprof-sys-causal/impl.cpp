@@ -162,15 +162,6 @@ diagnose_status(pid_t _pid, int _status)
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
 }
 
-std::string
-get_realpath(const std::string& _v)
-{
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
-}
-
 void
 print_command(const std::vector<char*>& _argv, std::string_view _prefix)
 {
@@ -252,10 +243,11 @@ prepare_environment_for_run(std::vector<char*>& _env)
 {
     if(launcher.empty())
     {
-        update_env(_env, "LD_PRELOAD",
-                   join(":", LIBPTHREAD_SO,
-                        get_realpath(path::get_internal_libpath("librocprof-sys-dl.so"))),
-                   true);
+        update_env(
+            _env, "LD_PRELOAD",
+            join(":", LIBPTHREAD_SO,
+                 path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"))),
+            true);
         update_env(_env, "ROCPROFSYS_SCRIPT_DIR", path::get_internal_script_path());
         update_env(_env, "ROCPROFSYS_ROOT", path::get_rocprofsys_root());
     }

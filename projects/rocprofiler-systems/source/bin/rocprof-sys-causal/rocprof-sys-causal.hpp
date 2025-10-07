@@ -35,9 +35,6 @@
 int
 get_verbose();
 
-std::string
-get_realpath(const std::string&);
-
 void
 print_command(const std::vector<char*>& _argv, std::string_view);
 
