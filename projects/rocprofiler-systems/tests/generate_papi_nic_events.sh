@@ -9,7 +9,20 @@
 # For example, if the NIC is enp7s0, the PAPI events are:
 # net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:tx:packet net:::enp7s0:rx:packet
 
-nic_list=$(ip r | awk '/default/{print $5}')
+# Get the directory where this script is located
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -x "$script_dir/get_default_nic.sh" ]; then
+  echo "Error: helper script get_default_nic.sh not found or not executable in $script_dir" >&2
+  exit 1
+fi
+
+# Call the `get_default_nic.sh`` script to get the list of default NICs
+# and store it in the nic_list variable
+nic_list="$("$script_dir/get_default_nic.sh")"
+if [ $? -ne 0 ]; then
+  echo "Error: failed to get default NICs" >&2
+  exit 1
+fi
 
 event_list=
 for nic in $nic_list
