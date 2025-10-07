@@ -24,7 +24,7 @@
 ##############################################################################
 
 """
-YAML Differentiation Script
+Analaysis Config Differentiation Script
 Generates differences from curr arch directory to prev arch directory.
 Output shows what needs to change in prev arch to match curr arch.
 """
