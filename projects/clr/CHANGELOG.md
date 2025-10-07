@@ -32,6 +32,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
     - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
       hipMemAllocationType and allocates uncached memory if so
+    - `hipHostRegister` now supports hipHostRegisterIoMemory flag
 
 ### Optimized
 
