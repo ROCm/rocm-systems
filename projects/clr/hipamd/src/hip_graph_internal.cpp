@@ -259,22 +259,22 @@ bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
   }
 
   while (!q.empty()) {
-    const Node& node = q.front();
-    TopoOrder.push_back(node);
+    Node node = std::move(q.front());
     q.pop_front();
     for (const auto& edge : node->GetEdges()) {
       inDegree[edge]--;
       if (inDegree[edge] == 0) {
-        q.push_back(edge);
+        q.emplace_back(edge);
       }
     }
+    TopoOrder.push_back(std::move(node));
   }
 
-  if (GetNodeCount() != TopoOrder.size()) {
-    TopoOrder.clear();
-    return false;
+  if (GetNodeCount() == TopoOrder.size()) {
+    return true;
   }
-  return true;
+  TopoOrder.clear();
+  return false;
 }
 
 // ================================================================================================
@@ -297,8 +297,6 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
   // Clone edges and dependencies
   std::vector<Node> clonedEdges;
   std::vector<Node> clonedDependencies;
-  clonedEdges.reserve(32);        // pre-allocated starting capacity
-  clonedDependencies.reserve(32);
 
   for (const auto& node : vertices_) {
     const std::vector<Node>& edges = node->GetEdges();
