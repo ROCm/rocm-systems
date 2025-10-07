@@ -192,6 +192,12 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
+  LogPrint(HSA_AMD_LOG_FLAG_SDMA, 
+         "Created SDMA queue id=%u, queue address=0x%lx, sdma engine id=%d",
+         queue_resource_.HWQueueId,
+         static_cast<unsigned long>(queue_resource_.RingBaseAddress),
+         static_cast<int32_t>(queue_resource_.SdmaEngineId));
+
   cached_reserve_index_ = *reinterpret_cast<uint64_t*>(queue_resource_.Queue_write_ptr);
   cached_commit_index_ = cached_reserve_index_;
 

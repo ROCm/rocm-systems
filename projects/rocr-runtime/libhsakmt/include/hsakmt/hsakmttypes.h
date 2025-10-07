@@ -785,6 +785,11 @@ typedef struct _HsaQueueResource
     };
 
     volatile HSAint64* ErrorReason;  /** exception bits signal payload */
+
+    HSAuint64   RingBaseAddress;    /** Base address of the queue (ring buffer) */
+    HSAuint32   SdmaEngineId;       /** SDMA engine ID */
+    HSAuint32   HWQueueId;          /** Hardware queue ID */
+    
 } HsaQueueResource;
 
 

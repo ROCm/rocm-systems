@@ -747,6 +747,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 	QueueResource->Queue_DoorBell = VOID_PTR_ADD(doorbells[NodeId].mapping,
 						     doorbell_offset);
 
+	QueueResource->RingBaseAddress = args.ring_base_address;
+	QueueResource->SdmaEngineId = args.sdma_engine_id; 
+	QueueResource->HWQueueId = args.queue_id;
+
 	return HSAKMT_STATUS_SUCCESS;
 }
 
