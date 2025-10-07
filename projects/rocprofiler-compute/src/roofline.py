@@ -246,8 +246,17 @@ class Roofline:
         ceiling_data: dict[str, Any],
     ) -> str:
         """
-        Calculates if a kernel point is memory-bound or compute-bound
-        based on its own cache level's roofline
+        Determine if a kernel point is memory-bound or compute-bound
+        based on its own cache level's roofline.
+
+        Args:
+            ai_value: Arithmetic intensity of the kernel
+            performance: Performance (GFLOP/s) of the kernel
+            cache_level: Cache level (ai_l1, ai_l2, ai_hbm, ai_lds)
+            ceiling_data: Ceiling data for the current datatype
+
+        Returns:
+            String -> "L1 Memory Bound", "L2 Compute Bound", etc.
         """
         cache_key = cache_level.replace("ai_", "")
         cache_name = cache_key.upper()
@@ -491,7 +500,7 @@ class Roofline:
                                 )
 
                                 plot_points_data.append({
-                                    "symbol": None,  # Will be filled in later
+                                    "symbol": None,
                                     "color": cache_colors.get(cache_level, "gray"),
                                     "cache_level": cache_level,
                                     "ai": f"{x_vals[i]:.2e}",
@@ -571,51 +580,91 @@ class Roofline:
         #######################
         # Plot Application AI
         #######################
-        cache_colors = {
-            "ai_l1": "blue",
-            "ai_l2": "green",
-            "ai_hbm": "red",
-            "ai_lds": "orange",
-        }
-
         if ops_flops == "FLOP" and not skipAI:
-            # Plot without showing in legend (showlegend=False)
-            fig.add_trace(
-                go.Scatter(
-                    x=self.__ai_data["ai_l1"][0],
-                    y=self.__ai_data["ai_l1"][1],
-                    name="ai_l1",
-                    mode="markers",
-                    marker_symbol=SYMBOLS,
-                    marker=dict(color="blue", size=10),
-                    showlegend=False,
-                ),
-                **subplot_kwargs,
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=self.__ai_data["ai_l2"][0],
-                    y=self.__ai_data["ai_l2"][1],
-                    name="ai_l2",
-                    mode="markers",
-                    marker_symbol=SYMBOLS,
-                    marker=dict(color="green", size=10),
-                    showlegend=False,
-                ),
-                **subplot_kwargs,
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=self.__ai_data["ai_hbm"][0],
-                    y=self.__ai_data["ai_hbm"][1],
-                    name="ai_hbm",
-                    mode="markers",
-                    marker_symbol=SYMBOLS,
-                    marker=dict(color="red", size=10),
-                    showlegend=False,
-                ),
-                **subplot_kwargs,
-            )
+            kernel_names = self.__ai_data.get("kernelNames", [])
+            
+            symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
+            
+            if self.__ai_data["ai_l1"][0]:
+                fig.add_trace(
+                    go.Scatter(
+                        x=self.__ai_data["ai_l1"][0],
+                        y=self.__ai_data["ai_l1"][1],
+                        name="L1 Cache",
+                        mode="markers",
+                        marker=dict(
+                            color="blue", 
+                            size=10, 
+                            symbol=symbols_list[:len(self.__ai_data["ai_l1"][0])]
+                        ),
+                        legendgroup="l1",
+                        showlegend=True,
+                        customdata=[
+                            [i, kernel_names[i]] 
+                            for i in range(len(self.__ai_data["ai_l1"][0]))
+                        ],
+                        hovertemplate=(
+                            "<b>%{customdata[1]}</b><br>"
+                            "L1 AI: %{x:.2e}<br>"
+                            "Performance: %{y:.2e} " + f"G{ops_flops}/s<extra></extra>"
+                        ),
+                    ),
+                    **subplot_kwargs,
+                )
+            
+            if self.__ai_data["ai_l2"][0]:
+                fig.add_trace(
+                    go.Scatter(
+                        x=self.__ai_data["ai_l2"][0],
+                        y=self.__ai_data["ai_l2"][1],
+                        name="L2 Cache",
+                        mode="markers",
+                        marker=dict(
+                            color="green", 
+                            size=10, 
+                            symbol=symbols_list[:len(self.__ai_data["ai_l2"][0])]
+                        ),
+                        legendgroup="l2",
+                        showlegend=True,
+                        customdata=[
+                            [i, kernel_names[i]] 
+                            for i in range(len(self.__ai_data["ai_l2"][0]))
+                        ],
+                        hovertemplate=(
+                            "<b>%{customdata[1]}</b><br>"
+                            "L2 AI: %{x:.2e}<br>"
+                            "Performance: %{y:.2e} " + f"G{ops_flops}/s<extra></extra>"
+                        ),
+                    ),
+                    **subplot_kwargs,
+                )
+            
+            if self.__ai_data["ai_hbm"][0]:
+                fig.add_trace(
+                    go.Scatter(
+                        x=self.__ai_data["ai_hbm"][0],
+                        y=self.__ai_data["ai_hbm"][1],
+                        name="HBM",
+                        mode="markers",
+                        marker=dict(
+                            color="red", 
+                            size=10, 
+                            symbol=symbols_list[:len(self.__ai_data["ai_hbm"][0])]
+                        ),
+                        legendgroup="hbm",
+                        showlegend=True,
+                        customdata=[
+                            [i, kernel_names[i]] 
+                            for i in range(len(self.__ai_data["ai_hbm"][0]))
+                        ],
+                        hovertemplate=(
+                            "<b>%{customdata[1]}</b><br>"
+                            "HBM AI: %{x:.2e}<br>"
+                            "Performance: %{y:.2e} " + f"G{ops_flops}/s<extra></extra>"
+                        ),
+                    ),
+                    **subplot_kwargs,
+                )
 
         #######################
         # Bandwidth Ceilings
