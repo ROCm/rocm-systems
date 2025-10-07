@@ -241,19 +241,20 @@ class AMDSMICommands():
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
-        # Only fetch data if group check passed; otherwise force "N/A"
-        if  _group_in_groups:
-            try:
-                bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                bdf = "N/A"
+        # Always try to get BDF regardless of group check
+        try:
+            bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            bdf = "N/A"
+        
+        # Only fetch UUID if group check passed; otherwise force "N/A"
+        if _group_in_groups:
             try:
                 uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
             except amdsmi_exception.AmdSmiLibraryException:
                 uuid = "N/A"
         else:
-            # user not in render/video → everything is N/A
-            bdf = "N/A"
+            # user not in render/video → UUID is N/A
             uuid = "N/A"
 
         try:
