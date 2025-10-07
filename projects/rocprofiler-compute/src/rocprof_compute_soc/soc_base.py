@@ -53,6 +53,7 @@ from utils.utils import (
     detect_rocprof,
     get_submodules,
     is_tcc_channel_counter,
+    load_yaml,
     mibench,
     parse_sets_yaml,
 )
@@ -316,7 +317,16 @@ class OmniSoC_Base:
                 with open(filename) as stream:
                     texts.append(stream.read())
 
+        panel_yaml = load_yaml("utils/metric_generator/analysis_config_template.yaml")
+        panel_info = {
+            panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml
+        }
+
         for block_id in filter_blocks:
+            # Convert block alias to metric id
+            if isinstance(block_id, str):
+                block_id = panel_info.get(block_id, "")
+
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
             # File id filtering

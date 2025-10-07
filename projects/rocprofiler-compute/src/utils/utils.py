@@ -1628,3 +1628,9 @@ def format_scientific_notation_if_needed(
         formatted = normal_str
 
     return formatted
+
+
+def load_yaml(filepath: str) -> dict:
+    """Load YAML file and return as dictionary."""
+    with open(filepath) as f:
+        return yaml.safe_load(f)

@@ -54,6 +54,7 @@ from utils.utils import (
     get_version_display,
     parse_sets_yaml,
     set_locale_encoding,
+    load_yaml,
 )
 
 
@@ -142,6 +143,8 @@ class RocProfCompute:
 
         if self.__args.list_metrics is not None and block:
             console_error("Cannot use --list-metrics with --blocks")
+        if self.__args.list_blocks is not None and block:
+            console_error("Cannot use --list-blocks with --blocks")
         if (
             hasattr(self.__args, "list_available_metrics")
             and self.__args.list_available_metrics
@@ -193,6 +196,9 @@ class RocProfCompute:
                 sys.exit(0)
             elif self.__args.list_metrics is not None:
                 self.list_metrics()
+                sys.exit(0)
+            elif self.__args.list_blocks is not None:
+                self.list_blocks()
                 sys.exit(0)
             elif self.__args.config_dir:
                 parser.print_help(sys.stderr)
@@ -246,6 +252,41 @@ class RocProfCompute:
             for key, value in ac.metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
+            sys.exit(0)
+        else:
+            console_error("Unsupported arch")
+
+    @demarcate
+    def list_blocks(self) -> None:
+        for_current_arch = getattr(self.__args, "list_available_metrics", False)
+
+        arch = (
+            self.__mspec.gpu_arch
+            if (for_current_arch or self.__args.list_blocks is None)
+            else self.__args.list_blocks
+        )
+        if arch in self.__supported_archs.keys():
+            ac = schema.ArchConfig()
+            ac.panel_configs = file_io.load_panel_configs([
+                str(Path(self.__args.config_dir) / arch)
+            ])
+            sys_info = (
+                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
+            )
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+
+            panel_yaml = load_yaml(
+                "utils/metric_generator/analysis_config_template.yaml"
+            )
+            panel_info = {
+                panel["panel_title"]: panel["panel_alias"] for panel in panel_yaml
+            }
+
+            print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            for key, value in ac.metric_list.items():
+                if key.count(".") > 0:
+                    continue
+                print(f"{key:<8} {panel_info[value]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")

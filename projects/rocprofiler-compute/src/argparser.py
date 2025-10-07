@@ -69,6 +69,13 @@ def add_general_group(
         help=print_avail_arch(list(supported_archs.keys())),
     )
     general_group.add_argument(
+        "--list-blocks",
+        dest="list_blocks",
+        metavar="",
+        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        help=print_avail_arch(list(supported_archs.keys())),
+    )
+    general_group.add_argument(
         "--config-dir",
         dest="config_dir",
         metavar="",
@@ -234,12 +241,6 @@ Examples:
         help="\t\t\tDispatch ID filtering.",
     )
 
-    def validate_block(value: str) -> str:
-        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
-        if re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$").match(value):
-            return value
-        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
-
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
@@ -249,7 +250,6 @@ Examples:
     profile_group.add_argument(
         "-b",
         "--block",
-        type=validate_block,
         dest="filter_blocks",
         metavar="",
         nargs="+",
