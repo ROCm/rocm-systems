@@ -55,13 +55,15 @@ HASH_FILE_MAP = {}
 GFX_VERSIONS = ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]
 METRIC_ID_TO_NAME_MAP = {gfx_version: {} for gfx_version in GFX_VERSIONS}
 
+
 def str_representer(dumper, data):
-    if '\n' in data:
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
 yaml.add_representer(str, str_representer)
+
 
 def get_autogen_text(config_file="utils/unified_config.yaml"):
     return (
@@ -83,10 +85,7 @@ def update_analysis_config():
         new_panel_config = {"Panel Config": {}}
         new_panel_config["Panel Config"]["id"] = panel_config["id"]
         new_panel_config["Panel Config"]["title"] = panel_config["title"]
-        new_panel_config["Panel Config"]["metrics_description"] = {
-            key: value["plain"].strip()
-            for key, value in panel_config.get("metrics_description", {}).items()
-        }
+
         panel_id_int = panel_config["id"]
         # Convert int into str with 4 digits
         panel_id = str(panel_config["id"]).zfill(4)
@@ -105,6 +104,9 @@ def update_analysis_config():
                 gfx_dir.mkdir()
                 print(f"Created directory: {gfx_dir}")
 
+            # Collect metrics for this gfx_version
+            gfx_metrics = []
+
             # Select metrics from current gfx arch
             new_panel_config["Panel Config"]["data source"] = []
             for data_source_index, data_source_config in enumerate(
@@ -115,6 +117,14 @@ def update_analysis_config():
                     data_source_config["metric_table"]["metric"] = data_source_config[
                         "metric_table"
                     ]["metric"][gfx_version]
+
+                    # Collect metric names for this gfx version (preserve order)
+                    for metric_name in data_source_config["metric_table"][
+                        "metric"
+                    ].keys():
+                        if metric_name not in gfx_metrics:
+                            gfx_metrics.append(metric_name)
+
                     build_metric_id_mapping(
                         panel_id_int,
                         data_source_index,
@@ -124,6 +134,14 @@ def update_analysis_config():
                 new_panel_config["Panel Config"]["data source"].append(
                     data_source_config
                 )
+
+            # Only include metric descriptions for metrics that exist in this gfx
+            new_panel_config["Panel Config"]["metrics_description"] = {
+                key: value["plain"].strip()
+                for key, value in panel_config.get("metrics_description", {}).items()
+                if key in gfx_metrics
+            }
+
             # Write panel config to file
             filename = TARGET_DIR / gfx_version / f"{panel_id}_{panel_title}.yaml"
             with open(filename, "w") as file:
@@ -247,8 +265,9 @@ def update_documentation():
                 # Add metrics info
                 for metric_name in sorted(list(metric_names)):
                     metrics_info[metric_name] = {
-                        "rst": panel_config["metrics_description"][metric_name]["rst"]
-                        .strip(),
+                        "rst": panel_config["metrics_description"][metric_name][
+                            "rst"
+                        ].strip(),
                         "unit": panel_config["metrics_description"][metric_name][
                             "unit"
                         ],
