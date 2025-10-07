@@ -18,10 +18,10 @@ THE SOFTWARE.
 */
 
 #include <iostream>
+#include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 #include <vector>
 #include <string>
-#include <hip_test_common.hh>
 
 
 /**
