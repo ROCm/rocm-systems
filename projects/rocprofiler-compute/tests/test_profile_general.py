@@ -946,7 +946,6 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         return
 
     # Test `--kernel` filtering outputs are present and labelled correctly
-    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
 
     plot_configurations = [

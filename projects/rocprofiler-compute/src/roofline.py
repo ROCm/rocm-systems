@@ -248,15 +248,6 @@ class Roofline:
         """
         Determine if a kernel point is memory-bound or compute-bound
         based on its own cache level's roofline.
-
-        Args:
-            ai_value: Arithmetic intensity of the kernel
-            performance: Performance (GFLOP/s) of the kernel
-            cache_level: Cache level (ai_l1, ai_l2, ai_hbm, ai_lds)
-            ceiling_data: Ceiling data for the current datatype
-
-        Returns:
-            String -> "L1 Memory Bound", "L2 Compute Bound", etc.
         """
         cache_key = cache_level.replace("ai_", "")
         cache_name = cache_key.upper()
@@ -582,7 +573,6 @@ class Roofline:
         #######################
         if ops_flops == "FLOP" and not skipAI:
             kernel_names = self.__ai_data.get("kernelNames", [])
-
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
 
             if self.__ai_data["ai_l1"][0]:
@@ -590,23 +580,12 @@ class Roofline:
                     go.Scatter(
                         x=self.__ai_data["ai_l1"][0],
                         y=self.__ai_data["ai_l1"][1],
-                        name="L1 Cache",
+                        name="ai_l1",
                         mode="markers",
                         marker=dict(
                             color="blue",
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data["ai_l1"][0])],
-                        ),
-                        legendgroup="l1",
-                        showlegend=True,
-                        customdata=[
-                            [i, kernel_names[i]]
-                            for i in range(len(self.__ai_data["ai_l1"][0]))
-                        ],
-                        hovertemplate=(
-                            "<b>%{customdata[1]}</b><br>"
-                            "L1 AI: %{x:.2e}<br>"
-                            "Performance: %{y:.2e} " + f"G{ops_flops}/s<extra></extra>"
                         ),
                     ),
                     **subplot_kwargs,
@@ -617,23 +596,12 @@ class Roofline:
                     go.Scatter(
                         x=self.__ai_data["ai_l2"][0],
                         y=self.__ai_data["ai_l2"][1],
-                        name="L2 Cache",
+                        name="ai_l2",
                         mode="markers",
                         marker=dict(
                             color="green",
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data["ai_l2"][0])],
-                        ),
-                        legendgroup="l2",
-                        showlegend=True,
-                        customdata=[
-                            [i, kernel_names[i]]
-                            for i in range(len(self.__ai_data["ai_l2"][0]))
-                        ],
-                        hovertemplate=(
-                            "<b>%{customdata[1]}</b><br>"
-                            "L2 AI: %{x:.2e}<br>"
-                            "Performance: %{y:.2e} " + f"G{ops_flops}/s<extra></extra>"
                         ),
                     ),
                     **subplot_kwargs,
@@ -644,23 +612,12 @@ class Roofline:
                     go.Scatter(
                         x=self.__ai_data["ai_hbm"][0],
                         y=self.__ai_data["ai_hbm"][1],
-                        name="HBM",
+                        name="ai_hbm",
                         mode="markers",
                         marker=dict(
                             color="red",
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data["ai_hbm"][0])],
-                        ),
-                        legendgroup="hbm",
-                        showlegend=True,
-                        customdata=[
-                            [i, kernel_names[i]]
-                            for i in range(len(self.__ai_data["ai_hbm"][0]))
-                        ],
-                        hovertemplate=(
-                            "<b>%{customdata[1]}</b><br>"
-                            "HBM AI: %{x:.2e}<br>"
-                            "Performance: %{y:.2e} " + f"G{ops_flops}/s<extra></extra>"
                         ),
                     ),
                     **subplot_kwargs,
@@ -733,27 +690,26 @@ class Roofline:
 
                 all_dts = sorted(list(set(existing_dts + [dtype])))
                 all_dts_str = ", ".join(all_dts)
+                legend_name = f"{level.upper()}-{all_dts_str}<br>{value} GB/s"
 
                 fig.update_traces(
                     patch={
-                        "name": f"{level.upper()}-{all_dts_str}<br>{value} GB/s",
-                        "hovertemplate": (
-                            f"<b>{level.upper()}: {value} GB/s</b><extra></extra>"
-                        ),
+                        "name": legend_name,
+                        "hovertemplate": f"<b>{legend_name}</b><extra></extra>",
                     },
                     selector={"name": trace_to_update.name},
                 )
             else:
                 # Add new bandwidth line with value in legend
+                legend_name = f"{level.upper()}-{dtype}<br>{value} GB/s"
+
                 fig.add_trace(
                     go.Scatter(
                         x=bw_line["x"],
                         y=bw_line["y"],
-                        name=f"{level.upper()}-{dtype}<br>{value} GB/s",
+                        name=legend_name,
                         mode="lines",
-                        hovertemplate=(
-                            f"<b>{level.upper()}: {value} GB/s</b><extra></extra>"
-                        ),
+                        hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                     ),
                     **subplot_kwargs,
                 )
@@ -767,31 +723,27 @@ class Roofline:
         mfma_data = self.__ceiling_data.get("mfma") if dtype in MFMA_DATATYPES else None
 
         if valu_data:
+            legend_name = f"Peak VALU-{dtype}<br>{to_int(valu_data[2])} G{ops_flops}/s"
             fig.add_trace(
                 go.Scatter(
                     x=valu_data[0],
                     y=valu_data[1],
-                    name=f"Peak VALU-{dtype}<br>{to_int(valu_data[2])} G{ops_flops}/s",
+                    name=legend_name,
                     mode="lines",
-                    hovertemplate=(
-                        f"<b>VALU-{dtype}: {to_int(valu_data[2])} G{ops_flops}/s"
-                        "</b><extra></extra>"
-                    ),
+                    hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                 ),
                 **subplot_kwargs,
             )
 
         if mfma_data:
+            legend_name = f"Peak MFMA-{dtype}<br>{to_int(mfma_data[2])} G{ops_flops}/s"
             fig.add_trace(
                 go.Scatter(
                     x=mfma_data[0],
                     y=mfma_data[1],
-                    name=f"Peak MFMA-{dtype}<br>{to_int(mfma_data[2])} G{ops_flops}/s",
+                    name=legend_name,
                     mode="lines",
-                    hovertemplate=(
-                        f"<b>MFMA-{dtype}: {to_int(mfma_data[2])} G{ops_flops}/s"
-                        "</b><extra></extra>"
-                    ),
+                    hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                 ),
                 **subplot_kwargs,
             )
