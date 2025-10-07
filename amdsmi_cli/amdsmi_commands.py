@@ -99,6 +99,19 @@ class AMDSMICommands():
                 logging.error('Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)')
                 exit_flag = True
 
+        self.convert_clock_type = {
+            "sys": amdsmi_interface.AmdSmiClkType.SYS,
+            "mem": amdsmi_interface.AmdSmiClkType.MEM,
+            "df": amdsmi_interface.AmdSmiClkType.DF,
+            "soc": amdsmi_interface.AmdSmiClkType.SOC,
+            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
+            # vclk and dclk currently do not support levels so average clk is given for frequency levels
+            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
+            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
+            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
+            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1
+        }
+
         if exit_flag:
             version_args = argparse.Namespace()
             version_args.gpu_version = False
@@ -1041,28 +1054,9 @@ class AMDSMICommands():
                 for clk in list(clk_dict.keys()):
                     if clk not in args.clock:
                         del clk_dict[clk]
-
                 for clk in args.clock:
-                    clk_type = clk.lower()
-                    if clk_type == "sys":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.SYS
-                    elif clk_type == "mem":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.MEM
-                    elif clk_type == "df":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.DF
-                    elif clk_type == "soc":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.SOC
-                    elif clk_type == "dcef":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.DCEF
-                    # vclk and dclk currently do not support levels so average clk is given for frequency levels
-                    elif clk_type == "vclk0":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.VCLK0
-                    elif clk_type == "vclk1":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.VCLK1
-                    elif clk_type == "dclk0":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.DCLK0
-                    elif clk_type == "dclk1":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.DCLK1
+                    if clk in self.convert_clock_type:
+                        clk_type_conversion = self.convert_clock_type[clk]
                     else:
                         clk_type_conversion = "N/A"
                         output_format = self.helpers.get_output_format()
@@ -2471,10 +2465,10 @@ class AMDSMICommands():
                 # Populate voltage point values
                 for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
                     if isinstance(od_volt, dict):
-                        logging.debug(f"point_{point} frequency: {od_volt['curve.vc_points'][point].frequency}")
-                        logging.debug(f"point_{point} voltage:   {od_volt['curve.vc_points'][point].voltage}")
-                        frequency = int(od_volt["curve.vc_points"][point].frequency / 1000000)
-                        voltage = int(od_volt["curve.vc_points"][point].voltage)
+                        logging.debug(f"point_{point} frequency: {od_volt['curve.vc_points'][point]['frequency']}")
+                        logging.debug(f"point_{point} voltage:   {od_volt['curve.vc_points'][point]['voltage']}")
+                        frequency = int(od_volt["curve.vc_points"][point]['frequency'] / 1000000)
+                        voltage = int(od_volt["curve.vc_points"][point]['voltage'])
                     else:
                         frequency = "N/A"
                         voltage = "N/A"
@@ -4875,6 +4869,11 @@ class AMDSMICommands():
                         return
                 else:
                     # For non-pcie clocks
+                    if clk_type in self.convert_clock_type:
+                        clk_type_conversion = self.convert_clock_type[clk_type]
+                    else:
+                        clk_type_conversion = "N/A"
+
                     try:
                         amdsmi_interface.amdsmi_set_clk_freq(args.gpu, clk_type, freq_bitmask)
                         results_clk_lvl['set_clock'] = f"Successfully set {clk_type} perf level(s) to {perf_levels_str}"
@@ -4959,6 +4958,7 @@ class AMDSMICommands():
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
 
                 if lim_type == "min":
+                    amdsmi_lim_type =  amdsmi_interface.AmdSmiClkLimitType.MIN
                     if val > clk_tuple['max_clk']:
                         self.logger.store_output(args.gpu, 'clk_limit', f"Cannot set {args.clk_limit.clk_type} min value greater than max ({clk_tuple['max_clk']}MHz)")
                         self.logger.print_output()
@@ -4967,8 +4967,8 @@ class AMDSMICommands():
 
                     if val == clk_tuple['min_clk']:
                         val_changed = False # Clock limit value did not changed
-
-                if lim_type == "max":
+                elif lim_type == "max":
+                    amdsmi_lim_type =  amdsmi_interface.AmdSmiClkLimitType.MAX
                     if val < clk_tuple['min_clk']:
                         self.logger.store_output(args.gpu, 'clk_limit', f"Cannot set {args.clk_limit.clk_type} max value less than min ({clk_tuple['min_clk']}MHz)")
                         self.logger.print_output()

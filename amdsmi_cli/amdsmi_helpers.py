@@ -857,7 +857,7 @@ class AMDSMIHelpers():
                 xgmi_plpd_info = amdsmi_interface.amdsmi_get_xgmi_plpd(dev)
             except amdsmi_interface.AmdSmiLibraryException as e:
                 continue
-            for policy in xgmi_plpd_info['plpds']:
+            for policy in xgmi_plpd_info['policies']:
                 policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
                 if not policy_string in xgmi_plpd_profile_list:
                     xgmi_plpd_profile_list.append(policy_string)

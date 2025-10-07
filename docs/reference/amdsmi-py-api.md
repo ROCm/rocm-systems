@@ -3325,7 +3325,7 @@ Field | Description
 ---|---
 `num_supported` | The number of supported policies
 `current_id` | The current policy index
-`plpds` | List of policies.
+`policies` | List of policies. (`plpds` marked for deprecation in next major release)
 
 Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 
