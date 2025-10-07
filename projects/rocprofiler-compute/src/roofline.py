@@ -582,9 +582,9 @@ class Roofline:
         #######################
         if ops_flops == "FLOP" and not skipAI:
             kernel_names = self.__ai_data.get("kernelNames", [])
-            
+
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
-            
+
             if self.__ai_data["ai_l1"][0]:
                 fig.add_trace(
                     go.Scatter(
@@ -593,14 +593,14 @@ class Roofline:
                         name="L1 Cache",
                         mode="markers",
                         marker=dict(
-                            color="blue", 
-                            size=10, 
-                            symbol=symbols_list[:len(self.__ai_data["ai_l1"][0])]
+                            color="blue",
+                            size=10,
+                            symbol=symbols_list[: len(self.__ai_data["ai_l1"][0])],
                         ),
                         legendgroup="l1",
                         showlegend=True,
                         customdata=[
-                            [i, kernel_names[i]] 
+                            [i, kernel_names[i]]
                             for i in range(len(self.__ai_data["ai_l1"][0]))
                         ],
                         hovertemplate=(
@@ -611,7 +611,7 @@ class Roofline:
                     ),
                     **subplot_kwargs,
                 )
-            
+
             if self.__ai_data["ai_l2"][0]:
                 fig.add_trace(
                     go.Scatter(
@@ -620,14 +620,14 @@ class Roofline:
                         name="L2 Cache",
                         mode="markers",
                         marker=dict(
-                            color="green", 
-                            size=10, 
-                            symbol=symbols_list[:len(self.__ai_data["ai_l2"][0])]
+                            color="green",
+                            size=10,
+                            symbol=symbols_list[: len(self.__ai_data["ai_l2"][0])],
                         ),
                         legendgroup="l2",
                         showlegend=True,
                         customdata=[
-                            [i, kernel_names[i]] 
+                            [i, kernel_names[i]]
                             for i in range(len(self.__ai_data["ai_l2"][0]))
                         ],
                         hovertemplate=(
@@ -638,7 +638,7 @@ class Roofline:
                     ),
                     **subplot_kwargs,
                 )
-            
+
             if self.__ai_data["ai_hbm"][0]:
                 fig.add_trace(
                     go.Scatter(
@@ -647,14 +647,14 @@ class Roofline:
                         name="HBM",
                         mode="markers",
                         marker=dict(
-                            color="red", 
-                            size=10, 
-                            symbol=symbols_list[:len(self.__ai_data["ai_hbm"][0])]
+                            color="red",
+                            size=10,
+                            symbol=symbols_list[: len(self.__ai_data["ai_hbm"][0])],
                         ),
                         legendgroup="hbm",
                         showlegend=True,
                         customdata=[
-                            [i, kernel_names[i]] 
+                            [i, kernel_names[i]]
                             for i in range(len(self.__ai_data["ai_hbm"][0]))
                         ],
                         hovertemplate=(
@@ -817,12 +817,11 @@ class Roofline:
                     row=2,
                     col=1,
                 )
-                
+
                 fig.update_xaxes(visible=False, range=[0, 1], row=2, col=1)
                 fig.update_yaxes(visible=False, range=[0, 2], row=2, col=1)
 
             else:
-                
                 header_y = len(plot_points_data) + 1
                 header_positions = {
                     "Symbol": 0.020,
@@ -873,13 +872,13 @@ class Roofline:
                             for point in plot_points_data
                         ],
                         showlegend=False,
-                        hoverinfo='skip',
+                        hoverinfo="skip",
                     ),
                     row=2,
                     col=1,
                 )
-
-                data_positions = [0.15, 0.30, 0.50, 0.80]  # cache_level, ai, perf, status
+                # cache_level, ai, perf, status
+                data_positions = [0.15, 0.30, 0.50, 0.80]
 
                 for idx, point in enumerate(plot_points_data):
                     y_pos = len(plot_points_data) - idx
@@ -978,7 +977,9 @@ class Roofline:
                     )
 
                 # Configure Plot Points subplot axes
-                fig.update_xaxes(visible=False, range=[0, 1], fixedrange=True, row=2, col=1)
+                fig.update_xaxes(
+                    visible=False, range=[0, 1], fixedrange=True, row=2, col=1
+                )
                 fig.update_yaxes(
                     visible=False,
                     range=[0, (len(plot_points_data) + 1.5)],
@@ -1091,7 +1092,9 @@ class Roofline:
 
             # Configure Kernel Names subplot axes
             fig.update_xaxes(visible=False, range=[0, 1], fixedrange=True, row=3, col=1)
-            fig.update_yaxes(visible=False, range=[min_y, max_y], fixedrange=True, row=3, col=1)
+            fig.update_yaxes(
+                visible=False, range=[min_y, max_y], fixedrange=True, row=3, col=1
+            )
 
         #######################
         # Layout Configuration
