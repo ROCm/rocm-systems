@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_deprecated.h>
+#include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
 #include "hip_mempool_impl.hpp"
@@ -199,8 +200,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
           ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
           // and it's not the current stream
           (active_stream != blocking_stream)) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p",
-                active_stream);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         // Get the last valid command
         waitForStream(active_stream);
       }
@@ -771,6 +771,7 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
 
   std::string symbolString = symbol;
+
   if (symbol == nullptr || symbolString == "" || pfn == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -783,6 +784,18 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
     if (hipVersion >= 600) {
       symbolString = "hipChooseDeviceR0600";
     }
+  } else if (symbolString == "hipAmdFileRead") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileRead);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    HIP_RETURN(hipSuccess);
+  } else if (symbolString == "hipAmdFileWrite") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileWrite);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    HIP_RETURN(hipSuccess);
   }
 
   void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
