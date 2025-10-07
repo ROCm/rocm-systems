@@ -23,6 +23,7 @@
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
@@ -159,6 +160,7 @@ namespace
 namespace process  = tim::process;  // NOLINT
 namespace signals  = tim::signals;
 namespace filepath = tim::filepath;
+namespace path     = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
@@ -192,26 +194,17 @@ strset_t                                   print_formats        = { "txt", "json
 std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-std::string
-get_internal_libpath()
-{
-    auto _exe = std::string_view{ ::realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib");
-}
-
 strvec_t lib_search_paths = tim::delimit(
-    JOIN(':', get_internal_libpath(), tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+    JOIN(':', path::get_internal_libdir(), tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
          tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
          tim::get_env<std::string>("LD_LIBRARY_PATH")),
     ":");
 strvec_t bin_search_paths = tim::delimit(tim::get_env<std::string>("PATH"), ":");
 
-auto _dyn_api_rt_paths = tim::delimit(
-    JOIN(":", get_internal_libpath(), JOIN("/", get_internal_libpath(), "rocprofsys")),
-    ":");
+auto _dyn_api_rt_paths =
+    tim::delimit(JOIN(":", path::get_internal_libdir(),
+                      JOIN("/", path::get_internal_libdir(), "rocprofsys")),
+                 ":");
 
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _paths);

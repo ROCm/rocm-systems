@@ -133,6 +133,9 @@ get_internal_libpath(const std::string& _lib) ROCPROFSYS_INTERNAL_API;
 inline std::string
 get_internal_script_path() ROCPROFSYS_INTERNAL_API;
 
+inline std::string
+get_internal_libdir() ROCPROFSYS_INTERNAL_API;
+
 struct ROCPROFSYS_INTERNAL_API path_type
 {
     enum path_type_e
@@ -448,6 +451,13 @@ get_internal_script_path()
     auto _root = get_rocprofsys_root();
     return rocprofsys::common::join('/', _root, "libexec", "rocprofiler-systems");
 }
+
+std::string
+get_internal_libdir()
+{
+    return rocprofsys::common::join("/", get_rocprofsys_root(), "lib");
+}
+
 }  // namespace path
 }  // namespace common
 }  // namespace rocprofsys
