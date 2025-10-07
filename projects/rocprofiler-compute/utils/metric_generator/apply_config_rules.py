@@ -31,6 +31,7 @@ Usage: python apply_delta.py <base_arch_dir> <delta_yaml> <output_dir>
 import shutil
 import sys
 from pathlib import Path
+
 import yaml
 
 
@@ -41,8 +42,14 @@ def load_yaml(filepath):
 
 def save_yaml(data, filepath):
     with open(filepath, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False,
-                  allow_unicode=True, width=float("inf"))
+        yaml.dump(
+            data,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            width=float("inf"),
+        )
 
 
 def find_table_in_config(config, table_id):
@@ -156,7 +163,11 @@ def apply_delta(base_dir, delta_file, output_dir):
         for change in delta.get(category, []):
             panel_id = change.get("Panel Config", {}).get("id")
             if panel_id not in changes_by_panel:
-                changes_by_panel[panel_id] = {"Addition": [], "Deletion": [], "Modification": []}
+                changes_by_panel[panel_id] = {
+                    "Addition": [],
+                    "Deletion": [],
+                    "Modification": [],
+                }
             changes_by_panel[panel_id][category].append(change)
 
     # Process each YAML file
@@ -169,7 +180,9 @@ def apply_delta(base_dir, delta_file, output_dir):
             print(f"\nApplying deltas to {yaml_file.name} (Panel ID: {panel_id})")
             for category in ["Deletion", "Modification", "Addition"]:
                 if changes_by_panel[panel_id][category]:
-                    apply_changes(config, changes_by_panel[panel_id][category], category)
+                    apply_changes(
+                        config, changes_by_panel[panel_id][category], category
+                    )
 
             save_yaml(config, output_path / yaml_file.name)
             print(f"Saved: {yaml_file.name}")

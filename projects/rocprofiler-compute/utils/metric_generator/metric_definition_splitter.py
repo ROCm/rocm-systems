@@ -27,8 +27,6 @@
 Aggregate metric descriptions by architecture.
 Extracts metrics from per-arch panel configs and combines with descriptions
 from unified config to create arch-specific metric description files.
-
-Usage: python metric_definition_splitter.py <analysis_configs_dir> <unified_config_file> <output_dir>
 """
 
 import sys
@@ -85,16 +83,24 @@ def parse_panel_yaml(yaml_file, descriptions_by_panel):
                             "unit": panel_metrics_desc[metric_name]["unit"],
                         }
                     else:
-                        print(f"WARNING: Metric '{metric_name}' not found for panel {panel_id}")
-                        result[table_title][metric_name] = {"rst": "", "unit": "Unknown"}
+                        print(
+                            f"WARNING: Metric '{metric_name}' "
+                            f"not found for panel {panel_id}"
+                        )
+                        result[table_title][metric_name] = {
+                            "rst": "",
+                            "unit": "Unknown",
+                        }
 
     return result
 
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python metric_definition_splitter.py <analysis_configs_dir> "
-              "<unified_config_file> <output_dir>")
+        print(
+            "Usage: python metric_definition_splitter.py <analysis_configs_dir> "
+            "<unified_config_file> <output_dir>"
+        )
         sys.exit(1)
 
     analysis_configs_path = Path(sys.argv[1])
@@ -131,7 +137,7 @@ def main():
                 yaml.dump(aggregated_metrics, f, sort_keys=False, allow_unicode=True)
             print(f"  Written: {output_file}\n")
         else:
-            print(f"  No metrics found\n")
+            print("  No metrics found\n")
 
     print("Aggregation complete!")
 

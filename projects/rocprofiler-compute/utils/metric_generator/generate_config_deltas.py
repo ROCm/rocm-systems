@@ -94,27 +94,29 @@ def compare_tables(prev_tables, curr_tables):
         prev_metrics = prev_dict[tid].get("metric", {})
         curr_metrics = curr_dict[tid].get("metric", {})
 
-        metric_adds, metric_dels, metric_mods = compare_metrics(prev_metrics, curr_metrics)
+        metric_adds, metric_dels, metric_mods = compare_metrics(
+            prev_metrics, curr_metrics
+        )
 
         if metric_adds:
             additions.append({
                 "id": tid,
                 "title": curr_dict[tid].get("title"),
-                "metrics": metric_adds
+                "metrics": metric_adds,
             })
 
         if metric_dels:
             deletions.append({
                 "id": tid,
                 "title": prev_dict[tid].get("title"),
-                "metrics": metric_dels
+                "metrics": metric_dels,
             })
 
         if metric_mods:
             modifications.append({
                 "id": tid,
                 "title": curr_dict[tid].get("title"),
-                "metrics": metric_mods
+                "metrics": metric_mods,
             })
 
     return additions, deletions, modifications
@@ -124,9 +126,13 @@ def format_metric_fields(metric_data):
     """Format metric fields as YAML lines."""
     lines = []
     for field_name, field_value in metric_data.items():
-        if isinstance(field_value, str) and ("\n" in field_value or len(field_value) > 80):
+        if isinstance(field_value, str) and (
+            "\n" in field_value or len(field_value) > 80
+        ):
             lines.append(f"                {field_name}: |")
-            lines.extend(f"                  {line}" for line in field_value.split("\n"))
+            lines.extend(
+                f"                  {line}" for line in field_value.split("\n")
+            )
         else:
             lines.append(f"                {field_name}: {field_value}")
     return lines
@@ -150,7 +156,7 @@ def format_output(combined_diff):
                 "  - Panel Config:",
                 f"      id: {pc['id']}",
                 f"      title: {pc['title']}",
-                "    metric_tables:"
+                "    metric_tables:",
             ])
 
             for mt in panel_item["metric_tables"]:
@@ -158,7 +164,7 @@ def format_output(combined_diff):
                     "      - metric_table:",
                     f"          id: {mt['id']}",
                     f"          title: {mt['title']}",
-                    "          metrics:"
+                    "          metrics:",
                 ])
 
                 # Handle metric-level changes or full table
@@ -217,20 +223,29 @@ def main():
 
         if additions:
             combined_diff["Addition"].append({
-                "panel_config": {"id": curr_pc.get("id"), "title": curr_pc.get("title")},
-                "metric_tables": additions
+                "panel_config": {
+                    "id": curr_pc.get("id"),
+                    "title": curr_pc.get("title"),
+                },
+                "metric_tables": additions,
             })
 
         if deletions:
             combined_diff["Deletion"].append({
-                "panel_config": {"id": prev_pc.get("id"), "title": prev_pc.get("title")},
-                "metric_tables": deletions
+                "panel_config": {
+                    "id": prev_pc.get("id"),
+                    "title": prev_pc.get("title"),
+                },
+                "metric_tables": deletions,
             })
 
         if modifications:
             combined_diff["Modification"].append({
-                "panel_config": {"id": curr_pc.get("id"), "title": curr_pc.get("title")},
-                "metric_tables": modifications
+                "panel_config": {
+                    "id": curr_pc.get("id"),
+                    "title": curr_pc.get("title"),
+                },
+                "metric_tables": modifications,
             })
 
     # Format and save output

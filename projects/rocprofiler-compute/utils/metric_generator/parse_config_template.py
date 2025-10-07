@@ -45,7 +45,9 @@ def parse_panel_config(yaml_file):
     panel_config = data["Panel Config"]
 
     # Strip panel ID prefix from filename
-    filename = yaml_file.name.split("_", 1)[1] if "_" in yaml_file.name else yaml_file.name
+    filename = (
+        yaml_file.name.split("_", 1)[1] if "_" in yaml_file.name else yaml_file.name
+    )
 
     # Normalize panel ID (divide by 100 if >= 100)
     panel_id = panel_config.get("id")
@@ -81,7 +83,8 @@ def main():
 
     # Parse all YAML files
     results = [
-        parsed for yaml_file in sorted(directory.glob("*.yaml"))
+        parsed
+        for yaml_file in sorted(directory.glob("*.yaml"))
         if (parsed := parse_panel_config(yaml_file))
     ]
 
