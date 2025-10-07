@@ -124,46 +124,38 @@ amdsmi_status_t AMDSmiDrm::init() {
 
         // looking for /sys/class/drm/card0/../renderD*
         std::string render_name = find_file_in_folder(renderD_folder, regex);
+        drm_paths_.push_back(render_name);
+
         std::string name = "/dev/dri/" + render_name;
         ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC);
 
         amdsmi_bdf_t bdf;
         if (fd.valid()) {
             auto version = drm_get_version(fd);
-            if (drm_get_device(fd, &device) != 0) {
+            if (drm_get_device(fd, &device) == 0) {
+                vendor_id = device->deviceinfo.pci->vendor_id;
+                drm_free_device(&device);
+            } else {
                 drm_free_device(&device);
             }
             drm_free_version(version);
             has_valid_fds = true;
         }
 
-        drm_paths_.push_back(render_name);
-        // even if fail, still add to prevent mismatch the index
-        if (!has_valid_fds) {
-            drm_bdfs_.push_back(bdf);
-            // No need to free device here since it is not valid
-            continue;
-        }
-
         uint64_t bdf_rocm = 0;
-        rsmi_dev_pci_id_get(i, &bdf_rocm);
-
-        vendor_id = device->deviceinfo.pci->vendor_id;
-
-        bdf.domain_number = static_cast<uint64_t>(((bdf_rocm >> 32) & 0xFFFFFFFF));
-        bdf.bus_number = static_cast<uint64_t>(((bdf_rocm >> 8) & 0xFF));
-        bdf.device_number = static_cast<uint64_t>(((bdf_rocm >> 3) & 0x1F));
-        bdf.function_number = static_cast<uint64_t>((bdf_rocm & 0x7));
-
+        rsmi_status_t rsmi_ret = rsmi_dev_pci_id_get(i, &bdf_rocm);
+        if (rsmi_ret != RSMI_STATUS_SUCCESS) {
+            // Set empty values on error
+            bdf = {}; // zero-initialize
+        } else {
+            bdf.domain_number = static_cast<uint64_t>(((bdf_rocm >> 32) & 0xFFFFFFFF));
+            bdf.bus_number = static_cast<uint64_t>(((bdf_rocm >> 8) & 0xFF));
+            bdf.device_number = static_cast<uint64_t>(((bdf_rocm >> 3) & 0x1F));
+            bdf.function_number = static_cast<uint64_t>((bdf_rocm & 0x7));
+        }
         drm_bdfs_.push_back(bdf);
-        drm_free_device(&device);
     }
 
-    // cannot find any valid fds.
-    if (!has_valid_fds) {
-        drm_bdfs_.clear();
-        return AMDSMI_STATUS_INIT_ERROR;
-    }
     return AMDSMI_STATUS_SUCCESS;
 }
 
