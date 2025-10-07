@@ -55,7 +55,7 @@ def load_panel_configs(
     """
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
-        for yaml_file in Path(dir_path).rglob("*.yaml"):
+        for yaml_file in Path(dir_path).glob("*.yaml"):
             with open(yaml_file) as file:
                 config_yml = yaml.safe_load(file)
                 # metric key can be None due to some metric-
