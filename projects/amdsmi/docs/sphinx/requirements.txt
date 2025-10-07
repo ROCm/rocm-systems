@@ -224,8 +224,8 @@ requests==2.32.5
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.25.0
-    # via -r docs/sphinx/requirements.in
+rocm-docs-core[api-reference]==1.26.0
+    # via -r requirements.in
 roman-numerals-py==3.1.0
     # via sphinx
 rpds-py==0.27.1

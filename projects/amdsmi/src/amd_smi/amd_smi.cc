@@ -63,7 +63,6 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
-
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
 
@@ -495,8 +494,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
     }
 
     for (uint32_t i = 0; i < *processor_count; i++) {
-        amdsmi_status_t r = amdsmi_get_processor_type(processor_handles[i],
-                                                      &processor_type);
+        amdsmi_status_t r = amdsmi_get_processor_type(processor_handles[i], &processor_type);
         if (r != AMDSMI_STATUS_SUCCESS) return r;
 
         if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_CPU) {
@@ -546,7 +544,7 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
 
 #endif
 
-amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle ,
+amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
               processor_type_t* processor_type) {
 
     AMDSMI_CHECK_INIT();
