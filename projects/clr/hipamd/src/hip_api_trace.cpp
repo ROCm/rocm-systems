@@ -863,13 +863,13 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
                                  unsigned long long flags, hipStream_t stream);
 hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
 hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream);
-hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption** jitOptions,
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
-                              hipLibraryOption** libraryOptions, void** libraryOptionValues,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions);
 hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
-                                  hipJitOption** jitOptions, void** jitOptionsValues,
-                                  unsigned int numJitOptions, hipLibraryOption** libraryOptions,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions);
 hipError_t hipLibraryUnload(hipLibrary_t library);
 hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
