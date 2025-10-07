@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   size_t granularity = 0;
@@ -68,7 +68,17 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -95,7 +105,7 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   size_t granularity = 0;
@@ -107,7 +117,17 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -154,7 +174,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   size_t granularity = 0;
@@ -166,7 +186,17 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -213,7 +243,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   size_t granularity = 0;
@@ -225,7 +255,17 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -276,7 +316,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   size_t granularity = 0;
@@ -289,7 +329,17 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -350,7 +400,7 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   size_t granularity = 0;
@@ -363,7 +413,17 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
