@@ -22,73 +22,190 @@
 
 #pragma once
 
-#include "buffer_storage.hpp"
-#include "sample_type.hpp"
+#include "core/trace_cache/cache_type_traits.hpp"
+#include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/type_registry.hpp"
+
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
-#include <iterator>
-#include <map>
-#include <rocprofiler-systems/categories.h>
-#include <stdint.h>
+#include <memory>
+#include <sstream>
 #include <string>
-#include <type_traits>
-#include <vector>
 
 namespace rocprofsys
 {
 namespace trace_cache
 {
-using postprocessing_callback = std::function<void(const storage_parsed_type_base&)>;
-class cache_manager;
+/**
+ * @brief Parser for reading and processing serialized data from buffered storage files
+ *
+ * This template class provides functionality to read binary files created by the buffered
+ * storage system, deserialize the contained data objects, and process them through a
+ * user-provided processing handler. It handles the binary format with type headers and
+ * automatically cleans up the file after successful parsing.
+ *
+ * The parser reads a binary format consisting of:
+ * - Type identifier (TypeIdentifierEnum value)
+ * - Sample size (size_t)
+ * - Serialized data payload
+ *
+ * @tparam TypeIdentifierEnum Enum class that identifies different serialized types
+ * @tparam SupportedTypes Variadic template pack of types that can be deserialized
+ *
+ * @note All SupportedTypes must be compatible with the type_registry requirements
+ */
+template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class storage_parser
 {
-public:
-    void register_type_callback(const entry_type&              type,
-                                const postprocessing_callback& callback);
+    static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
+                  "TypeIdentifierEnum must be an enum class");
 
-    void consume_storage();
-    void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback);
+public:
+    /**
+     * @brief Construct a new storage parser
+     *
+     * @param _filename Path to the binary file containing serialized data
+     */
+    storage_parser(std::string _filename)
+    : m_filename(std::move(_filename))
+    {}
+
+    /**
+     * @brief Register a callback to be executed when parsing is finished
+     *
+     * The callback will be invoked after the file has been successfully parsed
+     * and removed from the filesystem, but before the load() method returns.
+     *
+     * @param callback Unique pointer to a function object that will be called on
+     * completion The parser takes ownership of the callback
+     */
+    void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback)
+    {
+        m_on_finished_callback = std::move(callback);
+    }
+
+    /**
+     * @brief Load and process all data from the storage file
+     *
+     * Reads the binary file sequentially, deserializes each data sample based on its
+     * type identifier, and forwards it to the processing handler. The file is
+     * automatically removed after successful parsing.
+     *
+     * Binary format processed:
+     * - Header: TypeIdentifierEnum (type) + size_t (sample_size)
+     * - Payload: Raw serialized data of specified size
+     *
+     * @tparam ProcessingType Type of the processing handler
+     * @param processing Reference to processing handler that will receive deserialized
+     * objects
+     *
+     * @throws std::runtime_error if the file cannot be opened for reading
+     *
+     * @note ProcessingType must have a method with signature:
+     *       void execute_sample_processing(TypeIdentifierEnum, const cacheable_t&)
+     *
+     * @note The file is automatically deleted after successful parsing
+     * @note Fragmented space entries (used for buffer management) are automatically
+     * skipped
+     * @note Invalid or corrupted data entries are logged and skipped
+     * @note The registered callback (if any) is invoked after file processing completes
+     */
+    template <typename ProcessingType>
+    void load(ProcessingType& processing)
+    {
+        static_assert(
+            type_traits::has_execute_processing<ProcessingType, TypeIdentifierEnum,
+                                                cacheable_t>::value,
+            "ProcessingType must have proper execute processing member function: "
+            "ProcessingType::execute_sample_processing(TypeIdentifierEnum, const "
+            "cacheable_t&)");
+
+        std::cout << "Consuming buffered storage with filename: " << m_filename
+                  << std::endl;
+
+        std::ifstream ifs(m_filename, std::ios::binary);
+        if(!ifs)
+        {
+            std::stringstream ss;
+            ss << "Error opening file for reading: " << m_filename << "\n";
+            throw std::runtime_error(ss.str());
+        }
+
+        struct __attribute__((packed)) sample_header
+        {
+            TypeIdentifierEnum type;
+            size_t             sample_size;
+        };
+
+        sample_header header;
+
+        while(!ifs.eof())
+        {
+            ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
+
+            if(header.sample_size == 0 || ifs.eof())
+            {
+                continue;
+            }
+
+            std::vector<uint8_t> sample;
+            sample.reserve(header.sample_size);
+            ifs.read(reinterpret_cast<char*>(sample.data()), header.sample_size);
+
+            if(ifs.fail())
+            {
+                std::cout << "Bad read while consuming buffered storage. Filename: "
+                          << m_filename
+                          << " Bytes read: " << static_cast<int>(ifs.tellg())
+                          << std::endl;
+                continue;
+            }
+
+            if(header.type == TypeIdentifierEnum::fragmented_space)
+            {
+                continue;
+            }
+
+            uint8_t* data = sample.data();
+
+            auto sample_value = m_registry.get_type(header.type, data);
+            if(sample_value.has_value())
+            {
+                processing.execute_sample_processing(
+                    header.type, std::visit(
+                                     [](auto& arg) -> cacheable_t& {
+                                         return static_cast<cacheable_t&>(arg);
+                                     },
+                                     sample_value.value()));
+            }
+            else
+            {
+                std::cout << "Unsupported type detected. Skipping current sample."
+                          << std::endl;
+                continue;
+            }
+        }
+
+        ifs.close();
+        std::cout << "File parsing finished. Removing " << m_filename
+                  << " from file system." << std::endl;
+        std::remove(m_filename.c_str());
+
+        if(m_on_finished_callback != nullptr)
+        {
+            (*m_on_finished_callback)();
+        }
+    }
 
 private:
-    friend class cache_manager;
-    storage_parser(std::string _filename);
-
-    template <typename T>
-    static void process_arg(const uint8_t*& data_pos, T& arg)
-    {
-        if constexpr(std::is_same_v<T, std::string>)
-        {
-            arg = std::string((const char*) data_pos);
-            data_pos += arg.size() + 1;
-        }
-        else if constexpr(std::is_same_v<T, std::vector<uint8_t>>)
-        {
-            size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
-            data_pos += sizeof(size_t);
-            arg.reserve(vector_size);
-            std::copy_n(data_pos, vector_size, std::back_inserter(arg));
-            data_pos += vector_size;
-        }
-        else
-        {
-            arg = *reinterpret_cast<const T*>(data_pos);
-            data_pos += sizeof(T);
-        }
-    }
-
-    template <typename... Args>
-    static void parse_data(const uint8_t* data_pos, Args&... args)
-    {
-        (process_arg(data_pos, args), ...);
-    }
-
-    void invoke_callbacks(entry_type type, const storage_parsed_type_base& parsed);
-
-    std::string                                                m_filename;
-    std::map<entry_type, std::vector<postprocessing_callback>> m_callbacks;
-    std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
+    std::string m_filename;  ///< Path to the binary file to be parsed
+    std::unique_ptr<std::function<void()>> m_on_finished_callback{
+        nullptr
+    };  ///< Optional callback invoked when parsing completes
+    type_registry<TypeIdentifierEnum, SupportedTypes...>
+        m_registry;  ///< Type registry for deserializing stored objects
 };
 
 }  // namespace trace_cache

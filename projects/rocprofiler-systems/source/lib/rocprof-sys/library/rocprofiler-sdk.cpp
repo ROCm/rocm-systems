@@ -509,7 +509,7 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
 
 {
     trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::region,
+        trace_cache::region_sample {
         record->thread_id,
         static_cast<int32_t>(record->kind),
         static_cast<int32_t>(record->operation),
@@ -519,7 +519,7 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
         end_timestamp,
         call_stack.c_str(),
         args_str.c_str(),
-        category.c_str());
+        category.c_str()});
 }
 
 void
@@ -531,7 +531,7 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
     trace_cache::get_metadata_registry().add_stream(stream_handle);
 
     trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::kernel_dispatch,
+        trace_cache::kernel_dispatch_sample {
         record->start_timestamp,
         record->end_timestamp,
         record->thread_id,
@@ -549,7 +549,7 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
         record->dispatch_info.grid_size.x,
         record->dispatch_info.grid_size.y,
         record->dispatch_info.grid_size.z,
-        stream_handle);
+        stream_handle });
 
 }
 
@@ -558,7 +558,7 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record, uint6
 {
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::memory_copy,
+        trace_cache::memory_copy_sample {
         record->start_timestamp,
         record->end_timestamp,
         record->thread_id,
@@ -571,7 +571,7 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record, uint6
         get_parent_stack_id(record->correlation_id),
         get_mem_copy_dst_address(*record),
         get_mem_copy_src_address(*record),
-        stream_handle);
+        stream_handle});
 }
 
 #if (ROCPROFILER_VERSION >= 600)
@@ -580,7 +580,7 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
 {
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::memory_alloc,
+        trace_cache::memory_allocate_sample {
         record->start_timestamp,
         record->end_timestamp,
         record->thread_id,
@@ -591,7 +591,7 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
         record->correlation_id.internal,
         get_parent_stack_id(record->correlation_id),
         get_mem_alloc_address(*record),
-        stream_handle);
+        stream_handle});
 }
 #endif
 // clang-format on

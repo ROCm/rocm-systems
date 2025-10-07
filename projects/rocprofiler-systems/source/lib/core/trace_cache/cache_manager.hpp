@@ -23,7 +23,10 @@
 #pragma once
 
 #include "buffer_storage.hpp"
+#include "core/trace_cache/cacheable.hpp"
+#include "library/runtime.hpp"
 #include "metadata_registry.hpp"
+#include "sample_type.hpp"
 #include "storage_parser.hpp"
 
 namespace rocprofsys
@@ -31,11 +34,29 @@ namespace rocprofsys
 namespace trace_cache
 {
 
+using buffer_storage_t = buffered_storage<type_identifier_t>;
+
+// clang-format off
+using parser_t = storage_parser<type_identifier_t,
+#if(ROCPROFILER_VERSION >= 600)
+                                memory_allocate_sample,
+#endif
+                                in_time_sample,
+                                pmc_event_with_sample,
+                                region_sample,
+                                kernel_dispatch_sample,
+                                memory_copy_sample,
+                                amd_smi_sample,
+                                cpu_freq_sample,
+                                backtrace_region_sample
+>;
+// clang-format on
+
 class cache_manager
 {
 public:
     static cache_manager& get_instance();
-    buffer_storage&       get_buffer_storage() { return m_storage; }
+    buffer_storage_t&     get_buffer_storage() { return m_storage; }
     metadata_registry&    get_metadata_registry() { return m_metadata; }
     void                  shutdown();
     void                  post_process_bulk();
@@ -44,7 +65,8 @@ private:
     void post_process_metadata();
     cache_manager() = default;
 
-    buffer_storage    m_storage;
+    buffer_storage_t  m_storage{ utility::get_buffered_storage_filename(
+        get_root_process_id(), getpid()) };
     metadata_registry m_metadata;
 };
 
@@ -54,7 +76,7 @@ get_metadata_registry()
     return cache_manager::get_instance().get_metadata_registry();
 }
 
-inline buffer_storage&
+inline buffer_storage_t&
 get_buffer_storage()
 {
     return cache_manager::get_instance().get_buffer_storage();

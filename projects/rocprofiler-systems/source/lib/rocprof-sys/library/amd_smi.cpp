@@ -28,7 +28,6 @@
 
 #include "core/agent.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/cache_utility.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include <amd_smi/amdsmi.h>
 #include <cstdint>
@@ -543,12 +542,12 @@ data::sample(uint32_t _device_id)
     }
 #undef ROCPROFSYS_AMDSMI_GET
 
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::amd_smi_sample, serialize_settings(m_dev_id), _device_id,
-        _timestamp, m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
-        m_busy_perc.mm_activity, m_power.current_socket_power, m_temp, m_mem_usage,
+    trace_cache::get_buffer_storage().store(trace_cache::amd_smi_sample{
+        serialize_settings(m_dev_id), _device_id, _timestamp, m_busy_perc.gfx_activity,
+        m_busy_perc.umc_activity, m_busy_perc.mm_activity, m_power.current_socket_power,
+        m_temp, m_mem_usage,
         serialize_xcp_metrics(gpu::is_vcn_activity_supported(m_dev_id),
-                              gpu::is_jpeg_activity_supported(m_dev_id), _gpu_metrics));
+                              gpu::is_jpeg_activity_supported(m_dev_id), _gpu_metrics) });
 }
 
 void

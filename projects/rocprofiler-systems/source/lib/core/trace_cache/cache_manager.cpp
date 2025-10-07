@@ -23,14 +23,12 @@
 #include "cache_manager.hpp"
 #include "agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/trace_cache/storage_parser.hpp"
 #include "debug.hpp"
 #include "library/runtime.hpp"
-#include "trace_cache/cache_utility.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
-#include <iterator>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -140,13 +138,23 @@ cache_manager::post_process_bulk()
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
             rocpd_threads.emplace_back([this]() {
-                rocpd_post_processing _post_processing(
-                    m_metadata, get_agent_manager_instance(), std::to_string(getpid()));
-                storage_parser _parser(
-                    get_buffered_storage_filename(get_root_process_id(), getpid()));
-                _post_processing.register_parser_callback(_parser);
-                _post_processing.post_process_metadata();
-                _parser.consume_storage();
+                parser_t _parser(utility::get_buffered_storage_filename(
+                    get_root_process_id(), getpid()));
+
+                sample_processor_t _processor;
+                if(get_use_rocpd())
+                {
+                    auto rocpd_pp = std::make_shared<rocpd_post_processing>(
+                        m_metadata, get_agent_manager_instance(),
+                        std::to_string(getpid()));
+                    _processor.add_post_processing(rocpd_pp);
+                    _parser.register_on_finished_callback(
+                        std::make_unique<std::function<void()>>(
+                            [&]() { rocpd_pp->get_data_processor()->flush(); }));
+                }
+
+                _processor.post_process_metadata();
+                _parser.load(_processor);
             });
 
             for(const auto& [pid, files] : _cache_files)
@@ -171,14 +179,23 @@ cache_manager::post_process_bulk()
                             return;
                         }
 
-                        agent_manager         _agent_manager{ _agents };
-                        rocpd_post_processing _post_processing(_metadata, _agent_manager,
-                                                               std::to_string(pid));
-                        storage_parser        _parser(files.buff_storage);
-                        _post_processing.register_parser_callback(_parser);
-                        _post_processing.post_process_metadata();
-                        _parser.consume_storage();
-                        std::remove(files.metadata.c_str());  // Remove metadata file
+                        agent_manager _agent_manager{ _agents };
+
+                        parser_t           _parser(files.buff_storage);
+                        sample_processor_t _processor;
+                        if(get_use_rocpd())
+                        {
+                            auto rocpd_pp = std::make_shared<rocpd_post_processing>(
+                                _metadata, _agent_manager, std::to_string(pid));
+                            _processor.add_post_processing(rocpd_pp);
+                            _parser.register_on_finished_callback(
+                                std::make_unique<std::function<void()>>(
+                                    [&]() { rocpd_pp->get_data_processor()->flush(); }));
+                        }
+
+                        _processor.post_process_metadata();
+                        _parser.load(_processor);
+                        std::remove(files.metadata.c_str());
                     });
                 }
             }

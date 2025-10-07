@@ -260,14 +260,13 @@ sample()
     auto _freqs  = component::cpu_freq{}.sample();
 
     // user and kernel mode times are in microseconds
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::cpu_freq_sample, _timestamp, tim::get_page_rss(),
-        tim::get_virt_mem(), _rcache.get_peak_rss(),
+    trace_cache::get_buffer_storage().store(trace_cache::cpu_freq_sample{
+        _timestamp, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
         _rcache.get_num_priority_context_switch() +
             _rcache.get_num_voluntary_context_switch(),
         _rcache.get_num_major_page_faults() + _rcache.get_num_minor_page_faults(),
         _rcache.get_user_mode_time() * 1000, _rcache.get_kernel_mode_time() * 1000,
-        serialize_freqs(_freqs));
+        serialize_freqs(_freqs) });
 
     data.emplace_back(
         _timestamp, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
