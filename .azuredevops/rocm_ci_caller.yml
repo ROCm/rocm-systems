@@ -3,6 +3,8 @@ pr:
   branches:
     include:
       - develop
+      - release/rocm-rel-7.1
+      - release/rocm-rel-7.2
   drafts: false
 
 variables:
