@@ -240,6 +240,9 @@ GPU: 0
 
 ### Resolved Issues
 
+- **Fixed a CPER record count mismatch issue when using the `amd-smi ras --cper --file-limit`**.  
+  - Fixed deletion calculation to use files_to_delete = len(folder_files) - file_limit for exact file count management
+
 - **Fixed event monitoring segfaults causing RDC to crash**.  
   - Adds mutex locking around access to device event notification file pointer
 

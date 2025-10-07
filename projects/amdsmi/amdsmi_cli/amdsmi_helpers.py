@@ -1244,31 +1244,18 @@ class AMDSMIHelpers():
             output_rows = {}
 
             for entry_index, entry in enumerate(entries.values()):
-                # Batch deletion if file limit is exceeded
-                if file_limit:
-                    folder_files = list(sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime))
-                    if file_limit < len(folder_files):
-                        for old_file in folder_files[:len(folder_files) - file_limit]:
-                            try:
-                                old_file.unlink()
-                                json_file = old_file.with_suffix('.json')
-                                if json_file.exists():
-                                    json_file.unlink()
-                            except OSError as e:
-                                logging.debug(f"Failed to delete file {old_file}: {e}")
-
                 # Determine prefix/severity
                 error_severity = entry.get("error_severity", "").lower()
                 notify_type = entry.get("notify_type", "")
                 prefix = self._severity_as_string(error_severity, notify_type, True)
-
+            
                 # Generate filenames
                 count = self.get_cper_count() + 1
                 cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
                 json_path = folder / json_name
-
+            
                 # Write CPER binary file
                 try:
                     self.write_binary(
@@ -1278,7 +1265,7 @@ class AMDSMIHelpers():
                     )
                 except Exception as e:
                     logging.debug(f"Failed to write CPER file {cper_path}: {e}")
-
+            
                 # Write JSON metadata file
                 try:
                     with json_path.open("w") as cper_json_file:
@@ -1290,13 +1277,27 @@ class AMDSMIHelpers():
                         )
                 except Exception as e:
                     logging.debug(f"Failed to write JSON file {json_path}: {e}")
-
+            
                 # Collect data for printing
                 timestamp = entry.get("timestamp", "unknown")
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
                 severity = self._severity_as_string(error_severity, notify_type, False)
                 output_rows[cper_path] = [timestamp, gpu_id, severity, cper_name]
                 self.increment_cper_count()
+
+            # Batch deletion if file limit is exceeded (AFTER writing ALL new files)
+            if file_limit:
+                folder_files = list(sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime))
+                if len(folder_files) > file_limit:
+                    files_to_delete = len(folder_files) - file_limit
+                    for old_file in folder_files[:files_to_delete]:
+                        try:
+                            old_file.unlink()
+                            json_file = old_file.with_suffix('.json')
+                            if json_file.exists():
+                                json_file.unlink()
+                        except OSError as e:
+                            logging.debug(f"Failed to delete file {old_file}: {e}")
 
             # Print collected rows
             for cper_path, row in output_rows.items():
