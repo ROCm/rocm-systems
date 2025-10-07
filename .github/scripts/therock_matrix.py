@@ -24,7 +24,7 @@ project_map = {
     },
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "project_to_test": "",
+        "project_to_test": "rocprofiler-tests",
         "subtree_checkout": "projects/aqlprofile\nprojects/rocprofiler\nprojects/rocprofiler-compute\nprojects/rocprofiler-register\nprojects/rocprofiler-sdk\nprojects/rocprofiler-systems\nprojects/roctracer",
     },
 }
