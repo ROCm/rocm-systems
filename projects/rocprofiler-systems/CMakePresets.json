@@ -71,6 +71,31 @@
       }
     },
     {
+      "name": "coverage",
+      "displayName": "official coverage build",
+      "description": "Debug build parameters with tests",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "ROCPROFSYS_USE_ROCM": "ON",
+        "ROCPROFSYS_USE_PYTHON": "ON",
+        "ROCPROFSYS_BUILD_DYNINST": "ON",
+        "ROCPROFSYS_BUILD_TBB": "ON",
+        "ROCPROFSYS_BUILD_BOOST": "ON",
+        "ROCPROFSYS_BUILD_ELFUTILS": "ON",
+        "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
+        "ROCPROFSYS_BUILD_TESTING": "ON",
+        "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
+        "ROCPROFSYS_BUILD_DEBUG": "ON",
+        "ROCPROFSYS_BUILD_CI": "ON",
+        "ROCPROFSYS_BUILD_CODECOV": "ON"
+      }
+    },
+    {
       "name": "release",
       "displayName": "official release build",
       "description": "Official release build",

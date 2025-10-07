@@ -36,6 +36,7 @@ struct mock_driver_api
                 ());
     MOCK_METHOD(amdsmi_status_t, get_metrics_info,
                 (amdsmi_processor_handle, amdsmi_gpu_metrics_t*), ());
+    MOCK_METHOD(amdsmi_status_t, shutdown, (), ());
 };
 
 std::shared_ptr<StrictMock<mock_driver_api>> g_mock_api_instance = nullptr;
@@ -89,7 +90,6 @@ protected:
 
 TEST_F(ServiceTest, ConstructSuccess)
 {
-    amdsmi_version_t version{ 1, 2, 3, "build123" };
     EXPECT_CALL(*g_mock_api_instance, init);
     EXPECT_CALL(*g_mock_api_instance, get_version(_));
 

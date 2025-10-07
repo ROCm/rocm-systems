@@ -48,7 +48,7 @@ protected:
         amdsmi_gpu_metrics_t gpu_metrics = {};
         // Initialize XCP VCN and JPEG activity arrays
         std::for_each(std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
-                      [index = 0](amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
+                      [](amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
                           std::for_each(std::begin(xcp_stats.vcn_busy),
                                         std::end(xcp_stats.vcn_busy),
                                         [](auto& vcn_busy) { vcn_busy = 40; });
@@ -134,14 +134,14 @@ TEST_F(ProcessorTest, GetSupportedMetricsAllSupported)
             mock_driver, processor_handle, processor_type, 0);
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_TRUE(metrics.average_socket_power);
-    EXPECT_TRUE(metrics.current_socket_power);
-    EXPECT_TRUE(metrics.gfx_activity);
-    EXPECT_TRUE(metrics.mm_activity);
-    EXPECT_TRUE(metrics.umc_activity);
-    EXPECT_TRUE(metrics.memory_usage);
-    EXPECT_TRUE(metrics.edge_temperature);
-    EXPECT_TRUE(metrics.hotspot_temperature);
+    EXPECT_TRUE(metrics.bits.average_socket_power);
+    EXPECT_TRUE(metrics.bits.current_socket_power);
+    EXPECT_TRUE(metrics.bits.gfx_activity);
+    EXPECT_TRUE(metrics.bits.mm_activity);
+    EXPECT_TRUE(metrics.bits.umc_activity);
+    EXPECT_TRUE(metrics.bits.memory_usage);
+    EXPECT_TRUE(metrics.bits.edge_temperature);
+    EXPECT_TRUE(metrics.bits.hotspot_temperature);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsPowerInfoFails)
@@ -159,36 +159,29 @@ TEST_F(ProcessorTest, GetSupportedMetricsPowerInfoFails)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_FALSE(metrics.average_socket_power);
-    EXPECT_FALSE(metrics.current_socket_power);
-    EXPECT_TRUE(metrics.gfx_activity);
-    EXPECT_TRUE(metrics.memory_usage);
-    EXPECT_TRUE(metrics.edge_temperature);
-    EXPECT_TRUE(metrics.hotspot_temperature);
+    EXPECT_FALSE(metrics.bits.average_socket_power);
+    EXPECT_FALSE(metrics.bits.current_socket_power);
+    EXPECT_TRUE(metrics.bits.gfx_activity);
+    EXPECT_TRUE(metrics.bits.memory_usage);
+    EXPECT_TRUE(metrics.bits.edge_temperature);
+    EXPECT_TRUE(metrics.bits.hotspot_temperature);
 }
 
 TEST_F(ProcessorTest, GetSmiMetricsSuccess)
 {
-    amdsmi_power_info_t power_info  = {};
-    power_info.average_socket_power = 150;
-    power_info.current_socket_power = 140;
-
-    amdsmi_engine_usage_t engine_usage = {};
-    uint64_t              memory_usage = 8192;
-    int64_t               temperature  = 65000;
-
-    amdsmi_gpu_metrics_t gpu_metrics = {};
-    gpu_metrics.average_socket_power = 150;
-    gpu_metrics.current_socket_power = 140;
-    gpu_metrics.average_gfx_activity = 75;
-    gpu_metrics.average_umc_activity = 50;
-    gpu_metrics.average_mm_activity  = 60;
-    gpu_metrics.temperature_hotspot  = 25;
-    gpu_metrics.temperature_edge     = 35;
+    uint64_t             memory_usage = 8192;
+    amdsmi_gpu_metrics_t gpu_metrics  = {};
+    gpu_metrics.average_socket_power  = 150;
+    gpu_metrics.current_socket_power  = 140;
+    gpu_metrics.average_gfx_activity  = 75;
+    gpu_metrics.average_umc_activity  = 50;
+    gpu_metrics.average_mm_activity   = 60;
+    gpu_metrics.temperature_hotspot   = 25;
+    gpu_metrics.temperature_edge      = 35;
 
     std::for_each(
         std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
-        [index = 0](amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
+        [](amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
             std::for_each(std::begin(xcp_stats.vcn_busy), std::end(xcp_stats.vcn_busy),
                           [](auto& vcn_busy) { vcn_busy = 30; });
             std::for_each(std::begin(xcp_stats.jpeg_busy), std::end(xcp_stats.jpeg_busy),
@@ -245,8 +238,6 @@ TEST_F(ProcessorTest, GetSmiMetricsGpuMetricsFails)
 
 TEST_F(ProcessorTest, GetSmiMetricsMemoryUsageFails)
 {
-    amdsmi_gpu_metrics_t gpu_metrics = {};
-
     EXPECT_CALL(*mock_driver, get_power_info);
     EXPECT_CALL(*mock_driver, get_activity);
     EXPECT_CALL(*mock_driver, get_temperature_metric).Times(2);
@@ -293,11 +284,11 @@ TEST_F(ProcessorTest, GetSupportedMetricsActivityFails)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_TRUE(metrics.average_socket_power);
-    EXPECT_TRUE(metrics.current_socket_power);
-    EXPECT_FALSE(metrics.gfx_activity);
-    EXPECT_FALSE(metrics.mm_activity);
-    EXPECT_FALSE(metrics.umc_activity);
+    EXPECT_TRUE(metrics.bits.average_socket_power);
+    EXPECT_TRUE(metrics.bits.current_socket_power);
+    EXPECT_FALSE(metrics.bits.gfx_activity);
+    EXPECT_FALSE(metrics.bits.mm_activity);
+    EXPECT_FALSE(metrics.bits.umc_activity);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsMemoryUsageFails)
@@ -315,7 +306,7 @@ TEST_F(ProcessorTest, GetSupportedMetricsMemoryUsageFails)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_FALSE(metrics.memory_usage);
+    EXPECT_FALSE(metrics.bits.memory_usage);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsHotspotTemperatureFails)
@@ -339,8 +330,8 @@ TEST_F(ProcessorTest, GetSupportedMetricsHotspotTemperatureFails)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_FALSE(metrics.hotspot_temperature);
-    EXPECT_TRUE(metrics.edge_temperature);
+    EXPECT_FALSE(metrics.bits.hotspot_temperature);
+    EXPECT_TRUE(metrics.bits.edge_temperature);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsEdgeTemperatureFails)
@@ -364,8 +355,8 @@ TEST_F(ProcessorTest, GetSupportedMetricsEdgeTemperatureFails)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_TRUE(metrics.hotspot_temperature);
-    EXPECT_FALSE(metrics.edge_temperature);
+    EXPECT_TRUE(metrics.bits.hotspot_temperature);
+    EXPECT_FALSE(metrics.bits.edge_temperature);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsGpuMetricsInfoFails)
@@ -375,67 +366,25 @@ TEST_F(ProcessorTest, GetSupportedMetricsGpuMetricsInfoFails)
     EXPECT_CALL(*mock_driver, get_memory_usage);
     EXPECT_CALL(*mock_driver, get_temperature_metric).Times(2);
     EXPECT_CALL(*mock_driver, get_metrics_info(processor_handle, _))
-        .WillOnce(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+        .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
 
     test_processor =
         std::make_unique<rocprofsys::amd_smi::processor<mock_processor_driver>>(
             mock_driver, processor_handle, processor_type, 0);
 
     auto metrics = test_processor->get_supported_metrics();
-
-    // XCP metrics should all be false when gpu_metrics_info fails
-    for(auto& xcp_metric : metrics.xcp_metrics)
-    {
-        EXPECT_FALSE(xcp_metric.vcn_busy.any());
-        EXPECT_FALSE(xcp_metric.jpeg_busy.any());
-    }
-}
-
-TEST_F(ProcessorTest, GetSupportedMetricsXcpMixedSupport)
-{
-    amdsmi_gpu_metrics_t gpu_metrics = {};
-
-    // Set some engines as supported, others as unsupported
-    for(auto& xcp_stat : gpu_metrics.xcp_stats)
-    {
-        for(size_t j = 0; j < AMDSMI_MAX_NUM_VCN; ++j)
-        {
-            xcp_stat.vcn_busy[j] =
-                (j % 2 == 0) ? 50 : rocprofsys::amd_smi::metric_value_not_supported;
-        }
-        for(size_t j = 0; j < AMDSMI_MAX_NUM_JPEG_ENGINES; ++j)
-        {
-            xcp_stat.jpeg_busy[j] =
-                (j % 2 == 0) ? 30 : rocprofsys::amd_smi::metric_value_not_supported;
-        }
-    }
-
-    EXPECT_CALL(*mock_driver, get_power_info);
-    EXPECT_CALL(*mock_driver, get_activity);
-    EXPECT_CALL(*mock_driver, get_memory_usage);
-    EXPECT_CALL(*mock_driver, get_temperature_metric).Times(2);
-    EXPECT_CALL(*mock_driver, get_metrics_info(processor_handle, _))
-        .WillOnce(DoAll(SetArgPointee<1>(gpu_metrics), Return(AMDSMI_STATUS_SUCCESS)));
-
-    test_processor =
-        std::make_unique<rocprofsys::amd_smi::processor<mock_processor_driver>>(
-            mock_driver, processor_handle, processor_type, 0);
-
-    auto metrics = test_processor->get_supported_metrics();
-
-    // Check that alternating engines are supported/unsupported
-    for(auto& xcp_metric : metrics.xcp_metrics)
-    {
-        for(size_t j = 0; j < AMDSMI_MAX_NUM_VCN && j < xcp_metric.vcn_busy.size(); ++j)
-        {
-            EXPECT_EQ(xcp_metric.vcn_busy[j], j % 2 == 0);
-        }
-        for(size_t j = 0;
-            j < AMDSMI_MAX_NUM_JPEG_ENGINES && j < xcp_metric.jpeg_busy.size(); ++j)
-        {
-            EXPECT_EQ(xcp_metric.jpeg_busy[j], j % 2 == 0);
-        }
-    }
+    rocprofsys::amd_smi::smi_metric_options expected_metrics = { .bits{
+        .current_socket_power = 1,
+        .average_socket_power = 1,
+        .memory_usage         = 1,
+        .hotspot_temperature  = 1,
+        .edge_temperature     = 1,
+        .gfx_activity         = 1,
+        .umc_activity         = 1,
+        .mm_activity          = 1,
+        .vcn_activity         = 0,
+        .jpeg_activity        = 0 } };
+    EXPECT_EQ(metrics.value, expected_metrics.value);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsTemperatureNotSupported)
@@ -463,8 +412,8 @@ TEST_F(ProcessorTest, GetSupportedMetricsTemperatureNotSupported)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_FALSE(metrics.hotspot_temperature);
-    EXPECT_FALSE(metrics.edge_temperature);
+    EXPECT_FALSE(metrics.bits.hotspot_temperature);
+    EXPECT_FALSE(metrics.bits.edge_temperature);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsPowerNotSupported)
@@ -486,8 +435,8 @@ TEST_F(ProcessorTest, GetSupportedMetricsPowerNotSupported)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_FALSE(metrics.average_socket_power);
-    EXPECT_FALSE(metrics.current_socket_power);
+    EXPECT_FALSE(metrics.bits.average_socket_power);
+    EXPECT_FALSE(metrics.bits.current_socket_power);
 }
 
 TEST_F(ProcessorTest, GetSupportedMetricsGfxActivityNotSupported)
@@ -508,8 +457,9 @@ TEST_F(ProcessorTest, GetSupportedMetricsGfxActivityNotSupported)
 
     auto metrics = test_processor->get_supported_metrics();
 
-    EXPECT_FALSE(metrics.gfx_activity);
-    // mm_activity and umc_activity should still be true as they don't check values
-    EXPECT_TRUE(metrics.mm_activity);
-    EXPECT_TRUE(metrics.umc_activity);
+    EXPECT_FALSE(metrics.bits.gfx_activity);
+    // mm_activity and umc_activity should still be true as they don't check
+    // values
+    EXPECT_TRUE(metrics.bits.mm_activity);
+    EXPECT_TRUE(metrics.bits.umc_activity);
 }

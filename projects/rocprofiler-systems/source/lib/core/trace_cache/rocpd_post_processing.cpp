@@ -22,7 +22,6 @@
 
 #include "trace_cache/rocpd_post_processing.hpp"
 #include "agent_manager.hpp"
-#include "common.hpp"
 #include "config.hpp"
 #include "debug.hpp"
 #include "library/thread_info.hpp"

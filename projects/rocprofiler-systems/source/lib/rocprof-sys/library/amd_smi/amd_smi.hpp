@@ -29,7 +29,11 @@
 #pragma once
 
 #include "core/components/fwd.hpp"
+#include "core/debug.hpp"
 #include "core/state.hpp"
+#include "library/amd_smi/common.hpp"
+#include "timemory/components/timing/backends.hpp"
+#include <algorithm>
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
@@ -38,6 +42,115 @@ namespace rocprofsys
 {
 namespace amd_smi
 {
+
+using get_timestamp_t = std::function<unsigned long()>;
+
+template <typename smi_service_factory, typename settings_api, typename perfetto_api,
+          typename rocpd_api>
+struct amd_smi_impl
+{
+    using smi_service        = typename smi_service_factory::smi_service;
+    using processor_vector_t = typename smi_service::processor_vector_t;
+    using processor_t        = typename smi_service::processor_t;
+
+    void setup()
+    {
+        m_smi_service = smi_service_factory::create_smi_service();
+        auto _version = m_smi_service->get_version();
+        // ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n",
+        //                      _version.numeric_representation.major,
+        //                      _version.numeric_representation.minor,
+        //                      _version.numeric_representation.release,
+        //                      _version.string_representation.c_str());
+
+        m_gpu_processors =
+            m_smi_service->get_processors([](const processor_vector_t& processors) {
+                auto               filter = settings_api::get_device_filter();
+                processor_vector_t result{};
+                switch(filter.mode)
+                {
+                    case device_selection_mode::all: return processors;
+                    case device_selection_mode::none: break;
+                    case device_selection_mode::specific:
+                        std::copy_if(
+                            processors.begin(), processors.end(),
+                            std::back_inserter(result), [&](const auto& device) {
+                                return (filter.indices.count(device->get_index()) > 0);
+                            });
+                        break;
+                }
+                return result;
+            });
+
+        for(const auto& processor : m_gpu_processors)
+        {
+            perfetto_api::init_storage(processor->get_index());
+        }
+    }
+
+    void config()
+    {
+        auto _enabled_metrics = settings_api::get_enabled_metrics();
+        rocpd_api::initialize_category_metadata();
+
+        std::for_each(
+            m_gpu_processors.begin(), m_gpu_processors.end(), [&](const auto& device) {
+                auto device_index = device->get_index();
+                perfetto_api::setup_counter_tracks(device->get_index(), _enabled_metrics);
+                rocpd_api::initialize_smi_tracks_metadata(device_index);
+                rocpd_api::initialize_smi_pmc_metadata(device_index);
+            });
+    }
+
+    void sample(const get_timestamp_t& get_timestamp)
+    {
+        auto _enabled_metrics = settings_api::get_enabled_metrics();
+
+        for(auto it = m_gpu_processors.begin(); it != m_gpu_processors.end();)
+        {
+            auto& processor  = *it;
+            auto  _timestamp = get_timestamp();
+            assert(_timestamp < std::numeric_limits<int64_t>::max());
+
+            try
+            {
+                auto _supported_metrics = processor->get_supported_metrics();
+                auto _smi_metrics       = processor->get_smi_metrics();
+                auto _device_id         = processor->get_index();
+
+                rocpd_api::store_sample(_device_id, _supported_metrics, _enabled_metrics,
+                                        _smi_metrics, _timestamp);
+                perfetto_api::store_sample(_device_id, _smi_metrics, _timestamp);
+                ++it;
+            } catch(const std::runtime_error& e)
+            {
+                ROCPROFSYS_WARNING(
+                    0,
+                    "Reading metrics failed for device with ID %zu. Error: %s. "
+                    "Disabling device!\n",
+                    processor->get_index(), e.what());
+                auto device_to_remove = std::find(m_gpu_processors.begin(),
+                                                  m_gpu_processors.end(), processor);
+                m_gpu_processors.erase(device_to_remove);
+            }
+        }
+    }
+
+    void post_process()
+    {
+        auto _enabled_metrics = settings_api::get_enabled_metrics();
+        for(const auto& processor : m_gpu_processors)
+        {
+            perfetto_api::post_process(processor->get_index(), _enabled_metrics,
+                                       processor->get_supported_metrics());
+        }
+    }
+
+private:
+    processor_vector_t           m_gpu_processors;
+    std::shared_ptr<smi_service> m_smi_service;
+};
+
 void
 setup();
 

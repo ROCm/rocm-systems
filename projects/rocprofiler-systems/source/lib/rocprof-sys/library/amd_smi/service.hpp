@@ -55,7 +55,8 @@ template <typename driver_factory>
 struct service
 {
     using driver_t           = typename driver_factory::driver_t;
-    using processor_vector_t = std::vector<std::shared_ptr<processor<driver_t>>>;
+    using processor_t        = processor<driver_t>;
+    using processor_vector_t = std::vector<std::shared_ptr<processor_t>>;
 
     /**
      * @brief Constructs a service object and initializes the AMD SMI driver.
@@ -76,7 +77,7 @@ struct service
                       .string_representation  = std::string{ version.build } };
     }
 
-    // ~service() { m_driver_api->shutdown(); }
+    ~service() { /*m_driver_api->shutdown();*/ }
     /**
      * @brief Returns the AMD SMI driver version information.
      * @return Reference to the version struct.
@@ -89,12 +90,12 @@ struct service
      * @throws std::runtime_error if processor enumeration fails.
      */
     processor_vector_t get_processors(
-        const std::function<processor_vector_t(processor_vector_t& processors)> filter =
+        const std::function<processor_vector_t(processor_vector_t& processors)>& filter =
             nullptr)
     {
-        std::vector<std::shared_ptr<processor<driver_t>>> processors{};
-        auto   socket_handles = get_socket_handles();
-        size_t index          = 0;
+        std::vector<std::shared_ptr<processor_t>> processors{};
+        auto                                      socket_handles = get_socket_handles();
+        size_t                                    index          = 0;
         for(auto& socket_handle : socket_handles)
         {
             auto processor_handles = get_processor_handles(socket_handle);
@@ -105,7 +106,7 @@ struct service
                     m_driver_api->get_processor_type(processor_handle, &processor_type),
                     "Failed to get processor type!");
                 // We can implement filter later
-                processors.emplace_back(std::make_shared<processor<driver_t>>(
+                processors.emplace_back(std::make_shared<processor_t>(
                     m_driver_api, processor_handle, processor_type, index++));
             }
         };
@@ -162,6 +163,17 @@ private:
     std::shared_ptr<driver_t> m_driver_api;
     /** AMD SMI driver version information. */
     version m_version;
+};
+
+template <typename driver_factory>
+struct smi_service_factory
+{
+    using smi_service = service<driver_factory>;
+
+    static std::shared_ptr<smi_service> create_smi_service()
+    {
+        return std::make_shared<smi_service>();
+    }
 };
 
 }  // namespace amd_smi

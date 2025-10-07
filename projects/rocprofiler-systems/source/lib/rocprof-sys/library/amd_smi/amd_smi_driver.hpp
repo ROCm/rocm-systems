@@ -99,6 +99,8 @@ struct amd_smi_driver
     {
         return amdsmi_get_gpu_metrics_info(processor_handle, metrics);
     }
+
+    static amdsmi_status_t shutdown() { return amdsmi_shut_down(); }
 };
 
 struct amd_smi_driver_factory

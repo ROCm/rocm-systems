@@ -28,11 +28,10 @@
 
 #pragma once
 
-#include "core/benchmark/benchmark.hpp"
-#include "core/benchmark/category.hpp"
+#include "common.hpp"
+
 #include <algorithm>
 #include <amd_smi/amdsmi.h>
-#include <bitset>
 #include <cstdint>
 
 #include <cstring>
@@ -51,50 +50,6 @@ namespace amd_smi
 {
 
 constexpr auto metric_value_not_supported = 0xffff;
-
-#ifdef AMDSMI_MAX_NUM_JPEG_ENG_V1
-#    define AMDSMI_MAX_NUM_JPEG_ENGINES AMDSMI_MAX_NUM_JPEG_ENG_V1
-#else
-#    define AMDSMI_MAX_NUM_JPEG_ENGINES 40
-#endif
-
-#ifndef AMDSMI_MAX_NUM_XCP
-#    define AMDSMI_MAX_NUM_XCP 8
-#endif
-
-struct supported_metrics
-{
-    uint32_t current_socket_power : 1;
-    uint32_t average_socket_power : 1;
-    uint32_t memory_usage         : 1;
-    uint32_t hotspot_temperature  : 1;
-    uint32_t edge_temperature     : 1;
-    uint32_t gfx_activity         : 1;
-    uint32_t umc_activity         : 1;
-    uint32_t mm_activity          : 1;
-    struct xcp_metrics_t
-    {
-        std::bitset<AMDSMI_MAX_NUM_VCN>          vcn_busy;
-        std::bitset<AMDSMI_MAX_NUM_JPEG_ENGINES> jpeg_busy;
-    } xcp_metrics[AMDSMI_MAX_NUM_XCP];
-};
-
-struct smi_metrics
-{
-    uint32_t current_socket_power;
-    uint32_t average_socket_power;
-    uint32_t memory_usage;
-    uint16_t hotspot_temperature;
-    uint16_t edge_temperature;
-    uint32_t gfx_activity;
-    uint32_t umc_activity;
-    uint32_t mm_activity;
-    struct
-    {
-        uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];
-        uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG_ENGINES];
-    } xcp_stats[AMDSMI_MAX_NUM_XCP];
-};
 
 /**
  * @class processor
@@ -125,7 +80,7 @@ struct processor
         intialize_supported_metrics();
     }
 
-    supported_metrics get_supported_metrics() { return m_supported_metrics; }
+    smi_metric_options get_supported_metrics() { return m_supported_metrics; }
 
     /**
      * @brief Returns the type of the processor.
@@ -136,8 +91,7 @@ struct processor
     smi_metrics get_smi_metrics()
     {
         amdsmi_gpu_metrics_t gpu_metrics;
-        benchmark::start(benchmark::category::amd_smi_driver);
-        auto driver_call_result =
+        auto                 driver_call_result =
             m_driver_api->get_metrics_info(m_processor_handle, &gpu_metrics);
         if(driver_call_result != AMDSMI_STATUS_SUCCESS)
         {
@@ -153,48 +107,48 @@ struct processor
             std::cout << "Failed to read SMI data! AMD SMI Error code: "
                       << driver_call_result << std::endl;
         }
-        benchmark::end(benchmark::category::amd_smi_driver);
         auto populate_metrics = [](auto flag, const auto& source, auto& destination) {
             if(flag) destination = source;
         };
 
         smi_metrics metrics;
 
-        populate_metrics(m_supported_metrics.average_socket_power,
+        populate_metrics(m_supported_metrics.bits.average_socket_power,
                          gpu_metrics.average_socket_power, metrics.average_socket_power);
-        populate_metrics(m_supported_metrics.current_socket_power,
+        populate_metrics(m_supported_metrics.bits.current_socket_power,
                          gpu_metrics.current_socket_power, metrics.current_socket_power);
-        populate_metrics(m_supported_metrics.memory_usage, memory_usage,
+        populate_metrics(m_supported_metrics.bits.memory_usage, memory_usage,
                          metrics.memory_usage);
-        populate_metrics(m_supported_metrics.gfx_activity,
+        populate_metrics(m_supported_metrics.bits.gfx_activity,
                          gpu_metrics.average_gfx_activity, metrics.gfx_activity);
-        populate_metrics(m_supported_metrics.umc_activity,
+        populate_metrics(m_supported_metrics.bits.umc_activity,
                          gpu_metrics.average_umc_activity, metrics.umc_activity);
-        populate_metrics(m_supported_metrics.mm_activity, gpu_metrics.average_mm_activity,
-                         metrics.mm_activity);
-        populate_metrics(m_supported_metrics.edge_temperature,
+        populate_metrics(m_supported_metrics.bits.mm_activity,
+                         gpu_metrics.average_mm_activity, metrics.mm_activity);
+        populate_metrics(m_supported_metrics.bits.edge_temperature,
                          gpu_metrics.temperature_edge, metrics.edge_temperature);
-        populate_metrics(m_supported_metrics.hotspot_temperature,
+        populate_metrics(m_supported_metrics.bits.hotspot_temperature,
                          gpu_metrics.temperature_hotspot, metrics.hotspot_temperature);
 
-        std::for_each(
-            std::begin(m_supported_metrics.xcp_metrics),
-            std::end(m_supported_metrics.xcp_metrics),
-            [&, xcp_index = 0](const supported_metrics::xcp_metrics_t& xcp) mutable {
-                if(xcp.jpeg_busy.any())
-                {
-                    std::memcpy(metrics.xcp_stats[xcp_index].jpeg_busy,
-                                gpu_metrics.xcp_stats[xcp_index].jpeg_busy,
-                                sizeof(gpu_metrics.xcp_stats[xcp_index].jpeg_busy));
-                }
-                if(xcp.vcn_busy.any())
-                {
-                    std::memcpy(metrics.xcp_stats[xcp_index].vcn_busy,
-                                gpu_metrics.xcp_stats[xcp_index].vcn_busy,
-                                sizeof(gpu_metrics.xcp_stats[xcp_index].vcn_busy));
-                }
-                xcp_index++;
-            });
+        if(m_supported_metrics.bits.vcn_activity)
+        {
+            std::for_each(
+                std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
+                [&, xcp_index = 0](const amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
+                    std::memcpy(metrics.xcp_stats[xcp_index++].vcn_busy,
+                                xcp_stats.vcn_busy, sizeof(xcp_stats.vcn_busy));
+                });
+        }
+
+        if(m_supported_metrics.bits.jpeg_activity)
+        {
+            std::for_each(
+                std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
+                [&, xcp_index = 0](const amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
+                    std::memcpy(metrics.xcp_stats[xcp_index++].jpeg_busy,
+                                xcp_stats.jpeg_busy, sizeof(xcp_stats.jpeg_busy));
+                });
+        }
 
         return metrics;
     }
@@ -208,37 +162,28 @@ struct processor
 
         // Power metrics
         std::cout << "  " << std::setw(25) << "current_socket_power"
-                  << ": " << (bool) metrics.current_socket_power << '\n';
+                  << ": " << (bool) metrics.bits.current_socket_power << '\n';
         std::cout << "  " << std::setw(25) << "average_socket_power"
-                  << ": " << (bool) metrics.average_socket_power << '\n';
+                  << ": " << (bool) metrics.bits.average_socket_power << '\n';
 
         // Memory and thermal metrics
         std::cout << "  " << std::setw(25) << "memory_usage"
-                  << ": " << (bool) metrics.memory_usage << '\n';
+                  << ": " << (bool) metrics.bits.memory_usage << '\n';
         std::cout << "  " << std::setw(25) << "edge temperature"
-                  << ": " << (bool) metrics.edge_temperature << '\n';
+                  << ": " << (bool) metrics.bits.edge_temperature << '\n';
         std::cout << "  " << std::setw(25) << "hotspot temperature"
-                  << ": " << (bool) metrics.hotspot_temperature << '\n';
+                  << ": " << (bool) metrics.bits.hotspot_temperature << '\n';
 
         std::cout << "  " << std::setw(25) << "gfx_activity"
-                  << ": " << (bool) metrics.gfx_activity << '\n';
+                  << ": " << (bool) metrics.bits.gfx_activity << '\n';
         std::cout << "  " << std::setw(25) << "umc_activity"
-                  << ": " << (bool) metrics.umc_activity << '\n';
+                  << ": " << (bool) metrics.bits.umc_activity << '\n';
         std::cout << "  " << std::setw(25) << "mm_activity"
-                  << ": " << (bool) metrics.mm_activity << '\n';
-        std::for_each(std::begin(metrics.xcp_metrics), std::end(metrics.xcp_metrics),
-                      [index = 0](const auto& xcp_metircs) mutable {
-                          std::cout
-                              << "  " << std::setw(25)
-                              << "[" + std::to_string(index) + "] vcn_activity" << ": "
-                              << bitset_to_index_list(xcp_metircs.vcn_activity) << '\n';
-                          std::cout
-                              << "  " << std::setw(25)
-                              << "[" + std::to_string(index) + "] jpeg_activity" << ": "
-                              << bitset_to_index_list(xcp_metircs.jpeg_activity) << '\n';
-                          index++;
-                      });
-
+                  << ": " << (bool) metrics.bits.mm_activity << '\n';
+        std::cout << "  " << std::setw(25) << "vcn_activity"
+                  << ": " << (bool) metrics.bits.mm_activity << '\n';
+        std::cout << "  " << std::setw(25) << "jpeg_activity"
+                  << ": " << (bool) metrics.bits.mm_activity << '\n';
         std::cout << "=========================" << std::endl;
     }
 
@@ -268,10 +213,10 @@ private:
         auto                driver_call_result_success =
             m_driver_api->get_power_info(m_processor_handle, &socker_power_info) ==
             AMDSMI_STATUS_SUCCESS;
-        m_supported_metrics.average_socket_power =
+        m_supported_metrics.bits.average_socket_power =
             driver_call_result_success &&
             socker_power_info.average_socket_power != metric_value_not_supported;
-        m_supported_metrics.current_socket_power =
+        m_supported_metrics.bits.current_socket_power =
             driver_call_result_success &&
             socker_power_info.current_socket_power != metric_value_not_supported;
 
@@ -279,59 +224,60 @@ private:
         driver_call_result_success =
             m_driver_api->get_activity(m_processor_handle, &info) ==
             AMDSMI_STATUS_SUCCESS;
-        m_supported_metrics.gfx_activity =
+        m_supported_metrics.bits.gfx_activity =
             driver_call_result_success && info.gfx_activity != metric_value_not_supported;
-        m_supported_metrics.mm_activity  = driver_call_result_success;
-        m_supported_metrics.umc_activity = driver_call_result_success;
+        m_supported_metrics.bits.mm_activity  = driver_call_result_success;
+        m_supported_metrics.bits.umc_activity = driver_call_result_success;
 
         uint64_t memory_usage;
         driver_call_result_success =
             m_driver_api->get_memory_usage(m_processor_handle, AMDSMI_MEM_TYPE_VRAM,
                                            &memory_usage) == AMDSMI_STATUS_SUCCESS;
-        m_supported_metrics.memory_usage = driver_call_result_success;
+        m_supported_metrics.bits.memory_usage = driver_call_result_success;
 
         int64_t temperature;
         driver_call_result_success =
             m_driver_api->get_temperature_metric(
                 m_processor_handle, AMDSMI_TEMPERATURE_TYPE_HOTSPOT, AMDSMI_TEMP_CURRENT,
                 &temperature) == AMDSMI_STATUS_SUCCESS;
-        m_supported_metrics.hotspot_temperature =
+        m_supported_metrics.bits.hotspot_temperature =
             driver_call_result_success && temperature != metric_value_not_supported;
 
         driver_call_result_success =
             m_driver_api->get_temperature_metric(
                 m_processor_handle, AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_CURRENT,
                 &temperature) == AMDSMI_STATUS_SUCCESS;
-        m_supported_metrics.edge_temperature =
+        m_supported_metrics.bits.edge_temperature =
             driver_call_result_success && temperature != metric_value_not_supported;
 
         amdsmi_gpu_metrics_t gpu_metrics;
         driver_call_result_success =
             m_driver_api->get_metrics_info(m_processor_handle, &gpu_metrics) ==
             AMDSMI_STATUS_SUCCESS;
-        std::for_each(
+        m_supported_metrics.bits.vcn_activity = std::any_of(
             std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
-            [&, xcp_index = 0](const amdsmi_gpu_xcp_metrics_t& xcp_stats) mutable {
-                std::for_each(
+            [driver_call_result_success](const amdsmi_gpu_xcp_metrics_t& xcp_stats) {
+                return std::any_of(std::begin(xcp_stats.vcn_busy),
+                                   std::end(xcp_stats.vcn_busy),
+                                   [driver_call_result_success](const auto& vcn_busy) {
+                                       return driver_call_result_success &&
+                                              vcn_busy != metric_value_not_supported;
+                                   });
+            });
+        m_supported_metrics.bits.jpeg_activity = std::any_of(
+            std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
+            [driver_call_result_success](const amdsmi_gpu_xcp_metrics_t& xcp_stats) {
+                return std::any_of(
                     std::begin(xcp_stats.jpeg_busy), std::end(xcp_stats.jpeg_busy),
-                    [&, index = 0](const auto& engine_busy_value) mutable {
-                        m_supported_metrics.xcp_metrics[xcp_index].jpeg_busy[index++] =
-                            driver_call_result_success &&
-                            engine_busy_value != metric_value_not_supported;
+                    [driver_call_result_success](const auto& jpeg_activity) {
+                        return driver_call_result_success &&
+                               jpeg_activity != metric_value_not_supported;
                     });
-                std::for_each(
-                    std::begin(xcp_stats.vcn_busy), std::end(xcp_stats.vcn_busy),
-                    [&, index = 0](const auto& engine_busy_value) mutable {
-                        m_supported_metrics.xcp_metrics[xcp_index].vcn_busy[index++] =
-                            driver_call_result_success &&
-                            engine_busy_value != metric_value_not_supported;
-                    });
-                xcp_index++;
             });
     }
 
 private:
-    supported_metrics       m_supported_metrics;
+    smi_metric_options      m_supported_metrics{};
     std::shared_ptr<driver> m_driver_api;
     amdsmi_processor_handle m_processor_handle;
     processor_type_t        m_processor_type;

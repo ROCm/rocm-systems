@@ -4,26 +4,27 @@ find_package(PkgConfig REQUIRED)
 set(smi_tests_source 
     ${CMAKE_CURRENT_SOURCE_DIR}/amd_smi/service_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/amd_smi/processor_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/amd_smi/amd_smi_tests.cpp
 )
 
 add_executable(library-unit-tests ${smi_tests_source})
-target_compile_options(library-unit-tests PRIVATE --coverage)
-target_link_libraries(library-unit-tests PRIVATE --coverage)
 target_link_libraries(
     library-unit-tests PRIVATE 
-        rocprofiler-systems::rocprofiler-systems-headers
-        rocprofiler-systems::rocprofiler-systems-common-library
-        rocprofiler-systems::rocprofiler-systems-core
-        GTest::gtest GTest::gtest_main GTest::gmock
-        amd-smi::amd-smi
+    rocprofiler-systems::rocprofiler-systems-common-library
+    rocprofiler-systems::rocprofiler-systems-core
+    rocprofiler-systems::rocprofiler-systems-headers
+    rocprofiler-systems::rocprofiler-systems-interface-library
+    rocprofiler-systems::rocprofiler-systems-binary
+    GTest::gtest 
+    GTest::gtest_main 
+    GTest::gmock
+    amd-smi::amd-smi
 )
-# target_include_directories(library-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
 # Set test output directory
 set_target_properties(library-unit-tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/bin
 )
-
 
 include(GoogleTest)
 gtest_discover_tests(library-unit-tests
