@@ -48,6 +48,14 @@ jobs:
           # MI325
           - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
           - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
+        exclude:
+          - if: ${{ github.event_name == 'pull_request' || github.event_name == 'push'}}
+            system:
+              # MI355
+              - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
+              # MI325
+              - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
+              - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
     runs-on: ${{ matrix.system.runner }}
     env:
       HIP_PLATFORM: "amd"
@@ -122,6 +130,7 @@ jobs:
           echo "✅ ROCm Installation Complete!"
 
       - name: Configure, Build, and Test
+        id: run_ci
         timeout-minutes: 30
         working-directory: projects/rocprofiler-systems
         run: |
@@ -152,3 +161,10 @@ jobs:
             -- \
             -L "rocm|network" \
             -LE "rccl|runtime|ompvv"
+
+      - name: Output Logs
+        if: failure() && steps.run_ci.outcome == 'failure'
+        working-directory: projects/rocprofiler-systems
+        run: |
+          echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
+          cat build/Testing/Temporary/LastTest*.log
