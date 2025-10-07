@@ -39,7 +39,7 @@ jobs:
   prepare_matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix_data: ${{ steps.generate_matrix.outputs.matrix }}
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
       - uses: actions/checkout@v5
@@ -81,6 +81,7 @@ jobs:
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
+        
     steps:
       - uses: actions/checkout@v5
         with:
