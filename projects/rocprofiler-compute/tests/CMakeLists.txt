@@ -1,4 +1,21 @@
-set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
+# Replace line 1 with this:
+find_program(
+    AMD_CLANG_COMPILER
+    NAMES amdclang++
+    PATHS /opt/rocm/bin /opt/rocm/llvm/bin /usr/bin
+    NO_DEFAULT_PATH
+)
+
+if(AMD_CLANG_COMPILER)
+    set(CMAKE_HIP_COMPILER
+        ${AMD_CLANG_COMPILER}
+        CACHE STRING
+        "desired c++ compiler"
+        FORCE
+    )
+else()
+    message(FATAL_ERROR "amdclang++ compiler not found in expected locations")
+endif()
 
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
