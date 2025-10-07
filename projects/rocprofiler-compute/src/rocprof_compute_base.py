@@ -52,9 +52,9 @@ from utils.utils import (
     get_submodules,
     get_version,
     get_version_display,
+    load_yaml,
     parse_sets_yaml,
     set_locale_encoding,
-    load_yaml,
 )
 
 
