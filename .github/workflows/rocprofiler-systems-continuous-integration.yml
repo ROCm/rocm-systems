@@ -59,6 +59,7 @@ jobs:
 
   ubuntu:
     name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
+    needs: prepare_matrix
     strategy:
       fail-fast: false
       matrix:
