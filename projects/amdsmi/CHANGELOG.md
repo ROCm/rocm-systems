@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `GPU LINK PORT STATUS` table to `amd-smi xgmi` command**.  
+  - The `amd-smi xgmi -s` or `amd-smi xgmi --source-status` will show `GPU LINK PORT STATUS` table.  
+
 - **Added the following API's to amdsmi_interface.py**.  
   - amdsmi_get_cpu_handle()
   - amdsmi_get_esmi_err_msg()

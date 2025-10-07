@@ -6388,13 +6388,14 @@ class AMDSMICommands():
             self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
 
-    def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_link_status=None):
+    def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_source_status=None, xgmi_link_status=None):
         """ Get topology information for target gpus
             params:
                 args - argparser args to pass to subcommand
                 multiple_devices (bool) - True if checking for multiple devices
                 gpu (device_handle) - device_handle for target device
                 metric (bool) - Value override for args.metric
+                xgmi_source_status (bool) - Value override for args.xgmi_source_status
                 xgmi_link_status (bool) - Value override for args.xgmi_link_status
 
             return:
@@ -6409,6 +6410,8 @@ class AMDSMICommands():
             args.metric = metric
         if xgmi_link_status:
             args.link_status = xgmi_link_status
+        if xgmi_source_status:
+            args.source_status = xgmi_source_status
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -6418,9 +6421,10 @@ class AMDSMICommands():
             args.gpu = [args.gpu]
 
         # Handle all args being false
-        if not any([args.metric, args.link_status]):
+        if not any([args.metric, args.link_status, args.source_status]):
             args.metric = True
             args.link_status = True
+            args.source_status = True
 
         # Clear the table header
         self.logger.table_header = ''.rjust(7)
@@ -6443,8 +6447,16 @@ class AMDSMICommands():
             xgmi_values.append({"gpu" : gpu_id,
                                 "bdf" : gpu_bdf})
             # Populate header with just bdfs
-            self.logger.table_header += gpu_bdf.rjust(13)
+            self.logger.table_header += f"GPU{gpu_id}".rjust(13)
 
+        # Cache processor handles for each BDF
+        src_gpu_handles = {}
+        for dict in xgmi_values:
+            try:
+                src_gpu_handles[dict['bdf']] = amdsmi_interface.amdsmi_get_processor_handle_from_bdf(dict['bdf'])
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get processor handle for %s | %s", dict['bdf'], e.get_error_info())
+                src_gpu_handles[dict['bdf']] = None
         if args.metric:
             # prepend link metrics header to the table header
             link_metrics_header = "       " + "bdf".ljust(14) + \
@@ -6456,7 +6468,7 @@ class AMDSMICommands():
             for xgmi_dict in xgmi_values:
                 src_gpu_id = xgmi_dict['gpu']
                 src_gpu_bdf = xgmi_dict['bdf']
-                src_gpu = amdsmi_interface.amdsmi_get_processor_handle_from_bdf(src_gpu_bdf)
+                src_gpu = src_gpu_handles.get(src_gpu_bdf)
                 logging.debug("check2 device_handle: %s", src_gpu)
                 # This should be the same order as the check1
 
@@ -6596,24 +6608,24 @@ class AMDSMICommands():
 
         if self.logger.is_json_format():
             self.logger.store_xgmi_metric_json_output.append(xgmi_values)
-            if not args.link_status:
+            if not any([args.link_status, args.source_status]):
                 self.logger.combine_arrays_to_json()
         elif not self.logger.is_human_readable_format():
             self.logger.print_output(multiple_device_enabled=True)
 
-        if args.link_status:
+        if args.source_status:
             # Header modification
             self.logger.table_header = ''.rjust(7)
             current_header = "     ".ljust(7) + \
                              "bdf".ljust(14) + \
-                             "link_status".ljust(20)
+                             "port_num".ljust(20)
             self.logger.table_header = current_header + self.logger.table_header.strip()
             # Process each GPU
             tabular_output = []
             for xgmi_dict in xgmi_values:
                 src_gpu_id = xgmi_dict['gpu']
                 src_gpu_bdf = xgmi_dict['bdf']
-                src_gpu = amdsmi_interface.amdsmi_get_processor_handle_from_bdf(src_gpu_bdf)
+                src_gpu = src_gpu_handles.get(src_gpu_bdf)
 
                 # Populate link statuses
                 status_row = []
@@ -6639,14 +6651,81 @@ class AMDSMICommands():
                 if self.logger.is_human_readable_format():
                     xgmi_dict['link_status'] = tabular_output
             self.logger.multiple_device_output= tabular_output
-            self.logger.table_title = "\nXGMI LINK STATUS"
+            self.logger.table_title = "\nGPU LINK PORT STATUS"
             if not self.logger.is_json_format():
                 self.logger.print_output(multiple_device_enabled=True, tabular=True)
             self.logger.clear_multiple_devices_output()
             if self.logger.is_json_format():
                 self.logger.combine_arrays_to_json()
+
+        if args.link_status:
+            # XGMI LINK STATUS for src_gpu to dest_gpu
+            header = ["       ".ljust(8), "bdf".ljust(15)] + [f"GPU{d['gpu']}".ljust(14) for d in xgmi_values]
+            self.logger.table_header = "".join(header)
+            self.logger.table_title = "\nXGMI LINK STATUS"
+
+            src_link_status_map = {}
+            for gpu_dict in xgmi_values:
+                src_gpu_id = gpu_dict['gpu']
+                src_gpu_bdf = gpu_dict['bdf']
+                src_gpu = src_gpu_handles.get(src_gpu_bdf)
+                try:
+                    link_status = amdsmi_interface.amdsmi_get_gpu_xgmi_link_status(src_gpu)
+                    src_link_status_map[src_gpu_bdf] = link_status['status']
+                except amdsmi_exception.AmdSmiLibraryException:
+                    src_link_status_map[src_gpu_bdf] = ["N/A"] * amdsmi_interface.AMDSMI_MAX_NUM_XGMI_LINKS
+
+            tabular_output = []
+            for src_xgmi_dict in xgmi_values:
+                src_gpu_id = src_xgmi_dict['gpu']
+                src_gpu_bdf = src_xgmi_dict['bdf']
+                src_gpu = src_gpu_handles.get(src_gpu_bdf)
+                try:
+                    xgmi_metrics_info = amdsmi_interface.amdsmi_get_link_metrics(src_gpu)
+                except amdsmi_exception.AmdSmiLibraryException:
+                    xgmi_metrics_info = {"links": []}
+                # First column: GPU# + tab + bdf, then status for each dest bdf
+                row_dict = {"": f"GPU{src_gpu_id}\t{src_gpu_bdf}".ljust(20)}
+                # Cache GPU handles for destination GPUs
+                dest_gpu_handles = {dest_xgmi_dict['bdf']:
+                                    amdsmi_interface.amdsmi_get_processor_handle_from_bdf(dest_xgmi_dict['bdf'])
+                                    for dest_xgmi_dict in xgmi_values}
+                for dest_xgmi_dict in xgmi_values:
+                    dest_gpu_bdf = dest_xgmi_dict['bdf']
+                    dest_gpu = dest_gpu_handles[dest_gpu_bdf]
+
+                    # Find all link indexes in xgmi_metrics_info for this destination
+                    link_indexes = []
+                    for idx, link in enumerate(xgmi_metrics_info['links']):
+                        if link['bdf'] == dest_gpu_bdf:
+                            link_indexes.append(idx)
+
+                    # Use the found link index to get the status if valid
+                    if link_indexes and len(link_indexes) <= len(src_link_status_map.get(src_gpu_bdf, [])):
+                        statuses = []
+                        for link_idx in link_indexes:
+                            if link_idx < len(src_link_status_map[src_gpu_bdf]):
+                                statuses.append(str(src_link_status_map[src_gpu_bdf][link_idx]))
+
+                        # Join multiple statuses with "/"
+                        if statuses:
+                            status = "/".join(statuses)
+                        else:
+                            status = "N/A"
+                    elif dest_gpu_bdf == src_gpu_bdf:
+                        status = "SELF"
+                    else:
+                        status = "N/A"
+
+                    row_dict[dest_gpu_bdf.ljust(14)] = str(status).ljust(14)
+                tabular_output.append(row_dict)
+
+            self.logger.multiple_device_output = tabular_output
+            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            self.logger.clear_multiple_devices_output()
+
             if self.logger.is_human_readable_format():
-            # Populate the legend output
+                # Populate the legend output
                 legend_parts = [
                     "\n\nLegend:",
                     "  SELF = Current GPU",
