@@ -48,8 +48,8 @@ parameters of the respective block name.
 
 */
 
-#include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
+#include <hip/hiprtc.h>
 #include <picojson.h>
 #include <vector>
 #include <string>
