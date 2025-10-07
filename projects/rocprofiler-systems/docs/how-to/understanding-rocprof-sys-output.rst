@@ -319,6 +319,8 @@ set ``ROCPROFSYS_OUTPUT_PREFIX="%argt%-"``, and let ROCm Systems Profiler cleanl
    an ``%arg0%`` of ``/usr/bin/foo`` translates to ``usr_bin_foo``. Additionally, any ``%arg<N>%`` keys which
    do not have a command line argument at position ``<N>`` are ignored.
 
+.. _rocprof_sys_rocpd_output:
+
 ROCm Profiling Data (rocpd) output
 =========================================
 
