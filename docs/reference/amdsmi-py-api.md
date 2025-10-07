@@ -29,6 +29,11 @@ Output: `None`
 Exceptions that can be thrown by `amdsmi_init` function:
 
 * `AmdSmiLibraryException`
+* `AmdSmiTimeoutException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
 
 Initialize GPUs only example:
 
@@ -75,6 +80,11 @@ Output: `None`
 Exceptions that can be thrown by `amdsmi_shut_down` function:
 
 * `AmdSmiLibraryException`
+* `AmdSmiTimeoutException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
 
 Example:
 
@@ -99,6 +109,12 @@ Exceptions that can be thrown by `amdsmi_get_processor_type` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+
 Example:
 
 ```python
@@ -121,6 +137,14 @@ Output: List of GPU device handle objects
 Exceptions that can be thrown by `amdsmi_get_processor_handles` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_INIT - Device not initialized"
+"AMDSMI_STATUS_DRIVER_NOT_LOADED - Driver not loaded"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
 
 Example:
 
@@ -175,6 +199,13 @@ Exceptions that can be thrown by `amdsmi_get_socket_info` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -206,7 +237,14 @@ Output: device handle object
 Exceptions that can be thrown by `amdsmi_get_processor_handle_from_bdf` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiParameterException`
+* `AmdSmiBdfFormatException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -239,6 +277,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_bdf` function:
 * `AmdSmiParameterException`
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -263,6 +309,13 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_uuid` function:
 
 * `AmdSmiParameterException`
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -296,6 +349,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_enumeration_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+
 Example:
 
 ```python
@@ -332,6 +393,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 
 * `AmdSmiParameterException`
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_DRIVER_NOT_LOADED - Driver not loaded"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
 
 Example:
 
@@ -370,6 +439,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_FILE_ERROR - Problem accessing a file"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+
 Example:
 
 ```python
@@ -405,6 +483,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_kfd_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+
 Example:
 
 ```python
@@ -443,6 +530,14 @@ Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+
 Example:
 
 ```python
@@ -483,6 +578,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+
 Example:
 
 ```python
@@ -523,6 +626,12 @@ Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_BUSY - Processor busy"
+
 Example:
 
 ```python
@@ -556,6 +665,11 @@ Exceptions that can be thrown by `amdsmi_get_gpu_revision` function:
 
 * `AmdSmiLibraryException` If the processor handle is invalid.
 * `AmdSmiParameterException` If the underlying library call fails.
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
 
 Example:
 
@@ -611,6 +725,11 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cache_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -653,6 +772,13 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vbios_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_FILE_ERROR - Problem accessing a file"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -690,6 +816,15 @@ Exceptions that can be thrown by `amdsmi_get_fw_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
+
 Example:
 
 ```python
@@ -729,6 +864,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_activity` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -771,6 +914,13 @@ Exceptions that can be thrown by `amdsmi_get_power_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -810,6 +960,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_usage` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -878,6 +1036,13 @@ Exceptions that can be thrown by `amdsmi_get_violation_status` function:
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
 * `AmdSmiTimeoutException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -960,6 +1125,14 @@ Exceptions that can be thrown by `amdsmi_get_clock_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -999,6 +1172,14 @@ Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1037,6 +1218,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1074,6 +1263,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_threshold` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1111,6 +1308,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_reserved_pages` function
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1157,6 +1362,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -1201,6 +1415,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_total_ecc_count` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1260,6 +1482,12 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+"AMDSMI_STATUS_FILE_NOT_FOUND - File or directory not found"
+"AMDSMI_STATUS_FILE_ERROR - Problem accessing a file"
+
 Example:
 
 ```python
@@ -1289,11 +1517,13 @@ Output: Tuple[List[int], int]: A tuple containing:
 Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 
 * `AmdSmiParameterException`
-* `AmdSmiLibraryException` with these possible error codes:
-    AMDSMI_STATUS_INVAL
-    AMDSMI_STATUS_UNEXPECTED_SIZE
-    AMDSMI_STATUS_UNEXPECTED_DATA
-    AMDSMI_STATUS_NOT_SUPPORTED
+* `AmdSmiLibraryException` 
+
+#### Possible Library Exceptions
+    "AMDSMI_STATUS_INVAL - Invalid parameters"
+    "AMDSMI_STATUS_UNEXPECTED_SIZE - unexpected size of data was read"
+    "AMDSMI_STATUS_UNEXPECTED_DATA - The data read or provided was unexpected"
+    "AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
 
 Example 1: Using a single CPER record as bytes
 
@@ -1350,6 +1580,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ras_feature_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1404,6 +1642,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ras_block_features_enabled` fun
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_API_FAILED - API call failed"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1515,6 +1762,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_pci_bandwidth` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1547,6 +1803,15 @@ Exceptions that can be thrown by `amdsmi_set_power_cap` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -1579,6 +1844,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_power_profile` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -1612,6 +1886,14 @@ Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1652,6 +1934,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_bdf_id` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1695,6 +1985,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pci_bandwidth` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1730,6 +2028,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pci_throughput` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1760,6 +2066,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pci_replay_counter` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1789,6 +2103,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_topo_numa_affinity` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NOT_FOUND - Device Not found"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1827,6 +2150,14 @@ Exceptions that can be thrown by `amdsmi_get_energy_count` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -1857,6 +2188,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_total` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1895,6 +2234,14 @@ Exceptions that can be thrown by `amdsmi_set_gpu_od_clk_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1929,6 +2276,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_usage` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_FILE_ERROR - Problem accessing a file"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1966,6 +2322,14 @@ Exceptions that can be thrown by `amdsmi_set_gpu_od_volt_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -1997,6 +2361,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_fan_rpms` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2029,6 +2401,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2061,6 +2441,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed_max` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2090,6 +2478,14 @@ Exceptions that can be thrown by `amdsmi_is_gpu_power_management_enabled` functi
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2123,6 +2519,14 @@ Exceptions that can be thrown by `amdsmi_get_temp_metric` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2159,6 +2563,13 @@ Exceptions that can be thrown by `amdsmi_get_gpu_volt_metric` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -2199,6 +2610,14 @@ Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2242,6 +2661,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_perf_level` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2273,6 +2700,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_perf_determinism_mode` function
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -2301,6 +2737,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_isolation` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -2331,6 +2776,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_process_isolation` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -2359,6 +2813,15 @@ Exceptions that can be thrown by `amdsmi_clean_gpu_local_data` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -2388,6 +2851,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_overdrive_level` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2418,6 +2889,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_mem_overdrive_level` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2455,6 +2934,14 @@ Exceptions that can be thrown by `amdsmi_get_clk_freq` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2494,6 +2981,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2584,6 +3079,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2618,6 +3121,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pm_metrics_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2652,6 +3163,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_reg_table_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2687,6 +3206,16 @@ Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_curve_regions` function
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_UNEXPECTED_SIZE - unexpected size of data was read"
+"AMDSMI_STATUS_UNEXPECTED_DATA - The data read or provided was unexpected"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2723,6 +3252,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_power_profile_presets` function
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2753,6 +3290,14 @@ Exceptions that can be thrown by `amdsmi_gpu_counter_group_supported` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2782,6 +3327,14 @@ Exceptions that can be thrown by `amdsmi_gpu_create_counter` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -2810,6 +3363,14 @@ Exceptions that can be thrown by `amdsmi_gpu_destroy_counter` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2841,6 +3402,14 @@ Exceptions that can be thrown by `amdsmi_gpu_control_counter` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2876,6 +3445,14 @@ Exceptions that can be thrown by `amdsmi_gpu_read_counter` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2907,6 +3484,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_available_counters` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2938,6 +3523,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_perf_level` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -2967,6 +3561,11 @@ Exceptions that can be thrown by `amdsmi_reset_gpu` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -2998,6 +3597,12 @@ Exceptions that can be thrown by `amdsmi_set_gpu_fan_speed` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -3028,6 +3633,11 @@ Exceptions that can be thrown by `amdsmi_reset_gpu_fan` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3062,6 +3672,13 @@ Exceptions that can be thrown by `amdsmi_set_clk_freq` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3098,6 +3715,13 @@ Exceptions that can be thrown by `amdsmi_get_soc_pstate` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_INIT - Device not initialized"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+
 Example:
 
 ```python
@@ -3128,6 +3752,15 @@ Exceptions that can be thrown by `amdsmi_set_soc_pstate` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -3157,6 +3790,15 @@ Exceptions that can be thrown by `amdsmi_set_xgmi_plpd` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -3191,6 +3833,14 @@ Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3223,6 +3873,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_overdrive_level` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -3263,6 +3922,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ecc_count` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3297,6 +3964,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ecc_enabled` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3332,6 +4007,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ecc_status` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3360,6 +4043,11 @@ Output: String description of the provided error code
 Exceptions that can be thrown by `amdsmi_status_code_to_string` function:
 
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -3391,6 +4079,15 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INSUFFICIENT_SIZE - Insufficient size for operation"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3425,6 +4122,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` fu
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_FOUND - Device Not found"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3450,6 +4156,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_NOT_FOUND - Device Not found"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3476,6 +4191,14 @@ Exceptions that can be thrown by `amdsmi_gpu_xgmi_error_status` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3506,6 +4229,15 @@ Exceptions that can be thrown by `amdsmi_reset_gpu_xgmi_error` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+
 Example:
 
 ```python
@@ -3534,6 +4266,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vendor_name` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3563,6 +4303,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_id` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3592,6 +4340,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3621,6 +4377,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_id` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3650,6 +4414,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_name` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3679,6 +4451,14 @@ Exceptions that can be thrown by `amdsmi_topo_get_numa_node_number` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3709,6 +4489,14 @@ Exceptions that can be thrown by `amdsmi_topo_get_link_weight` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3745,6 +4533,14 @@ Exceptions that can be thrown by `amdsmi_get_minmax_bandwidth_between_processors
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3787,6 +4583,13 @@ Exceptions that can be thrown by `amdsmi_get_link_metrics` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -3836,6 +4639,14 @@ Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3882,6 +4693,7 @@ Exceptions that can be thrown by `amdsmi_get_P2P_status` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
 Example:
 
 ```python
@@ -3923,6 +4735,14 @@ Exceptions that can be thrown by `amdsmi_is_P2P_accessible` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -3953,6 +4773,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+"AMDSMI_COMPUTE_PARTITION_INVALID - Invalid compute partition type"
+
 Example:
 
 ```python
@@ -3983,6 +4812,16 @@ Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+"AMDSMI_STATUS_SETTING_UNAVAILABLE - Setting is not available"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4013,6 +4852,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4043,6 +4890,15 @@ Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_NO_PERM - Permission Denied"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4079,6 +4935,14 @@ Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` 
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4115,6 +4979,14 @@ Exceptions that can be thrown by `amdsmi_get_xgmi_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4149,6 +5021,13 @@ Output: Dictionary holding the following fields.
 Exceptions that can be thrown by `amdsmi_get_link_topology_nearest` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4202,6 +5081,13 @@ Exceptions that can be thrown by `amdsmi_get_gpu_virtualization_mode` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4233,6 +5119,11 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_FOUND - Device Not found"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+
 Example:
 
 ```python
@@ -4265,6 +5156,13 @@ Exceptions that can be thrown by `amdsmi_get_processor_info` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4288,6 +5186,13 @@ Output: amdsmi hsmp protocol version
 Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_proto_ver` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4314,6 +5219,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4333,6 +5245,13 @@ Output: amdsmi HSMP Driver version
 Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_driver_version` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4359,6 +5278,13 @@ Output: amdsmi SMU Firmware version
 Exceptions that can be thrown by `amdsmi_get_cpu_smu_fw_version` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4387,6 +5313,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_prochot_status` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4411,6 +5344,13 @@ Output: amdsmi data fabric clock and memory clock
 Exceptions that can be thrown by `amdsmi_get_cpu_fclk_mclk` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4439,6 +5379,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_cclk_limit` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4464,6 +5411,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_current_active_freq_limi
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4482,6 +5436,11 @@ except AmdSmiException as e:
 ```
 
 ### amdsmi_get_cpu_socket_freq_range
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Description: Get socket frequency range
 
@@ -4490,6 +5449,9 @@ Output: amdsmi maximum frequency and minimum frequency
 Exceptions that can be thrown by `amdsmi_get_cpu_socket_freq_range` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
 
 Example:
 
@@ -4518,6 +5480,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_core_current_freq_limit` functi
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4542,6 +5511,13 @@ Output: amdsmi socket power
 Exceptions that can be thrown by `amdsmi_get_cpu_socket_power` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4568,6 +5544,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_power_cap` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4592,6 +5575,13 @@ Output: amdsmi socket power cap max
 Exceptions that can be thrown by `amdsmi_get_cpu_socket_power_cap_max` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4618,6 +5608,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_pwr_svi_telemetry_all_rails` fu
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4643,6 +5640,13 @@ Exceptions that can be thrown by `amdsmi_set_cpu_socket_power_cap` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4667,6 +5671,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_pwr_efficiency_mode` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4690,6 +5698,13 @@ Output: amdsmi frequency
 Exceptions that can be thrown by `amdsmi_get_cpu_core_boostlimit` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4716,6 +5731,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_c0_residency` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4741,6 +5763,13 @@ Exceptions that can be thrown by `amdsmi_set_cpu_core_boostlimit` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4765,6 +5794,13 @@ Exceptions that can be thrown by `amdsmi_set_cpu_socket_boostlimit` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4788,6 +5824,13 @@ Output: amdsmi ddr bandwidth data
 Exceptions that can be thrown by `amdsmi_get_cpu_ddr_bw` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4816,6 +5859,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_temperature` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4840,6 +5890,13 @@ Output: amdsmi dimm metric data
 Exceptions that can be thrown by `amdsmi_get_cpu_dimm_temp_range_and_refresh_rate` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4867,6 +5924,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_dimm_power_consumption` functio
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4893,6 +5957,13 @@ Output: amdsmi dimm temperature data
 Exceptions that can be thrown by `amdsmi_get_cpu_dimm_thermal_sensor` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4922,6 +5993,13 @@ Exceptions that can be thrown by `amdsmi_set_cpu_xgmi_width` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4945,6 +6023,13 @@ Input: minimum & maximum link width to be set.
 Exceptions that can be thrown by `amdsmi_set_cpu_gmi3_link_width_range` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -4970,6 +6055,13 @@ Exceptions that can be thrown by `amdsmi_cpu_apb_enable` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -4993,6 +6085,13 @@ Input: pstate value
 Exceptions that can be thrown by `amdsmi_cpu_apb_disable` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -5018,6 +6117,13 @@ Exceptions that can be thrown by `amdsmi_set_cpu_socket_lclk_dpm_level` function
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5041,6 +6147,13 @@ Output: nbio id
 Exceptions that can be thrown by `amdsmi_get_cpu_socket_lclk_dpm_level` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -5068,6 +6181,13 @@ Exceptions that can be thrown by `amdsmi_set_cpu_pcie_link_rate` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5091,6 +6211,13 @@ Input: max pstate, min pstate
 Exceptions that can be thrown by `amdsmi_set_cpu_df_pstate_range` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -5117,6 +6244,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_current_io_bandwidth` function:
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5141,6 +6275,10 @@ Output: amdsmi link id and bw type to which xgmi bandwidth to be obtained
 Exceptions that can be thrown by `amdsmi_get_cpu_current_xgmi_bw` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -5167,6 +6305,13 @@ Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table_version` functio
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5191,6 +6336,13 @@ Output: HSMP metric table data
 Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -5223,6 +6375,13 @@ Exceptions that can be thrown by `amdsmi_first_online_core_on_cpu_socket` functi
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5248,6 +6407,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5268,6 +6434,13 @@ Exceptions that can be thrown by `amdsmi_get_cpu_model` function:
 
 * `AmdSmiLibraryException`
 
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
+
 Example:
 
 ```python
@@ -5287,6 +6460,10 @@ Output: cpu model name
 Exceptions that can be thrown by `amdsmi_get_cpu_model_name` function:
 
 * `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 
@@ -5309,6 +6486,14 @@ Output: amdsmi build version
 Exceptions that can be thrown by `amdsmi_get_lib_version` function:
 
 * `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+"AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+"AMDSMI_STATUS_NOT_YET_IMPLEMENTED - Feature not yet implemented"
+"AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported"
+"AMDSMI_STATUS_INVAL - Invalid parameters"
+"AMDSMI_STATUS_TIMEOUT - Timeout in API call"
 
 Example:
 

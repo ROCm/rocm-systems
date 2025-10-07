@@ -79,7 +79,7 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT : "AMDSMI_STATUS_NOT_INIT - Device not initialized",
             amdsmi_wrapper.AMDSMI_STATUS_NO_SLOT : "AMDSMI_STATUS_NO_SLOT - No more free slot",
             amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED : "AMDSMI_STATUS_DRIVER_NOT_LOADED - Driver not loaded",
-            amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA : "AMDSMI_STATUS_MORE_DATA - More data available",
+            amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA : "AMDSMI_STATUS_MORE_DATA - There is more data than the buffer size the user passed",
             amdsmi_wrapper.AMDSMI_STATUS_NO_DATA : "AMDSMI_STATUS_NO_DATA - No data was found for given input",
             amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE : "AMDSMI_STATUS_INSUFFICIENT_SIZE - Insufficient size for operation",
             amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE : "AMDSMI_STATUS_UNEXPECTED_SIZE - unexpected size of data was read",
