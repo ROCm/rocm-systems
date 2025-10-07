@@ -7,8 +7,6 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree_checkout:
-        type: string
 
 
 permissions:
