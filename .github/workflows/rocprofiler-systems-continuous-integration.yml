@@ -36,26 +36,33 @@ env:
   ROCM_VERSION: "7.0.0"
 
 jobs:
+  prepare_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix.outputs.matrix }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: projects/rocprofiler-systems/.github
+
+      - name: Generate and output matrix
+        id: generate_matrix
+        working-directory: projects/rocprofiler-systems/.github
+        run: |
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-nightly' -I=0 -o=json)
+          else
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ci' -I=0 -o=json)
+          fi
+          echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
+
   ubuntu:
     name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
     strategy:
       fail-fast: false
       matrix:
-        system:
-          # MI355
-          - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
-          - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
-          # MI325
-          - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
-          - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
-        exclude:
-          - system:
-              # MI355
-              - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
-              # MI325
-              - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
-              - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
-            if: ${{ github.event_name == 'pull_request' || github.event_name == 'push'}}
+        system: ${{ fromJSON(needs.prepare_matrix.outputs.matrix) }}
     runs-on: ${{ matrix.system.runner }}
     env:
       HIP_PLATFORM: "amd"
