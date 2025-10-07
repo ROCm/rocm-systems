@@ -156,14 +156,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * MI300A/X L2-Fabric 64B read counter may display negative values - The rocprof-compute metric 17.6.1 (Read 64B) can report negative values due to incorrect calculation when TCC_BUBBLE_sum + TCC_EA0_RDREQ_32B_sum exceeds TCC_EA0_RDREQ_sum.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
-* Kokkos integration for `GFX950` architecture uses GFX942 as Kokkos upstream does not yet support this architecture
-* Real Kokkos builds will automatically fall back to mock implementation when `rocminfo`/`wmic` is not available
 
 ### Upcoming changes
 
-* Kokkos test improvements:
-  * Replace minimal_app with lulesh
-  * Enhance the test to profile with `--kokkos-trace` and `rocpd` output format
 
 ## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 
@@ -216,28 +211,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 #### Kokkos Integration
 
-* Added `--kokkos-trace` option to rocprofiler-compute for comprehensive Kokkos performance profiling
-  * Enables tracing and profiling of Kokkos-based GPU applications
-  * To use: `rocprof-compute profile --kokkos-trace -- ./kokkos_app`
-  
-* **Build System Integration:**
-  * Added `USE_MOCK_KOKKOS` CMake option to control real vs mock Kokkos implementation
-  * Added CMake integration for building Kokkos from source with automatic GPU architecture detection
-  
-* **GPU Architecture Support:**
-  * `GFX908` (AMD Instinct MI100)
-  * `GFX90A` (AMD Instinct MI210, MI250, MI250X)  
-  * `GFX942` (AMD Instinct MI300A, MI300X)
-  * `GFX950` fallback: Uses GFX942 as kokkos doesn't support GFX950
-  
-* **Testing Framework:**
-  * Added Kokkos-specific test framework with `@pytest.mark.kokkos` test markers
-  * Added test suite for both real and mock Kokkos applications
-
-* **Fallback Mechanisms:**
-  * Fallback to mock Kokkos app when `rocminfo` or `wmic` are unavailable
-  * Test configuration to conditionally enable Kokkos tests based on system capabilities
-
+* Added `--kokkos-trace` option to profiling  
+* Added `USE_MOCK_KOKKOS` CMake option to control real vs mock Kokkos implementation
+* Added Kokkos-specific test framework with `@pytest.mark.kokkos` test markers
+* Fallback to mock Kokkos  when `rocminfo` or `wmic` are unavailable
+* Test configuration to conditionally enable Kokkos tests based on system capabilities
 
 #### rocprofv3 support
 
