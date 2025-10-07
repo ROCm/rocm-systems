@@ -1725,17 +1725,16 @@ def test_kokkos_trace_output(binary_handler_profile_rocprof_compute):
     # Set environment variable for mock Kokkos detection
     use_mock_kokkos = os.environ.get("USE_MOCK_KOKKOS", "ON") == "ON"
 
-    kokkos_app_dir = str(
-        Path(__file__).parent.parent / "build" / "kokkos_mock_app_build"
-    )
+    kokkos_app_dir = Path(__file__).parent.parent / "build" / "kokkos_mock_app_build"
+
     num_kernels = 0
     if use_mock_kokkos:
-        kokkos_app = f"{kokkos_app_dir}/mock_kokkos_minimal"
+        kokkos_app = kokkos_app_dir / "mock_kokkos_minimal"
     else:
-        kokkos_app = f"{kokkos_app_dir}/real_kokkos_minimal"
+        kokkos_app = kokkos_app_dir / "real_kokkos_minimal"
 
-    config["app_kokkos"] = [kokkos_app]
-    if not os.path.exists(kokkos_app):
+    config["app_kokkos"] = [str(kokkos_app)]
+    if not kokkos_app.exists():
         print("Kokkos app not found at {}, skipping test".format(kokkos_app))
         pytest.skip("Kokkos app not found, skipping test")
         return
