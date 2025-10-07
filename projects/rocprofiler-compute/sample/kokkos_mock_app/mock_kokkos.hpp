@@ -1,4 +1,30 @@
-// mock_kokkos.hpp
+/*
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+*/
+
 // Mock Kokkos that uses actual HIP GPU kernels for profiling compatibility
 // (C) Minimal educational/CI helper - not a drop-in replacement for Kokkos.
 
@@ -387,8 +413,7 @@ void parallel_for(const Policy &p, const Functor &f) {
 
   void (*kernel_ptr)(Functor, IndexType, IndexType) =
       parallel_for_kernel<Functor, IndexType>;
-  hipLaunchKernelGGL(kernel_ptr, grid_size, block_size, 0, 0, f, p.begin(),
-                     p.end());
+  kernel_ptr<<<grid_size, block_size>>>(f, p.begin(), p.end());
 
   auto result = hipDeviceSynchronize();
   (void)result;
@@ -436,9 +461,8 @@ void parallel_reduce(const Policy &p, const Functor &f, ValueType &result) {
 
   void (*kernel_ptr)(Functor, IndexType, IndexType, ValueType *) =
       parallel_reduce_kernel<Functor, IndexType, ValueType>;
-  hipLaunchKernelGGL(kernel_ptr, grid_size, block_size, 0, 0, f, p.begin(),
-                     p.end(), d_result);
 
+  kernel_ptr<<<grid_size, block_size>>>(f, p.begin(), p.end(), d_result);
   // Copy result back to host
   auto result3 =
       hipMemcpy(&result, d_result, sizeof(ValueType), hipMemcpyDeviceToHost);
