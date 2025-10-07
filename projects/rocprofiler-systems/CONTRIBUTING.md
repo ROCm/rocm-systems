@@ -64,7 +64,7 @@ By creating a pull request, you agree to the statements made in the [code licens
 * Set the original repository URL as the remote upstream using `git remote add upstream https://github.com/ROCm/rocm-systems` (or `git remote set-url upstream https://github.com/ROCm/rocm-systems`)
 * Verify if origin and upstream points correctly with `git remote -v`.
 * Start a new branch for your work: `git checkout -b topic-<yourFeatureName>`
-* Build the project as outlined in [ROCm documentation](https://github.com/ROCm/rocprofiler-systems/blob/develop/docs/install/install.rst#building-and-installing-rocm-systems-profiler#building-rocm-systems-profiler-from-source).
+* Build the project as outlined in [ROCm documentation](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/install/install.rst).
 
 ### Running Tests ###
 
