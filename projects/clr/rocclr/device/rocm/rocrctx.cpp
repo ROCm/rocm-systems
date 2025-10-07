@@ -126,6 +126,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve_align)
   GET_ROCR_SYMBOL(hsa_amd_enable_logging)
   GET_ROCR_SYMBOL(hsa_amd_memory_get_preferred_copy_engine)
+  GET_ROCR_SYMBOL(hsa_amd_ais_file_read)
+  GET_ROCR_SYMBOL(hsa_amd_ais_file_write)
 
   // Image extensions
   GET_ROCR_SYMBOL(hsa_ext_image_data_get_info)
