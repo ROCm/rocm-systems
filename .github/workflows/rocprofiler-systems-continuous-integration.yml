@@ -49,13 +49,13 @@ jobs:
           - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
           - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
         exclude:
-          - if: ${{ github.event_name == 'pull_request' || github.event_name == 'push'}}
-            system:
+          - system:
               # MI355
               - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
               # MI325
               - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
               - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-mi325-1gpu-ossci-rocm' }
+            if: ${{ github.event_name == 'pull_request' || github.event_name == 'push'}}
     runs-on: ${{ matrix.system.runner }}
     env:
       HIP_PLATFORM: "amd"
