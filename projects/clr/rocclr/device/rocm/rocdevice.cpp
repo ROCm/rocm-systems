@@ -1722,6 +1722,40 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   return true;
 }
 
+bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                      uint64_t* size_copied, int32_t* status) {
+  hsa_amd_ais_file_handle_t fh{};
+#if defined(_WIN32)
+  fh.handle = handle;
+#else
+  fh.fd = handle;
+#endif
+  hsa_status_t ret = Hsa::ais_file_read(fh,
+                                        devicePtr, size, file_offset, size_copied, status);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("hsa_amd_ais_file_read operation failed with err 0x%xh", ret);
+    return false;
+  }
+  return true;
+}
+
+bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) {
+  hsa_amd_ais_file_handle_t fh{};
+#if defined(_WIN32)
+  fh.handle = handle;
+#else
+  fh.fd = handle;
+#endif
+  hsa_status_t ret = Hsa::ais_file_write(fh,
+                                         devicePtr, size, file_offset, size_copied, status);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("hsa_amd_ais_file_write operation failed with err 0x%xh", ret);
+    return false;
+  }
+  return true;
+}
+
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                 bool validateOnly) {
 #if defined(_WIN32)
