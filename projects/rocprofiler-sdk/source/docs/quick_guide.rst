@@ -113,6 +113,20 @@ Thread Trace
 
 **Documentation:** :ref:`using-thread-trace`
 
+Process Attachment
+------------------
+
+.. code-block:: bash
+
+   # Attach to a running process by PID
+   rocprofv3 --pid 12345 --runtime-trace -d ./results
+   # or
+
+   # Attach for a specific duration (10 seconds)
+   rocprofv3 --pid 12345 --runtime-trace --attach-duration-msec 1000
+
+**Documentation:** :ref:`using-rocprofv3-process-attachment`
+
 Output Formats and Post-processing
 ===================================
 
