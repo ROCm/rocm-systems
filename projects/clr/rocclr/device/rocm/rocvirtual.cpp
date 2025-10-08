@@ -3912,6 +3912,9 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     if (vcmd.CpuWaitRequested()) {
       // It should be safe to call flush directly if there are not pending dispatches without
       // HSA signal callback
+      if (gpu_queue_ == nullptr) {
+        gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+      }
       flush(vcmd.GetBatchHead());
     } else {
       profilingBegin(vcmd);
