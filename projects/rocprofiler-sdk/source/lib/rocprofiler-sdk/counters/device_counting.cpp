@@ -260,8 +260,28 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
 
     aql::set_profiler_active_on_queue(
         agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-            pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
+            /**
+             * NOTE: Due to a current issue where completion signals for IB Packets are incorrectly set to zero,
+             * we use a barrier packet as a workaround to ensure the completion signal is set at the correct time.
+             * Once this issue is resolved, the barrier packet can be removed and the original code uncommented.
+             */
+            // pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
             submitPacket(callback_data.queue, (void*) &pkt);
+            // constexpr auto timeout_hint =
+            //     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+            // if(hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
+            //                                                      HSA_SIGNAL_CONDITION_EQ,
+            //                                                      0,
+            //                                                      timeout_hint.count(),
+            //                                                      HSA_WAIT_STATE_ACTIVE) != 0)
+            // {
+            //     ROCP_FATAL << "Could not set agent to be profiled";
+            // }
+            // hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+            hsa::rocprofiler_packet barrier{};
+            barrier.barrier_and.header            = header_pkt(HSA_PACKET_TYPE_BARRIER_AND);
+            barrier.barrier_and.completion_signal = callback_data.completion;
+            submitPacket(callback_data.queue, (void*) &barrier);
             constexpr auto timeout_hint =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
             if(hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
