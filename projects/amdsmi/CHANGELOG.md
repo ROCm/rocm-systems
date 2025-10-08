@@ -8,40 +8,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- N/A
-
-### Changed
-
-- N/A
-
-### Removed
-
-- N/A
-
-### Optimized
-
-- **Changed sourcing of BDF to from drm to kfd**.  
-  - Non sudo privliged users were unable to see the BDF due to logical errors.
-
-### Resolved Issues
-
-- N/A
-
-### Upcoming Changes
-
-- N/A
-
-### Known Issues
-
-- N/A
-
-## amd_smi_lib for ROCm 7.1.0
-
-### Added
-
-- **Added `GPU LINK PORT STATUS` table to `amd-smi xgmi` command**.  
-  - The `amd-smi xgmi -s` or `amd-smi xgmi --source-status` will show `GPU LINK PORT STATUS` table.  
-
 - **Added the following API's to amdsmi_interface.py**.  
   - amdsmi_get_cpu_handle()
   - amdsmi_get_esmi_err_msg()
@@ -58,6 +24,38 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The entry `policies` is added to the end of the dictionary to match API definition.
   - The entry `plpds` is marked for deprecation as it has the same information as `policies`.
 
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed an issue where amdsmi_get_gpu_od_volt_info() returned a reference to a python object**.  
+  - The returned dictionary was changed to return values in all fields
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.1.0
+
+### Added
+
+- **Added `GPU LINK PORT STATUS` table to `amd-smi xgmi` command**.  
+  - The `amd-smi xgmi -s` or `amd-smi xgmi --source-status` will show `GPU LINK PORT STATUS` table.  
+
 - **Added `amdsmi_get_gpu_revision()` to Python API**  
   - This function retrieves the GPU revision ID. Available in `amdsmi_interface.py` as `amdsmi_get_gpu_revision()`.
 
@@ -66,126 +64,126 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   values through the `-G/--gpuboard` or `-b/--baseboard` options or obtain all of them as normal using the `amd-smi metric` command without
   any options. If the hardware does not support gpuboard or baseboard temperatures, then the values will be hidden from the default `metric` view.
 
-```console
-$ amd-smi metric -b
-GPU: 0
-    BASEBOARD:
-        TEMPERATURE:
-            FIRST: 78
-            UBB_FRONT: 55
-            UBB_BACK: 49
-            UBB_OAM7: 86
-            UBB_IBC: 94
-            UBB_UFPGA: 49
-            UBB_OAM1: 78
-            OAM_0_1_HSC: 54
-            OAM_2_3_HSC: 32
-            OAM_4_5_HSC: 14
-            OAM_6_7_HSC: 85
-            UBB_FPGA_0V72_VR: 43
-            UBB_FPGA_3V3_VR: 41
-            RETIMER_0_1_2_3_1V2_VR: 64
-            RETIMER_4_5_6_7_1V2_VR: 56
-            RETIMER_0_1_0V9_VR: 74
-            RETIMER_4_5_0V9_VR: 34
-            RETIMER_2_3_0V9_VR: 85
-            RETIMER_6_7_0V9_VR: 92
-            OAM_0_1_2_3_3V3_VR: 29
-            OAM_4_5_6_7_3V3_VR: 13
-            IBC_HSC: 41
-            IBC: 43
+  ```console
+  $ amd-smi metric -b
+  GPU: 0
+      BASEBOARD:
+          TEMPERATURE:
+              FIRST: 78
+              UBB_FRONT: 55
+              UBB_BACK: 49
+              UBB_OAM7: 86
+              UBB_IBC: 94
+              UBB_UFPGA: 49
+              UBB_OAM1: 78
+              OAM_0_1_HSC: 54
+              OAM_2_3_HSC: 32
+              OAM_4_5_HSC: 14
+              OAM_6_7_HSC: 85
+              UBB_FPGA_0V72_VR: 43
+              UBB_FPGA_3V3_VR: 41
+              RETIMER_0_1_2_3_1V2_VR: 64
+              RETIMER_4_5_6_7_1V2_VR: 56
+              RETIMER_0_1_0V9_VR: 74
+              RETIMER_4_5_0V9_VR: 34
+              RETIMER_2_3_0V9_VR: 85
+              RETIMER_6_7_0V9_VR: 92
+              OAM_0_1_2_3_3V3_VR: 29
+              OAM_4_5_6_7_3V3_VR: 13
+              IBC_HSC: 41
+              IBC: 43
 
-$ amd-smi metric -G
-GPU: 0
-    GPUBOARD:
-        TEMPERATURE:
-            NODE_RETIMER_X: 43
-            NODE_OAM_X_IBC: 24
-            NODE_OAM_X_IBC_2: 56
-            NODE_OAM_X_VDD18_VR: 34
-            NODE_OAM_X_04_HBM_B_VR: 53
-            NODE_OAM_X_04_HBM_D_VR: 47
-            VR_FIRST: 58
-            VDDCR_VDD1: 78
-            VDDCR_VDD2: 35
-            VDDCR_VDD3: 73
-            VDDCR_SOC_A: 12
-            VDDCR_SOC_C: 57
-            VDDCR_SOCIO_A: 39
-            VDDCR_SOCIO_C: 75
-            VDD_085_HBM: 64
-            VDDCR_11_HBM_B: 92
-            VDDCR_11_HBM_D: 87
-            VDD_USR: 46
-            VDDIO_11_E32: 98
+  $ amd-smi metric -G
+  GPU: 0
+      GPUBOARD:
+          TEMPERATURE:
+              NODE_RETIMER_X: 43
+              NODE_OAM_X_IBC: 24
+              NODE_OAM_X_IBC_2: 56
+              NODE_OAM_X_VDD18_VR: 34
+              NODE_OAM_X_04_HBM_B_VR: 53
+              NODE_OAM_X_04_HBM_D_VR: 47
+              VR_FIRST: 58
+              VDDCR_VDD1: 78
+              VDDCR_VDD2: 35
+              VDDCR_VDD3: 73
+              VDDCR_SOC_A: 12
+              VDDCR_SOC_C: 57
+              VDDCR_SOCIO_A: 39
+              VDDCR_SOCIO_C: 75
+              VDD_085_HBM: 64
+              VDDCR_11_HBM_B: 92
+              VDDCR_11_HBM_D: 87
+              VDD_USR: 46
+              VDDIO_11_E32: 98
 
-$ amd-smi metric
-GPU: 0
-    USAGE:
-        GFX_ACTIVITY: 0 %
-        UMC_ACTIVITY: 0 %
-        ...
-    POWER:
-        SOCKET_POWER: 140 W
-        GFX_VOLTAGE: N/A
-        ...
-    CLOCK:
-        GFX_0:
-            CLK: 132 MHz
-            MIN_CLK: 500 MHz
-        ...
-    TEMPERATURE:
-        EDGE: N/A
-        HOTSPOT: 37 °C
-        ...
-    PCIE:
-        WIDTH: 16
-        SPEED: 32 GT/s
-        ...
-    GPUBOARD:
-        TEMPERATURE:
-            NODE_RETIMER_X: 43
-            NODE_OAM_X_IBC: 24
-            ...
-    BASEBOARD:
-        TEMPERATURE:
-            UBB_FPGA: 78
-            UBB_FRONT: 55
-            ...
-    ECC:
-        TOTAL_CORRECTABLE_COUNT: 0
-        TOTAL_UNCORRECTABLE_COUNT: 0
-        ...
-    ECC_BLOCKS:
-        UMC:
-            CORRECTABLE_COUNT: 0
-            UNCORRECTABLE_COUNT: 0
-        ...
-    FAN:
-        SPEED: N/A
-        MAX: N/A
-        ...
-    VOLTAGE_CURVE:
-        POINT_0_FREQUENCY: N/A
-        POINT_0_VOLTAGE: N/A
-        ...
-    OVERDRIVE: N/A
-    MEM_OVERDRIVE: N/A
-    PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
-    XGMI_ERR: N/A
-    VOLTAGE:
-        VDDBOARD: N/A
-    ENERGY:
-        TOTAL_ENERGY_CONSUMPTION: 14292727.274 J
-    MEM_USAGE:
-        TOTAL_VRAM: 196592 MB
-        USED_VRAM: 283 MB
-        ...
-    THROTTLE:
-        ACCUMULATION_COUNTER: 100936627
-        PROCHOT_ACCUMULATED: 0
-        ...
-```
+  $ amd-smi metric
+  GPU: 0
+      USAGE:
+          GFX_ACTIVITY: 0 %
+          UMC_ACTIVITY: 0 %
+          ...
+      POWER:
+          SOCKET_POWER: 140 W
+          GFX_VOLTAGE: N/A
+          ...
+      CLOCK:
+          GFX_0:
+              CLK: 132 MHz
+              MIN_CLK: 500 MHz
+          ...
+      TEMPERATURE:
+          EDGE: N/A
+          HOTSPOT: 37 °C
+          ...
+      PCIE:
+          WIDTH: 16
+          SPEED: 32 GT/s
+          ...
+      GPUBOARD:
+          TEMPERATURE:
+              NODE_RETIMER_X: 43
+              NODE_OAM_X_IBC: 24
+              ...
+      BASEBOARD:
+          TEMPERATURE:
+              UBB_FPGA: 78
+              UBB_FRONT: 55
+              ...
+      ECC:
+          TOTAL_CORRECTABLE_COUNT: 0
+          TOTAL_UNCORRECTABLE_COUNT: 0
+          ...
+      ECC_BLOCKS:
+          UMC:
+              CORRECTABLE_COUNT: 0
+              UNCORRECTABLE_COUNT: 0
+          ...
+      FAN:
+          SPEED: N/A
+          MAX: N/A
+          ...
+      VOLTAGE_CURVE:
+          POINT_0_FREQUENCY: N/A
+          POINT_0_VOLTAGE: N/A
+          ...
+      OVERDRIVE: N/A
+      MEM_OVERDRIVE: N/A
+      PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
+      XGMI_ERR: N/A
+      VOLTAGE:
+          VDDBOARD: N/A
+      ENERGY:
+          TOTAL_ENERGY_CONSUMPTION: 14292727.274 J
+      MEM_USAGE:
+          TOTAL_VRAM: 196592 MB
+          USED_VRAM: 283 MB
+          ...
+      THROTTLE:
+          ACCUMULATION_COUNTER: 100936627
+          PROCHOT_ACCUMULATED: 0
+          ...
+  ```
 
 ### Changed
 
@@ -238,6 +236,9 @@ GPU: 0
 
 - **Optimized the way `amd-smi process` validates which proccesses are running on a GPU**.  
 
+- **Changed sourcing of BDF to from drm to kfd**.  
+  - Non sudo privliged users were unable to see the BDF due to logical errors.
+
 ### Resolved Issues
 
 - **Fixed a CPER record count mismatch issue when using the `amd-smi ras --cper --file-limit`**.  
@@ -245,9 +246,6 @@ GPU: 0
 
 - **Fixed event monitoring segfaults causing RDC to crash**.  
   - Adds mutex locking around access to device event notification file pointer
-
-- **Fixed an issue where amdsmi_get_gpu_od_volt_info() returned a reference to a python object**.  
-  - The returned dictionary was changed to return values in all fields
 
 - **Fixed an issue where using `amd-smi ras --folder <folder_name>` was forcing the created folder's name to be lowercase**.  
   - This fix also allows all string input options to be case insensitive.
