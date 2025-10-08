@@ -232,7 +232,7 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
              HSA_STATUS_SUCCESS);
 
     // NOTE: As of now, hsa_signal_create_fn may return HSA_STATUS_SUCCESS even if it fails
-    // to create a valid signal (i.e., handle == 0). Once this is fixed in the HSA runtime,
+    // to create a signal (i.e., handle == 0). Once this is fixed in the HSA runtime,
     // the CHECK below can be removed.
     CHECK(callback_data.completion.handle != 0);
 
@@ -243,7 +243,7 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
         HSA_STATUS_SUCCESS);
 
     // NOTE: As of now, hsa_signal_create_fn may return HSA_STATUS_SUCCESS even if it fails
-    // to create a valid signal (i.e., handle == 0). Once this is fixed in the HSA runtime,
+    // to create a signal (i.e., handle == 0). Once this is fixed in the HSA runtime,
     // the CHECK below can be removed.
     CHECK(callback_data.start_signal.handle != 0);
 
