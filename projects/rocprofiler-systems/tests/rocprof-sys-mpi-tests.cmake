@@ -167,51 +167,39 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
         "${_mpip_environment}"
     )
 
-    rocprofiler_systems_add_test(
-        SKIP_RUNTIME
-        NAME "mpi-fortran-poisson"
-        TARGET mpi-fortran-poisson
-        MPI ON
-        NUM_PROCS 2
-        LABELS "mpip;fortran"
-        REWRITE_ARGS
-            -e
-            -v
-            2
-            --label
-            file
-            line
-            args
-            --min-instructions
-            0
-            --main-function
-            "MAIN__"
-        ENVIRONMENT "${_fortran_mpip_flat_environment}"
-        REWRITE_RUN_PASS_REGEX
-            ">>> mpi-fortran-poisson.inst(.*\n.*)>>> PMPI_Init(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)>>> PMPI_Cart_create(.*\n.*)>>> PMPI_Cart_shift(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)>>> PMPI_Allreduce(.*\n.*)"
-    )
+    if(ROCPROFSYS_USE_MPI)
+        set(MPI_FPRTRAN_REWRITE_RUN_REGEX
+            ">>> MPI_Init(.*\n.*)>>> MPI_Send(.*\n.*)>>> MPI_Recv(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)"
+        )
+    else()
+        set(MPI_FPRTRAN_REWRITE_RUN_REGEX
+            ">>> PMPI_Init(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)"
+        )
+    endif()
 
-    rocprofiler_systems_add_test(
-        SKIP_RUNTIME
-        NAME "mpi-fortran-intervals"
-        TARGET mpi-fortran-intervals
-        MPI ON
-        NUM_PROCS 2
-        LABELS "mpip;fortran"
-        REWRITE_ARGS
-            -e
-            -v
-            2
-            --label
-            file
-            line
-            args
-            --min-instructions
-            0
-            --main-function
-            "MAIN__"
-        ENVIRONMENT "${_fortran_mpip_flat_environment}"
-        REWRITE_RUN_PASS_REGEX
-            ">>> mpi-fortran-intervals.inst(.*\n.*)>>> PMPI_Init(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)"
-    )
+    foreach(_FORTRAN_EXAMPLE poisson intervals array)
+        rocprofiler_systems_add_test(
+            SKIP_RUNTIME
+            NAME "mpi-fortran-${_FORTRAN_EXAMPLE}"
+            TARGET mpi-fortran-${_FORTRAN_EXAMPLE}
+            MPI ON
+            NUM_PROCS 2
+            LABELS "mpip;fortran"
+            REWRITE_ARGS
+                -e
+                -v
+                2
+                --label
+                file
+                line
+                args
+                --min-instructions
+                0
+                --main-function
+                "MAIN__"
+            ENVIRONMENT "${_fortran_mpip_flat_environment}"
+            REWRITE_RUN_PASS_REGEX
+                ">>> mpi-fortran-${_FORTRAN_EXAMPLE}.inst(.*\n.*)${MPI_FPRTRAN_REWRITE_RUN_REGEX}"
+        )
+    endforeach()
 endif()

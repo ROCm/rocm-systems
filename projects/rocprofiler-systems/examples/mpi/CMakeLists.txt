@@ -111,6 +111,16 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
             $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
     )
 
+    if(GFORTRAN_VERSION VERSION_GREATER_EQUAL "10")
+        set(FORTRAN_COMPILE_FLAGS "-w;-fallow-argument-mismatch")
+    else()
+        set(FORTRAN_COMPILE_FLAGS "-w;-Wno-argument-mismatch")
+    endif()
+
+    add_executable(mpi-fortran-array mpi_array.f)
+    target_compile_options(mpi-fortran-array PRIVATE ${FORTRAN_COMPILE_FLAGS})
+    target_link_libraries(mpi-fortran-array PRIVATE mpi-fortran-interface-library)
+
     add_executable(mpi-fortran-intervals intervals_mpi.f90)
     target_link_libraries(mpi-fortran-intervals PRIVATE mpi-fortran-interface-library)
 
@@ -147,7 +157,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     )
     if(ENABLE_FORTRAN_MPI_CTESTS)
         install(
-            TARGETS mpi-fortran-poisson mpi-fortran-intervals
+            TARGETS mpi-fortran-poisson mpi-fortran-intervals mpi-fortran-array
             DESTINATION bin
             COMPONENT rocprofiler-systems-examples
         )
