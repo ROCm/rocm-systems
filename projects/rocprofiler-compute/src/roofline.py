@@ -22,7 +22,6 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
 import argparse
 import textwrap
 from abc import abstractmethod
@@ -389,14 +388,26 @@ class Roofline:
                 for name in sorted(self.__args.kernel):
                     kernel_list += "_" + name
 
-            # Re-save to remove loading MathJax pop up
             if ops_figure:
+                actual_height = int(ops_figure.layout.height)
+                # minimum height of 1000 to avoid cutting off content
+                pdf_height = max(actual_height, 1000)
+
                 ops_figure.write_image(
                     f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.pdf",
+                    width=1000,
+                    height=pdf_height,
                 )
+
             if flops_figure:
+                actual_height = int(flops_figure.layout.height)
+                # minimum height of 1000 to avoid cutting off content
+                pdf_height = max(actual_height, 1000)
+
                 flops_figure.write_image(
                     f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.pdf",
+                    width=1000,
+                    height=pdf_height,
                 )
 
             console_log("roofline", "Empirical Roofline PDFs saved!")
@@ -497,7 +508,9 @@ class Roofline:
                                 plot_points_data.append({
                                     "symbol": None,
                                     "color": cache_colors.get(cache_level, "gray"),
-                                    "cache_level": cache_level.replace("ai_", "", 1).upper(),
+                                    "cache_level": cache_level.replace(
+                                        "ai_", "", 1
+                                    ).upper(),
                                     "ai": f"{x_vals[i]:.2f}",
                                     "performance": f"{y_vals[i]:.2f}",
                                     "status": status,
