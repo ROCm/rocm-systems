@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -21,7 +20,7 @@
  * THE SOFTWARE.
  */
 
- /**
+/**
  * @file aca_fields.h
  * @brief ACA register field definitions and manipulation functions
  *
@@ -30,8 +29,8 @@
  * definitions for status, IPID, and syndrome registers, along with
  * functions to initialize and access these fields.
  */
-#ifndef ACA_FIELDS_H
-#define ACA_FIELDS_H
+#ifndef RAS_DECODE_FIELDS_H
+#define RAS_DECODE_FIELDS_H
 
 #include <stdint.h>
 

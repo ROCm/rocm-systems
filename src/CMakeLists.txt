@@ -44,13 +44,33 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi.h"
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
 
-set(ACA_SRC_DIR "aca-decode")
-set(SRC_LIST ${SRC_LIST} ${ACA_SRC_DIR}/aca_api.c ${ACA_SRC_DIR}/aca_decode.c ${ACA_SRC_DIR}/aca_fields.c
-             ${ACA_SRC_DIR}/aca_tables.c ${ACA_SRC_DIR}/error_map.c)
-set(ACA_INC_DIR "${PROJECT_SOURCE_DIR}/include/aca-decode")
-set(INC_LIST ${INC_LIST} ${ACA_INC_DIR}/aca_decode.h ${ACA_INC_DIR}/aca_fields.h ${ACA_INC_DIR}/aca_tables.h
-             ${ACA_INC_DIR}/error_map.h)
-
+set(RAS_DECODE "ras-decode")
+set(ACA_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${RAS_DECODE}")
+set(SRC_LIST ${SRC_LIST} 
+    ${ACA_SRC_DIR}/aca_decode.c
+    ${ACA_SRC_DIR}/aca_fields.c
+    ${ACA_SRC_DIR}/aca_tables.c
+    ${ACA_SRC_DIR}/aca_version.c
+    ${ACA_SRC_DIR}/boot_decode.c
+    ${ACA_SRC_DIR}/error_map.c
+    ${ACA_SRC_DIR}/json_printer.c
+    ${ACA_SRC_DIR}/json_util.c
+    # ${ACA_SRC_DIR}/main.c
+    ${ACA_SRC_DIR}/ras_decode_api.c
+)
+set(ACA_INC_DIR "${PROJECT_SOURCE_DIR}/include/${RAS_DECODE}")
+set(INC_LIST ${INC_LIST} 
+    ${ACA_INC_DIR}/aca_decode.h
+    ${ACA_INC_DIR}/aca_fields.h
+    ${ACA_INC_DIR}/aca_tables.h
+    ${ACA_INC_DIR}/aca_version.h
+    ${ACA_INC_DIR}/boot_decode.h
+    ${ACA_INC_DIR}/error_map.h
+    ${ACA_INC_DIR}/json_printer.h
+    ${ACA_INC_DIR}/json_util.h
+    ${ACA_INC_DIR}/ras_decode_api.h
+    ${ACA_INC_DIR}/ras_decode_constants.h
+)
 if(ENABLE_ESMI_LIB)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_monitor.h)

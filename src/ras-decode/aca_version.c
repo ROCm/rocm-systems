@@ -26,32 +26,32 @@
 
 int aca_get_version_major(void)
 {
-    return ACA_VERSION_MAJOR;
+    return RAS_DECODE_VERSION_MAJOR;
 }
 
 int aca_get_version_minor(void)
 {
-    return ACA_VERSION_MINOR;
+    return RAS_DECODE_VERSION_MINOR;
 }
 
 int aca_get_version_patch(void)
 {
-    return ACA_VERSION_PATCH;
+    return RAS_DECODE_VERSION_PATCH;
 }
 
 const char *aca_get_version_string(void)
 {
-    return ACA_VERSION_STRING;
+    return RAS_DECODE_VERSION_STRING;
 }
 
 aca_version_info_t aca_get_version_info(void)
 {
     aca_version_info_t info;
 
-    info.major = ACA_VERSION_MAJOR;
-    info.minor = ACA_VERSION_MINOR;
-    info.patch = ACA_VERSION_PATCH;
-    info.string = ACA_VERSION_STRING;
+    info.major = RAS_DECODE_VERSION_MAJOR;
+    info.minor = RAS_DECODE_VERSION_MINOR;
+    info.patch = RAS_DECODE_VERSION_PATCH;
+    info.string = RAS_DECODE_VERSION_STRING;
 
     return info;
 }
