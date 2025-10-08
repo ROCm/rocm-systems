@@ -280,7 +280,7 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
 
 device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
   device::Program* program;
-  program = new LightningProgram(*this, owner);
+  program = new pal::Program(*this, owner);
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -1176,7 +1176,7 @@ bool Device::initializeHeapResources() {
     // Setup trap handler if available
     if (trap_handler_ != nullptr) {
       auto program =
-          reinterpret_cast<pal::LightningProgram*>(trap_handler_->getDeviceProgram(*this));
+          reinterpret_cast<pal::Program*>(trap_handler_->getDeviceProgram(*this));
       if (program != nullptr) {
         Pal::Result result{Pal::Result::Success};
         Pal::GpuMemoryRef memRef = {};
@@ -1242,7 +1242,7 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
 }
 
 device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program = new LightningProgram(*this, owner);
+  device::Program* program = new pal::Program(*this, owner);
   if (program == nullptr) {
     LogError("We failed memory allocation for program!");
   }

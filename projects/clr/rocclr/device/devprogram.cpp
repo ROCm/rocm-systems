@@ -94,13 +94,6 @@ void Program::clear() {
 }
 
 // ================================================================================================
-bool Program::compileImpl(const std::string& sourceCode,
-                          const std::vector<const std::string*>& headers,
-                          const char** headerIncludeNames, amd::option::Options* options) {
-  return compileImplLC(sourceCode, headers, headerIncludeNames, options);
-}
-
-// ================================================================================================
 
 // If buildLog is not null, and dataSet contains a log object, extract the
 // first log data object from dataSet and process it with
@@ -519,9 +512,9 @@ static std::size_t getOCLOptionsHash(const amd::option::Options& options) {
   return std::hash<std::string>()(opts);
 }
 
-bool Program::compileImplLC(const std::string& sourceCode,
-                            const std::vector<const std::string*>& headers,
-                            const char** headerIncludeNames, amd::option::Options* options) {
+bool Program::compileImpl(const std::string& sourceCode,
+                          const std::vector<const std::string*>& headers,
+                          const char** headerIncludeNames, amd::option::Options* options) {
   const char* xLang = options->oVariables->XLang;
   if (xLang != nullptr) {
     if (strcmp(xLang, "asm") == 0) {
@@ -651,8 +644,7 @@ bool Program::compileImplLC(const std::string& sourceCode,
     }
     if (clBinary()->saveLLVMIR()) {
       clBinary()->elfOut()->addSection(amd::Elf::LLVMIR, llvmBinary_.data(), llvmBinary_.size());
-      // store the original compile options
-      clBinary()->storeCompileOptions(compileOptions_);
+      compileOptions_.clear();
     }
   } else {
     buildLog_ += "Error: Failed to compile source (from CL or HIP source to LLVM IR).\n";
@@ -663,14 +655,8 @@ bool Program::compileImplLC(const std::string& sourceCode,
 }
 
 // ================================================================================================
-bool Program::linkImpl(const std::vector<device::Program*>& inputPrograms,
-                       amd::option::Options* options, bool createLibrary) {
-  return linkImplLC(inputPrograms, options, createLibrary);
-}
-
-// ================================================================================================
-bool Program::linkImplLC(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                         bool createLibrary) {
+bool Program::linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
+                       bool createLibrary) {
   amd_comgr_data_set_t inputs;
 
   if (amd::Comgr::create_data_set(&inputs) != AMD_COMGR_STATUS_SUCCESS) {
@@ -751,10 +737,6 @@ bool Program::linkImplLC(const std::vector<Program*>& inputPrograms, amd::option
 
   if (clBinary()->saveLLVMIR()) {
     clBinary()->elfOut()->addSection(amd::Elf::LLVMIR, llvmBinary_.data(), llvmBinary_.size());
-    // store the original link options
-    clBinary()->storeLinkOptions(linkOptions_);
-    // store the original compile options
-    clBinary()->storeCompileOptions(compileOptions_);
   }
 
   // skip the rest if we are building an opencl library
@@ -771,10 +753,6 @@ bool Program::linkImplLC(const std::vector<Program*>& inputPrograms, amd::option
 }
 
 // ================================================================================================
-bool Program::linkImpl(amd::option::Options* options) {
-  return linkImplLC(options);
-}
-
 static void dumpCodeObject(const std::string& image) {
   char fname[30];
   static std::atomic<int> index;
@@ -787,7 +765,7 @@ static void dumpCodeObject(const std::string& image) {
 }
 
 // ================================================================================================
-bool Program::linkImplLC(amd::option::Options* options) {
+bool Program::linkImpl(amd::option::Options* options) {
   file_type_t continueCompileFrom = FILE_TYPE_LLVMIR_BINARY;
 
   internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ? true : false;
@@ -1416,18 +1394,10 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
 }
 
 // ================================================================================================
-bool Program::loadLC() {
-  return setKernels(const_cast<void*>(binary().first), binary().second, BinaryFd().first,
-                    BinaryFd().second, BinaryURI());
-}
-
-// ================================================================================================
 bool Program::load() {
-  if (loadLC()) {
-    coLoaded_ = 1;
-    return true;
-  }
-  return false;
+  coLoaded_ = setKernels(const_cast<void*>(binary().first), binary().second, BinaryFd().first,
+                    BinaryFd().second, BinaryURI());
+  return coLoaded_;
 }
 
 // ================================================================================================
@@ -1651,8 +1621,8 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     compileOptions_ = same_dev_prog->compileOptions();
     linkOptions_ = same_dev_prog->linkOptions();
   } else if (!amd::IS_HIP) {
-    clBinary()->loadCompileOptions(compileOptions_);
-    clBinary()->loadLinkOptions(linkOptions_);
+    compileOptions_.clear();
+    linkOptions_.clear();
   }
 
   clBinary()->resetElfIn();

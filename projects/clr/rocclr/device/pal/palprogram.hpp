@@ -201,9 +201,19 @@ class Program : public device::Program {
   //! Returns API hash value of the program for RGP thread trace
   uint64_t ApiHash() const { return apiHash_; }
 
- protected:
-  bool saveBinaryAndSetType(type_t type);
+  //! Returns the load address of the trap handler
+  uint64_t GetTrapHandlerAddress() const;
 
+  virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
+                             bool internalKernel) override;
+
+  virtual bool setKernels(void* binary, size_t binSize,
+                          amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
+                          std::string uri = std::string()) override;
+
+  virtual bool createBinary(amd::option::Options* options) override;
+
+ protected:
   //! Destroys CPU allocations in the code segment
   void DestroySegmentCpuAccess() const {
     if (codeSegment_ != nullptr) {
@@ -242,30 +252,6 @@ class Program : public device::Program {
   amd::hsa::loader::Loader* loader_;          //!< Loader object
   amd::hsa::loader::Executable* executable_;  //!< Executable for HSA Loader
   PALHSALoaderContext loaderContext_;         //!< Context for HSA Loader
-};
-
-//! \class Lightning Compiler Program
-class LightningProgram final : public pal::Program {
- public:
-  LightningProgram(NullDevice& device, amd::Program& owner) : pal::Program(device, owner) {
-    isHIP_ = (owner.language() == amd::Program::HIP);
-  }
-
-  LightningProgram(Device& device, amd::Program& owner) : Program(device, owner) {
-    isHIP_ = (owner.language() == amd::Program::HIP);
-  }
-  virtual ~LightningProgram() {}
-  uint64_t GetTrapHandlerAddress() const;
-
- protected:
-  virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
-                             bool internalKernel) override;
-
-  virtual bool setKernels(void* binary, size_t binSize,
-                          amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-                          std::string uri = std::string()) override;
-
-  virtual bool createBinary(amd::option::Options* options) override;
 };
 
 /*@}*/  // namespace amd::pal

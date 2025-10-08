@@ -53,7 +53,6 @@ class VirtualGPU;
 class Device;
 class NullDevice;
 class Program;
-class LightningProgram;
 
 /*! \addtogroup pal PAL Device Implementation
  *  @{
@@ -119,6 +118,9 @@ class Kernel : public device::Kernel {
   //! Returns the kernel index in the program
   uint index() const { return index_; }
 
+  //! Get the kernel descriptor and copy the code object from the program CPU segment
+  bool setKernelDescriptor(amd::hsa::loader::Symbol* sym, llvm::amdhsa::kernel_descriptor_t* akd);
+
  private:
   //! Disable copy constructor
   Kernel(const pal::Kernel&);
@@ -142,23 +144,6 @@ class Kernel : public device::Kernel {
 
   uint64_t code_;    //!< GPU memory pointer to the kernel
   size_t codeSize_;  //!< Size of ISA code
-};
-
-class LightningKernel final : public pal::Kernel {
- public:
-  LightningKernel(const std::string& name, pal::Program* prog, bool internalKernel)
-      : pal::Kernel(name, prog, internalKernel) {}
-
-  //! Returns Lightning program associated with this kernel
-  const LightningProgram& prog() const;
-
-  //! Get the kernel descriptor and copy the code object from the program CPU segment
-  bool setKernelDescriptor(amd::hsa::loader::Symbol* sym, llvm::amdhsa::kernel_descriptor_t* akd);
-  //! Initializes the metadata required for this kernel
-  bool init();
-
-  //! Setup after code object loading
-  bool postLoad();
 };
 
 /*@}*/  // namespace amd::pal

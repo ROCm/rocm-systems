@@ -779,7 +779,7 @@ bool Device::ValidateComgr() {
   // Check if Lightning compiler was requested
   constexpr bool kComgrVersioned = false;
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
-  return true;
+  return amd::Comgr::IsReady();
 }
 
 size_t GetMaxStackSize(const std::string& procName) {
@@ -1520,26 +1520,6 @@ bool ClBinary::loadLlvmBinary(std::string& llvmBinary,
 
   DevLogPrintfError("Cannot Load LLVM Binary: %s \n", llvmBinary.c_str());
   return false;
-}
-
-bool ClBinary::loadCompileOptions(std::string& compileOptions) const {
-  char* options = nullptr;
-  size_t sz;
-  compileOptions.clear();
-  return false;
-}
-
-bool ClBinary::loadLinkOptions(std::string& linkOptions) const {
-  char* options = nullptr;
-  size_t sz;
-  linkOptions.clear();
-  return false;
-}
-
-void ClBinary::storeCompileOptions(const std::string& compileOptions) {
-}
-
-void ClBinary::storeLinkOptions(const std::string& linkOptions) {
 }
 
 bool ClBinary::isSPIR() const {

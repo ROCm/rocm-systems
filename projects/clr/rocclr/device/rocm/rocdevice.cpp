@@ -703,7 +703,7 @@ bool Device::create() {
 
 // ================================================================================================
 device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program = new LightningProgram(*this, owner);
+  device::Program* program = new roc::Program(*this, owner);
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -739,7 +739,7 @@ bool Device::createBlitProgram() {
 }
 
 device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program = new LightningProgram(*this, owner);
+  device::Program* program = new roc::Program(*this, owner);
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");

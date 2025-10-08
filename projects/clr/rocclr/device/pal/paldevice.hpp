@@ -38,7 +38,6 @@
 #include "device/pal/palappprofile.hpp"
 #include "device/pal/palcapturemgr.hpp"
 #include "device/pal/palsignal.hpp"
-#include "acl.h"
 #include "memory"
 
 #include <atomic>

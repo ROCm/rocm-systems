@@ -293,18 +293,18 @@ class Program : public amd::HeapObject {
    *
    *  \return True if we successefully compiled a GPU program
    */
-  virtual bool compileImpl(const std::string& sourceCode,  //!< the program's source code
-                           const std::vector<const std::string*>& headers,
-                           const char** headerIncludeNames,
-                           amd::option::Options* options  //!< compile options's object
+  bool compileImpl(const std::string& sourceCode,  //!< the program's source code
+                   const std::vector<const std::string*>& headers,
+                   const char** headerIncludeNames,
+                   amd::option::Options* options  //!< compile options's object
   );
 
   //! Link the device program.
-  virtual bool linkImpl(amd::option::Options* options);
+  bool linkImpl(amd::option::Options* options);
 
   //! Link the device programs.
-  virtual bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                        bool createLibrary);
+  bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
+                bool createLibrary);
 
   virtual bool createBinary(amd::option::Options* options) = 0;
 
@@ -315,8 +315,6 @@ class Program : public amd::HeapObject {
 
   //! Initialize Binary
   virtual bool initClBinary();
-
-  virtual bool saveBinaryAndSetType(type_t type) = 0;
 
   //! Release the Binary
   void releaseClBinary();
@@ -373,19 +371,6 @@ class Program : public amd::HeapObject {
   bool defineUndefinedVars();
 
  private:
-  //! Compile the device program with LC path
-  bool compileImplLC(const std::string& sourceCode, const std::vector<const std::string*>& headers,
-                     const char** headerIncludeNames, amd::option::Options* options);
-
-  //! Link the device programs with LC path
-  bool linkImplLC(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                  bool createLibrary);
-
-  //! Link the device program with LC path
-  bool linkImplLC(amd::option::Options* options);
-
-  //! Load the device program with LC path
-  bool loadLC();
 
   //! Dump the log data object to the build log, if a log data object is present
   void extractBuildLog(amd_comgr_data_set_t dataSet);

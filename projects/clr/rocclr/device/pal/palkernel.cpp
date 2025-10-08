@@ -36,8 +36,8 @@
 namespace amd::pal {
 
 void Kernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
-                                   const uint32_t groupSegmentSize, const uint16_t numSGPRs,
-                                   const uint16_t numVGPRs) {
+                              const uint32_t groupSegmentSize, const uint16_t numSGPRs,
+                              const uint16_t numVGPRs) {
   workGroupInfo_.scratchRegs_ = amd::alignUp(privateSegmentSize, 16) / sizeof(uint32_t);
   // Make sure runtime matches HW alignment, which is 256 scratch regs (DWORDs) per wave
   constexpr uint32_t ScratchRegAlignment = 256;
@@ -93,17 +93,85 @@ Kernel::Kernel(std::string name, pal::Program* prog, bool internalKernel)
 
 Kernel::~Kernel() {}
 
-bool Kernel::postLoad() { return true; }
+bool Kernel::postLoad() {
+  if (codeObjectVer() == 2) {
+    symbolName_ = name();
+  }
+
+  // Copy codeobject of this kernel from the program CPU segment
+  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
+
+  auto sym = prog().getSymbol(symbolName().c_str(), &agent);
+
+  if (!setKernelDescriptor(sym, &akd_)) {
+    return false;
+  }
+  if (!sym->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK,
+                    reinterpret_cast<void*>(&kernelHasDynamicCallStack_))) {
+    return false;
+  }
+  if (!prog().isNull()) {
+    codeSize_ = prog().codeSegGpu().owner()->getSize();
+
+    // handle device enqueue
+    if (!RuntimeHandle().empty()) {
+      amd::hsa::loader::Symbol* rth_symbol;
+
+      // Get the runtime handle symbol GPU address
+      rth_symbol = prog().getSymbol(RuntimeHandle().c_str(), &agent);
+      uint64_t symbol_address;
+      rth_symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &symbol_address);
+
+      // Copy the kernel_object pointer to the runtime handle symbol GPU address
+      const Memory& codeSegGpu = prog().codeSegGpu();
+      uint64_t offset = symbol_address - codeSegGpu.vmAddress();
+      uint64_t kernel_object = gpuAqlCode();
+      VirtualGPU* gpu = codeSegGpu.dev().xferQueue();
+
+      const struct RuntimeHandle runtime_handle = {gpuAqlCode(), spillSegSize(), ldsSize()};
+
+      codeSegGpu.writeRawData(*gpu, offset, sizeof(runtime_handle), &runtime_handle, true);
+    }
+  }
+
+  // Setup the the workgroup info
+  setWorkGroupInfo(WorkitemPrivateSegmentByteSize(), WorkgroupGroupSegmentByteSize(),
+                   workGroupInfo()->usedSGPRs_, workGroupInfo()->usedVGPRs_);
+
+  // Copy wavefront size
+  workGroupInfo_.wavefrontSize_ = device().info().wavefrontWidth_;
+  workGroupInfo_.usedStackSize_ = kernelHasDynamicCallStack_;
+  if (workGroupInfo_.size_ == 0) {
+    return false;
+  }
+  if ((workGroupInfo_.usedStackSize_ & 0x1) == 0x1) {
+    workGroupInfo_.scratchRegs_ =
+        std::max<uint32_t>(device().StackSize(), workGroupInfo_.scratchRegs_ * sizeof(uint32_t));
+    workGroupInfo_.scratchRegs_ = amd::alignUp(workGroupInfo_.scratchRegs_, 16) / sizeof(uint32_t);
+    workGroupInfo_.privateMemSize_ = workGroupInfo_.scratchRegs_ * sizeof(uint32_t);
+  }
+
+  // handle the printf metadata if any
+  std::vector<std::string> printfStr;
+  if (!GetPrintfStr(&printfStr)) {
+    return false;
+  }
+
+  if (!printfStr.empty()) {
+    InitPrintf(printfStr);
+  }
+
+  return true;
+}
 
 bool Kernel::init() {
-  return true;
+  return GetAttrCodePropMetadata();
 }
 
 const pal::Program& Kernel::prog() const {
   return reinterpret_cast<const pal::Program&>(prog_);
 }
 
-// ================================================================================================
 hsa_kernel_dispatch_packet_t* Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
                                                          const amd::NDRangeContainer& sizes,
                                                          const_address params, size_t ldsAddress,
@@ -336,85 +404,7 @@ hsa_kernel_dispatch_packet_t* Kernel::loadArguments(VirtualGPU& gpu, const amd::
   return hsaDisp;
 }
 
-// ================================================================================================
-const LightningProgram& LightningKernel::prog() const {
-  return reinterpret_cast<const LightningProgram&>(prog_);
-}
-
-bool LightningKernel::init() { return GetAttrCodePropMetadata(); }
-
-bool LightningKernel::postLoad() {
-  if (codeObjectVer() == 2) {
-    symbolName_ = name();
-  }
-
-  // Copy codeobject of this kernel from the program CPU segment
-  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
-
-  auto sym = prog().getSymbol(symbolName().c_str(), &agent);
-
-  if (!setKernelDescriptor(sym, &akd_)) {
-    return false;
-  }
-  if (!sym->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK,
-                    reinterpret_cast<void*>(&kernelHasDynamicCallStack_))) {
-    return false;
-  }
-  if (!prog().isNull()) {
-    codeSize_ = prog().codeSegGpu().owner()->getSize();
-
-    // handle device enqueue
-    if (!RuntimeHandle().empty()) {
-      amd::hsa::loader::Symbol* rth_symbol;
-
-      // Get the runtime handle symbol GPU address
-      rth_symbol = prog().getSymbol(RuntimeHandle().c_str(), &agent);
-      uint64_t symbol_address;
-      rth_symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &symbol_address);
-
-      // Copy the kernel_object pointer to the runtime handle symbol GPU address
-      const Memory& codeSegGpu = prog().codeSegGpu();
-      uint64_t offset = symbol_address - codeSegGpu.vmAddress();
-      uint64_t kernel_object = gpuAqlCode();
-      VirtualGPU* gpu = codeSegGpu.dev().xferQueue();
-
-      const struct RuntimeHandle runtime_handle = {gpuAqlCode(), spillSegSize(), ldsSize()};
-
-      codeSegGpu.writeRawData(*gpu, offset, sizeof(runtime_handle), &runtime_handle, true);
-    }
-  }
-
-  // Setup the the workgroup info
-  setWorkGroupInfo(WorkitemPrivateSegmentByteSize(), WorkgroupGroupSegmentByteSize(),
-                   workGroupInfo()->usedSGPRs_, workGroupInfo()->usedVGPRs_);
-
-  // Copy wavefront size
-  workGroupInfo_.wavefrontSize_ = device().info().wavefrontWidth_;
-  workGroupInfo_.usedStackSize_ = kernelHasDynamicCallStack_;
-  if (workGroupInfo_.size_ == 0) {
-    return false;
-  }
-  if ((workGroupInfo_.usedStackSize_ & 0x1) == 0x1) {
-    workGroupInfo_.scratchRegs_ =
-        std::max<uint32_t>(device().StackSize(), workGroupInfo_.scratchRegs_ * sizeof(uint32_t));
-    workGroupInfo_.scratchRegs_ = amd::alignUp(workGroupInfo_.scratchRegs_, 16) / sizeof(uint32_t);
-    workGroupInfo_.privateMemSize_ = workGroupInfo_.scratchRegs_ * sizeof(uint32_t);
-  }
-
-  // handle the printf metadata if any
-  std::vector<std::string> printfStr;
-  if (!GetPrintfStr(&printfStr)) {
-    return false;
-  }
-
-  if (!printfStr.empty()) {
-    InitPrintf(printfStr);
-  }
-
-  return true;
-}
-
-bool LightningKernel::setKernelDescriptor(amd::hsa::loader::Symbol* sym,
+bool Kernel::setKernelDescriptor(amd::hsa::loader::Symbol* sym,
                                           llvm::amdhsa::kernel_descriptor_t* akd) {
   if (!sym) {
     return false;

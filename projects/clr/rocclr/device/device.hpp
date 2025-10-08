@@ -700,7 +700,7 @@ class Settings : public amd::HeapObject {
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
-      uint reserved_ : 12;
+      uint reserved_ : 14;
     };
     uint value_;
   };
@@ -1080,22 +1080,6 @@ class ClBinary : public amd::HeapObject {
   bool loadLlvmBinary(std::string& llvmBinary,               //!< LLVMIR binary code
                       amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
   ) const;
-
-  //! Loads compile options from OCL binary file
-  bool loadCompileOptions(std::string& compileOptions  //!< return the compile options loaded
-  ) const;
-
-  //! Loads link options from OCL binary file
-  bool loadLinkOptions(std::string& linkOptions  //!< return the link options loaded
-  ) const;
-
-  //! Store compile options into OCL binary file
-  void storeCompileOptions(const std::string& compileOptions  //!< the compile options to be stored
-  );
-
-  //! Store link options into OCL binary file
-  void storeLinkOptions(const std::string& linkOptions  //!< the link options to be stored
-  );
 
   //! Check if the binary is recompilable
   bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);

@@ -2696,7 +2696,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   assert((nullptr != aqlPkt) && "Couldn't load kernel arguments");
 
   // Dynamic call stack size is considered to calculate private segment size and scratch regs
-  // in LightningKernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
+  // in pal::Kernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
   // hipLaunchKernel/hipLaunchKernelGGL, Updated value is passed to dispatch packet.
   size_t privateMemSize = hsaKernel.spillSegSize();
   if ((hsaKernel.workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
