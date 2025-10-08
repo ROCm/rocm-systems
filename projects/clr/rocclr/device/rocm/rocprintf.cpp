@@ -107,7 +107,9 @@ int PrintfDbg::checkVectorSpecifier(const std::string& fmt, size_t startPos, siz
     else if ((curPos >= 5) && (fmt[curPos - 5] == 'v')) {
       size = 4;
     }
-    // modifier is "hh" or "hl" with vec size 16
+    // modifier is "hh" or "hl" with vec size 16. i.e
+    // specifiers such as "%v16hhd", "%v16hld". total size 
+    // of vector spcifier + length modifier would then be 5.
     else if ((curPos >= 6) && (fmt[curPos - 6] == 'v')) {
       size = 5;
     }
@@ -154,7 +156,9 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
     // copiedBytes should be as number of printed chars
     copiedBytes = 0;
     if (*(reinterpret_cast<const unsigned char*>(argument)) == 0) {
-      // accounts for null character
+      // accounts for null character, empty strings should not be
+      // printed as "(null)". setting copiedBytes to 1 indicates
+      // null character in the buffer has been consumed.
       copiedBytes = 1;
     } else {
       const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
@@ -382,9 +386,10 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
   }
 
   // handle '%%' escapes
+  size_t P = 0;
   if (pos != std::string::npos) {
     fmt = str.substr(pos, str.size() - pos);
-    size_t P = fmt.find("%%", P);
+    P = fmt.find("%%", P);
     while (P != std::string::npos) {
       fmt.replace(P, 2, "%");
       P = fmt.find("%%", P);
