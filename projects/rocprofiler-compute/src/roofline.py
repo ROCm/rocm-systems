@@ -378,7 +378,11 @@ class Roofline:
 
         # Output will be different depending on interaction type:
         # Save PDFs if we're in "standalone roofline" mode,
-        # otherwise return HTML to be used in GUI output
+        # otherwise return HTML to be used in GUI outputif flops_figure:
+        console_debug("roofline", f"PDF figure height: {flops_figure.layout.height}")
+        console_debug("roofline", f"Number of traces: {len(flops_figure.data)}")
+        console_debug("roofline", f"Has subplots: {hasattr(flops_figure, '_grid_ref')}")
+
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
             if self.__run_parameters.get("kernel_filter", False):
@@ -493,9 +497,9 @@ class Roofline:
                                 plot_points_data.append({
                                     "symbol": None,
                                     "color": cache_colors.get(cache_level, "gray"),
-                                    "cache_level": cache_level,
-                                    "ai": f"{x_vals[i]:.2e}",
-                                    "performance": f"{y_vals[i]:.2e}",
+                                    "cache_level": cache_level.replace("ai_", "", 1).upper(),
+                                    "ai": f"{x_vals[i]:.2f}",
+                                    "performance": f"{y_vals[i]:.2f}",
                                     "status": status,
                                     "kernel_idx": i,
                                 })
@@ -574,19 +578,20 @@ class Roofline:
         if ops_flops == "FLOP" and not skipAI:
             kernel_names = self.__ai_data.get("kernelNames", [])
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
-
+            show_in_legend = not self.__run_parameters["is_standalone"]
             if self.__ai_data["ai_l1"][0]:
                 fig.add_trace(
                     go.Scatter(
                         x=self.__ai_data["ai_l1"][0],
                         y=self.__ai_data["ai_l1"][1],
-                        name="ai_l1",
+                        name="L1",
                         mode="markers",
                         marker=dict(
                             color="blue",
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data["ai_l1"][0])],
                         ),
+                        showlegend=show_in_legend,
                     ),
                     **subplot_kwargs,
                 )
@@ -596,13 +601,14 @@ class Roofline:
                     go.Scatter(
                         x=self.__ai_data["ai_l2"][0],
                         y=self.__ai_data["ai_l2"][1],
-                        name="ai_l2",
+                        name="L2",
                         mode="markers",
                         marker=dict(
                             color="green",
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data["ai_l2"][0])],
                         ),
+                        showlegend=show_in_legend,
                     ),
                     **subplot_kwargs,
                 )
@@ -612,13 +618,14 @@ class Roofline:
                     go.Scatter(
                         x=self.__ai_data["ai_hbm"][0],
                         y=self.__ai_data["ai_hbm"][1],
-                        name="ai_hbm",
+                        name="HBM",
                         mode="markers",
                         marker=dict(
                             color="red",
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data["ai_hbm"][0])],
                         ),
+                        showlegend=show_in_legend,
                     ),
                     **subplot_kwargs,
                 )
@@ -700,7 +707,7 @@ class Roofline:
                     selector={"name": trace_to_update.name},
                 )
             else:
-                # Add new bandwidth line with value in legend
+                # New bandwidth line with value in legend
                 legend_name = f"{level.upper()}-{dtype}<br>{value} GB/s"
 
                 fig.add_trace(
@@ -778,8 +785,8 @@ class Roofline:
                 header_positions = {
                     "Symbol": 0.020,
                     "Cache Level": 0.15,
-                    f"AI ({ops_flops}s/Byte)": 0.30,
-                    f"Performance (G{ops_flops}/s)": 0.50,
+                    f"{ops_flops}s/Byte": 0.30,
+                    f"G{ops_flops}/s": 0.50,
                     "Status": 0.80,
                 }
 
@@ -796,7 +803,7 @@ class Roofline:
                         col=1,
                     )
 
-                # Add scatter plot for symbols
+                # Scatter plot for symbols
                 symbol_x = []
                 symbol_y = []
                 symbol_markers = []
@@ -850,7 +857,7 @@ class Roofline:
                             col=1,
                         )
 
-                    # Add border lines for this row
+                    # Border lines for this row
                     fig.add_shape(
                         type="line",
                         x0=0,
@@ -897,7 +904,7 @@ class Roofline:
                     )
 
                     if "Compute Bound" in point["status"]:
-                        status_color = "orange"
+                        status_color = "DarkOrange"
                     elif "Memory Bound" in point["status"]:
                         status_color = "blue"
                     else:
@@ -914,7 +921,7 @@ class Roofline:
                         col=1,
                     )
 
-                # Add vertical column separators
+                # Vertical column separators
                 column_x_positions = [0.12, 0.27, 0.47, 0.75]
                 for x_pos in column_x_positions:
                     fig.add_shape(
@@ -971,7 +978,7 @@ class Roofline:
                 kernel_symbol_y.append(y_positions[i])
                 kernel_symbol_markers.append(symbols_list[i])
 
-                # Add background shading for every other row
+                # Background shading for every other row
                 if i % 2 == 0:
                     fig.add_shape(
                         type="rect",
@@ -986,7 +993,7 @@ class Roofline:
                         col=1,
                     )
 
-                # Add border lines for this kernel
+                # Border lines for this kernel
                 fig.add_shape(
                     type="line",
                     x0=0,
@@ -998,7 +1005,7 @@ class Roofline:
                     col=1,
                 )
 
-                # Add kernel name annotation with wrapped text (left aligned)
+                # Kernel name annotation with wrapped text (left aligned)
                 fig.add_annotation(
                     x=0.15,
                     y=y_positions[i],
@@ -1012,7 +1019,7 @@ class Roofline:
                     col=1,
                 )
 
-            # Add vertical separator between symbol and kernel name
+            # Vertical separator between symbol and kernel name
             fig.add_shape(
                 type="line",
                 x0=0.12,
