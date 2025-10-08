@@ -102,7 +102,7 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
 
     hsa_amd_memory_pool_access_t _access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
     ext.hsa_amd_agent_memory_pool_get_info_fn(agent->get_hsa_agent(),
-                                              agent->kernarg_pool(),
+                                              agent->gpu_pool(),
                                               HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
                                               static_cast<void*>(&_access));
 
@@ -118,7 +118,7 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
 
     pool.gpu_agent     = agent->get_hsa_agent();
     pool.cpu_pool_     = agent->cpu_pool();
-    pool.kernarg_pool_ = agent->kernarg_pool();
+    pool.kernarg_pool_ = agent->gpu_pool();
 
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
     if(aql_agent == nullptr) throw std::runtime_error("Could not get AQL agent!");
