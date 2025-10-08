@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#ifndef ACA_VERSION_H
-#define ACA_VERSION_H
+#ifndef RAS_DECODE_VERSION_H
+#define RAS_DECODE_VERSION_H
 
 #ifdef __cplusplus
 extern "C"
@@ -40,12 +40,19 @@ extern "C"
  */
 
 /* Version Components */
-#define ACA_VERSION_MAJOR 1 /**< Major version number */
-#define ACA_VERSION_MINOR 0 /**< Minor version number */
-#define ACA_VERSION_PATCH 0 /**< Patch version number */
+#define RAS_DECODE_VERSION_MAJOR 2 /**< Major version number */
+#define RAS_DECODE_VERSION_MINOR 0 /**< Minor version number */
+#define RAS_DECODE_VERSION_PATCH 0 /**< Patch version number */
 
-/* Version String */
-#define ACA_VERSION_STRING "1.0.0"
+/* Helper macros for string concatenation */
+#define RAS_DECODE_STRINGIFY(x) #x
+#define RAS_DECODE_TOSTRING(x) RAS_DECODE_STRINGIFY(x)
+
+/* Version String - dynamically constructed from components */
+#define RAS_DECODE_VERSION_STRING \
+    RAS_DECODE_TOSTRING(RAS_DECODE_VERSION_MAJOR) "." \
+    RAS_DECODE_TOSTRING(RAS_DECODE_VERSION_MINOR) "." \
+    RAS_DECODE_TOSTRING(RAS_DECODE_VERSION_PATCH)
 
     /**
      * @brief Structure containing version information
@@ -92,4 +99,4 @@ extern "C"
 }
 #endif
 
-#endif /* ACA_VERSION_H */
+#endif /* RAS_DECODE_VERSION_H */

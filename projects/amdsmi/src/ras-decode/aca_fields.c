@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -21,7 +20,7 @@
  * THE SOFTWARE.
  */
 
- /**
+/**
  * @file aca_fields.c
  * @brief Implementation of ACA register field handling
  *
