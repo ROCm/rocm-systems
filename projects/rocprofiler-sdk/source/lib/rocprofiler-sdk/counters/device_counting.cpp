@@ -131,6 +131,7 @@ construct_aql_pkt(std::shared_ptr<counter_config>& profile)
         return nullptr;
     }
 
+    profile->pkt_generator->enable_device_profiling();
     auto pkts = profile->pkt_generator->construct_packet(
         CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
         CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());

@@ -52,13 +52,13 @@ CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags
     auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
-    if(!flags.host_access || pool.kernarg_pool_.handle == 0 || !pool.fill_fn)
+    if(!flags.host_access || pool.gpu_pool_.handle == 0 || !pool.fill_fn)
         return HSA_STATUS_ERROR;
 
     hsa_status_t status;
     if(!pool.bIgnoreKernArg && flags.memory_hint == AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED)
         status =
-            pool.allocate_fn(pool.kernarg_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+            pool.allocate_fn(pool.gpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
     else
         status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 

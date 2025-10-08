@@ -84,6 +84,9 @@ public:
 
     rocprofiler_status_t can_collect();
 
+    bool is_device_profiling_enabled() const { return _device_profiling_enabled; }
+    void enable_device_profiling() { _device_profiling_enabled = true; }
+
 private:
     static constexpr size_t MEM_PAGE_ALIGN = 0x1000;
     static constexpr size_t MEM_PAGE_MASK  = MEM_PAGE_ALIGN - 1;
@@ -101,6 +104,8 @@ protected:
     std::vector<AQLProfileMetric>                      _metrics;
     std::vector<aqlprofile_pmc_event_t>                _events;
     std::map<aqlprofile_pmc_event_t, counters::Metric> _event_to_metric;
+
+    bool _device_profiling_enabled = false;
 };
 
 class ThreadTraceAQLPacketFactory

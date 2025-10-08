@@ -112,6 +112,7 @@ class CounterAQLPacket : public AQLPacket
         hsa_agent_t                             gpu_agent       = {.handle = 0};
         hsa_amd_memory_pool_t                   cpu_pool_       = {.handle = 0};
         hsa_amd_memory_pool_t                   kernarg_pool_   = {.handle = 0};
+        hsa_amd_memory_pool_t                   gpu_pool_       = {.handle = 0};
         decltype(hsa_amd_memory_pool_allocate)* allocate_fn     = nullptr;
         decltype(hsa_amd_agents_allow_access)*  allow_access_fn = nullptr;
         decltype(hsa_amd_memory_pool_free)*     free_fn         = nullptr;
