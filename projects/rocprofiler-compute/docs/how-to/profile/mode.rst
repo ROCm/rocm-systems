@@ -639,3 +639,57 @@ plot.
    :align: center
    :alt: Sample ROCm Compute Profiler roofline output
    :width: 800
+
+
+.. _kokkos-integration:
+
+Kokkos Integration
+==================
+
+Rocprofiler Compute supports profiling Kokkos applications.
+
+Profiling Kokkos Applications
+-----------------------------
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name kokkos_app --kokkos-trace -- path/to/kokkos/app
+
+Enabling --kokkos-trace generates kokkos_kernel_trace.csv for kokkos kernels by correlating counter collection information from counter_collection.csv with marker information from marker_api_trace.csv
+
+
+Analyzing Kokkos Results
+------------------------
+
+After profiling, analyze the results.
+
+.. code-block:: shell-session
+
+   # View results in TUI mode
+   $ rocprof-compute analyze --tui 
+
+   # View results in GUI mode
+   $ rocprof-compute analyze --gui -p path/to/profiling/results
+
+   # Generate CSV reports  
+   $ rocprof-compute analyze --output-format csv path/to/profiling/results
+
+Known Issues and Limitations
+----------------------------
+
+.. warning::
+
+   **ROCProfiler Support**
+   
+   The ``--kokkos-trace`` option currently **only works with rocprofv3**. 
+   It is not supported with rocprofiler-sdk yet. Will be supported in future releases.
+
+   To use Kokkos tracing, ensure you are using rocprofv3:
+
+   .. code-block:: shell-session
+
+      # Verify rocprofv3 is available
+      $ rocprofv3 --version
+      
+      # Use rocprofv3 explicitly if needed
+      $ ROCPROF='rocprofv3' rocprof-compute profile --kokkos-trace ...

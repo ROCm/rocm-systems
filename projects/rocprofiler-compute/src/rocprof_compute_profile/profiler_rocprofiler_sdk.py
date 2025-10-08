@@ -90,9 +90,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if args.kokkos_trace:
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
             console_error(
-                "The option '--kokkos-trace' is not supported in the current "
-                "version of rocprof-compute. This functionality is planned for a "
-                "future release. Please adjust your profiling options accordingly."
+                "The option '--kokkos-trace' is not supported by rocprofiler-sdk currently. "
+                "This functionality is planned for a future release. "
+                "Please use rocprofv3 or adjust your profiling options accordingly."
             )
         if args.hip_trace:
             options["ROCPROF_HIP_COMPILER_API_TRACE"] = "1"
