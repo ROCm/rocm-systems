@@ -44,8 +44,8 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.10', '9.3', '9.4' ]
-        rocm-version: [ '0.0', '6.3', '6.4' ]
+        os-release: [ '8.10', '9.4' ]
+        rocm-version: [ '0.0', '6.3', '6.4', '7.0' ]
         build-type: ['Release']
 
     steps:
