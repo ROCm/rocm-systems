@@ -725,83 +725,85 @@ GROUP BY
     PMC_I.name,
     K.agent_id;
 
-CREATE VIEW IF NOT EXISTS
-    `pc_sampling` AS
+-- PC Sampling view
+CREATE VIEW IF NOT EXISTS pc_sampling AS
 SELECT
     S.id,
     S.guid,
-    JSON_EXTRACT(S.extdata, '$.sampling_method') AS sampling_method,
+    S.timestamp,
     T.nid,
     P.pid,
     TH.tid,
-    S.timestamp,
-    JSON_EXTRACT(S.extdata, '$.instruction') AS instruction,
-    JSON_EXTRACT(S.extdata, '$.instruction_comment') AS instruction_comment,
-    JSON_EXTRACT(E.line_info, '$.pc.code_object_id') AS code_object_id,
-    JSON_EXTRACT(E.line_info, '$.pc.code_object_offset') AS code_object_offset,
-    JSON_EXTRACT(E.extdata, '$.dispatch_id') AS dispatch_id,
-    E.stack_id AS corr_id_internal,
-    E.correlation_id AS corr_id_external,
-    JSON_EXTRACT(S.extdata, '$.exec_mask') AS exec_mask,
-    JSON_EXTRACT(E.extdata, '$.workgroup_id.x') AS workgroup_id_x,
-    JSON_EXTRACT(E.extdata, '$.workgroup_id.y') AS workgroup_id_y,
-    JSON_EXTRACT(E.extdata, '$.workgroup_id.z') AS workgroup_id_z,
-    JSON_EXTRACT(S.extdata, '$.wave_in_group') AS wave_in_group,
-    JSON_EXTRACT(S.extdata, '$.hw_id.chiplet') AS hw_id_chiplet,
-    JSON_EXTRACT(S.extdata, '$.hw_id.wave_id') AS hw_id_wave_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.simd_id') AS hw_id_simd_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.pipe_id') AS hw_id_pipe_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.cu_or_wgp_id') AS hw_id_cu_or_wgp_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.shader_array_id') AS hw_id_shader_array_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.shader_engine_id') AS hw_id_shader_engine_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.workgroup_id') AS hw_id_workgroup_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.vm_id') AS hw_id_vm_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.queue_id') AS hw_id_queue_id,
-    JSON_EXTRACT(S.extdata, '$.hw_id.microengine_id') AS hw_id_microengine_id,
-    -- Stochastic-specific fields (NULL for host_trap)
-    JSON_EXTRACT(E.extdata, '$.wave_issued') AS wave_issued,
-    JSON_EXTRACT(E.extdata, '$.inst_type') AS inst_type,
-    JSON_EXTRACT(E.extdata, '$.wave_count') AS wave_count,
-    S.event_id,
     S.track_id,
+    S.event_id,
     E.stack_id,
-    E.parent_stack_id,
     E.correlation_id,
-    S.extdata AS sample_extdata,
-    E.extdata AS event_extdata,
-    JSON_EXTRACT(E.extdata, '$.snapshot.stall_reason') AS stall_reason,
-    JSON_EXTRACT(E.extdata, '$.snapshot.dual_issue_valu') AS snapshot_dual_issue_valu,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_valu') AS snapshot_arb_state_issue_valu,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_matrix') AS snapshot_arb_state_issue_matrix,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_lds') AS snapshot_arb_state_issue_lds,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_lds_direct') AS snapshot_arb_state_issue_lds_direct,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_scalar') AS snapshot_arb_state_issue_scalar,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_vmem_tex') AS snapshot_arb_state_issue_vmem_tex,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_flat') AS snapshot_arb_state_issue_flat,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_exp') AS snapshot_arb_state_issue_exp,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_misc') AS snapshot_arb_state_issue_misc,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_issue_brmsg') AS snapshot_arb_state_issue_brmsg,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_valu') AS snapshot_arb_state_stall_valu,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_matrix') AS snapshot_arb_state_stall_matrix,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_lds') AS snapshot_arb_state_stall_lds,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_lds_direct') AS snapshot_arb_state_stall_lds_direct,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_scalar') AS snapshot_arb_state_stall_scalar,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_vmem_tex') AS snapshot_arb_state_stall_vmem_tex,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_flat') AS snapshot_arb_state_stall_flat,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_exp') AS snapshot_arb_state_stall_exp,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_misc') AS snapshot_arb_state_stall_misc,
-    JSON_EXTRACT(E.extdata, '$.snapshot.arb_state_stall_brmsg') AS snapshot_arb_state_stall_brmsg,
-    JSON_EXTRACT(E.extdata, '$.memory_counters.load_cnt') AS memory_counters_load_cnt,
-    JSON_EXTRACT(E.extdata, '$.memory_counters.store_cnt') AS memory_counters_store_cnt,
-    JSON_EXTRACT(E.extdata, '$.memory_counters.bvh_cnt') AS memory_counters_bvh_cnt,
-    JSON_EXTRACT(E.extdata, '$.memory_counters.sample_cnt') AS memory_counters_sample_cnt,
-    JSON_EXTRACT(E.extdata, '$.memory_counters.ds_cnt') AS memory_counters_ds_cnt,
-    JSON_EXTRACT(E.extdata, '$.memory_counters.km_cnt') AS memory_counters_km_cnt
+    MAX(CASE WHEN PMC.name = 'sampling_method' THEN PE.value END) AS sampling_method,
+    MAX(CASE WHEN PMC.name = 'instruction' THEN PE.value END) AS instruction,
+    MAX(CASE WHEN PMC.name = 'instruction_comment' THEN PE.value END) AS instruction_comment,
+    MAX(CASE WHEN PMC.name = 'code_object_id' THEN PE.value END) AS code_object_id,
+    MAX(CASE WHEN PMC.name = 'code_object_offset' THEN PE.value END) AS code_object_offset,
+    MAX(CASE WHEN PMC.name = 'dispatch_id' THEN PE.value END) AS dispatch_id,
+    MAX(CASE WHEN PMC.name = 'exec_mask' THEN PE.value END) AS exec_mask,
+    MAX(CASE WHEN PMC.name = 'workgroup_id_x' THEN PE.value END) AS workgroup_id_x,
+    MAX(CASE WHEN PMC.name = 'workgroup_id_y' THEN PE.value END) AS workgroup_id_y,
+    MAX(CASE WHEN PMC.name = 'workgroup_id_z' THEN PE.value END) AS workgroup_id_z,
+    MAX(CASE WHEN PMC.name = 'wave_in_group' THEN PE.value END) AS wave_in_group,
+    -- Hardware ID fields
+    MAX(CASE WHEN PMC.name = 'hw_id_chiplet' THEN PE.value END) AS hw_id_chiplet,
+    MAX(CASE WHEN PMC.name = 'hw_id_wave_id' THEN PE.value END) AS hw_id_wave_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_simd_id' THEN PE.value END) AS hw_id_simd_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_pipe_id' THEN PE.value END) AS hw_id_pipe_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_cu_or_wgp_id' THEN PE.value END) AS hw_id_cu_or_wgp_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_shader_array_id' THEN PE.value END) AS hw_id_shader_array_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_shader_engine_id' THEN PE.value END) AS hw_id_shader_engine_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_workgroup_id' THEN PE.value END) AS hw_id_workgroup_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_vm_id' THEN PE.value END) AS hw_id_vm_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_queue_id' THEN PE.value END) AS hw_id_queue_id,
+    MAX(CASE WHEN PMC.name = 'hw_id_microengine_id' THEN PE.value END) AS hw_id_microengine_id,
+    -- Stochastic-specific fields
+    MAX(CASE WHEN PMC.name = 'wave_issued' THEN PE.value END) AS wave_issued,
+    MAX(CASE WHEN PMC.name = 'inst_type' THEN PE.value END) AS inst_type,
+    MAX(CASE WHEN PMC.name = 'wave_count' THEN PE.value END) AS wave_count,
+    MAX(CASE WHEN PMC.name = 'stall_reason' THEN PE.value END) AS stall_reason,
+    -- Snapshot fields
+    MAX(CASE WHEN PMC.name = 'dual_issue_valu' THEN PE.value END) AS dual_issue_valu,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_valu' THEN PE.value END) AS arb_state_issue_valu,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_matrix' THEN PE.value END) AS arb_state_issue_matrix,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_lds' THEN PE.value END) AS arb_state_issue_lds,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_lds_direct' THEN PE.value END) AS arb_state_issue_lds_direct,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_scalar' THEN PE.value END) AS arb_state_issue_scalar,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_vmem_tex' THEN PE.value END) AS arb_state_issue_vmem_tex,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_flat' THEN PE.value END) AS arb_state_issue_flat,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_exp' THEN PE.value END) AS arb_state_issue_exp,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_misc' THEN PE.value END) AS arb_state_issue_misc,
+    MAX(CASE WHEN PMC.name = 'arb_state_issue_brmsg' THEN PE.value END) AS arb_state_issue_brmsg,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_valu' THEN PE.value END) AS arb_state_stall_valu,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_matrix' THEN PE.value END) AS arb_state_stall_matrix,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_lds' THEN PE.value END) AS arb_state_stall_lds,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_lds_direct' THEN PE.value END) AS arb_state_stall_lds_direct,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_scalar' THEN PE.value END) AS arb_state_stall_scalar,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_vmem_tex' THEN PE.value END) AS arb_state_stall_vmem_tex,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_flat' THEN PE.value END) AS arb_state_stall_flat,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_exp' THEN PE.value END) AS arb_state_stall_exp,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_misc' THEN PE.value END) AS arb_state_stall_misc,
+    MAX(CASE WHEN PMC.name = 'arb_state_stall_brmsg' THEN PE.value END) AS arb_state_stall_brmsg,
+    -- Memory counters
+    MAX(CASE WHEN PMC.name = 'load_cnt' THEN PE.value END) AS load_cnt,
+    MAX(CASE WHEN PMC.name = 'store_cnt' THEN PE.value END) AS store_cnt,
+    MAX(CASE WHEN PMC.name = 'bvh_cnt' THEN PE.value END) AS bvh_cnt,
+    MAX(CASE WHEN PMC.name = 'sample_cnt' THEN PE.value END) AS sample_cnt,
+    MAX(CASE WHEN PMC.name = 'ds_cnt' THEN PE.value END) AS ds_cnt,
+    MAX(CASE WHEN PMC.name = 'km_cnt' THEN PE.value END) AS km_cnt
 FROM
-    `rocpd_sample` S
-    INNER JOIN `rocpd_track` T ON T.id = S.track_id AND T.guid = S.guid
-    INNER JOIN `rocpd_event` E ON E.id = S.event_id AND E.guid = S.guid
-    INNER JOIN `rocpd_info_process` P ON P.id = T.pid AND P.guid = T.guid
-    INNER JOIN `rocpd_info_thread` TH ON TH.id = T.tid AND TH.guid = T.guid
+    rocpd_sample{{uuid}} S
+    JOIN rocpd_event{{uuid}} E ON E.id = S.event_id
+    JOIN rocpd_track{{uuid}} T ON T.id = S.track_id
+    JOIN rocpd_info_process{{uuid}} P ON P.id = T.pid
+    JOIN rocpd_info_thread{{uuid}} TH ON TH.id = T.tid
+    JOIN rocpd_pmc_event{{uuid}} PE ON PE.event_id = E.id
+    JOIN rocpd_info_pmc{{uuid}} PMC ON PMC.id = PE.pmc_id
 WHERE
-    JSON_EXTRACT(S.extdata, '$.sampling_method') IN ('host_trap', 'stochastic');
+    T.name_id = (SELECT id FROM rocpd_string{{uuid}} WHERE string = 'pc_sample')
+GROUP BY
+    S.id, S.guid, S.timestamp, T.nid, P.pid, TH.tid, S.track_id, S.event_id, E.stack_id, E.correlation_id;

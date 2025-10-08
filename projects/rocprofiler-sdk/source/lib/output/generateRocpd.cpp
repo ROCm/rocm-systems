@@ -1673,6 +1673,130 @@ write_rocpd(
 
     auto insert_pc_sampling_data = [&](const auto&        pc_sampling_gen,
                                        const std::string& sampling_method) {
+        // Cache for PMC field IDs to avoid redundant lookups and inserts
+        static std::unordered_map<std::string, uint64_t> pc_sampling_field_ids;
+
+        // Function to register a PC sampling field in rocpd_info_pmc
+        auto register_pmc_field = [&](const std::string& field_name,
+                                      const std::string& description,
+                                      const std::string& component = "pc_sample") -> uint64_t {
+            auto it = pc_sampling_field_ids.find(field_name);
+            if(it != pc_sampling_field_ids.end())
+            {
+                return it->second;
+            }
+
+            // Field not registered yet, insert into rocpd_info_pmc
+            auto stmt = get_insert_statement("rocpd_info_pmc{{uuid}}",
+                                             {insert_value("nid", node_id),
+                                              insert_value("pid", this_pid),
+                                              insert_value("target_arch", std::string_view{"GPU"}),
+                                              insert_value("name", field_name),
+                                              insert_value("symbol", field_name),
+                                              insert_value("description", description),
+                                              insert_value("component", component),
+                                              insert_value("value_type", std::string_view{"ABS"})});
+
+            execute_raw_sql_statements(conn, stmt);
+            auto field_id                     = sqlite3_last_insert_rowid(conn);
+            pc_sampling_field_ids[field_name] = field_id;
+            return field_id;
+        };
+
+        // Function to add a field value as a PMC event
+        auto add_pmc_value = [&](uint64_t           event_id,
+                                 const std::string& field_name,
+                                 const std::string& value,
+                                 const std::string& description  = "",
+                                 bool               force_insert = false) {
+            // Skip empty values, but allow "0" and "false"
+            if(!force_insert && value.empty()) return;
+
+            auto pmc_id = register_pmc_field(field_name, description);
+
+            auto stmt = get_insert_statement("rocpd_pmc_event{{uuid}}",
+                                             {insert_value("event_id", event_id),
+                                              insert_value("pmc_id", pmc_id),
+                                              insert_value("value", value)});
+
+            execute_raw_sql_statements(conn, stmt);
+        };
+
+        // Register all field types once
+        static bool fields_registered = false;
+        if(!fields_registered)
+        {
+            register_pmc_field("sampling_method", "PC sampling method (host_trap or stochastic)");
+            register_pmc_field("instruction", "Disassembled instruction at the program counter");
+            register_pmc_field("instruction_comment", "Comment for the instruction");
+            register_pmc_field("code_object_id", "ID of the code object containing the sampled PC");
+            register_pmc_field("code_object_offset",
+                               "Offset within the code object for the sampled PC");
+            register_pmc_field("dispatch_id", "ID of the kernel dispatch being sampled");
+            register_pmc_field("exec_mask", "Active SIMD lanes execution mask");
+            register_pmc_field("wave_in_group", "Wave index within the workgroup");
+
+            register_pmc_field("workgroup_id_x", "X dimension of workgroup ID");
+            register_pmc_field("workgroup_id_y", "Y dimension of workgroup ID");
+            register_pmc_field("workgroup_id_z", "Z dimension of workgroup ID");
+
+            // Hardware ID fields
+            register_pmc_field("hw_id_chiplet", "HW ID chiplet");
+            register_pmc_field("hw_id_wave_id", "HW ID wave ID");
+            register_pmc_field("hw_id_simd_id", "HW ID SIMD ID");
+            register_pmc_field("hw_id_pipe_id", "HW ID pipe ID");
+            register_pmc_field("hw_id_cu_or_wgp_id", "HW ID CU/WGP ID");
+            register_pmc_field("hw_id_shader_array_id", "HW ID shader array ID");
+            register_pmc_field("hw_id_shader_engine_id", "HW ID shader engine ID");
+            register_pmc_field("hw_id_workgroup_id", "HW ID workgroup ID");
+            register_pmc_field("hw_id_vm_id", "HW ID VM ID");
+            register_pmc_field("hw_id_queue_id", "HW ID queue ID");
+            register_pmc_field("hw_id_microengine_id", "HW ID microengine ID");
+
+            // Stochastic-specific fields
+            register_pmc_field("wave_issued", "Whether the wave was issued");
+            register_pmc_field("inst_type", "Type of instruction sampled");
+            register_pmc_field("wave_count",
+                               "Number of active waves on the CU at time of sampling");
+            register_pmc_field("stall_reason", "Reason for wave stalling");
+
+            // Snapshot fields
+            register_pmc_field("dual_issue_valu", "Dual issue VALU");
+            register_pmc_field("arb_state_issue_valu", "Arbiter issued VALU instruction");
+            register_pmc_field("arb_state_issue_matrix", "Arbiter issued matrix instruction");
+            register_pmc_field("arb_state_issue_lds", "Arbiter issued LDS instruction");
+            register_pmc_field("arb_state_issue_lds_direct",
+                               "Arbiter issued LDS direct instruction");
+            register_pmc_field("arb_state_issue_scalar", "Arbiter issued scalar instruction");
+            register_pmc_field("arb_state_issue_vmem_tex", "Arbiter issued vmem/tex instruction");
+            register_pmc_field("arb_state_issue_flat", "Arbiter issued flat instruction");
+            register_pmc_field("arb_state_issue_exp", "Arbiter issued export instruction");
+            register_pmc_field("arb_state_issue_misc", "Arbiter issued misc instruction");
+            register_pmc_field("arb_state_issue_brmsg",
+                               "Arbiter issued branch/message instruction");
+            register_pmc_field("arb_state_stall_valu", "VALU stall");
+            register_pmc_field("arb_state_stall_matrix", "Matrix stall");
+            register_pmc_field("arb_state_stall_lds", "LDS stall");
+            register_pmc_field("arb_state_stall_lds_direct", "LDS direct stall");
+            register_pmc_field("arb_state_stall_scalar", "Scalar stall");
+            register_pmc_field("arb_state_stall_vmem_tex", "VMEM/TEX stall");
+            register_pmc_field("arb_state_stall_flat", "Flat stall");
+            register_pmc_field("arb_state_stall_exp", "Export stall");
+            register_pmc_field("arb_state_stall_misc", "Misc stall");
+            register_pmc_field("arb_state_stall_brmsg", "Branch/message stall");
+
+            // Memory counters
+            register_pmc_field("load_cnt", "Load count");
+            register_pmc_field("store_cnt", "Store count");
+            register_pmc_field("bvh_cnt", "BVH count");
+            register_pmc_field("sample_cnt", "Sample count");
+            register_pmc_field("ds_cnt", "DS count");
+            register_pmc_field("km_cnt", "KM count");
+
+            fields_registered = true;
+        }
+
+        // Process PC sampling records
         for(auto pitr : pc_sampling_gen)
         {
             auto _deferred = sql::deferred_transaction{conn};
@@ -1686,28 +1810,95 @@ write_rocpd(
                 // Get instruction info
                 auto [instruction, instruction_comment] = get_instruction_info(itr);
 
-                // Create line_info data structure
-                cereal::line_info_data line_info{
-                    .pc = {.code_object_id     = record.pc.code_object_id,
-                           .code_object_offset = record.pc.code_object_offset}};
+                // Create minimal event for PC sample
+                auto evt_id = create_event(
+                    conn,
+                    {insert_value("category_id", string_entries.at("pc_sample")),
+                     insert_value("stack_id", record.correlation_id.internal),
+                     insert_value("parent_stack_id", record.correlation_id.internal),
+                     insert_value("correlation_id", record.correlation_id.external.value)});
 
-                // Serialize line_info to JSON
-                std::string line_info_json =
-                    get_json_string([&line_info](auto& ar) { cereal::save(ar, line_info); });
+                // Create track_id
+                auto pc_track_id = get_track_id(conn,
+                                                node_id,
+                                                this_pid,
+                                                record.correlation_id.internal,
+                                                string_entries.at("pc_sample"),
+                                                R"({})");
 
-                // Create event data structure with all fields properly initialized
-                cereal::pc_sampling_event_data event_data{
-                    .workgroup_id    = {.x = record.workgroup_id.x,
-                                     .y = record.workgroup_id.y,
-                                     .z = record.workgroup_id.z},
-                    .dispatch_id     = record.dispatch_id,
-                    .wave_issued     = std::nullopt,
-                    .inst_type       = std::nullopt,
-                    .wave_count      = std::nullopt,
-                    .snapshot        = std::nullopt,
-                    .memory_counters = std::nullopt};
+                // Create minimal sample record
+                auto stmt = get_insert_statement("rocpd_sample{{uuid}}",
+                                                 {insert_value("track_id", pc_track_id),
+                                                  insert_value("timestamp", record.timestamp),
+                                                  insert_value("event_id", evt_id)});
 
-                // Add stochastic-specific data only for stochastic records
+                execute_raw_sql_statements(conn, stmt);
+
+                // Add common fields as PMC events - only skip empty strings
+                add_pmc_value(evt_id, "sampling_method", sampling_method);
+
+                if(!instruction.empty())
+                {
+                    add_pmc_value(evt_id, "instruction", sanitize_sql_string(instruction));
+                }
+
+                if(!instruction_comment.empty())
+                {
+                    add_pmc_value(
+                        evt_id, "instruction_comment", sanitize_sql_string(instruction_comment));
+                }
+
+                add_pmc_value(evt_id, "code_object_id", std::to_string(record.pc.code_object_id));
+                add_pmc_value(
+                    evt_id, "code_object_offset", std::to_string(record.pc.code_object_offset));
+                add_pmc_value(evt_id, "dispatch_id", std::to_string(record.dispatch_id));
+                add_pmc_value(
+                    evt_id, "exec_mask", std::to_string(static_cast<uint64_t>(record.exec_mask)));
+                add_pmc_value(evt_id,
+                              "wave_in_group",
+                              std::to_string(static_cast<uint32_t>(record.wave_in_group)));
+
+                // Add workgroup dimensions
+                add_pmc_value(evt_id, "workgroup_id_x", std::to_string(record.workgroup_id.x));
+                add_pmc_value(evt_id, "workgroup_id_y", std::to_string(record.workgroup_id.y));
+                add_pmc_value(evt_id, "workgroup_id_z", std::to_string(record.workgroup_id.z));
+
+                // Add hardware ID fields
+                add_pmc_value(evt_id,
+                              "hw_id_chiplet",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.chiplet)));
+                add_pmc_value(evt_id,
+                              "hw_id_wave_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.wave_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_simd_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.simd_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_pipe_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.pipe_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_cu_or_wgp_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.cu_or_wgp_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_shader_array_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.shader_array_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_shader_engine_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.shader_engine_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_workgroup_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.workgroup_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_vm_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.vm_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_queue_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.queue_id)));
+                add_pmc_value(evt_id,
+                              "hw_id_microengine_id",
+                              std::to_string(static_cast<uint64_t>(record.hw_id.microengine_id)));
+
+                // Add stochastic-specific data
                 if(sampling_method == "stochastic")
                 {
                     if constexpr(std::is_same_v<
@@ -1716,6 +1907,7 @@ write_rocpd(
                     {
                         const auto& stochastic_record = record;
 
+                        // Get enum string representations
                         const char* inst_type_name =
                             rocprofiler_get_pc_sampling_instruction_type_name(
                                 static_cast<rocprofiler_pc_sampling_instruction_type_t>(
@@ -1760,129 +1952,83 @@ write_rocpd(
                                 std::to_string(stochastic_record.snapshot.reason_not_issued);
                         }
 
-                        // Add stochastic-specific fields to event data
-                        event_data.wave_issued = static_cast<bool>(stochastic_record.wave_issued);
-                        event_data.inst_type   = sanitize_sql_string(inst_type_str);
-                        event_data.wave_count  = stochastic_record.wave_count;
+                        // Add stochastic fields
+                        add_pmc_value(
+                            evt_id,
+                            "wave_issued",
+                            std::to_string(static_cast<bool>(stochastic_record.wave_issued)));
 
-                        event_data.snapshot = cereal::stochastic_snapshot_data{
-                            .stall_reason = sanitize_sql_string(reason_str),
-                            .dual_issue_valu =
-                                static_cast<bool>(stochastic_record.snapshot.dual_issue_valu),
-                            .arb_state_issue_valu =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_valu),
-                            .arb_state_issue_matrix = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_issue_matrix),
-                            .arb_state_issue_lds =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_lds),
-                            .arb_state_issue_lds_direct = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_issue_lds_direct),
-                            .arb_state_issue_scalar = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_issue_scalar),
-                            .arb_state_issue_vmem_tex = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_issue_vmem_tex),
-                            .arb_state_issue_flat =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_flat),
-                            .arb_state_issue_exp =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_exp),
-                            .arb_state_issue_misc =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_misc),
-                            .arb_state_issue_brmsg =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_brmsg),
-                            .arb_state_stall_valu =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_valu),
-                            .arb_state_stall_matrix = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_stall_matrix),
-                            .arb_state_stall_lds =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_lds),
-                            .arb_state_stall_lds_direct = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_stall_lds_direct),
-                            .arb_state_stall_scalar = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_stall_scalar),
-                            .arb_state_stall_vmem_tex = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_stall_vmem_tex),
-                            .arb_state_stall_flat =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_flat),
-                            .arb_state_stall_exp =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_exp),
-                            .arb_state_stall_misc =
-                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_misc),
-                            .arb_state_stall_brmsg = static_cast<bool>(
-                                stochastic_record.snapshot.arb_state_stall_brmsg)};
+                        if(!inst_type_str.empty())
+                        {
+                            add_pmc_value(evt_id, "inst_type", sanitize_sql_string(inst_type_str));
+                        }
 
-                        // Add memory counters if present
+                        add_pmc_value(
+                            evt_id, "wave_count", std::to_string(stochastic_record.wave_count));
+
+                        if(!reason_str.empty())
+                        {
+                            add_pmc_value(evt_id, "stall_reason", sanitize_sql_string(reason_str));
+                        }
+
+                        // Add snapshot fields
+#define ADD_ARB_STATE_FIELD(field)                                                                 \
+    add_pmc_value(                                                                                 \
+        evt_id, #field, std::to_string(static_cast<bool>(stochastic_record.snapshot.field)))
+
+                        ADD_ARB_STATE_FIELD(dual_issue_valu);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_valu);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_matrix);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_lds);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_lds_direct);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_scalar);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_vmem_tex);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_flat);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_exp);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_misc);
+                        ADD_ARB_STATE_FIELD(arb_state_issue_brmsg);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_valu);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_matrix);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_lds);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_lds_direct);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_scalar);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_vmem_tex);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_flat);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_exp);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_misc);
+                        ADD_ARB_STATE_FIELD(arb_state_stall_brmsg);
+#undef ADD_ARB_STATE_FIELD
+
+                        // Add memory counters when available
                         if(stochastic_record.flags.has_memory_counter)
                         {
-                            event_data.memory_counters = cereal::stochastic_memory_counters{
-                                .load_cnt = static_cast<uint32_t>(
-                                    stochastic_record.memory_counters.load_cnt),
-                                .store_cnt = static_cast<uint32_t>(
-                                    stochastic_record.memory_counters.store_cnt),
-                                .bvh_cnt = static_cast<uint32_t>(
-                                    stochastic_record.memory_counters.bvh_cnt),
-                                .sample_cnt = static_cast<uint32_t>(
-                                    stochastic_record.memory_counters.sample_cnt),
-                                .ds_cnt =
-                                    static_cast<uint32_t>(stochastic_record.memory_counters.ds_cnt),
-                                .km_cnt = static_cast<uint32_t>(
-                                    stochastic_record.memory_counters.km_cnt)};
+                            add_pmc_value(evt_id,
+                                          "load_cnt",
+                                          std::to_string(static_cast<uint32_t>(
+                                              stochastic_record.memory_counters.load_cnt)));
+                            add_pmc_value(evt_id,
+                                          "store_cnt",
+                                          std::to_string(static_cast<uint32_t>(
+                                              stochastic_record.memory_counters.store_cnt)));
+                            add_pmc_value(evt_id,
+                                          "bvh_cnt",
+                                          std::to_string(static_cast<uint32_t>(
+                                              stochastic_record.memory_counters.bvh_cnt)));
+                            add_pmc_value(evt_id,
+                                          "sample_cnt",
+                                          std::to_string(static_cast<uint32_t>(
+                                              stochastic_record.memory_counters.sample_cnt)));
+                            add_pmc_value(evt_id,
+                                          "ds_cnt",
+                                          std::to_string(static_cast<uint32_t>(
+                                              stochastic_record.memory_counters.ds_cnt)));
+                            add_pmc_value(evt_id,
+                                          "km_cnt",
+                                          std::to_string(static_cast<uint32_t>(
+                                              stochastic_record.memory_counters.km_cnt)));
                         }
                     }
                 }
-
-                // Serialize event data to JSON
-                std::string event_extdata =
-                    get_json_string([&event_data](auto& ar) { cereal::save(ar, event_data); });
-
-                // Create event with PC sampling metadata
-                auto evt_id = create_event(
-                    conn,
-                    {insert_value("stack_id", record.correlation_id.internal),
-                     insert_value("parent_stack_id", record.correlation_id.internal),
-                     insert_value("correlation_id", record.correlation_id.external.value),
-                     insert_value("line_info", line_info_json),
-                     insert_value("extdata", event_extdata)});
-
-                // Create track_id
-                auto pc_track_id = get_track_id(conn,
-                                                node_id,
-                                                this_pid,
-                                                record.correlation_id.internal,
-                                                string_entries.at("pc_sample"),
-                                                R"({})");
-
-                // Create sample data structure
-                cereal::pc_sampling_sample_data sample_data{
-                    .sampling_method     = sampling_method,
-                    .instruction         = sanitize_sql_string(instruction),
-                    .instruction_comment = sanitize_sql_string(instruction_comment),
-                    .exec_mask           = std::to_string(static_cast<uint64_t>(record.exec_mask)),
-                    .wave_in_group       = static_cast<uint32_t>(record.wave_in_group),
-                    .hw_id               = {
-                        .chiplet          = static_cast<uint64_t>(record.hw_id.chiplet),
-                        .wave_id          = static_cast<uint64_t>(record.hw_id.wave_id),
-                        .simd_id          = static_cast<uint64_t>(record.hw_id.simd_id),
-                        .pipe_id          = static_cast<uint64_t>(record.hw_id.pipe_id),
-                        .cu_or_wgp_id     = static_cast<uint64_t>(record.hw_id.cu_or_wgp_id),
-                        .shader_array_id  = static_cast<uint64_t>(record.hw_id.shader_array_id),
-                        .shader_engine_id = static_cast<uint64_t>(record.hw_id.shader_engine_id),
-                        .workgroup_id     = static_cast<uint64_t>(record.hw_id.workgroup_id),
-                        .vm_id            = static_cast<uint64_t>(record.hw_id.vm_id),
-                        .queue_id         = static_cast<uint64_t>(record.hw_id.queue_id),
-                        .microengine_id   = static_cast<uint64_t>(record.hw_id.microengine_id)}};
-
-                // Serialize sample data to JSON
-                std::string sample_extdata =
-                    get_json_string([&sample_data](auto& ar) { cereal::save(ar, sample_data); });
-
-                // Insert sample with serialized data
-                auto stmt = get_insert_statement("rocpd_sample{{uuid}}",
-                                                 {insert_value("track_id", pc_track_id),
-                                                  insert_value("timestamp", record.timestamp),
-                                                  insert_value("event_id", evt_id),
-                                                  insert_value("extdata", sample_extdata)});
-
-                execute_raw_sql_statements(conn, stmt);
             }
         }
     };
