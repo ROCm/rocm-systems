@@ -106,7 +106,10 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMemVmm.cc
       hipArray.cc
       hipMemcpyDeviceToDeviceNoCU.cc
-      hipGetProcAddressMemoryApis.cc)
+      hipGetProcAddressMemoryApis.cc
+      # Will be enabled for NVIDIA after fix for SWDEV-551244
+      hipMemPrefetchAsync_v2.cc
+      hipMemAdvise_v2.cc)
   if(UNIX)
     # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
     # For windows build error occurs undefined symbol: hipPointerSetAttribute
@@ -119,6 +122,16 @@ endif()
 hip_add_exe_to_target(NAME MemoryTest1
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+
+if(UNIX)
+  # link libnuma for numa_available(), numa_max_node(), move_pages(), etc.
+  find_library(NUMA_LIB numa)
+  if(NUMA_LIB)
+    target_link_libraries(MemoryTest1 ${NUMA_LIB})
+  else()
+    message(WARNING "libnuma not found; HostNuma tests will fail to link")
+  endif()
+endif()
 
 if(HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(hipHostRegister.cc PROPERTIES COMPILE_FLAGS -std=c++17)

@@ -482,7 +482,7 @@ typedef enum cudaSharedMemConfig hipSharedMemConfig;
 typedef CUfunc_cache hipFuncCache;
 typedef CUjitInputType hipJitInputType;
 typedef CUjit_option hipJitOption;
-typedef enum cudaLibraryOption hipLibraryOption;
+typedef CUlibraryOption hipLibraryOption;
 typedef CUdevice hipDevice_t;
 typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
 #define hipDevP2PAttrPerformanceRank cudaDevP2PAttrPerformanceRank
@@ -492,12 +492,15 @@ typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
 #define hipFuncAttributeMaxDynamicSharedMemorySize cudaFuncAttributeMaxDynamicSharedMemorySize
 #define hipFuncAttributePreferredSharedMemoryCarveout cudaFuncAttributePreferredSharedMemoryCarveout
 
+#define hipLibraryHostUniversalFunctionAndDataTable CU_LIBRARY_HOST_UNIVERSAL_FUNCTION_AND_DATA_TABLE
+#define hipLibraryBinaryIsPreserved CU_LIBRARY_BINARY_IS_PRESERVED
+
 typedef CUlinkState hipLinkState_t;
 typedef CUmodule hipModule_t;
 typedef CUfunction hipFunction_t;
 typedef CUdeviceptr hipDeviceptr_t;
-typedef cudaLibrary_t hipLibrary_t;
-typedef cudaKernel_t hipKernel_t;
+typedef CUlibrary hipLibrary_t;
+typedef CUkernel hipKernel_t;
 typedef struct cudaArray* hipArray_t;
 typedef struct cudaArray* hipArray_const_t;
 typedef struct cudaFuncAttributes hipFuncAttributes;
@@ -1790,7 +1793,6 @@ typedef cudaGraphEdgeData hipGraphEdgeData;
 typedef cudaLaunchConfig_t hipLaunchConfig_t;
 typedef cudaLaunchAttribute hipLaunchAttribute;
 typedef CUlaunchAttribute hipDrvLaunchAttribute;
-typedef cudaKernel_t hipKernel_t;
 typedef CUlaunchConfig HIP_LAUNCH_CONFIG;
 typedef CUlaunchAttributeID hipDrvLaunchAttributeID;
 typedef CUlaunchAttributeValue hipDrvLaunchAttributeValue;
@@ -3628,38 +3630,38 @@ inline static hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* im
 }
 
 inline static hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code,
-                                            hipJitOption** jitOptions, void** jitOptionsValues,
+                                            hipJitOption* jitOptions, void** jitOptionsValues,
                                             unsigned int numJitOptions,
-                                            hipLibraryOption** libraryOptions,
+                                            hipLibraryOption* libraryOptions,
                                             void** libraryOptionValues,
                                             unsigned int numLibraryOptions) {
-  return hipCUResultTohipError(cudaLibraryLoadData(library, code, jitOptions, jitOptionsValues,
+  return hipCUResultTohipError(cuLibraryLoadData(library, code, jitOptions, jitOptionsValues,
                                                    numJitOptions, libraryOptions,
                                                    libraryOptionValues, numLibraryOptions));
 }
 
 inline static hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
-                                                hipJitOption** jitOptions, void** jitOptionsValues,
+                                                hipJitOption* jitOptions, void** jitOptionsValues,
                                                 unsigned int numJitOptions,
-                                                hipLibraryOption** libraryOptions,
+                                                hipLibraryOption* libraryOptions,
                                                 void** libraryOptionValues,
                                                 unsigned int numLibraryOptions) {
   return hipCUResultTohipError(
-      cudaLibraryLoadFromFile(library, fileName, jitOptions, jitOptionsValues, numJitOptions,
+      cuLibraryLoadFromFile(library, fileName, jitOptions, jitOptionsValues, numJitOptions,
                               libraryOptions, libraryOptionValues, numLibraryOptions));
 }
 
 inline static hipError_t hipLibraryUnload(hipLibrary_t library) {
-  return hipCUResultTohipError(cudaLibraryUnload(library));
+  return hipCUResultTohipError(cuLibraryUnload(library));
 }
 
 inline static hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library,
                                              const char* name) {
-  return hipCUResultTohipError(cudaLibraryGetKernel(pKernel, library, name));
+  return hipCUResultTohipError(cuLibraryGetKernel(pKernel, library, name));
 }
 
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
-  return hipCUResultTohipError(cudaLibraryGetKernelCount(count, library));
+  return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
 
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,

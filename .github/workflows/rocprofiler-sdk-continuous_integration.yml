@@ -62,7 +62,7 @@ env:
   navi4_EXCLUDE_LABEL_REGEX: ""
 
   GLOBAL_CMAKE_OPTIONS: ""
-  DISABLE_ROCR_BUILD: "true"
+  DISABLE_ROCR_BUILD: "false"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
