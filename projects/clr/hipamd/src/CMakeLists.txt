@@ -118,6 +118,7 @@ target_sources(amdhip64 PRIVATE
   hip_peer.cpp
   hip_platform.cpp
   hip_profile.cpp
+  hip_storage.cpp
   hip_stream_ops.cpp
   hip_stream.cpp
   hip_surface.cpp

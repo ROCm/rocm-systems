@@ -1088,15 +1088,15 @@ typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** fu
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
 typedef hipError_t (*t_hipLibraryLoadData)(hipLibrary_t* library, const void* code,
-                                           hipJitOption** jitOptions, void** jitOptionsValues,
+                                           hipJitOption* jitOptions, void** jitOptionsValues,
                                            unsigned int numJitOptions,
-                                           hipLibraryOption** libraryOptions,
+                                           hipLibraryOption* libraryOptions,
                                            void** libraryOptionValues,
                                            unsigned int numLibraryOptions);
 typedef hipError_t (*t_hipLibraryLoadFromFile)(hipLibrary_t* library, const char* fileName,
-                                               hipJitOption** jitOptions, void** jitOptionsValues,
+                                               hipJitOption* jitOptions, void** jitOptionsValues,
                                                unsigned int numJitOptions,
-                                               hipLibraryOption** libraryOptions,
+                                               hipLibraryOption* libraryOptions,
                                                void** libraryOptionValues,
                                                unsigned int numLibraryOptions);
 typedef hipError_t (*t_hipLibraryUnload)(hipLibrary_t library);
