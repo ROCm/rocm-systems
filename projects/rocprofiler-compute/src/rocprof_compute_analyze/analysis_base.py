@@ -197,7 +197,7 @@ class OmniAnalyze_Base:
         print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
         for key, value in self._arch_configs[arch].metric_list.items():
             panel_yaml = load_yaml(
-                "utils/metric_generator/analysis_config_template.yaml"
+                "utils/config_management/analysis_config_template.yaml"
             )
             panel_info = {
                 panel["panel_title"]: panel["panel_alias"] for panel in panel_yaml

@@ -29,8 +29,8 @@ from pathlib import Path
 from typing import Optional
 
 
-def print_avail_arch(avail_arch: list[str]) -> str:
-    ret_str = "List all available metrics for analysis on specified arch:"
+def print_avail_arch(avail_arch: list[str], args: str) -> str:
+    ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += f"\n   {arch}"
     return ret_str
@@ -65,14 +65,14 @@ def add_general_group(
         dest="list_metrics",
         metavar="",
         choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(list(supported_archs.keys())),
+        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="",
         choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(list(supported_archs.keys())),
+        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
     )
     general_group.add_argument(
         "--config-dir",
@@ -257,6 +257,10 @@ Examples:
         help=(
             "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
             "(e.g. 12, 12.1, 12.1.1).\n"
+            "\t\t\tAlternatively, specify block id(s) for filtering "
+            "(e.g. 12, 13, 14).\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering "
+            "(e.g. lds, l1i, sl1d).\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set or --roof-only"
         ),

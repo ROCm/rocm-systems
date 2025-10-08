@@ -5,6 +5,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## Unreleased
 
 ### Added
+* Add `--list-blocks <arch>` option to general options to list available blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
+
 * Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
   * Use '--attach-pid' to specify the target process ID.
   * Use '--attach-duration-msec' to specify time duration.
@@ -126,6 +128,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
   * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
   * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
+  * `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
 
 * Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
   * Use ROCPROF=rocprofv3 to use rocprofv3 interface

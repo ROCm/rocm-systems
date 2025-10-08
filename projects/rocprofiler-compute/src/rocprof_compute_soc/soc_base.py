@@ -317,7 +317,7 @@ class OmniSoC_Base:
                 with open(filename) as stream:
                     texts.append(stream.read())
 
-        panel_yaml = load_yaml("utils/metric_generator/analysis_config_template.yaml")
+        panel_yaml = load_yaml("utils/config_management/analysis_config_template.yaml")
         panel_info = {
             panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml
         }

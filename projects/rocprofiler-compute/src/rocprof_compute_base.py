@@ -276,7 +276,7 @@ class RocProfCompute:
             parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 
             panel_yaml = load_yaml(
-                "utils/metric_generator/analysis_config_template.yaml"
+                "utils/config_management/analysis_config_template.yaml"
             )
             panel_info = {
                 panel["panel_title"]: panel["panel_alias"] for panel in panel_yaml
