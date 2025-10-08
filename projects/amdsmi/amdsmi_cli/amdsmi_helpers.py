@@ -29,6 +29,9 @@ import platform
 import re
 import sys
 import time
+import glob
+import errno
+import pwd
 
 from enum import Enum
 from pathlib import Path
@@ -115,7 +118,7 @@ class AMDSMIHelpers():
         This is used to determine if the last set was successful or not.
         """
         self._previous_set_success_check = status
-    
+
     def get_previous_set_success_check(self):
         """Returns the previous set success check.
         This is used to determine if the last set was successful or not.
@@ -822,7 +825,7 @@ class AMDSMIHelpers():
             except amdsmi_interface.AmdSmiLibraryException as e:
                 logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
                 continue
-        
+
         # If we never found a real min or max, set them to N/A
         if power_cap_min == amdsmi_interface.MaxUIntegerTypes.UINT64_T:
             power_cap_min = "N/A"
@@ -931,7 +934,7 @@ class AMDSMIHelpers():
             memory (NPS) partition mode.
 
             Please use `sudo amd-smi reset -r` AFTER successfully
-            changing the memory (NPS) partition mode. A successful driver reload 
+            changing the memory (NPS) partition mode. A successful driver reload
             is REQUIRED in order to complete updating ALL GPUs in the hive to
             the requested partition mode.
 
@@ -1133,34 +1136,101 @@ class AMDSMIHelpers():
         for i in self.progressbar(range(timeInSeconds), title, 40, add_newline=add_newline):
             time.sleep(1)
 
+    def _user_name(self, uid: int) -> str:
+        try:
+            return pwd.getpwuid(uid).pw_name
+        except Exception:
+            # In containers, the UID may not resolve to a name
+            return str(uid)
 
+    def _group_name(self, gid: int) -> str:
+        try:
+            return grp.getgrgid(gid).gr_name
+        except Exception:
+            # In containers, the GID may not resolve to a name
+            return str(gid)
+
+    # Attempt to grab file info
+    def _stat_info(self, path: str) -> dict:
+        try:
+            st = os.stat(path)
+            return {
+                "uid": st.st_uid,
+                "gid": st.st_gid,
+                "user": self._user_name(st.st_uid),
+                "group": self._group_name(st.st_gid),
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _try_open(self, path: str):
+        try:
+            fd = os.open(path, os.O_RDONLY) # Only read access is needed for permission check
+            os.close(fd)
+            return True, None, None
+        except OSError as e:
+            return False, e.errno, e.strerror
+
+    # Check kfd and dri for EACCES/EPERM
     def check_required_groups(self):
         """
-        Check if the current user is a member of the required groups.
-        If not, log a warning.
+        Check if the current user can access kfd and dri
+        Specifically, only care for EACCES/EPERM
         """
 
         # Skip check if running as root.
         if os.geteuid() == 0:
             return
 
-        required_groups = {'video', 'render'}
+        paths_to_check = []
+        if os.path.exists("/dev/kfd"):
+            paths_to_check.append("/dev/kfd")
 
-        user_groups = set()
-        for gid in set(os.getgroups()) | {os.getgid()}:
-            try:
-                user_groups.add(grp.getgrgid(gid).gr_name)
-            except Exception as e:
-                # Expected in containers when the name for this GID isn't defined
-                pass
+        # Render group correspond to /dev/dri/renderD*
+        paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
 
-        missing_groups = required_groups - user_groups
-        if missing_groups:
-            msg = (
-                "WARNING: User is missing the following required groups: %s. "
-                "Please add user to these groups."
-            ) % ", ".join(sorted(missing_groups))
-            raise RuntimeError(msg)
+        # Video group corresponds to /dev/dri/card*
+        paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
+
+        if not paths_to_check:
+            return
+
+        denied = []
+
+        for path in paths_to_check:
+            ok, err, msg = self._try_open(path)
+            if ok:
+                continue
+            # if permission denied or operation not permitted
+            if err in (errno.EACCES, errno.EPERM):
+                denied.append((path, err, msg, self._stat_info(path)))
+
+        if denied:
+            lines = []
+            lines.append("Permission needed to access required GPU device node(s):")
+            for path, err, msg, si in denied:
+                if "error" in si:
+                    lines.append(f"  - {path}: {os.strerror(err)}; stat failed: {si['error']}")
+                else:
+                    lines.append(
+                        "  - {p}: {err}; owner={user}({uid}):{group}({gid});".format(
+                            p=path,
+                            err=os.strerror(err),
+                            user=si["user"],
+                            uid=si["uid"],
+                            group=si["group"],
+                            gid=si["gid"],
+                        )
+                    )
+
+            lines.append("")
+            lines.append("You can try:")
+            lines.append("  • Add your user to the group that owns these devices:")
+            lines.append("      sudo usermod -aG <group> \"$USER\"\n")
+            print("\n".join(lines))
+            return False
+
+        return True
 
     def _severity_as_string(self, error_severity, notify_type, for_filename):
         if error_severity == "non_fatal_uncorrected":
@@ -1563,7 +1633,7 @@ class AMDSMIHelpers():
         if not isinstance(data, (list, tuple)):
             logging.debug(f"Invalid data type for {context}: expected list/tuple, got {type(data)}")
             return "N/A"
-    
+
         # Flatten nested lists and filter integers
         flat = [v for value in data for v in (value if isinstance(value, list) else [value]) if isinstance(v, int)]
         return round(sum(flat) / len(flat)) if flat else "N/A"

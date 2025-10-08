@@ -217,19 +217,7 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        # Perform one-time group check. If it fails, record that fact
-        # but do NOT abort—just mark that UUID should be "N/A" later.
-        _group_check_done = False
-        _group_in_groups = False
-        if not _group_check_done:
-           try:
-               self.helpers.check_required_groups()
-               _group_in_groups = True
-           except Exception as e:
-               _group_in_groups = False
-               # print the helper's error message exactly once:
-               print(f"{e}")
-           _group_check_done = True
+        _group_in_groups = self.helpers.check_required_groups()
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
@@ -247,14 +235,9 @@ class AMDSMICommands():
         except amdsmi_exception.AmdSmiLibraryException as e:
             bdf = "N/A"
         
-        # Only fetch UUID if group check passed; otherwise force "N/A"
-        if _group_in_groups:
-            try:
-                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
-            except amdsmi_exception.AmdSmiLibraryException:
-                uuid = "N/A"
-        else:
-            # user not in render/video → UUID is N/A
+        try:
+            uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
+        except amdsmi_exception.AmdSmiLibraryException:
             uuid = "N/A"
 
         try:
@@ -6447,7 +6430,7 @@ class AMDSMICommands():
             gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu)
             xgmi_values.append({"gpu" : gpu_id,
                                 "bdf" : gpu_bdf})
-            # Populate header with just bdfs
+            # Populate header with just it's gpu_id
             self.logger.table_header += f"GPU{gpu_id}".rjust(13)
 
         # Cache processor handles for each BDF
