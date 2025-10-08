@@ -231,11 +231,21 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
     CHECK_EQ(hsa::get_core_table()->hsa_signal_create_fn(1, 0, nullptr, &callback_data.completion),
              HSA_STATUS_SUCCESS);
 
+    // NOTE: As of now, hsa_signal_create_fn may return HSA_STATUS_SUCCESS even if it fails
+    // to create a valid signal (i.e., handle == 0). Once this is fixed in the HSA runtime,
+    // the CHECK below can be removed.
+    CHECK(callback_data.completion.handle != 0);
+
     // Signal to manage the startup of the context. Allows us to ensure that
     // the AQL packet we inject with start_context() completes before returning
     CHECK_EQ(
         hsa::get_core_table()->hsa_signal_create_fn(1, 0, nullptr, &callback_data.start_signal),
         HSA_STATUS_SUCCESS);
+
+    // NOTE: As of now, hsa_signal_create_fn may return HSA_STATUS_SUCCESS even if it fails
+    // to create a valid signal (i.e., handle == 0). Once this is fixed in the HSA runtime,
+    // the CHECK below can be removed.
+    CHECK(callback_data.start_signal.handle != 0);
 
     // Setup callback
     // NOLINTBEGIN(performance-no-int-to-ptr)
