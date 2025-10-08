@@ -9,7 +9,6 @@ subtree_to_project_map = {
     'projects/rocminfo': 'core', 
     'projects/rocprofiler': 'profiler', 
     'projects/rocprofiler-compute': 'profiler', 
-    'projects/rocprofiler-register': 'profiler', 
     'projects/rocprofiler-sdk': 'profiler', 
     'projects/rocprofiler-systems': 'profiler', 
     'projects/rocr-runtime': 'core', 
