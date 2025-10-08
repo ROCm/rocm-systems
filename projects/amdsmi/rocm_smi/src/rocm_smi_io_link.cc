@@ -196,7 +196,10 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
     std::string link_path_root = LinkPathRoot(node_indx, directory);
 
     auto io_link_dir = opendir(link_path_root.c_str());
-    assert(io_link_dir != nullptr);
+
+    if (!io_link_dir) {
+      return errno ? errno : 1;
+    }
 
     auto dentry_io_link = readdir(io_link_dir);
     while (dentry_io_link != nullptr) {
@@ -264,7 +267,10 @@ static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
   std::string link_path_root = LinkPathRoot(node_indx, directory);
 
   auto io_link_dir = opendir(link_path_root.c_str());
-  assert(io_link_dir != nullptr);
+
+  if (!io_link_dir) {
+    return errno ? errno : 1;
+  }
 
   auto dentry = readdir(io_link_dir);
   while (dentry != nullptr) {

@@ -7252,6 +7252,11 @@ rsmi_event_notification_init(uint32_t dv_ind) {
   DEVICE_MUTEX
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
+
+  if (dev->evt_notif_anon_fd() > 0 && dev->evt_notif_anon_file_ptr() != nullptr) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
   if (smi.kfd_notif_evt_fh() == -1) {
     assert(smi.kfd_notif_evt_fh_refcnt() == 0);
     int kfd_fd = open(kPathKFDIoctl, O_RDWR | O_CLOEXEC);
@@ -7666,15 +7671,27 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
 
-  if (dev->evt_notif_anon_fd() == -1) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-//  close(dev->evt_notif_anon_fd());
   FILE *anon_fp = smi.devices()[dv_ind]->evt_notif_anon_file_ptr();
-  fclose(anon_fp);
-  assert(errno == 0 || errno == EAGAIN);
-  dev->set_evt_notif_anon_file_ptr(nullptr);
-  dev->set_evt_notif_anon_fd(-1);
+  int   anon_fd = smi.devices()[dv_ind]->evt_notif_anon_fd();
+
+  // If nothing to close, success
+  if (!anon_fp && anon_fd <= 0) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  // Clear state first so nobody else can race a second close
+  smi.devices()[dv_ind]->set_evt_notif_anon_file_ptr(nullptr);
+  smi.devices()[dv_ind]->set_evt_notif_anon_fd(-1);
+
+  if (anon_fp) {
+    if (fclose(anon_fp) != 0) {
+      return amd::smi::ErrnoToRsmiStatus(errno);
+    }
+  } else { // no FILE*, but fd was valid
+    if (close(anon_fd) != 0) {
+      return amd::smi::ErrnoToRsmiStatus(errno);
+    }
+  }
 
   if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
     int ret = close(smi.kfd_notif_evt_fh());

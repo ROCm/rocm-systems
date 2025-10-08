@@ -397,7 +397,9 @@ Monitor::setVoltSensorLabelMap(void) {
 static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
                                               std::vector<uint64_t> *sensors) {
   auto hwmon_dir = opendir(dir_path.c_str());
-  assert(hwmon_dir != nullptr);
+  if (!hwmon_dir) {
+    return errno ? errno : 1;
+  }
   assert(sensors != nullptr);
 
   sensors->clear();
