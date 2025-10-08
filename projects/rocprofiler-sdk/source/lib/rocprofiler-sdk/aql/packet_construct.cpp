@@ -107,18 +107,17 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
                                               static_cast<void*>(&_access));
 
     // Check if the gpu pool is coarse grained
-    if(is_device_profiling_enabled()) {
+    if(is_device_profiling_enabled())
+    {
         hsa_amd_segment_t segment;
-        uint32_t flags;
-        ext.hsa_amd_memory_pool_get_info_fn(agent->gpu_pool(),
-                                            HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
-                                            &segment);
-        ext.hsa_amd_memory_pool_get_info_fn(agent->gpu_pool(),
-                                            HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
-                                            &flags);
+        uint32_t          flags;
+        ext.hsa_amd_memory_pool_get_info_fn(
+            agent->gpu_pool(), HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+        ext.hsa_amd_memory_pool_get_info_fn(
+            agent->gpu_pool(), HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);
 
         bool is_coarse_grained = (segment == HSA_AMD_SEGMENT_GLOBAL) &&
-                                (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED);
+                                 (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED);
         if(!is_coarse_grained)
         {
             ROCP_FATAL << "Counter pool must be coarse grained!";
@@ -139,9 +138,9 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
     pool.cpu_pool_     = agent->cpu_pool();
     pool.kernarg_pool_ = agent->kernarg_pool();
     if(is_device_profiling_enabled())
-        pool.gpu_pool_     = agent->gpu_pool();
+        pool.gpu_pool_ = agent->gpu_pool();
     else
-        pool.gpu_pool_     = agent->kernarg_pool();
+        pool.gpu_pool_ = agent->kernarg_pool();
 
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
     if(aql_agent == nullptr) throw std::runtime_error("Could not get AQL agent!");

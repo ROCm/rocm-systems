@@ -544,7 +544,7 @@ protected:
                                       &queue),
                      HSA_STATUS_SUCCESS);
 
-            auto kern_pkt  = gen_kernel_pkt(kernel_handle);
+            auto kern_pkt = gen_kernel_pkt(kernel_handle);
             pkt_constructor.enable_device_profiling();
             auto inst_pkts = pkt_constructor.construct_packet(get_api_table(), get_ext_table());
             inst_pkts->packets.start_packet.header = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
