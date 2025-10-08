@@ -184,7 +184,7 @@ def format_output(combined_diff):
 
 def main():
     if len(sys.argv) != 3:
-        print("Usage: python metric_delta_generator.py <curr_arch_dir> <prev_arch_dir>")
+        print("Usage: python generate_config_deltas.py <curr_arch_dir> <prev_arch_dir>")
         sys.exit(1)
 
     curr_arch_dir = Path(sys.argv[1])

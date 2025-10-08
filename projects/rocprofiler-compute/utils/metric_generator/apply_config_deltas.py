@@ -25,7 +25,7 @@
 
 """
 Apply delta YAML to base architecture to produce target architecture.
-Usage: python apply_delta.py <base_arch_dir> <delta_yaml> <output_dir>
+Usage: python apply_config_deltas.py <base_arch_dir> <delta_yaml> <output_dir>
 """
 
 import shutil
@@ -192,7 +192,10 @@ def apply_delta(base_dir, delta_file, output_dir):
 
 def main():
     if len(sys.argv) != 4:
-        print("Usage: python apply_delta.py <base_arch_dir> <delta_yaml> <output_dir>")
+        print(
+            "Usage: python apply_config_deltas.py "
+            "<base_arch_dir> <delta_yaml> <output_dir>"
+        )
         sys.exit(1)
 
     base_dir, delta_file, output_dir = sys.argv[1:4]
