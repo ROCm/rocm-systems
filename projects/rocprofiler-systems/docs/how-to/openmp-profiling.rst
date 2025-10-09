@@ -64,27 +64,38 @@ OMPT events will not be traced if a GPU is not detected.
 Instrumenting and running a program
 ===================================
 
-An example rocprof-sys-instrument command is:
+Consider the `Fortran HPC Jacobi example program <https://github.com/amd/HPCTrainingExamples/tree/main/Pragma_Examples/OpenMP/Fortran/8_jacobi/2_jacobi_targetdata>`_.
+To generate a trace of this program, we first compile using:
+
+.. code-block:: shell
+
+  make FC=amdflang
+
+To generate the instrumented binary, we use `rocprof-sys-instrument`. An example command is:
 
 .. code-block:: shell
 
   rocprof-sys-instrument -o jacobi.inst \
-    --log-file jacobi_instr.log --verbose --debug
+    --log-file mylog.log --verbose --debug -v 2 \
+    --print-instrumented pair+ --all-functions \
     -- ./jacobi
 
 This command generates an instrumented binary ``jacobi.inst``. Then, run it with the following command:
 
 .. code-block:: shell
 
-  rocprof-sys-run -- ./foo.inst
+  rocprof-sys-run -- ./jacobi.inst
 
 .. note::
    If ROCPROFSYS_USE_OMPT=ON is not specified, you can append `-I "ompt"`` to `rocprof-sys-run`.
 
-To view the generated ``.proto`` file in the browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, clicl on ``Open trace file`` and select the ``.proto`` file.
+To view the generated ``.proto`` file in the browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
 
-[ INSERT IMAGE HERE ]
+The output should resemble:
 
+.. image:: ../data/rocprof-sys-perfetto-openmp-fortran-trace.png
+    :alt: Visualization of a performance graph in Perfetto with OpenMP tracks
+    :width: 800
 
 .. - Configuration
 ..     - ROCPROFSYS_USE_OMPT = ON (collects OMPT events)
