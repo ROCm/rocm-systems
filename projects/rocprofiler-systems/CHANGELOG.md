@@ -12,11 +12,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
 - Support for profiling Pytorch workloads using the rocPD output database.
 - Support for tracing OpenMP API in Fortran applications.
+- An error warning that is triggered if the profiler application fails due to SELinux enforcement being enabled. The warning includes steps to disable SELinux enforcement.
 
 ## Changed
 
 - Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
-- Output an error message if SELinux is preventing the profiler from functioning correctly.
 - Updated PAPI module to v7.2.0b2
 - Using ROCprofiler-SDK for tracing OMPT API calls.
 
