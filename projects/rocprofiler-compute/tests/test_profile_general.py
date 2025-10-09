@@ -1619,8 +1619,8 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1633,8 +1633,8 @@ def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
     )
     # Should return code 1 since --block cannot be used with --list-metrics
     assert code == 1
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 

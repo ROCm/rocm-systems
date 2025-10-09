@@ -3,6 +3,8 @@ pr:
   branches:
     include:
       - develop
+      - release/rocm-rel-7.1
+      - release/rocm-rel-7.2
   drafts: false
 
 variables:
@@ -66,6 +68,7 @@ jobs:
                 "$file" == projects/rocprofiler-systems/docs/* || \
                 "$file" == projects/rocr-runtime/runtime/docs/* ]]; then
             WINDOWS_SKIP=true
+            MATCH_FOUND=false
           fi
           if [[ "$MATCH_FOUND" == true && "$WINDOWS_SKIP" == false ]]; then
             break

@@ -135,6 +135,20 @@ class NullDevice : public amd::Device {
   //! Empty implementation on Null device
   virtual bool globalFreeMemory(size_t* freeMemory) const { return false; }
 
+  //! Empty implementation on Null device
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status) {
+    ShouldNotReachHere();
+    return false;
+  }
+
+  //! Empty implementation on Null device
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status) {
+    ShouldNotReachHere();
+    return false;
+  }
+
   //! Get GPU device settings
   const pal::Settings& settings() const { return reinterpret_cast<pal::Settings&>(*settings_); }
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
@@ -442,6 +456,30 @@ class Device : public NullDevice {
 
   //! Retrieves information about free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory) const;
+
+  /**
+   * @brief Read data from a file to device memory.
+   * @param[IN] handle: file descriptor of the file to read.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of read.
+   * @param[IN] file_offset: offset into fd where data has to be read.
+   * @param[IN/OUT] size_copied: actual size read.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status);
+
+  /**
+   * Write data from device memory to a file.
+   * @param[IN] handle: file descriptor of the file to write.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of write.
+   * @param[IN] file_offset: offset into fd where data has to written.
+   * @param[IN/OUT] size_copied: actual size copied.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status);
 
   //! Returns a GPU memory object from AMD memory object
   pal::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
