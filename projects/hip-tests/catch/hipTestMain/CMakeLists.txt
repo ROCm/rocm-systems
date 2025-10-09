@@ -28,3 +28,5 @@ if(HIP_PLATFORM MATCHES "amd")
 else()
     target_compile_options(Main_Object PUBLIC -std=c++17)
 endif()
+
+target_link_libraries(Main_Object PRIVATE Catch2::Catch2)
