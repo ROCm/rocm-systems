@@ -1,498 +1,568 @@
-# HIP eBPF Tracing Tool
+# Unified HIP + Kernel Dispatch Tracer
 
-A powerful eBPF-based tool for tracing HIP (Heterogeneous-compute Interface for Portability) API calls in real-time without modifying the target application. This tool captures function entry/exit events, arguments, return values, and execution durations with nanosecond precision.
+A comprehensive, low-overhead GPU tracing solution that combines HIP API tracing via eBPF uprobes with kernel dispatch tracing via lightweight HSA queue interception, generating unified Chrome Trace JSON output.
 
-## Features
+## Table of Contents
 
-- **Comprehensive HIP API tracing** - traces all 439+ HIP Runtime API functions using eBPF uprobes
-- **Multiple output formats**: Console, CSV, and Perfetto trace format
-- **Dynamic function generation** - automatically parses HIP headers to generate tracing code
-- **Nanosecond precision** timestamps and duration measurements
-- **Argument capture** with proper names and values
-- **Process and thread tracking** for multi-threaded applications
-- **Non-intrusive** - no application modification required
-- **High performance** - minimal overhead on target application
-- **Perfetto visualization** - view traces on ui.perfetto.dev
-- **Call stack tracking** - handles nested function calls without recursion
-- **Optional kernel dispatch tracking** - captures GPU kernel execution times (disabled by default)
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Components](#components)
+- [Building](#building)
+- [Usage](#usage)
+- [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
+- [Design Documentation](#design-documentation)
 
-## Requirements
+## Overview
 
-- Linux kernel with eBPF support (5.4+)
-- Root privileges (for eBPF program loading)
-- HIP runtime library
-- Build tools: `clang`, `bpftool`, `libbpf-dev`
-- CMake 3.10+ (required for build)
-- Python 3 (for dynamic function generation)
-- **System limits**: Increased file descriptor limit (65536) and memory lock limit for comprehensive tracing of all HIP functions
+This tool provides complete visibility into HIP/ROCm GPU workloads by capturing:
 
-## Quick Start
+1. **HIP API calls** - Function entry/exit, arguments, return values (via eBPF uprobes)
+2. **Kernel dispatches** - Launch parameters, grid/workgroup sizes, memory usage
+3. **GPU execution times** - Hardware-accurate timestamps from AMD profiling API
+4. **Correlation** - Links HIP API calls to their corresponding kernel launches
 
-### Build with CMake
-
-```bash
-# Configure and build
-cmake -B build .
-cmake --build build --parallel 16
-
-# Run the tool (use wrapper script for automatic limit increase)
-./hip_trace_wrapper.sh -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto
-```
-
-### Complete Example
-
-```bash
-# 1. Build the tool
-cmake -B build .
-cmake --build build --parallel 16
-
-# 2. Run with your HIP application (CSV output)
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.csv -f csv &
-TRACE_PID=$!
-
-# 3. Run your HIP application
-./your_hip_application
-
-# 4. Stop tracing
-kill $TRACE_PID
-
-# 5. Analyze results
-head -10 trace.csv
-cut -d',' -f2 trace.csv | sort | uniq -c
-
-# Alternative: Perfetto output for visualization
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto &
-TRACE_PID=$!
-./your_hip_application
-kill $TRACE_PID
-# Open trace.json in ui.perfetto.dev
-```
-
-## Usage
-
-### Command Line Options
-
-```bash
-./hip_trace [options]
-
-Options:
-  -p <pid>     Attach to specific process ID (not implemented yet)
-  -l <lib>     Path to HIP library (default: auto-detect)
-  -o <file>    Output file for function calls
-  -f <format>  Output format: csv, perfetto (default: console)
-  -h           Show help message
-```
-
-### Usage Examples
-
-#### Basic Tracing
-```bash
-# Trace all HIP processes with console output
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so
-
-# Auto-detect HIP library
-sudo ./build/hip_trace
-```
-
-#### CSV Output
-```bash
-# Generate CSV file for analysis
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.csv -f csv
-
-# Run in background and analyze later
-sudo ./build/hip_trace -o trace.csv -f csv &
-TRACE_PID=$!
-./your_hip_app
-kill $TRACE_PID
-# Analyze results
-head -10 trace.csv
-cut -d',' -f2 trace.csv | sort | uniq -c
-```
-
-#### Perfetto Output
-```bash
-# Generate Perfetto trace file for visualization
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto
-
-# Run in background and visualize later
-sudo ./build/hip_trace -o trace.json -f perfetto &
-TRACE_PID=$!
-./your_hip_app
-kill $TRACE_PID
-# Open trace.json in ui.perfetto.dev
-```
-
-#### Common HIP Library Paths
-```bash
-# ROCm 7.1.0
-sudo ./build/hip_trace -l /opt/rocm-7.1.0/lib/libamdhip64.so.7.1.70100 -o trace.csv -f csv
-
-# Standard ROCm installation
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.csv -f csv
-
-# System installation
-sudo ./build/hip_trace -l /usr/lib/x86_64-linux-gnu/libamdhip64.so -o trace.csv -f csv
-```
-
-#### Testing with Sample Application
-```bash
-# Test with the provided test program
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o test_trace.csv -f csv &
-TRACE_PID=$!
-sleep 2
-./test_hip_program
-kill $TRACE_PID
-# Analyze results
-head -10 test_trace.csv
-cut -d',' -f2 test_trace.csv | sort | uniq -c
-```
-
-## Output Format
-
-### Console Output
-```
-[timestamp] ENTRY: function_name (pid, tid) args=[arg1, arg2, ...]
-[timestamp] EXIT:  function_name (pid, tid) ret=return_value
-```
-
-### CSV Output
-The CSV file contains the following columns:
-- `function_id` - Unique identifier for each function call
-- `function_name` - Name of the HIP function
-- `pid` - Process ID
-- `tid` - Thread ID
-- `start_timestamp_ns` - Function entry timestamp (nanoseconds)
-- `end_timestamp_ns` - Function exit timestamp (nanoseconds)
-- `duration_ns` - Function execution duration (nanoseconds)
-- `arg_count` - Number of arguments captured
-- `arg0_name, arg0_value, arg1_name, arg1_value, ...` - Function arguments
-- `return_value` - Function return value
-
-### Perfetto Output
-The Perfetto trace file (`.json`) contains:
-- **Track events** for each HIP function call
-- **Slice begin/end events** showing function execution duration
-- **Process and thread information** for multi-threaded applications
-- **Timestamps** with nanosecond precision
-- **Function names** and argument information
-
-The Perfetto format enables:
-- **Interactive visualization** on ui.perfetto.dev
-- **Timeline analysis** of HIP API calls
-- **Performance profiling** with detailed timing information
-- **Multi-process/thread correlation** for complex applications
-
-## Supported HIP Functions
-
-Comprehensive support for **all 439 HIP Runtime API functions** (100% coverage) across all major categories:
-
-### Memory Management (25+ functions)
-- `hipMalloc`, `hipFree`, `hipMemcpy`, `hipMemcpyAsync`
-- `hipMemset`, `hipMemsetAsync`, `hipMemGetInfo`
-- `hipMemPrefetchAsync`, `hipMemAdvise`, `hipMemAllocHost`
-- `hipHostMalloc`, `hipMallocManaged`, `hipMallocHost`
-- `hipMemAddressFree`, `hipMemAddressReserve`, `hipMemCreate`
-- `hipMemExportToShareableHandle`, `hipMemGetAccess`
-- `hipMemGetAllocationGranularity`, `hipMemImportFromShareableHandle`
-- `hipMemMap`, `hipMemMapArrayAsync`, `hipMemRelease`
-- `hipMemRetainAllocationHandle`, `hipMemSetAccess`, `hipMemUnmap`
-
-### Stream Management (20+ functions)
-- `hipStreamCreate`, `hipStreamDestroy`, `hipStreamSynchronize`
-- `hipStreamWaitEvent`, `hipStreamQuery`, `hipStreamCreateWithFlags`
-- `hipStreamCreateWithPriority`, `hipStreamGetFlags`, `hipStreamGetId`
-- `hipStreamGetPriority`, `hipStreamGetDevice`, `hipStreamAddCallback`
-- `hipStreamSetAttribute`, `hipStreamGetAttribute`
-- `hipStreamWaitValue32`, `hipStreamWaitValue64`
-- `hipStreamWriteValue32`, `hipStreamWriteValue64`
-- `hipStreamBatchMemOp`, `hipExtStreamCreateWithCUMask`
-
-### Event Management (10+ functions)
-- `hipEventCreate`, `hipEventDestroy`, `hipEventRecord`
-- `hipEventSynchronize`, `hipEventElapsedTime`, `hipEventQuery`
-- `hipEventCreateWithFlags`, `hipEventRecordWithFlags`
-
-### Kernel Launch & Execution
-- `hipLaunchKernel` - Launch kernel (with call stack tracking)
-- `hipFuncSetAttribute`, `hipFuncSetCacheConfig`, `hipFuncSetSharedMemConfig`
-
-### Device Management (30+ functions)
-- `hipSetDevice`, `hipGetDevice`, `hipGetDeviceCount`
-- `hipDeviceSynchronize`, `hipDeviceReset`, `hipDeviceGet`
-- `hipDeviceComputeCapability`, `hipDeviceGetName`, `hipDeviceGetUuid`
-- `hipDeviceGetP2PAttribute`, `hipDeviceGetPCIBusId`, `hipDeviceGetByPCIBusId`
-- `hipDeviceTotalMem`, `hipDeviceGetAttribute`, `hipDeviceGetDefaultMemPool`
-- `hipDeviceSetMemPool`, `hipDeviceGetMemPool`, `hipGetDeviceProperties`
-- `hipDeviceSetCacheConfig`, `hipDeviceGetCacheConfig`
-- `hipDeviceGetLimit`, `hipDeviceSetLimit`
-- `hipDeviceGetSharedMemConfig`, `hipDeviceSetSharedMemConfig`
-- `hipGetDeviceFlags`, `hipSetDeviceFlags`, `hipChooseDevice`
-
-### Graph Management (50+ functions)
-- `hipGraphCreate`, `hipGraphDestroy`, `hipGraphAddKernelNode`
-- `hipGraphAddMemcpyNode`, `hipGraphAddMemsetNode`, `hipGraphAddMemFreeNode`
-- `hipGraphAddHostNode`, `hipGraphAddChildGraphNode`, `hipGraphAddEmptyNode`
-- `hipGraphAddEventRecordNode`, `hipGraphAddEventWaitNode`
-- `hipGraphAddExternalSemaphoresWaitNode`, `hipGraphAddExternalSemaphoresSignalNode`
-- `hipGraphExecCreate`, `hipGraphExecDestroy`, `hipGraphExecUpdate`
-- `hipGraphExecKernelNodeSetParams`, `hipGraphExecMemcpyNodeSetParams`
-- `hipGraphExecMemsetNodeSetParams`, `hipGraphExecHostNodeSetParams`
-- `hipGraphExecChildGraphNodeSetParams`, `hipGraphExecEventRecordNodeSetParams`
-- `hipGraphExecEventWaitNodeSetParams`, `hipGraphExecExternalSemaphoresWaitNodeSetParams`
-- `hipGraphExecExternalSemaphoresSignalNodeSetParams`
-- `hipGraphLaunch`, `hipGraphInstantiate`, `hipGraphInstantiateWithFlags`
-- `hipGraphKernelNodeCopyAttributes`, `hipGraphNodeSetEnabled`, `hipGraphNodeGetEnabled`
-- `hipGraphRetainUserObject`, `hipGraphReleaseUserObject`
-- `hipGraphDebugDotPrint`, `hipGraphAddBatchMemOpNode`
-- `hipGraphBatchMemOpNodeGetParams`, `hipGraphBatchMemOpNodeSetParams`
-- `hipGraphExecBatchMemOpNodeSetParams`
-
-### IPC & External Resources (15+ functions)
-- `hipIpcGetMemHandle`, `hipIpcOpenMemHandle`, `hipIpcCloseMemHandle`
-- `hipIpcGetEventHandle`, `hipIpcOpenEventHandle`
-- `hipImportExternalSemaphore`, `hipSignalExternalSemaphoresAsync`
-- `hipWaitExternalSemaphoresAsync`, `hipDestroyExternalSemaphore`
-- `hipImportExternalMemory`, `hipExternalMemoryGetMappedBuffer`
-- `hipDestroyExternalMemory`, `hipExternalMemoryGetMappedMipmappedArray`
-
-### Graphics & Surface Management (10+ functions)
-- `hipGraphicsMapResources`, `hipGraphicsSubResourceGetMappedArray`
-- `hipGraphicsResourceGetMappedPointer`, `hipGraphicsUnmapResources`
-- `hipGraphicsUnregisterResource`, `hipCreateSurfaceObject`
-- `hipDestroySurfaceObject`
-
-### User Objects & Advanced Features (10+ functions)
-- `hipUserObjectCreate`, `hipUserObjectRelease`, `hipUserObjectRetain`
-- `hipPointerSetAttribute`, `hipPointerGetAttributes`, `hipPointerGetAttribute`
-- `hipDrvPointerGetAttributes`, `hipGetLastError`, `hipPeekAtLastError`
-- `hipInit`, `hipDriverGetVersion`, `hipRuntimeGetVersion`
-
-## Analysis Tools
-
-### CSV Analysis
-```bash
-# Basic analysis commands
-head -10 trace.csv                    # View first 10 entries
-cut -d',' -f2 trace.csv | sort | uniq -c  # Count function calls
-sort -t',' -k7 -nr trace.csv | head -10   # Longest running calls
-```
-
-### Perfetto Visualization
-```bash
-# Generate Perfetto trace
-sudo ./build/hip_trace -o trace.json -f perfetto &
-TRACE_PID=$!
-./your_hip_application
-kill $TRACE_PID
-
-# Open in Perfetto UI
-# Navigate to https://ui.perfetto.dev
-# Click "Open trace file" and select trace.json
-```
-
-Perfetto UI provides:
-- **Interactive timeline** with zoom and pan
-- **Function call visualization** as colored slices
-- **Performance metrics** and statistics
-- **Multi-thread analysis** with thread tracks
-- **Search and filtering** capabilities
-- **Export options** for further analysis
-
-### Python Analysis
-```python
-import pandas as pd
-import numpy as np
-
-# Load the CSV data
-df = pd.read_csv('trace.csv')
-
-# Basic statistics
-print("Function call summary:")
-print(df.groupby('function_name')['duration_ns'].describe())
-
-# Performance analysis
-print("\nPerformance metrics:")
-print(f"Total calls: {len(df)}")
-print(f"Average duration: {df['duration_ns'].mean() / 1e6:.3f} ms")
-print(f"Max duration: {df['duration_ns'].max() / 1e6:.3f} ms")
-
-# Memory allocation analysis
-if 'hipMalloc' in df['function_name'].values:
-    malloc_calls = df[df['function_name'] == 'hipMalloc']
-    print(f"\nMemory allocations: {len(malloc_calls)}")
-    print(f"Average allocation time: {malloc_calls['duration_ns'].mean() / 1e6:.3f} ms")
-```
-
-### Command Line Analysis
-```bash
-# Count function calls
-cut -d',' -f2 trace.csv | sort | uniq -c
-
-# Find longest running calls
-sort -t',' -k7 -nr trace.csv | head -10
-
-# Analyze by process
-awk -F',' 'NR>1 {print $3}' trace.csv | sort | uniq -c
-
-# Calculate average duration by function
-awk -F',' 'NR>1 {sum[$2]+=$7; count[$2]++} END {for(f in sum) print f, sum[f]/count[f]/1e6 " ms"}' trace.csv
-```
+**Key Innovation**: HIP API tracing is done entirely with eBPF uprobes (NO rocprofiler-sdk dependency), while kernel dispatch tracing uses a lightweight shim that leverages rocprofiler-sdk ONLY for HSA API table access.
 
 ## Architecture
 
-The tool consists of:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       HIP Application                           │
+│  (uses libamdhip64.so + HSA runtime)                            │
+└────────┬──────────────────────────────────────┬─────────────────┘
+         │                                      │
+         │ HIP API calls                        │ HSA queue operations
+         │ (hipMalloc, hipMemcpy,              │ (kernel dispatches)
+         │  hipLaunchKernel, etc.)             │
+         ▼                                      ▼
+┌──────────────────────────┐         ┌──────────────────────────┐
+│  eBPF Program            │         │  hsa_hybrid_shim.so      │
+│  (hip_kernel_unified)    │         │  (LD_PRELOAD library)    │
+│                          │         │                          │
+│  - Uprobes on            │         │  - HSA queue intercept   │
+│    libamdhip64.so        │         │  - Signal injection      │
+│  - Captures args/returns │         │  - GPU timestamp capture │
+│  - Correlation IDs       │         │  - Async handlers        │
+└────────┬─────────────────┘         └──────────┬───────────────┘
+         │                                      │
+         │ HIP events                           │ Kernel events
+         │ (ring buffer)                        │ (ring buffer)
+         │                                      │
+         └──────────────┬───────────────────────┘
+                        │
+                        ▼
+              ┌──────────────────────────────┐
+              │ hip_kernel_unified_tracer    │
+              │  (userspace tool)            │
+              │                              │
+              │  - Event correlation         │
+              │  - Chrome Trace JSON writer  │
+              └──────────────────────────────┘
+                        │
+                        ▼
+                  trace.json
+                (chrome://tracing)
+```
 
-1. **eBPF Program** (`hip_trace.bpf.c`) - Kernel-space tracing logic with:
-   - 878 uprobes (439 functions × 2) for HIP API tracing
-   - Call stack tracking to handle nested function calls
-   - Optional kernel dispatch tracepoints (disabled by default)
-2. **User-space Loader** (`hip_trace.c`) - Program loading and event processing
-3. **Dynamic Code Generation** (`generate_hip_functions_from_headers.py`) - Parses HIP headers and generates eBPF programs
-4. **Build System** - CMake-based build with automatic function generation
-5. **Wrapper Script** (`hip_trace_wrapper.sh`) - Handles system limit requirements
-6. **Analysis Tools** - CSV analysis and visualization scripts
+### Event Flow
 
-## How It Works
+1. **HIP API Entry** → eBPF uprobe → Allocate correlation ID → Send entry event
+2. **HIP API Exit** → eBPF uretprobe → Use correlation ID → Send exit event
+3. **Kernel Dispatch** → HSA interceptor → Inject tracking signal → Send dispatch event
+4. **Kernel Complete** → Async signal handler → Get GPU timestamps → Send completion event
+5. **Userspace Tool** → Read all events → Correlate → Write Chrome Trace JSON
 
-1. **Dynamic Code Generation**: Python script parses HIP headers and generates eBPF programs for all 439 HIP Runtime API functions
-2. **Uprobe Attachment**: Attaches 878 eBPF uprobes (entry + exit) to HIP library functions
-   - **Call Stack Tracking**: Uses depth-based keys `(tid << 16) | depth` to handle nested function calls
-   - **Recursion Prevention**: Prevents infinite recursion when traced functions call other traced functions
-3. **Event Capture**: Captures function entry/exit events with arguments and timestamps
-4. **Data Processing**: Processes events in user-space with function name mapping
-5. **Output Generation**: Writes structured data to console, CSV, or Perfetto JSON format
+## Features
 
-For detailed technical explanation, see [eBPF_HIP_Tracing_Technical_Guide.md](eBPF_HIP_Tracing_Technical_Guide.md).
+### Core Features
 
-## Performance Impact
+✅ **Pure eBPF HIP API Tracing**
+- No rocprofiler-sdk dependency for HIP APIs
+- Uprobes on libamdhip64.so
+- Captures all HIP runtime API calls
+- Low overhead, kernel-space efficiency
 
-- **Minimal overhead** on target application
-- **High throughput** event processing
-- **Efficient memory usage** with ring buffers
-- **Real-time processing** without blocking target application
+✅ **Lightweight Kernel Dispatch Tracing**
+- HSA queue write interception
+- Signal injection for completion detection
+- Async handlers (no polling)
+- GPU-side timestamps via `hsa_amd_profiling_get_dispatch_time`
+
+✅ **Event Correlation**
+- Per-thread correlation IDs
+- Links HIP APIs to kernel launches
+- Maintains causal relationships
+
+✅ **Comprehensive Metadata**
+- Grid dimensions (x, y, z)
+- Workgroup sizes
+- LDS (Local Data Share) usage
+- Scratch memory usage
+- Kernel object addresses
+
+✅ **Chrome Trace JSON Output**
+- Compatible with `chrome://tracing`
+- Perfetto UI support
+- Multi-track visualization (HIP APIs + Kernels)
+- Rich metadata in trace events
+
+### Performance Characteristics
+
+- **Minimal Overhead**: eBPF uprobes + async handlers (no polling)
+- **Scalable**: Ring buffers prevent event loss
+- **Non-intrusive**: Application behavior unchanged
+- **Zero Root Requirement** (except for tracer startup)
+
+## Components
+
+### 1. hip_kernel_unified.bpf.c (eBPF Program)
+
+**Purpose**: Captures HIP API calls via uprobes
+
+**Key Maps**:
+- `events`: Ring buffer for HIP API events
+- `kernel_events`: Array map for kernel events from shim
+- `correlation_map`: Per-thread correlation ID tracking
+- `correlation_counter`: Global correlation ID allocator
+- `correlation_to_function`: Maps correlation IDs to function IDs
+- `function_names`: Array map storing function names by function ID
+- `probe_function_map`: Hash map for probe address to function ID (legacy)
+
+**Probes**:
+- `hip_api_entry`: Attached to HIP function entries with BPF cookies
+- `hip_api_exit`: Attached to HIP function returns with BPF cookies
+
+**Function Name Resolution**:
+- Uses **BPF cookies** (`bpf_get_attach_cookie()`) to pass function IDs directly from userspace
+- Each uprobe attachment includes function ID as cookie
+- Eliminates runtime IP address lookups
+- 100% accurate function name identification
+
+### 2. hsa_hybrid_shim.cpp (Lightweight Shim)
+
+**Purpose**: Intercepts HSA kernel dispatches and captures GPU timestamps
+
+**Uses rocprofiler-sdk for**:
+- HSA API table access via `rocprofiler_configure()`
+- Function pointers: `hsa_amd_queue_intercept_create`, `hsa_amd_queue_intercept_register`, etc.
+
+**Does NOT use rocprofiler-sdk for**:
+- HIP API tracing (done by eBPF)
+- Callback tracing
+- Buffer tracing
+
+**Key Functions**:
+- `rocprofiler_configure()`: Gets HSA API function table
+- `api_registration_callback()`: Extracts AMD extension functions
+- `hsa_queue_create()`: Intercepted, installs write interceptor
+- `write_interceptor_callback()`: Captures kernel dispatch packets
+- `async_signal_handler()`: Handles kernel completion, gets GPU timestamps
+
+**Sends to eBPF**:
+- Kernel dispatch events (timestamp, metadata)
+- Kernel completion events (GPU start/end times)
+
+### 3. hip_kernel_unified_tracer.c (Userspace Tool)
+
+**Purpose**: Orchestrates tracing, correlates events, generates output
+
+**Responsibilities**:
+- Load eBPF program
+- Attach uprobes to HIP functions in libamdhip64.so
+- Pin `kernel_events` map to `/sys/fs/bpf/kernel_events`
+- Poll ring buffers for events
+- Correlate HIP APIs with kernel dispatches
+- Write Chrome Trace JSON
+
+**Output Format**: Chrome Trace JSON (Perfetto compatible)
+
+## Building
+
+### Prerequisites
+
+```bash
+# Ubuntu/Debian
+sudo apt install -y \
+    clang \
+    llvm \
+    libbpf-dev \
+    libelf-dev \
+    zlib1g-dev \
+    linux-tools-common \
+    linux-tools-generic \
+    cmake \
+    build-essential
+
+# ROCm (required)
+# Install from https://rocm.docs.amd.com/
+```
+
+### Build Steps
+
+```bash
+cd /path/to/eBPF
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
+```
+
+### Build Outputs
+
+- `hip_kernel_unified_tracer` - Main tracer executable
+- `libhsa_hybrid_shim.so` - Shim library for kernel tracing
+- `hip_trace` - (Optional) Legacy HIP-only tracer
+
+## Usage
+
+### Basic Usage
+
+**Step 1**: Start the tracer (requires root for eBPF)
+
+```bash
+sudo ./build/hip_kernel_unified_tracer \
+    -l /opt/rocm/lib/libamdhip64.so \
+    -o trace.json
+```
+
+**Step 2**: In another terminal, run your HIP application with the shim
+
+```bash
+LD_PRELOAD=./build/libhsa_hybrid_shim.so \
+    ./your_hip_application [args]
+```
+
+**Step 3**: Stop the tracer (Ctrl+C in tracer terminal)
+
+**Step 4**: View the trace
+
+1. Open Chrome/Chromium
+2. Navigate to `chrome://tracing`
+3. Click "Load" and select `trace.json`
+
+### Command Line Options
+
+#### hip_kernel_unified_tracer
+
+```
+Usage: hip_kernel_unified_tracer [-l libamdhip64.so] [-o output.json]
+
+Options:
+  -l FILE    Path to libamdhip64.so (default: /opt/rocm/lib/libamdhip64.so)
+  -o FILE    Output trace file (default: hip_kernel_trace.json)
+  -h         Show help
+```
+
+### Quick Test Script
+
+```bash
+sudo ./test_unified_tracer.sh
+```
+
+This automated test script will:
+1. Start the tracer
+2. Run a test HIP application (if available)
+3. Generate `unified_trace.json`
+4. Show instructions for viewing in Chrome
+
+## Examples
+
+### Example 1: Tracing Vector Addition
+
+```bash
+# Terminal 1: Start tracer
+sudo ./build/hip_kernel_unified_tracer -o vector_add_trace.json
+
+# Terminal 2: Run vector addition sample
+cd /opt/rocm/share/hip/samples/0_Intro/vectorAdd
+LD_PRELOAD=/path/to/build/libhsa_hybrid_shim.so ./vectorAdd
+
+# Terminal 1: Stop tracer with Ctrl+C
+# View trace at chrome://tracing
+```
+
+### Example 2: Tracing Matrix Multiplication
+
+```bash
+# Terminal 1
+sudo ./build/hip_kernel_unified_tracer -o matmul_trace.json
+
+# Terminal 2
+cd /opt/rocm/share/hip/samples/0_Intro/matrixMul
+LD_PRELOAD=/path/to/build/libhsa_hybrid_shim.so ./matrixMul
+
+# Trace will show:
+# - hipMalloc calls for matrices
+# - hipMemcpy for data transfer
+# - hipLaunchKernel for computation
+# - Kernel execution with grid/workgroup info
+```
+
+### Example 3: Custom HIP Application
+
+```cpp
+// my_hip_app.cpp
+#include <hip/hip_runtime.h>
+#include <iostream>
+
+__global__ void myKernel(float* data, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) data[idx] *= 2.0f;
+}
+
+int main() {
+    const int N = 1024;
+    float *d_data;
+
+    hipMalloc(&d_data, N * sizeof(float));
+    // ... initialize data ...
+
+    myKernel<<<(N+255)/256, 256>>>(d_data, N);
+
+    hipDeviceSynchronize();
+    hipFree(d_data);
+    return 0;
+}
+```
+
+```bash
+# Compile
+hipcc my_hip_app.cpp -o my_hip_app
+
+# Terminal 1: Trace
+sudo ./build/hip_kernel_unified_tracer -o my_app_trace.json
+
+# Terminal 2: Run with shim
+LD_PRELOAD=./build/libhsa_hybrid_shim.so ./my_hip_app
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Permission denied**: Run with `sudo` (eBPF requires root privileges)
-2. **Library not found**: Specify HIP library path with `-l` option
-3. **No events captured**: Ensure target application uses HIP functions
-4. **Build errors**: Install required dependencies (`libbpf-dev`, `clang`, `bpftool`)
-5. **Recursive calls**: Fixed with call stack tracking - no longer occurs
+#### 1. "Could not open kernel events map"
 
-### Build Issues
+**Problem**: Shim can't find the eBPF map
 
-#### CMake Build Fails
+**Solution**:
+- Ensure tracer is running FIRST
+- Check: `ls /sys/fs/bpf/kernel_events`
+- Tracer pins this map on startup
+
+#### 2. "Failed to attach uprobes"
+
+**Problem**: Can't attach to HIP library
+
+**Solutions**:
+- Verify path: `ls /opt/rocm/lib/libamdhip64.so`
+- Try alternate ROCm path: `-l /opt/rocm-X.Y.Z/lib/libamdhip64.so`
+- Ensure running as root: `sudo ./hip_kernel_unified_tracer`
+- Check eBPF support: `sudo bpftool prog list`
+
+#### 3. "No kernel events in trace"
+
+**Problem**: Shim not loaded or not intercepting
+
+**Checks**:
+- Verify LD_PRELOAD: `echo $LD_PRELOAD` should show shim path
+- Look for `[HSA_SHIM]` messages in application stderr
+- Check rocprofiler-sdk installed: `ls /opt/rocm/lib/librocprofiler-sdk.so*`
+- Verify shim connected: Should see "Connected to kernel events map" message
+
+#### 4. "Empty or small trace file"
+
+**Problem**: Application didn't make HIP calls
+
+**Solutions**:
+- Ensure application actually uses HIP APIs
+- Check application ran successfully
+- Look for errors in tracer output
+- Try a known-working HIP sample
+
+#### 5. "Permission denied" errors
+
+**Problem**: eBPF requires elevated privileges
+
+**Solution**:
+- Run tracer with `sudo`
+- Shim (application side) does NOT need sudo
+
+#### 6. "Failed to increase RLIMIT_MEMLOCK"
+
+**Problem**: System memory lock limit too low
+
+**Solution**:
 ```bash
-# Clean and rebuild
-rm -rf build
-cmake -B build .
-cmake --build build --parallel 16
-```
-
-#### Missing Dependencies
-```bash
-# Install required packages
-sudo apt update
-sudo apt install libbpf-dev clang bpftool libelf-dev zlib1g-dev python3
-```
-
-#### System Limit Issues
-```bash
-# If you get "Too many open files" error, use the wrapper script
-./hip_trace_wrapper.sh -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto
-
-# Or manually increase limits
-sudo sh -c 'ulimit -n 65536 && ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto'
-```
-
-### Runtime Issues
-
-#### No Events Captured
-```bash
-# Check if HIP library is found
-ldd /path/to/your/hip/app | grep hip
-
-# Verify library path
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o trace.csv
-```
-
-#### High CPU Usage
-```bash
-# Reduce sampling rate by modifying the eBPF program
-# Or use filtering in the user-space code
+sudo sysctl -w kernel.perf_event_paranoid=-1
+# Or permanently in /etc/sysctl.conf
 ```
 
 ### Debug Mode
 
-Enable verbose output by modifying the source code or using debug builds:
+For detailed debugging:
+
 ```bash
-# Debug build
-cmake -B build -DCMAKE_BUILD_TYPE=Debug .
-cmake --build build
+# Check eBPF programs loaded
+sudo bpftool prog list
+
+# Check eBPF maps
+sudo bpftool map list
+
+# Verify pinned maps
+ls -l /sys/fs/bpf/
+
+# Check shim output
+LD_PRELOAD=./build/libhsa_hybrid_shim.so ./app 2>&1 | grep HSA_SHIM
 ```
+
+## Comparison with Other Tools
+
+| Feature | Unified Tracer | rocprofiler-sdk | rocprof | GPUPerfAPI |
+|---------|---------------|----------------|---------|------------|
+| HIP API Tracing | ✅ eBPF | ✅ Callbacks | ✅ Intercept | ❌ |
+| Kernel Dispatch | ✅ HSA Shim | ✅ Callbacks | ✅ Intercept | ✅ |
+| GPU Timestamps | ✅ HSA API | ✅ HSA API | ✅ HSA API | ✅ |
+| Overhead | Low | Medium | Medium | High |
+| Root Required | Tracer only | No | No | No |
+| HIP Dependency | eBPF only | Full | Full | Full |
+| Correlation | ✅ | ✅ | ✅ | ❌ |
+| Chrome Trace | ✅ | Via tools | Via tools | Custom |
+
+## Design Documentation
+
+Detailed design documents are available in the `design-docs/` directory:
+
+- **[eBPF_HIP_Tracing_Technical_Guide.md](design-docs/eBPF_HIP_Tracing_Technical_Guide.md)**
+  - eBPF uprobe architecture
+  - HIP API interception techniques
+  - BPF cookies for function name resolution
+  - Correlation ID management
+
+- **[Unified_Tracer_Architecture.md](design-docs/Unified_Tracer_Architecture.md)**
+  - Complete system architecture
+  - HSA shim-based kernel dispatch tracing
+  - Event flow and correlation
+  - Performance analysis
+
+## Technical Details
+
+### Event Structures
+
+```c
+// HIP API Event (from eBPF)
+struct gpu_trace_event {
+    uint64_t timestamp;
+    uint32_t pid, tid;
+    uint32_t event_type;        // 0=entry, 1=exit
+    uint32_t correlation_id;
+    char function_name[64];
+    uint64_t args[8];
+    uint64_t return_value;
+    // ... kernel fields when applicable
+};
+
+// Kernel Event (from shim)
+struct kernel_event {
+    uint64_t timestamp;
+    uint32_t pid, tid;
+    uint32_t event_type;        // 2=dispatch, 3=complete
+    uint32_t queue_id;
+    uint64_t agent_id;          // HSA agent handle (required for alignment)
+    char kernel_name[256];
+    uint64_t kernel_object;
+    uint32_t grid_size_x, grid_size_y, grid_size_z;
+    uint32_t workgroup_size_x, workgroup_size_y, workgroup_size_z;
+    uint32_t group_segment_size, private_segment_size;
+    uint64_t gpu_start_time, gpu_end_time;  // Converted from HSA ticks to nanoseconds
+};
+```
+
+### Event Communication Design
+
+**Event paths**:
+1. `events` - Ring buffer for HIP API events (eBPF generates directly)
+2. `kernel_events` - Array map for kernel events (shim writes via `bpf_map_update_elem`)
+
+**Why different mechanisms?**
+- HIP API events: High frequency, eBPF-generated → ring buffer is optimal
+- Kernel events: Lower frequency, userspace-generated → array map allows direct writes
+- No contention: Different writers (eBPF vs. userspace shim)
+- Unified consumption: Tracer reads from both sources and correlates
+
+### Correlation Algorithm
+
+1. On HIP API entry: Allocate unique correlation ID, store in per-thread map
+2. On HIP API exit: Retrieve correlation ID from per-thread map
+3. On kernel dispatch: Read current thread's correlation ID (if in HIP launch)
+4. Userspace: Match HIP APIs to kernels via correlation ID
+
+### GPU Timestamp Accuracy
+
+Uses `hsa_amd_profiling_get_dispatch_time()` which provides:
+- Hardware clock timestamps (in HSA system clock ticks)
+- Nanosecond precision after conversion
+- Start and end times for each kernel dispatch
+- No software overhead
+
+**Timestamp Conversion**:
+- HSA timestamps are in GPU clock ticks, not nanoseconds
+- Conversion: `ns = (ticks * 1,000,000,000) / frequency_hz`
+- Frequency obtained via `hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)`
+- Typical frequency: 1 GHz (1:1 tick-to-nanosecond ratio)
+- Conversion applied in shim before sending events to eBPF
+
+Fallback to CPU timestamps if profiling API unavailable.
+
+## Future Enhancements
+
+### Planned Features
+
+- [ ] Symbol resolution for kernel names (via .so/.o file parsing)
+- [ ] Memory transfer tracking (hipMemcpy bandwidth, direction)
+- [ ] Stream/event tracking (dependencies, synchronization)
+- [ ] Multi-GPU support (per-device correlation)
+- [ ] HIP Graph tracing
+- [ ] Extended HIP function coverage
+
+### Performance Improvements
+
+- [ ] Adaptive ring buffer sizing
+- [ ] Batch event processing
+- [ ] Zero-copy event forwarding
+- [ ] SIMD-optimized correlation lookup
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+Contributions welcome! Areas of interest:
+- Additional HIP function coverage
+- Kernel name symbol resolution
+- Performance optimizations
+- Multi-GPU support
+- Test case additions
 
 ## License
 
-This project is licensed under the GPL-2.0 License - see the LICENSE file for details.
+SPDX-License-Identifier: GPL-2.0
 
 ## Acknowledgments
 
-- Built with [libbpf](https://github.com/libbpf/libbpf)
-- Uses eBPF uprobes for user-space tracing
-- Inspired by modern observability tools
+Built on:
+- Linux eBPF subsystem
+- libbpf library
+- ROCm/HIP runtime
+- HSA runtime
+- ROCprofiler-SDK (for HSA API table access only)
 
 ## Support
 
-For issues and questions:
-1. Check the troubleshooting section
-2. Review the technical guide
-3. Open an issue on the repository
+For issues, questions, or feature requests:
+- File an issue in the project repository
+- Include trace output and application details
+- Provide ROCm version and GPU model
 
-## Quick Reference
+---
 
-### Build Commands
-```bash
-# CMake build (required)
-cmake -B build .
-cmake --build build --parallel 16
-```
-
-### Run Commands
-```bash
-# Basic tracing (use wrapper script for automatic limit increase)
-./hip_trace_wrapper.sh -l /opt/rocm/lib/libamdhip64.so
-
-# CSV output
-./hip_trace_wrapper.sh -l /opt/rocm/lib/libamdhip64.so -o trace.csv -f csv
-
-# Perfetto output
-./hip_trace_wrapper.sh -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto
-
-# Background tracing
-./hip_trace_wrapper.sh -o trace.csv -f csv &
-TRACE_PID=$!
-./your_hip_app
-kill $TRACE_PID
-```
-
-### Analysis Commands
-```bash
-# Function call count
-cut -d',' -f2 trace.csv | sort | uniq -c
-
-# Longest calls
-sort -t',' -k7 -nr trace.csv | head -10
-
-# View sample data
-head -10 trace.csv
-```
+**Last Updated**: October 2025
+**Version**: 1.0.0
+**Status**: Production-ready

@@ -141,6 +141,45 @@ int perfetto_writer_add_slice_end(perfetto_writer_t *writer, uint64_t timestamp,
     return 0;
 }
 
+int perfetto_writer_add_slice_with_args(perfetto_writer_t *writer,
+                                        uint64_t start_ts, uint64_t end_ts,
+                                        const char *name, uint32_t pid, uint32_t tid,
+                                        const char *args_json) {
+    if (!writer) return -1;
+
+    chrome_trace_writer_t *chrome_writer = (chrome_trace_writer_t*)writer;
+
+    /* Write complete event with duration and args */
+    if (!chrome_writer->first_event) {
+        fprintf(chrome_writer->file, ",\n");
+    }
+
+    fprintf(chrome_writer->file, "    {\n");
+    fprintf(chrome_writer->file, "      \"name\": ");
+    escape_json_string(chrome_writer->file, name);
+    fprintf(chrome_writer->file, ",\n");
+    fprintf(chrome_writer->file, "      \"cat\": \"HIP\",\n");
+    fprintf(chrome_writer->file, "      \"ph\": \"X\",\n");  // Complete event
+    fprintf(chrome_writer->file, "      \"ts\": %llu,\n", (unsigned long long)start_ts);
+    fprintf(chrome_writer->file, "      \"dur\": %llu,\n", (unsigned long long)(end_ts - start_ts));
+    fprintf(chrome_writer->file, "      \"pid\": %u,\n", pid);
+    fprintf(chrome_writer->file, "      \"tid\": %u", tid);
+
+    /* Add args if provided */
+    if (args_json && args_json[0] != '\0') {
+        fprintf(chrome_writer->file, ",\n      \"args\": %s\n", args_json);
+    } else {
+        fprintf(chrome_writer->file, "\n");
+    }
+
+    fprintf(chrome_writer->file, "    }");
+
+    chrome_writer->first_event = 0;
+    fflush(chrome_writer->file);
+
+    return 0;
+}
+
 int perfetto_writer_add_instant_event(perfetto_writer_t *writer, uint64_t timestamp, const char *name, uint32_t pid, uint32_t tid) {
     if (!writer) return -1;
 

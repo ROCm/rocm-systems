@@ -337,36 +337,46 @@ int hip_malloc_exit(struct pt_regs *ctx) {
 
 ### Function Name Detection
 
-The current implementation uses individual eBPF programs for each HIP function with hardcoded function names:
+The current implementation uses **BPF cookies** for efficient function name resolution:
 
 ```c
-// Individual eBPF programs for each HIP function
-SEC("uprobe/hip_malloc_entry")
-int hip_malloc_entry(struct pt_regs *ctx) {
-    char func_name[64] = "hipMalloc";
-    // ... capture arguments specific to hipMalloc
-    return 0;
-}
+// Generic entry probe for all HIP functions
+SEC("uprobe/hip_api_entry")
+int hip_api_entry(struct pt_regs *ctx) {
+    // Get function ID from BPF cookie (set during probe attachment)
+    __u64 cookie = bpf_get_attach_cookie(ctx);
+    __u32 func_id = (__u32)cookie;
 
-SEC("uprobe/hip_memcpy_entry")
-int hip_memcpy_entry(struct pt_regs *ctx) {
-    char func_name[64] = "hipMemcpy";
-    // ... capture arguments specific to hipMemcpy
-    return 0;
-}
-
-SEC("uprobe/hip_launch_kernel_entry")
-int hip_launch_kernel_entry(struct pt_regs *ctx) {
-    char func_name[64] = "hipLaunchKernel";
-    // ... capture arguments specific to hipLaunchKernel
+    // Look up function name from map
+    char *func_name = bpf_map_lookup_elem(&function_names, &func_id);
+    if (func_name) {
+        // Copy function name to event
+        for (int i = 0; i < MAX_NAME_LEN - 1; i++) {
+            event->function_name[i] = func_name[i];
+            if (func_name[i] == 0) break;
+        }
+    }
+    // ... capture arguments
     return 0;
 }
 ```
 
+**Probe Attachment with BPF Cookies**:
+```c
+// Userspace tracer attaches probes with function ID as cookie
+struct bpf_uprobe_opts entry_opts = {
+    .sz = sizeof(struct bpf_uprobe_opts),
+    .retprobe = false,
+    .bpf_cookie = func_id  // Pass function ID directly
+};
+bpf_program__attach_uprobe_opts(prog, -1, hip_lib, offset, &entry_opts);
+```
+
 This approach provides:
-- **Accurate function identification** without heuristics
-- **Function-specific argument handling** for optimal data capture
-- **Comprehensive coverage** of all 439 HIP Runtime API functions (100% coverage)
+- **100% accurate function identification** - no runtime IP address lookups
+- **Efficient correlation** - function ID passed directly via BPF cookie
+- **Generic probe handlers** - single entry/exit probe for all functions
+- **Comprehensive coverage** - works for all HIP Runtime API functions
 
 ### Unique Function ID Generation
 

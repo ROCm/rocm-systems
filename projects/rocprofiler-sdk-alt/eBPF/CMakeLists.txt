@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(hip_ebpf_trace VERSION 1.0.0 LANGUAGES C)
+project(hip_ebpf_trace VERSION 1.0.0 LANGUAGES C CXX)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -168,10 +168,178 @@ install(TARGETS hip_trace
     RUNTIME DESTINATION bin
 )
 
+# HSA Queue Interceptor (LD_PRELOAD-based)
+# Find HSA runtime
+find_path(HSA_INCLUDE_DIR hsa/hsa.h
+    PATHS /opt/rocm/include
+          /usr/local/rocm/include
+          /usr/include
+    NO_DEFAULT_PATH
+)
+
+if(NOT HSA_INCLUDE_DIR)
+    message(WARNING "HSA runtime header not found. Skipping HSA queue tools.")
+else()
+    message(STATUS "Found HSA runtime header: ${HSA_INCLUDE_DIR}")
+
+    # Find ROCprofiler SDK
+    find_path(ROCPROFILER_INCLUDE_DIR rocprofiler-sdk/registration.h
+        PATHS /opt/rocm/include
+              /usr/local/rocm/include
+              /usr/include
+        NO_DEFAULT_PATH
+    )
+
+    find_library(ROCPROFILER_LIBRARY rocprofiler-sdk
+        PATHS /opt/rocm/lib
+              /usr/local/rocm/lib
+              /usr/lib
+        NO_DEFAULT_PATH
+    )
+
+    if(NOT ROCPROFILER_INCLUDE_DIR OR NOT ROCPROFILER_LIBRARY)
+        message(WARNING "ROCprofiler SDK not found. HSA Queue Interceptor will have limited functionality.")
+        set(ROCPROFILER_INCLUDE_DIR "")
+        set(ROCPROFILER_LIBRARY "")
+    else()
+        message(STATUS "Found ROCprofiler SDK: ${ROCPROFILER_LIBRARY}")
+        message(STATUS "  Include: ${ROCPROFILER_INCLUDE_DIR}")
+    endif()
+
+    # Detect architecture for eBPF compilation
+    execute_process(
+        COMMAND uname -m
+        OUTPUT_VARIABLE ARCH_UNAME
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    if(ARCH_UNAME STREQUAL "x86_64")
+        set(BPF_ARCH "x86")
+        set(BPF_TARGET_ARCH "__TARGET_ARCH_x86")
+    elseif(ARCH_UNAME STREQUAL "aarch64")
+        set(BPF_ARCH "arm64")
+        set(BPF_TARGET_ARCH "__TARGET_ARCH_arm64")
+    else()
+        message(FATAL_ERROR "Unsupported architecture: ${ARCH_UNAME}")
+    endif()
+
+    message(STATUS "eBPF target architecture: ${BPF_ARCH} (${BPF_TARGET_ARCH})")
+
+    # NOTE: Old HSA Queue Tracer has been replaced by the Unified GPU Tracer below
+
+    # HSA Hybrid Shim (ROCprofiler SDK registration with LD_PRELOAD)
+    # NOTE: This now sends kernel events to eBPF, no longer writes Chrome Trace directly
+    add_library(hsa_hybrid_shim SHARED
+        hsa_hybrid_shim.cpp
+    )
+
+    target_include_directories(hsa_hybrid_shim PRIVATE
+        ${HSA_INCLUDE_DIR}
+        ${ROCPROFILER_INCLUDE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${LIBBPF_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(hsa_hybrid_shim
+        ${CMAKE_DL_LIBS}
+        pthread
+        ${LIBBPF_LIBRARIES}
+        ${ELF_LIB}
+        ${ROCPROFILER_LIBRARY}
+    )
+
+    set_target_properties(hsa_hybrid_shim PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        POSITION_INDEPENDENT_CODE ON
+    )
+
+    # Install hybrid shim
+    install(TARGETS hsa_hybrid_shim
+        LIBRARY DESTINATION lib
+    )
+
+    message(STATUS "")
+    message(STATUS "=== Unified HIP + Kernel Tracer (NO rocprofiler-sdk for HIP API tracing) ===")
+
+    # Unified eBPF program (HIP uprobes + kernel events from shim)
+    set(UNIFIED_HIP_KERNEL_EBPF_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_unified.bpf.o)
+    set(UNIFIED_HIP_KERNEL_SKELETON_HEADER ${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_unified.skel.h)
+
+    add_custom_command(
+        OUTPUT ${UNIFIED_HIP_KERNEL_EBPF_OBJECT}
+        COMMAND ${CLANG} -O2 -g -target bpf
+                -D${BPF_TARGET_ARCH}
+                -I${CMAKE_CURRENT_SOURCE_DIR}
+                -I/usr/include
+                -c ${CMAKE_CURRENT_SOURCE_DIR}/hip_kernel_unified.bpf.c
+                -o ${UNIFIED_HIP_KERNEL_EBPF_OBJECT}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_kernel_unified.bpf.c
+        COMMENT "Compiling Unified HIP + Kernel eBPF program (${BPF_ARCH})"
+        VERBATIM
+    )
+
+    add_custom_command(
+        OUTPUT ${UNIFIED_HIP_KERNEL_SKELETON_HEADER}
+        COMMAND ${BPFTOOL} gen skeleton ${UNIFIED_HIP_KERNEL_EBPF_OBJECT} > ${UNIFIED_HIP_KERNEL_SKELETON_HEADER}
+        DEPENDS ${UNIFIED_HIP_KERNEL_EBPF_OBJECT}
+        COMMENT "Generating Unified HIP + Kernel skeleton header"
+        VERBATIM
+    )
+
+    add_custom_target(unified_hip_kernel_skeleton
+        DEPENDS ${UNIFIED_HIP_KERNEL_SKELETON_HEADER}
+        COMMENT "Unified HIP + Kernel skeleton header"
+    )
+
+    # Unified tracer executable
+    add_executable(hip_kernel_unified_tracer
+        hip_kernel_unified_tracer.c
+        chrome_trace_writer.c
+    )
+
+    add_dependencies(hip_kernel_unified_tracer unified_hip_kernel_skeleton)
+
+    target_include_directories(hip_kernel_unified_tracer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        ${LIBBPF_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(hip_kernel_unified_tracer
+        ${LIBBPF_LIBRARIES}
+        ${ELF_LIB}
+        ${Z_LIB}
+    )
+
+    set_target_properties(hip_kernel_unified_tracer PROPERTIES
+        C_STANDARD 99
+        C_STANDARD_REQUIRED ON
+    )
+
+    install(TARGETS hip_kernel_unified_tracer
+        RUNTIME DESTINATION bin
+    )
+
+    message(STATUS "")
+    message(STATUS "=== Unified HIP + Kernel Tracer (Pure eBPF + Lightweight Shim) ===")
+    message(STATUS "Out-of-process tool: hip_kernel_unified_tracer")
+    message(STATUS "  Usage: sudo ./hip_kernel_unified_tracer -l /opt/rocm/lib/libamdhip64.so -o trace.json")
+    message(STATUS "Lightweight shim: libhsa_hybrid_shim.so")
+    message(STATUS "  Usage: LD_PRELOAD=./libhsa_hybrid_shim.so <app>")
+    message(STATUS "Features:")
+    message(STATUS "  - HIP API tracing via eBPF uprobes (NO rocprofiler-sdk)")
+    message(STATUS "  - Kernel dispatch tracing via lightweight shim (uses rocprofiler-sdk ONLY for HSA table access)")
+    message(STATUS "  - GPU-side kernel timestamps via HSA profiling API")
+    message(STATUS "  - Unified Chrome Trace JSON output")
+endif()
+
 # Install scripts
 install(PROGRAMS
     test_csv_output.sh
     demo_csv_analysis.sh
+    test_queue_tracer.sh
+    trace_hip_and_kernels.sh
     DESTINATION bin
 )
 

@@ -34,6 +34,12 @@ int perfetto_writer_add_slice_begin(perfetto_writer_t *writer, uint64_t timestam
 int perfetto_writer_add_slice_end(perfetto_writer_t *writer, uint64_t timestamp,
                                  const char *name, uint32_t pid, uint32_t tid);
 
+// Add a slice event with arguments (metadata)
+int perfetto_writer_add_slice_with_args(perfetto_writer_t *writer,
+                                        uint64_t start_ts, uint64_t end_ts,
+                                        const char *name, uint32_t pid, uint32_t tid,
+                                        const char *args_json);
+
 // Add an instant event (for kernel dispatch events)
 int perfetto_writer_add_instant_event(perfetto_writer_t *writer, uint64_t timestamp,
                                      const char *name, uint32_t pid, uint32_t tid);
