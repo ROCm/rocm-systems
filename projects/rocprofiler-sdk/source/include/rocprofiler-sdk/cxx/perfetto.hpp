@@ -105,6 +105,11 @@ ROCPROFILER_DEFINE_CATEGORY(category, hipfile_api, "hipFILE API function")
 ROCPROFILER_DEFINE_CATEGORY(category, counter_collection, "Counter Collection")
 ROCPROFILER_DEFINE_CATEGORY(category, kfd_events, "KFD events collection")
 ROCPROFILER_DEFINE_CATEGORY(category, scratch_memory, "Scratch Memory Allocation")
+ROCPROFILER_DEFINE_CATEGORY(category, thread_context_switch, "Thread Context Switch")
+ROCPROFILER_DEFINE_CATEGORY(category, thread_cpu_time, "Thread CPU Time")
+ROCPROFILER_DEFINE_CATEGORY(category, thread_page_fault, "Thread Page Fault")
+ROCPROFILER_DEFINE_CATEGORY(category, thread_peak_memory, "Thread Peak Memory Usage")
+
 ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
 
 #define ROCPROFILER_PERFETTO_CATEGORIES                                                            \
@@ -122,6 +127,10 @@ ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
         ROCPROFILER_PERFETTO_CATEGORY(category::rocshmem_api),                                     \
         ROCPROFILER_PERFETTO_CATEGORY(category::hipfile_api),                                      \
         ROCPROFILER_PERFETTO_CATEGORY(category::scratch_memory),                                   \
+        ROCPROFILER_PERFETTO_CATEGORY(category::thread_context_switch),                            \
+        ROCPROFILER_PERFETTO_CATEGORY(category::thread_cpu_time),                                  \
+        ROCPROFILER_PERFETTO_CATEGORY(category::thread_page_fault),                                \
+        ROCPROFILER_PERFETTO_CATEGORY(category::thread_peak_memory),                               \
         ROCPROFILER_PERFETTO_CATEGORY(category::none)
 
 #include <perfetto.h>
