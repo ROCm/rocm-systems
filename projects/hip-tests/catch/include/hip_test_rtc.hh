@@ -24,7 +24,6 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include <hip/hiprtc.h>
 #include <kernel_mapping.hh>
-#include <catch.hpp>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -126,7 +125,7 @@ inline hiprtcProgram compileRTC(std::string& rtcKernel, std::string& kernelNameE
   kernelFile.close();
 
   std::string kernelCode{stringStream.str()};
-  INFO("RTC Kernel Code:\n" << kernelCode)
+  INFO("RTC Kernel Code:\n" << kernelCode);
 
   hiprtcProgram rtcProgram;
   hiprtcCreateProgram(&rtcProgram, kernelCode.c_str(), (fileName + ".cu").c_str(), 0, nullptr,

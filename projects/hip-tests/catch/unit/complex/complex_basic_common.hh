@@ -69,6 +69,6 @@ __global__ void CastComplexTypeKernel(T1* const output_val, T2 const input_val) 
 
 template <typename T> void CompareValues(T actual_val, T ref_val, double margin) {
   if (!std::isnan(ref_val)) {
-    REQUIRE_THAT(actual_val, Catch::WithinAbs(ref_val, margin));
+    REQUIRE_THAT(actual_val, Catch::Matchers::WithinAbs(ref_val, margin));
   }
 }
