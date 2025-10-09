@@ -20,8 +20,8 @@ THE SOFTWARE.
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
-#include <bitset>
 #include <array>
+#include <random>
 
 #include <cmd_options.hh>
 #include <cpu_grid.h>
