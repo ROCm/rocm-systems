@@ -186,7 +186,7 @@ bool verifyAdd_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
     if (activeLanes[i]) val += divergentValue[i];
   }
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[0]));
+    REQUIRE(val == Catch::Approx(gpuData[0]));
     return true;
   }
   return val == gpuData[0];
@@ -199,7 +199,7 @@ bool verifySub_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
     if (activeLanes[i]) val -= divergentValue[i];
   }
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[1]));
+    REQUIRE(val == Catch::Approx(gpuData[1]));
     return true;
   }
   return val == gpuData[1];
@@ -213,7 +213,7 @@ bool verifyMax_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
   }
 
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[2]));
+    REQUIRE(val == Catch::Approx(gpuData[2]));
     return true;
   }
   return val == gpuData[2];
@@ -227,7 +227,7 @@ bool verifyMin_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
   }
 
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[3]));
+    REQUIRE(val == Catch::Approx(gpuData[3]));
     return true;
   }
   return val == gpuData[3];

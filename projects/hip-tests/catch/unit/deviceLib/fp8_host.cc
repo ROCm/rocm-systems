@@ -177,7 +177,7 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness", "", float, double) {
 
       INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
       INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
-      REQUIRE(cvt1 == Approx(orig));
+      REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt2 == cvt1);
     }
   }
@@ -447,7 +447,7 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness", "", float, double) {
 
       INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
       INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
-      REQUIRE(cvt1 == Approx(orig));
+      REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt1 == cvt2);
     }
   }
@@ -787,7 +787,7 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness", "", float, double) {
 
       INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
       INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
-      REQUIRE(cvt1 == Approx(orig));
+      REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt2 == cvt1);
     }
   }
@@ -1065,7 +1065,7 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness", "", float, double) {
 
       INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
       INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
-      REQUIRE(cvt1 == Approx(orig));
+      REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt1 == cvt2);
     }
   }
