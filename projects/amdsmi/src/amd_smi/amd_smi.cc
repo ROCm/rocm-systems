@@ -1572,6 +1572,22 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
     return AMDSMI_STATUS_SUCCESS;
 }
 
+// If similar caches are implemented in the future, make this generic and move it
+namespace {
+    struct AsicInfoCache {
+        amdsmi_asic_info_t info{};
+        std::chrono::steady_clock::time_point last_read;
+        bool valid = false;
+        std::mutex mtx;
+    };
+
+    std::unordered_map<std::string, AsicInfoCache> g_asic_info_cache_map;
+    std::mutex g_asic_info_cache_map_mu;
+    static const std::chrono::milliseconds kAsicInfoCacheDuration(
+        read_env_ms("AMDSMI_ASIC_INFO_CACHE_MS", 10000)
+    );
+}
+
 amdsmi_status_t
 amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_info_t *info) {
     AMDSMI_CHECK_INIT();
@@ -1606,6 +1622,33 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         return r;
     }
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+
+    // ---- ASIC info cache ----
+    const std::string key = gpu_device->get_gpu_path();
+
+    AsicInfoCache* cache_ptr = nullptr;
+    {
+        std::lock_guard<std::mutex> map_lk(g_asic_info_cache_map_mu);
+        cache_ptr = &g_asic_info_cache_map[key];
+    }
+    {
+        std::lock_guard<std::mutex> lk(cache_ptr->mtx);
+        auto now = std::chrono::steady_clock::now();
+        auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - cache_ptr->last_read);
+
+        if (cache_ptr->valid &&
+            kAsicInfoCacheDuration > std::chrono::milliseconds::zero() &&
+            last_read_delta < kAsicInfoCacheDuration) {
+
+            *info = cache_ptr->info;
+
+            ss << "Returned cached ASIC info for key=" << key
+                << " (age=" << last_read_delta.count() << "ms)";
+            LOG_INFO(ss);
+
+            return AMDSMI_STATUS_SUCCESS;
+        }
+    }
 
     /**
      * For other sysfs related information, get from rocm-smi
@@ -1803,6 +1846,20 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
        << std::hex << info->target_graphics_version << "\n"
        << " | Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, true);
     LOG_INFO(ss);
+
+    // ---- Store cache success ----
+    if (status == AMDSMI_STATUS_SUCCESS &&
+        kAsicInfoCacheDuration > std::chrono::milliseconds::zero()) {
+        
+        auto now = std::chrono::steady_clock::now();
+        std::lock_guard<std::mutex> lk(cache_ptr->mtx);
+        cache_ptr->info  = *info;
+        cache_ptr->last_read = now;
+        cache_ptr->valid = true;
+
+        ss << "Successfully Cached ASIC info for key=" << key;
+        LOG_INFO(ss);
+    }
     return AMDSMI_STATUS_SUCCESS;
 }
 

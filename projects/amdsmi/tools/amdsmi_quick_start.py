@@ -29,6 +29,9 @@ import sys
 # Metrics cache set to 1 by default, uncomment to change
 # os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "1"
 
+# ASIC info cache set to 10000 by default, uncomment to change
+# os.environ["AMDSMI_ASIC_INFO_CACHE_MS"] = "10000"
+
 try:
     from amdsmi import *
 except ImportError as e:
