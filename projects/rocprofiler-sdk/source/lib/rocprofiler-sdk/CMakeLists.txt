@@ -60,18 +60,12 @@ add_subdirectory(ompt)
 target_link_libraries(
     rocprofiler-sdk-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-           rocprofiler-sdk::rocprofiler-sdk-hip-nolink
-           rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink
-           rocprofiler-sdk::rocprofiler-sdk-rccl-nolink
-           rocprofiler-sdk::rocprofiler-sdk-rocdecode-nolink
-           rocprofiler-sdk::rocprofiler-sdk-rocjpeg-nolink
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-hsa-aql
             rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink
             rocprofiler-sdk::rocprofiler-sdk-dw)
 
 target_compile_definitions(rocprofiler-sdk-object-library PRIVATE rocprofiler_EXPORTS=1)
@@ -95,12 +89,8 @@ target_sources(
             shared_library.cpp)
 target_link_libraries(
     rocprofiler-sdk-shared-library
-    INTERFACE rocprofiler-sdk::rocprofiler-sdk-headers
-              $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink>
-              $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hip-nolink>
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink
-            rocprofiler-sdk::rocprofiler-sdk-hip-nolink
-            rocprofiler-sdk::rocprofiler-sdk-build-flags
+    PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem
@@ -140,8 +130,6 @@ target_sources(rocprofiler-sdk-static-library
 target_link_libraries(
     rocprofiler-sdk-static-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-           rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink
-           rocprofiler-sdk::rocprofiler-sdk-hip-nolink
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-object-library)

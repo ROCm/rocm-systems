@@ -227,8 +227,9 @@ typedef union
     HSAuint32 Value;
     struct
     {
-        unsigned int PerSDMAQueueResetSupported : 1; // Indicates per-sdma queue reset supported
-        unsigned int Reserved : 31; // Reserved
+        unsigned int PerSDMAQueueResetSupported : 1;  // Indicates per-sdma queue reset supported
+        unsigned int AqlEmulationPm4_ : 1;            // Indicates device uses AQL emulation via PM4 packets
+        unsigned int Reserved : 30; // Reserved
     } ui32;
 } HSA_CAPABILITY2;
 
@@ -585,9 +586,10 @@ typedef struct _HsaMemFlags
             unsigned int ExtendedCoherent: 1;  // system-scope coherence on atomic instructions
             unsigned int GTTAccess:     1;  // default = 0; If 1: The caller indicates this memory will be mapped to GART for MES
 					    // KFD will allocate GTT memory with the Preferred_node set as gpu_id for GART mapping
-            unsigned int Contiguous:	1; // Allocate contiguous VRAM
-            unsigned int ExecuteBlit:	1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
-            unsigned int Reserved:      8;
+            unsigned int Contiguous:    1; // Allocate contiguous VRAM
+            unsigned int ExecuteBlit:   1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
+            unsigned int QueueObject:   1; // AQL queue object, used in windows for CPU access to get the read pointer from amd_queue_t
+            unsigned int Reserved:      7;
 
         } ui32;
         HSAuint32 Value;

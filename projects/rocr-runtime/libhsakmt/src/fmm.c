@@ -2025,6 +2025,9 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 	if (mflags.ui32.Uncached || svm.disable_cache)
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
 
+	if (mflags.ui32.ExtendedCoherent)
+		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT;
+
 	ioc_flags |= fmm_translate_hsa_to_ioc_flags(mflags);
 
 	if (mflags.ui32.AQLQueueMemory)

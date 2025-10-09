@@ -153,21 +153,21 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
  public:
   GraphKernelArgManager() : amd::ReferenceCountedObject() {}
   ~GraphKernelArgManager() {
-    //! Release the kernel arg pools
-    if (device_ != nullptr) {
-      for (auto& element : kernarg_graph_) {
-        device_->hostFree(element.kernarg_pool_addr_, element.kernarg_pool_size_);
+    for (auto kernarg : kernarg_graph_) {
+      //! Release the kernel arg pools
+      for (auto& element : kernarg.second) {
+        kernarg.first->hostFree(element.kernarg_pool_addr_, element.kernarg_pool_size_);
       }
-      kernarg_graph_.clear();
+      kernarg.second.clear();
     }
   }
 
-  // Allocate kernel arg pool on device for the given size.
+  //! Allocate kernel arg pool on device for the given size.
   bool AllocGraphKernargPool(size_t pool_size, amd::Device* device);
 
   // Allocate kernel args from current chunck for given size and alignment.
   // If kernel arg pool is full allocate new chunck and alloc kern args from new pool.
-  address AllocKernArg(size_t size, size_t alignment) override;
+  address AllocKernArg(size_t size, size_t alignment, int devId) override;
 
   // Do HDP flush/When HDP flush register is invalid fallback to Readback
   void ReadBackOrFlush();
@@ -181,8 +181,8 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
     size_t kernarg_pool_offset_;  //! Current offset in the kernel arg alloc
   };
   bool device_kernarg_pool_ = false;  //! Indicate if kernel pool in device mem
-  amd::Device* device_ = nullptr;     //! Device from where kernel arguments are allocated
-  std::vector<KernelArgPoolGraph> kernarg_graph_;  //! Vector of allocated kernarg pool
+  std::unordered_map<amd::Device*, std::vector<KernelArgPoolGraph>>
+      kernarg_graph_;  //! Vector of allocated kernarg pool per device
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
@@ -861,6 +861,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node);
+  // Handle packetBatches_ updates when nodes are enabled/disabled
+  hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled);
   // Kenrel arg manger is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
@@ -870,7 +872,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
   static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
-  void GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph);
+  void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
 
@@ -884,15 +886,23 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
 
-  //! Structure for batch dispatch optimization - packets and kernel names in aligned memory
+  // PacketBatch structure
   struct PacketBatch {
-    std::vector<uint8_t*> packets;
-    std::vector<std::string> kernelNames;
-    size_t capturedNodeCount;  // Number of consecutive captured nodes in this batch
-
-    PacketBatch() : capturedNodeCount(0) {}
-    PacketBatch(std::vector<uint8_t*>&& p, std::vector<std::string>&& k, size_t nodeCount)
-      : packets(std::move(p)), kernelNames(std::move(k)), capturedNodeCount(nodeCount) {}
+    // Main dispatch vectors - always ready for batch dispatch
+    std::vector<uint8_t*> dispatchPackets;
+    std::vector<std::string> dispatchKernelNames;
+    // Node tracking
+    struct NodeRange {
+      size_t startIndex;    // Start index in dispatchPackets
+      size_t packetCount;   // Number of packets for this node
+      bool enabled;         // Node enabled state (checked during dispatch)
+    };
+    std::vector<NodeRange> nodeRanges;
+    std::unordered_map<GraphNode*, size_t> nodeToRangeIndex;  // O(1) lookup
+    int disabledNodeCount = 0;  // Count of currently disabled nodes
+    PacketBatch() {}
+    // O(1) enable/disable operations - just update state
+    void setEnabled(GraphNode* node, bool enabled);
   };
 
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
