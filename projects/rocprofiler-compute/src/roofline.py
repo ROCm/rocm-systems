@@ -245,19 +245,18 @@ class Roofline:
         ceiling_data: dict[str, Any],
     ) -> str:
         """
-        Determine if a kernel point is memory-bound or compute-bound
-        based on its own cache level's roofline.
+        Calculate if a kernel point is memory-bound or compute-bound
+        based on its own cache level's roofline
         """
         cache_key = cache_level.replace("ai_", "")
-        cache_name = cache_key.upper()
 
         # Get bw for this cache level
         if cache_key not in ceiling_data or not ceiling_data[cache_key]:
-            return f"{cache_name} Unknown"
+            return "Unknown"
 
         cache_data = ceiling_data[cache_key]
         if not isinstance(cache_data, (list, tuple)) or len(cache_data) < 3:
-            return f"{cache_name} Unknown"
+            return "Unknown"
 
         bandwidth = cache_data[2]
 
@@ -269,14 +268,14 @@ class Roofline:
             min_peak = min(min_peak, ceiling_data["mfma"][2])
 
         if min_peak == float("inf"):
-            return f"{cache_name} Unknown"
+            return "Unknown"
 
         x_intersect = min_peak / bandwidth
 
         if ai_value < x_intersect:
-            return f"{cache_name} Memory Bound"
+            return "Memory Bound"
         else:
-            return f"{cache_name} Compute Bound"
+            return "Compute Bound"
 
     @demarcate
     def empirical_roofline(
@@ -378,9 +377,6 @@ class Roofline:
         # Output will be different depending on interaction type:
         # Save PDFs if we're in "standalone roofline" mode,
         # otherwise return HTML to be used in GUI outputif flops_figure:
-        console_debug("roofline", f"PDF figure height: {flops_figure.layout.height}")
-        console_debug("roofline", f"Number of traces: {len(flops_figure.data)}")
-        console_debug("roofline", f"Has subplots: {hasattr(flops_figure, '_grid_ref')}")
 
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
@@ -797,10 +793,10 @@ class Roofline:
                 header_y = len(plot_points_data) + 1
                 header_positions = {
                     "Symbol": 0.020,
-                    "Cache Level": 0.15,
-                    f"{ops_flops}s/Byte": 0.30,
-                    f"G{ops_flops}/s": 0.50,
-                    "Status": 0.80,
+                    f"{ops_flops}s/Byte": 0.15,
+                    f"G{ops_flops}/s": 0.35,
+                    "Status": 0.55,
+                    "Cache Level": 0.80,
                 }
 
                 for header_text, x_pos in header_positions.items():
@@ -849,8 +845,8 @@ class Roofline:
                     row=2,
                     col=1,
                 )
-                # cache_level, ai, perf, status
-                data_positions = [0.15, 0.30, 0.50, 0.80]
+                # ai, perf, status, cache_level
+                data_positions = [0.15, 0.35, 0.55, 0.80]
 
                 for idx, point in enumerate(plot_points_data):
                     y_pos = len(plot_points_data) - idx
@@ -885,7 +881,7 @@ class Roofline:
                     fig.add_annotation(
                         x=data_positions[0],
                         y=y_pos,
-                        text=point["cache_level"],
+                        text=point["ai"],
                         showarrow=False,
                         xanchor="left",
                         yanchor="middle",
@@ -896,17 +892,6 @@ class Roofline:
                     fig.add_annotation(
                         x=data_positions[1],
                         y=y_pos,
-                        text=point["ai"],
-                        showarrow=False,
-                        xanchor="left",
-                        yanchor="middle",
-                        font=dict(size=10, color="black"),
-                        row=2,
-                        col=1,
-                    )
-                    fig.add_annotation(
-                        x=data_positions[2],
-                        y=y_pos,
                         text=point["performance"],
                         showarrow=False,
                         xanchor="left",
@@ -916,16 +901,18 @@ class Roofline:
                         col=1,
                     )
 
-                    if "Compute Bound" in point["status"]:
+                    status_text = point["status"]
+                    
+                    if "Compute Bound" in status_text:
                         status_color = "DarkOrange"
-                    elif "Memory Bound" in point["status"]:
+                    elif "Memory Bound" in status_text:
                         status_color = "blue"
                     else:
                         status_color = "gray"
                     fig.add_annotation(
-                        x=data_positions[3],
+                        x=data_positions[2],
                         y=y_pos,
-                        text=point["status"],
+                        text=status_text,
                         showarrow=False,
                         xanchor="left",
                         yanchor="middle",
@@ -933,9 +920,21 @@ class Roofline:
                         row=2,
                         col=1,
                     )
+                    
+                    fig.add_annotation(
+                        x=data_positions[3],
+                        y=y_pos,
+                        text=point["cache_level"],
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="middle",
+                        font=dict(size=10, color="black"),
+                        row=2,
+                        col=1,
+                    )
 
                 # Vertical column separators
-                column_x_positions = [0.12, 0.27, 0.47, 0.75]
+                column_x_positions = [0.12, 0.32, 0.52, 0.75]
                 for x_pos in column_x_positions:
                     fig.add_shape(
                         type="line",
