@@ -475,6 +475,15 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
                             conn, select_guid_nid_pid("threads")};
 
+                        auto pmc_events = rocpd::sql_generator<rocpd::types::rocpd_pmc_event>{
+                            conn,
+                            fmt::format("SELECT rocpd_info_pmc.name AS name, "
+                                        "rocpd_pmc_event.* FROM rocpd_pmc_event "
+                                        "INNER JOIN rocpd_info_pmc ON rocpd_info_pmc.id = "
+                                        "rocpd_pmc_event.pmc_id "
+                                        "WHERE rocpd_pmc_event.guid = '{}'",
+                                        pitr.guid)};
+
                         // absolute_index |-> (agent, agent_index)
                         auto agents_map =
                             std::unordered_map<uint64_t,
@@ -500,7 +509,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       memory_copies,
                                                       scratch_memory,
                                                       memory_allocations,
-                                                      counters);
+                                                      counters,
+                                                      pmc_events);
                     }
                 }
             }

@@ -177,7 +177,8 @@ write_perfetto(
     const tool::generator<types::memory_copies>&     memory_copy_gen,
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
-    const tool::generator<types::counter>&           counter_collection_gen)
+    const tool::generator<types::counter>&           counter_collection_gen,
+    const tool::generator<types::rocpd_pmc_event>&   pmc_event_gen)
 {
     namespace sdk    = ::rocprofiler::sdk;
     namespace common = ::rocprofiler::common;
@@ -380,6 +381,7 @@ write_perfetto(
                 auto  _name      = itr.name;
                 auto  _operation = itr.name;
 
+                /* Temporary crash fix
                 if(itr.has_extdata())
                 {
                     auto _extdata = itr.get_extdata();
@@ -388,8 +390,15 @@ write_perfetto(
                     if(_extdata.operation && !_extdata.operation->empty())
                         _operation = _extdata.operation.value();
                 }
+                */
 
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
+                const char* category_name = get_category_string(itr.category);
+
+                auto _category = std::strcmp(category_name,
+                                             sdk::perfetto_category<sdk::category::none>::name) == 0
+                                     ? ::perfetto::DynamicCategory{itr.category}
+                                     : ::perfetto::DynamicCategory{category_name};
+
                 TRACE_EVENT_BEGIN(_category,
                                   ::perfetto::DynamicString{_name},
                                   track,
@@ -414,51 +423,6 @@ write_perfetto(
                                   [&](::perfetto::EventContext ctx) { (void) ctx; });
 
                 TRACE_EVENT_END(_category, track, itr.end);
-
-                tracing_session->FlushBlocking();
-            }
-        }
-
-        for(auto ditr : sample_gen)
-        {
-            for(auto itr : sample_gen.get(ditr))
-            {
-                auto& track      = thread_tracks.at(itr.tid);
-                auto  _name      = itr.name;
-                auto  _operation = itr.name;
-
-                if(itr.has_extdata())
-                {
-                    auto _extdata = itr.get_extdata();
-                    if(_extdata.message && !_extdata.message->empty())
-                        _name = _extdata.message.value();
-                    if(_extdata.operation && !_extdata.operation->empty())
-                        _operation = _extdata.operation.value();
-                }
-
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
-                TRACE_EVENT_INSTANT(_category,
-                                    ::perfetto::DynamicString{_name},
-                                    track,
-                                    itr.timestamp,
-                                    ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
-                                    "begin_ns",
-                                    itr.timestamp,
-                                    "end_ns",
-                                    itr.timestamp,
-                                    "delta_ns",
-                                    0,
-                                    "tid",
-                                    itr.tid,
-                                    "kind",
-                                    itr.category,
-                                    "operation",
-                                    _operation,
-                                    "corr_id",
-                                    itr.stack_id,
-                                    "ancestor_id",
-                                    itr.parent_stack_id,
-                                    [&](::perfetto::EventContext ctx) { (void) ctx; });
 
                 tracing_session->FlushBlocking();
             }
@@ -613,6 +577,90 @@ write_perfetto(
 
     // counter tracks
     {
+        // sample counter tracks
+
+        std::map<std::string, std::map<uint64_t, uint64_t>> pmc_event_values;
+        for(auto ditr : pmc_event_gen)
+        {
+            for(const auto& itr : pmc_event_gen.get(ditr))
+            {
+                pmc_event_values[itr.name][itr.event_id] = static_cast<uint64_t>(itr.value);
+            }
+        }
+
+        auto sample_endpoints =
+            std::map<std::string,
+                     std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>>{};
+        for(auto ditr : sample_gen)
+        {
+            for(const auto& itr : sample_gen.get(ditr))
+            {
+                auto it = pmc_event_values.find(itr.name);
+                if(it == pmc_event_values.end())
+                {
+                    // No PMC events found for sample name
+                    continue;
+                }
+                auto value        = it->second[itr.event_id];
+                auto thread_index = thread_indexes[itr.tid];
+                sample_endpoints[itr.category][thread_index].emplace(itr.timestamp, value);
+            }
+        }
+
+        auto trace_sample_counter =
+            [&]<typename T>(
+                std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>& track_data) {
+                for(auto& [thread_index, ts_map] : track_data)
+                {
+                    auto _track_name = std::stringstream{};
+                    _track_name << T::description << " [" << thread_index << "] (S)";
+
+                    auto _name = _track_name.str();
+                    auto counter_track =
+                        ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
+                            .set_unit(::perfetto::CounterTrack::Unit::UNIT_UNSPECIFIED)
+                            .set_unit_multiplier(1)
+                            .set_is_incremental(false);
+
+                    for(auto itr : ts_map)
+                    {
+                        TRACE_COUNTER(T::name, counter_track, itr.first, itr.second);
+                    }
+
+                    tracing_session->FlushBlocking();
+                }
+            };
+
+        for(auto& [category, track_data] : sample_endpoints)
+        {
+            if(category == sdk::perfetto_category<sdk::category::thread_context_switch>::name)
+            {
+                trace_sample_counter.
+                operator()<sdk::perfetto_category<sdk::category::thread_context_switch>>(
+                    track_data);
+            }
+            else if(category == sdk::perfetto_category<sdk::category::thread_cpu_time>::name)
+            {
+                trace_sample_counter.
+                operator()<sdk::perfetto_category<sdk::category::thread_cpu_time>>(track_data);
+            }
+            else if(category == sdk::perfetto_category<sdk::category::thread_page_fault>::name)
+            {
+                trace_sample_counter.
+                operator()<sdk::perfetto_category<sdk::category::thread_page_fault>>(track_data);
+            }
+            else if(category == sdk::perfetto_category<sdk::category::thread_peak_memory>::name)
+            {
+                trace_sample_counter.
+                operator()<sdk::perfetto_category<sdk::category::thread_peak_memory>>(track_data);
+            }
+            else
+            {
+                trace_sample_counter.operator()<sdk::perfetto_category<sdk::category::none>>(
+                    track_data);
+            }
+        }
+
         // memory copy counter track
         auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
         auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),

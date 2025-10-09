@@ -405,6 +405,17 @@ struct stats_node
     double      std_dev        = 0.0;
 };
 
+struct rocpd_pmc_event
+{
+    std::string name     = {};
+    uint64_t    id       = 0;
+    guid_t      guid     = {};
+    uint64_t    event_id = 0;
+    uint64_t    pmc_id   = 0;
+    double      value    = 0.0;
+    std::string extdata  = {};
+};
+
 // Add this struct after the existing type definitions
 
 struct pmc_event
@@ -846,6 +857,19 @@ load(ArchiveT& ar, rocpd::types::stats_node& data)
     LOAD_DATA_NAMED("MAX (nsec)", max_ns);
     LOAD_DATA_NAMED("VARIANCE", variance);
     LOAD_DATA_NAMED("STD_DEV", std_dev);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::rocpd_pmc_event& data)
+{
+    LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(event_id);
+    LOAD_DATA_FIELD(pmc_id);
+    LOAD_DATA_FIELD(value);
+    LOAD_DATA_FIELD(extdata);
 }
 
 // Add this inside the cereal namespace, after the existing load functions
