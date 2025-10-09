@@ -45,7 +45,7 @@ Install the following dependencies:
 
 .. code-block:: bash
 
-    sudo dnf install elfutils elfutils-devel libsqlite3x-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
+    sudo dnf install elfutils elfutils-devel sqlite-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
     python3 -m pip install --upgrade pip
     python3 -m pip install scikit-build
 
