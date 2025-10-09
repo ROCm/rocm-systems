@@ -1096,7 +1096,7 @@ namespace {
       try {
         return std::max(0, std::stoi(s));
       } catch (...) {
-        // Ignore error, fallback on 100 ms default
+        // Ignore error, fallback to passed in def
       }
     }
     return def;
@@ -1108,7 +1108,6 @@ namespace {
     std::mutex mtx;
   };
 
-  GpuMetricsCache g_gpu_metrics_cache;
   // Keep 1 cache map, with an entry for each gpu
   std::unordered_map<std::string, GpuMetricsCache> g_gpu_metrics_cache_map;
   std::mutex g_gpu_metrics_cache_map_mu;

@@ -113,7 +113,6 @@ amdsmi_status_t AMDSmiDrm::init() {
     amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
     auto devices = smi.devices();
 
-    bool has_valid_fds = false;
     for (uint32_t i=0; i < devices.size(); i++) {
         auto rocm_smi_device = devices[i];
         drmDevicePtr device;
@@ -139,7 +138,6 @@ amdsmi_status_t AMDSmiDrm::init() {
                 drm_free_device(&device);
             }
             drm_free_version(version);
-            has_valid_fds = true;
         }
 
         uint64_t bdf_rocm = 0;

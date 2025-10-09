@@ -988,6 +988,17 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
   return AMDSMI_STATUS_API_FAILED;
 }
 
+int read_env_ms(const char* name, int def) {
+    if (const char* s = std::getenv(name)) {
+        try {
+            return std::max(0, std::stoi(s));
+        } catch (...) {
+            // Ignore error, fallback to passed in def
+        }
+    }
+    return def;
+}
+
 struct CperFileCtx {
     amdsmi_status_t status = AMDSMI_STATUS_FILE_ERROR;
     std::unique_ptr<char[]> buffer;

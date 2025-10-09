@@ -118,6 +118,19 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
                                         uint32_t device_index,
                                         amdsmi_processor_handle *processor_handle);
 
+/**
+ *  @brief Get an int environment var or return default if does not exist
+ *
+ *  @details Given a const char* @p name and a default int @p def
+ *  and call getenv with name. On any error, return default int
+ *
+ *  @param[in] name a const char* containing ENV var name
+ *
+ *  @param[in] def default int in case of error
+ *
+ *  @retval int of environment variable
+ */
+int read_env_ms(const char* name, int def);
 
 template<typename>
 constexpr bool is_dependent_false_v = false;
