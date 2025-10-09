@@ -1709,8 +1709,8 @@ main(int argc, char** argv)
     //  1. It contains the actual user code that should be instrumented and will not be
     //  treated as a subroutine.
     //  2. If we instrument the C wrapper and if the Fortran main is written in such a way
-    //     that Dyninst marks it with funcReturnStatus == NORETURN, the Fortran main will
-    //     not be instrumented
+    //     that Dyninst marks it with funcReturnStatus == NORETURN, then during
+    //     rocprof-sys-run, the instrumented MAIN__ will not be reached.
     if(main_fname == "main")
     {
         // _MAIN__, MAIN__, main_, _main_, _QQmain
