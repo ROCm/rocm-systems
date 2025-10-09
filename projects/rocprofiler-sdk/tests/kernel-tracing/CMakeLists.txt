@@ -24,12 +24,18 @@ rocprofiler_add_integration_execute_test(
     kernel-tracing
     TARGET reproducible-runtime
     TIMEOUT 100
+    LABELS "integration-tests"
     ENVIRONMENT "${kernel-tracing-env}"
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+    FIXTURES_SETUP kernel-tracing)
 
 rocprofiler_add_integration_validate_test(
     kernel-tracing
-    COPY validate.py conftest.py
+    TEST_PATHS validate.py
+    COPY conftest.py
     CONFIG pytest.ini
-    ARGS ${PYTEST_ARGS} --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json
-    DISCOVERY_ARGS ${PYTEST_ARGS})
+    LABELS "integration-tests"
+    TIMEOUT 45
+    FIXTURES_REQUIRED kernel-tracing
+    DISCOVERY_ARGS ${PYTEST_ARGS}
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json)

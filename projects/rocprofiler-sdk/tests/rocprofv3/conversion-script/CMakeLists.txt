@@ -34,23 +34,21 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
                                    CONFIG pytest.ini)
 
-add_test(
-    NAME rocprofv3-test-conversion-script-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script -o pmc1 --output-format csv --
-        $<TARGET_FILE:vector-ops>)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-pmc "${PRELOAD_ENV}")
-
-set_tests_properties(
-    rocprofv3-test-conversion-script-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-conversion-script
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
+        -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script -o pmc1 --output-format
+        csv -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    LABELS "integration-tests"
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-conversion-script)
 
 set(convert_tests rocprofv3-test-conversion-script-convert-no-agent-prefix
                   rocprofv3-test-conversion-script-convert-agent-prefix)
@@ -74,45 +72,41 @@ foreach(i RANGE 0 ${convert_test_length})
     list(GET agent_index_flag ${i} flag)
     list(GET validate_tests ${i} validate_test_name)
     if(${flag})
-        add_test(
-            NAME ${test_name}
-            COMMAND
-                ${Python3_EXECUTABLE}
-                $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
-                --input ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output
-                ${output} --retain-agent-prefix)
-
-        add_test(NAME ${validate_test_name}
-                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                         ${PYTEST_ARGS} --input ${output} --retain-agent-prefix true)
+        set(conversion_cmd
+            ${Python3_EXECUTABLE}
+            $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
+            --input
+            ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script
+            --output
+            ${output}
+            --retain-agent-prefix)
+        set(validate_args --retain-agent-prefix true)
     else()
-        add_test(
-            NAME ${test_name}
-            COMMAND
-                ${Python3_EXECUTABLE}
-                $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
-                --input ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output
-                ${output})
-
-        add_test(NAME ${validate_test_name}
-                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                         ${PYTEST_ARGS} --input ${output} --retain-agent-prefix false)
+        set(conversion_cmd
+            ${Python3_EXECUTABLE}
+            $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format> --input
+            ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output ${output})
+        set(validate_args --retain-agent-prefix false)
     endif()
-    set_tests_properties(
+
+    rocprofiler_add_integration_execute_test(
         ${test_name}
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-                   rocprofv3-test-conversion-script-execute FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-    set_tests_properties(
+        COMMAND ${conversion_cmd}
+        DEPENDS rocprofiler-sdk::convert-counters-collection-format
+        TIMEOUT 45
+        LABELS "integration-tests"
+        PRELOAD "${PRELOAD_ENV}"
+        FIXTURES_REQUIRED rocprofv3-test-conversion-script
+        FIXTURES_SETUP ${test_name})
+
+    rocprofiler_add_integration_validate_test(
         ${validate_test_name}
-        PROPERTIES TIMEOUT
-                   45
-                   LABELS
-                   "integration-tests"
-                   DEPENDS
-                   ${test_name}
-                   FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-                   DISABLED
-                   "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+        TEST_PATHS validate.py
+        COPY conftest.py input.txt
+        CONFIG pytest.ini
+        ARGS --input ${output} ${validate_args}
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED ${test_name}
+        UNSTABLE)
 endforeach()

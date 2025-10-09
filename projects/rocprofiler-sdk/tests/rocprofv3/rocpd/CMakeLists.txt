@@ -16,8 +16,6 @@ set(rocprofv3-rocpd-env
     "OMPI_ALLOW_RUN_AS_ROOT=1"
     "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
-
 find_package(MPI)
 find_package(Python3 REQUIRED)
 
@@ -40,50 +38,33 @@ endif()
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out --output-format rocpd json
         --runtime-trace --kernel-rename --output-config --pmc SQ_WAVES --
-        $<TARGET_FILE:reproducible-dispatch-count> 500 2)
+        $<TARGET_FILE:reproducible-dispatch-count> 500 2
+    DEPENDS reproducible-dispatch-count
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd)
 
-set_tests_properties(
-    rocprofv3-test-rocpd-execute
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd)
-
-add_test(
-    NAME rocprofv3-test-rocpd-execute-multiproc
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-multiproc
     COMMAND
         ${MULTIPROC_LAUNCHER} ${Python3_EXECUTABLE}
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc -o out_mp_%rank%
         --output-format rocpd json --runtime-trace --kernel-rename --output-config --pmc
-        SQ_WAVES -- $<TARGET_FILE:reproducible-dispatch-count> 200 1)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-execute-multiproc
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${MULTIPROC_IS_DISABLED}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-multiproc)
+        SQ_WAVES -- $<TARGET_FILE:reproducible-dispatch-count> 200 1
+    DEPENDS reproducible-dispatch-count
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc
+    DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
 #
@@ -91,52 +72,33 @@ set_tests_properties(
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-otf2-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-otf2-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-otf2-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
-set_tests_properties(
-    rocprofv3-test-rocpd-otf2-generation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd)
-
-add_test(
-    NAME rocprofv3-test-rocpd-otf2-generation-multiproc
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-otf2-generation-multiproc
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o rocpd-mp-output-test
-        -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-otf2-generation-multiproc
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${MULTIPROC_IS_DISABLED}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-multiproc)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o rocpd-mp-output-test -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc-otf2-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
+    DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
 #
@@ -144,53 +106,34 @@ set_tests_properties(
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-perfetto-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-perfetto-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-perfetto-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
-set_tests_properties(
-    rocprofv3-test-rocpd-perfetto-generation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd)
-
-add_test(
-    NAME rocprofv3-test-rocpd-perfetto-generation-multiproc
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-perfetto-generation-multiproc
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f perfetto --kernel-rename
         --group-by-queue -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o
         out_mp -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-perfetto-generation-multiproc
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${MULTIPROC_IS_DISABLED}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-multiproc)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc-perfetto-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
+    DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
 #
@@ -198,81 +141,51 @@ set_tests_properties(
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-csv-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-csv-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-csv-generation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-csv-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 #########################################################################################
 #
 # Summary generate
 #
 #########################################################################################
-add_test(
-    NAME rocprofv3-test-rocpd-summary-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
         -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-summary-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
-set_tests_properties(
-    rocprofv3-test-rocpd-summary-generation
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd)
-
-add_test(
-    NAME rocprofv3-test-rocpd-summary-generation-multiproc
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-generation-multiproc
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
         -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary -o out_mp -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-summary-generation-multiproc
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${MULTIPROC_IS_DISABLED}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-multiproc)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc-summary-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
+    DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
 #
@@ -280,34 +193,25 @@ set_tests_properties(
 #
 #########################################################################################
 
-set(VALIDATION_DEPENDS
-    rocprofv3-test-rocpd-perfetto-generation rocprofv3-test-rocpd-csv-generation
-    rocprofv3-test-rocpd-otf2-generation)
-
-add_test(
-    NAME rocprofv3-test-rocpd-validation
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2 --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace --csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_agent_info.csv
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-validation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "${VALIDATION_DEPENDS}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-generation)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
+         --csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED
+        rocprofv3-test-rocpd rocprofv3-test-rocpd-otf2-generation
+        rocprofv3-test-rocpd-perfetto-generation rocprofv3-test-rocpd-csv-generation)
