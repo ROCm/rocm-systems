@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -51,6 +51,9 @@
 
 #include "core/util/timer.h"
 #include "core/inc/runtime.h"
+#if defined(_WIN32)
+#include "malloc.h"
+#endif
 
 namespace rocr {
 namespace core {
@@ -234,8 +237,11 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   MAKE_SCOPE_GUARD([&]() {
     if (signal_count > small_size) delete[] evts;
   });
-
+#if defined(__linux__)
   uint64_t event_age[unique_evts];
+#else
+  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
+#endif
   memset(event_age, 0, unique_evts * sizeof(uint64_t));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
     for (uint32_t i = 0; i < unique_evts; i++)
@@ -367,8 +373,11 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
   std::sort(evts, evts + signal_count);
   HsaEvent** end = std::unique(evts, evts + signal_count);
   unique_evts = uint32_t(end - evts);
-
+#if defined(__linux__)
   uint64_t event_age[unique_evts];
+#else
+  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
+#endif
   memset(event_age, 0, unique_evts * sizeof(uint64_t));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
     for (uint32_t i = 0; i < unique_evts; i++)

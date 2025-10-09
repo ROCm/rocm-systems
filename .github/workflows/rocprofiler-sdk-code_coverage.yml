@@ -32,6 +32,7 @@ concurrency:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
@@ -58,17 +59,16 @@ env:
 
 jobs:
   code-coverage:
-    name: Code Coverage • ${{ matrix.runner }} • ${{ matrix.os }}
+    name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi300a']
-        os: ['ubuntu-22.04']
-        build-type: ['Release']
+        system:
+          - { gpu: 'mi300a', runner: 'rocprofiler-mi300a-dind', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
-    runs-on: rocprofiler-mi300a-dind
+    runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -79,7 +79,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: 'rocprofiler-mi300a-dind'
+      GPU_RUNNER: ${{ matrix.system.runner }}
       GCC_COMPILER_VERSION: 11
       ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
@@ -88,8 +88,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
-        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
@@ -199,11 +199,11 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
@@ -212,7 +212,7 @@ jobs:
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
       with:
-        key: ccache-${{ matrix.os }}-rocprofiler-mi300a-dind-${{ matrix.runner }}
+        key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
         max-size: 2G
         save: true
 
@@ -223,7 +223,7 @@ jobs:
         export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo -e "Building & Installing ROCDecode..."
         cmake -B build-rocdecode \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
           -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -234,7 +234,7 @@ jobs:
         echo -e "ROCDecode Installed Successfully!"
         echo -e "Building & Installing ROCJPEG..."
         cmake -B build-rocjpeg \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
           -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -253,8 +253,8 @@ jobs:
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           .
@@ -272,8 +272,8 @@ jobs:
         echo "Install ROCR-Runtime..."
         cmake -B build \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
           .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
@@ -288,8 +288,8 @@ jobs:
         echo "Install Aqlprofile..."
         cmake -B build-aqlprofile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           .
@@ -305,20 +305,20 @@ jobs:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
           --build-jobs 16
-          --site 'rocprofiler-mi300a-dind'
+          --site ${{ matrix.system.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
           --
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
@@ -329,20 +329,20 @@ jobs:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
-          --site 'rocprofiler-mi300a-dind'
+          --site ${{ matrix.system.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
           --
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
@@ -353,20 +353,20 @@ jobs:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
           --build-jobs 16
-          --site 'rocprofiler-mi300a-dind'
+          --site ${{ matrix.system.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
           --
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Save XML Code Coverage
       id: save-coverage
@@ -492,7 +492,7 @@ jobs:
         #   - unittests
         #   - integration-tests
         #
-        ctest -N -LE 'samples|tests' -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" -O ctest.mislabeled.log
+        ctest -N -LE 'samples|tests' -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" -O ctest.mislabeled.log
         grep 'Total Tests: 0' ctest.mislabeled.log
         #
         # if following fails, then there is overlap between the labels.

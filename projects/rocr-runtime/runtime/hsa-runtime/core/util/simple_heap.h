@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -194,6 +194,35 @@ template <typename Allocator> class SimpleHeap {
     }
 
     return reinterpret_cast<void*>(base);
+  }
+
+  /* Return block-base the ptr belongs to if the ptr is a valid ptr which is allocated
+   * from this simpleheap and the block-base is allocated from block_allocator_*/
+  void* block_base(void* ptr) {
+    if (ptr == nullptr)
+      return nullptr;
+
+    uintptr_t base = reinterpret_cast<uintptr_t>(ptr);
+
+    // Find fragment and validate.
+    auto frag_map_it = block_list_.upper_bound(base);
+    if (frag_map_it == block_list_.begin())
+      return nullptr;
+    frag_map_it--;
+    auto& frag_map = frag_map_it->second;
+    auto fragment = frag_map.find(base);
+    if (fragment == frag_map.end() || isFree(fragment->second))
+      return nullptr;
+
+    return reinterpret_cast<void*>(frag_map_it->first);
+  }
+
+  void reset() {
+    free_list_.clear();
+    block_list_.clear();
+    block_cache_.clear();
+    in_use_size_ = 0;
+    cache_size_ = 0;
   }
 
   bool free(void* ptr) {

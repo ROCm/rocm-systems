@@ -88,9 +88,16 @@ class MenuBar(Container):
 
         def on_recent_selected(selected_dir: Optional[str]) -> None:
             if selected_dir:
-                self.parent_main_view.selected_path = Path(selected_dir)
-                self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
-                self.parent_main_view.run_analysis()
+                path_obj = Path(selected_dir)
+                if path_obj.exists():
+                    self.parent_main_view.selected_path = path_obj
+                    self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
+                    self.parent_main_view.run_analysis()
+                else:
+                    # Remove non-existent path from recent dirs
+                    if selected_dir in self.app.recent_dirs:
+                        self.app.recent_dirs.remove(selected_dir)
+                        self.app._save_recent_dirs()
 
         self.app.push_screen(
             RecentDirectoriesScreen(self.app.recent_dirs), on_recent_selected

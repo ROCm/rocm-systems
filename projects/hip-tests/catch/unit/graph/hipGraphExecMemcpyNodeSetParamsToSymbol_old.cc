@@ -151,6 +151,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative") {
                                                   HIP_SYMBOL(globalOut), HIP_SYMBOL(globalIn),
                                                   Nbytes, 0, hipMemcpyDeviceToDevice);
     REQUIRE(hipErrorInvalidValue == ret);
+    HIP_CHECK(hipGraphDestroy(graph1));
   }
 
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, nullptr, false);

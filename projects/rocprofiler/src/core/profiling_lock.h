@@ -1,3 +1,5 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #ifndef _SRC_CORE_PROFILING_LOCK_H
 #define _SRC_CORE_PROFILING_LOCK_H
