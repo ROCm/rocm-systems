@@ -249,6 +249,9 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
             ? 1
             : kmt_alloc_flags.ui32.Uncached);
 
+  kmt_alloc_flags.ui32.QueueObject =
+      (alloc_flags & core::MemoryRegion::AllocateQueueObject ? 1
+                                                             : kmt_alloc_flags.ui32.QueueObject);
   if (kmt_alloc_flags.ui32.Uncached) {
     /* Uncached overwrites CoarseGrain and ExtendedCoherent */
     kmt_alloc_flags.ui32.CoarseGrain = 0;
@@ -672,7 +675,6 @@ hsa_status_t KfdDriver::DeregisterMemory(void* ptr) const {
 hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
                                            const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
                                            const uint32_t* nodes) const {
-#if defined(__linux__)
   if (mem_flags == nullptr && nodes == nullptr) {
     if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va)) !=
         HSAKMT_STATUS_SUCCESS) {
@@ -686,19 +688,6 @@ hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_
     debug_print("Invalid memory flags ptr:%p nodes ptr:%p\n", mem_flags, nodes);
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-#else
-  assert(num_nodes > 0);
-  assert(nodes != NULL);
-
-  *alternate_va = 0;
-  const HSAKMT_STATUS status =
-      HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(const_cast<void*>(mem), size, alternate_va, *mem_flags,
-                                            num_nodes, const_cast<uint32_t*>(nodes)));
-
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-#endif
   return HSA_STATUS_SUCCESS;
 }
 

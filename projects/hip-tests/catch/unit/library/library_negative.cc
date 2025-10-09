@@ -29,7 +29,7 @@ TEST_CASE("Unit_library_negative") {
     HIP_CHECK_ERROR(
         hipLibraryLoadFromFile(nullptr, nullptr, nullptr, nullptr, 0, nullptr, nullptr, 0),
         hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipLibraryUnload(nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipLibraryUnload(nullptr), hipErrorInvalidResourceHandle);
     HIP_CHECK_ERROR(hipLibraryGetKernel(nullptr, nullptr, nullptr), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipLibraryGetKernelCount(nullptr, nullptr), hipErrorInvalidValue);
   }
