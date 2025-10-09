@@ -87,6 +87,7 @@ Current Variables:
 
 ```{note}
 AMDSMI_GPU_METRICS_CACHE_MS - Controls the internal GPU metrics cache duration (ms). Default 100, set to 0 to disable.
+AMDSMI_ASIC_INFO_CACHE_MS - Controls the internal GPU asic info cache duration (ms). Default 10000, set to 0 to disable.
 ```
 
 (cmds)=

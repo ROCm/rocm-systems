@@ -44,7 +44,11 @@ The environment variable ``AMDSMI_GPU_METRICS_CACHE_MS`` may be set to
 control the internal GPU metrics cache duration (ms). 
 Default 1, set to 0 to disable.
 
-You can apply it in one of two ways:
+The environment variable ``AMDSMI_ASIC_INFO_CACHE_MS`` may be set to
+control the internal GPU asic info cache duration (ms). 
+Default 10000 ms, set to 0 to disable.
+
+You can apply them in one of two ways:
 
 1. In Python code (before the AMDSMI library loads):
 ```
