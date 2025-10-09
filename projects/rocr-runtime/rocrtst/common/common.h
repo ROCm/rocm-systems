@@ -110,6 +110,8 @@ struct agent_pools_t{
     std::vector<hsa_amd_memory_pool_t> pools;
 };
 
+extern size_t pool_size_limit;
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored

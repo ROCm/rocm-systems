@@ -174,6 +174,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeGetParams_Positive") {
   REQUIRE(memCpy_params.dstHeight == memCpyGetParams.dstHeight);
 
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
   HIP_CHECK(hipCtxPopCurrent(&context));
   HIP_CHECK(hipCtxDestroy(context));

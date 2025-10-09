@@ -1397,7 +1397,8 @@ class MemObjMap : public AllStatic {
     size_t psize;                              ///< Total size of the device memory allocation
     size_t poffset;                            ///< Offset within the allocation
     int owners_process_id;                     ///< ID of the process that owns the allocation
-    char reserved[LP64_SWITCH(20, 12)];        ///< Reserved for future extensions
+    int owners_device_id;                      ///< ID of the device that owns the allocation
+    char reserved[LP64_SWITCH(16, 8)];        ///< Reserved for future extensions
 
     bool operator<(const IpcMemHandle& h) const {
       int cmp = std::memcmp(ipc_handle, h.ipc_handle, AMD_IPC_MEM_HANDLE_SIZE);

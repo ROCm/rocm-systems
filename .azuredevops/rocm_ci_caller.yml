@@ -4,6 +4,7 @@ pr:
     include:
       - develop
       - release/rocm-rel-7.1
+      - release/rocm-rel-7.2
   drafts: false
 
 variables:
@@ -58,6 +59,16 @@ jobs:
           fi
           if [[ "$file" == projects/clr/* || "$file" == projects/hip/* || "$file" == projects/hip-tests/* ]]; then
             WINDOWS_SKIP=false
+          fi
+          if [[ "$file" == projects/hip/docs/* || \
+                "$file" == projects/rdc/docs/* || \
+                "$file" == projects/rocm-smi-lib/docs/* || \
+                "$file" == projects/rocminfo/docs/* || \
+                "$file" == projects/rocprofiler-compute/docs/* || \
+                "$file" == projects/rocprofiler-systems/docs/* || \
+                "$file" == projects/rocr-runtime/runtime/docs/* ]]; then
+            WINDOWS_SKIP=true
+            MATCH_FOUND=false
           fi
           if [[ "$MATCH_FOUND" == true && "$WINDOWS_SKIP" == false ]]; then
             break

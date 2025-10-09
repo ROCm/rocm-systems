@@ -27,6 +27,8 @@ subtrees:
       title: Tool library
     - file: api-reference/intercept_table
       title: Runtime intercept tables
+    - file: api-reference/process_attachment
+      title: Process attachment
     - file: api-reference/buffered_services
       title: Buffered services
     - file: api-reference/callback_services

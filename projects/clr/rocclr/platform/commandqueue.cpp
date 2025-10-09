@@ -208,20 +208,18 @@ void HostQueue::finish(bool cpu_wait) {
             "await command completion",
             minBatchSize);
     command->awaitCompletion();
-
-    if (IS_HIP) {
-      ScopedLock sl(vdev()->execution());
-      ScopedLock l(lastCmdLock_);
-      // Runtime can clear the last command only if no other submissions occured
-      // during finish()
-      if (command == lastEnqueueCommand_) {
-        device_.removeFromActiveQueues(this);
-        lastEnqueueCommand_->release();
-        lastEnqueueCommand_ = nullptr;
-      }
+  }
+  if (IS_HIP) {
+    ScopedLock sl(vdev()->execution());
+    ScopedLock l(lastCmdLock_);
+    // Runtime can clear the last command only if no other submissions occured
+    // during finish()
+    if (command == lastEnqueueCommand_) {
+      device_.removeFromActiveQueues(this);
+      lastEnqueueCommand_->release();
+      lastEnqueueCommand_ = nullptr;
     }
   }
-
   // Release all HW queues, which are idle or nearly idle
   vdev()->ReleaseAllHwQueues();
 
