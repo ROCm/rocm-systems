@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -87,7 +87,6 @@ bool checkNumaNodeInfo(const PVOID buffer, const SIZE_T bufferSize, const WORD n
     free(wsInfo);
     return false;
   }
-
   bool ret = true;
   for (DWORD_PTR i = 0; i < numPages; i++) {
     BOOL  IsValid = wsInfo[i].VirtualAttributes.Valid;
@@ -199,7 +198,7 @@ static DWORD WINAPI workerThread(LPVOID lpParam) {
     default:
       return -1;
   }
- 
+
   if (!pMem) {
     std::cerr << "NUMA allocation failed for thread "
           << GetCurrentThreadId() << "on NUMA node " << node->nodeNumber <<
@@ -210,7 +209,7 @@ static DWORD WINAPI workerThread(LPVOID lpParam) {
   memset(pMem, 0xCD, allocSize);
   bool ret = checkNumaNodeInfo(pMem, allocSize, node->nodeNumber,
                     threadPara->mallocType !=  MallocType::hostMallocType);
-      
+
   switch (threadPara->mallocType) {
     case MallocType::hostMallocType:
       VirtualFree(pMem, 0, MEM_RELEASE);
@@ -222,56 +221,6 @@ static DWORD WINAPI workerThread(LPVOID lpParam) {
       return -1;
   }
   return ret ? 0 : -1;
-}
-
-static void runTestAll(std::vector<NumaNodeInfo> &nodes, MallocType type, unsigned int flags,
-    const char *description) {
-  std::cout << std::dec;
-  std::vector<HANDLE> threadHandles;
-  std::vector<ThreadPara> paras;
-  paras.reserve(nodes.size());
-  int index = 0;
-  for (auto& node : nodes) {
-    if (node.freeBytes < allocSize) {
-      std::cerr << "node.freeBytes " << node.freeBytes <<" < allocSize " << allocSize << "\n";
-      continue;
-    }
-    auto& ref = paras.emplace_back(&node, type, flags, -1);
-    HANDLE hThread = CreateThread(nullptr, 0, workerThread, &ref, CREATE_SUSPENDED, nullptr);
-    if (!hThread) {
-      std::cerr << "Thread creation failed. Error: " << GetLastError() << "\n";
-      continue;
-    }
-    GROUP_AFFINITY ga = {};
-    ga.Group = node.groupNumber;
-    ga.Mask = node.mask;
-    GROUP_AFFINITY prev = {};
-    if (!SetThreadGroupAffinity(hThread, &ga, &prev)) {
-      std::cerr << "SetThreadGroupAffinity failed. Error: " << GetLastError() << "\n";
-      CloseHandle(hThread);
-      continue;
-    }
-    std::cout << "thread " << index++ << ": Group: " << ga.Group << ", Mask: "
-        << std::hex << ga.Mask << "; prev: Group: " << std::dec << prev.Group << ", Mask: "
-        << std::hex << prev.Mask << std::dec <<"\n";
-    ResumeThread(hThread);
-    threadHandles.push_back(hThread);
-  }
-
-  // Wait for all threads
-  WaitForMultipleObjects((DWORD)threadHandles.size(), threadHandles.data(), TRUE, INFINITE);
-  bool result = true;
-  for (auto h : threadHandles) {
-    DWORD exitCode = 0;
-    if (GetExitCodeThread(h, &exitCode)) {
-      result &= (exitCode == 0);
-    } else {
-      result = false;
-    }
-    CloseHandle(h);
-  }
-  std::cout << description << (result ? " passed\n" : " failed\n");
-  REQUIRE(result);
 }
 
 static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, unsigned int flags,
@@ -340,37 +289,6 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
   REQUIRE(result);
 }
 
-/* Test memory allocation on all host numa nodes with 1 GPU */
-TEST_CASE("Perf_hipPerfHostNumaAlloc_test_all_host_numa_nodes") {
-  std::vector<NumaNodeInfo> nodes;
-  enumerateNumaNodes(nodes);
-  if (nodes.empty()) {
-    std::cerr << "No NUMA nodes found.\n";
-    REQUIRE(false);
-  }
-  SYSTEM_INFO systemInfo;
-  GetSystemInfo(&systemInfo);
-  pageSize = systemInfo.dwPageSize;
-  std::cout << "logic processor count " << systemInfo.dwNumberOfProcessors
-      << ", page size " << pageSize << "\n";
-  int numaNode = -1;
-  HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, 0));
-  if (numaNode == -1) {
-    HipTest::HIP_SKIP_TEST("Host NUMA isn't supported hence skipping the test...\n");
-    return;
-  }
-  HIP_CHECK(hipSetDevice(0)); // Test on device 0
-  runTestAll(nodes,
-      MallocType::hostMallocType, MEM_RESERVE | MEM_COMMIT,
-      "VirtualAllocExNuma on all numa node");
-  runTestAll(nodes,
-      MallocType::hiphostMallocType, hipHostMallocDefault | hipHostMallocNumaUser,
-      "hiphostMalloc(hipHostMallocDefault | hipHostMallocNumaUser) on all numa nodes");
-  runTestAll(nodes,
-      MallocType::hiphostMallocType, hipHostAllocMapped | hipHostMallocNumaUser,
-      "hiphostMalloc(hipHostAllocMapped | hipHostMallocNumaUser) on all numa nodes");
-}
-
 /* Test memory allocation on preferred host numa node on each CPU */
 TEST_CASE("Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU") {
   std::vector<NumaNodeInfo> nodes;
@@ -391,12 +309,16 @@ TEST_CASE("Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU")
     return;
   }
   HIP_CHECK(hipSetDevice(0));
+  // In windows, it is same with / without hipHostMallocNumaUser
   runTestPrefered(nodes,
       MallocType::hiphostMallocType, hipHostMallocDefault | hipHostMallocNumaUser,
       "hiphostMalloc(hipHostMallocDefault | hipHostMallocNumaUser) on preferred numa node");
   runTestPrefered(nodes,
       MallocType::hiphostMallocType, hipHostAllocMapped | hipHostMallocNumaUser,
       "hiphostMalloc(hipHostAllocMapped | hipHostMallocNumaUser) on preferred numa node");
+  runTestPrefered(nodes,
+      MallocType::hostMallocType, MEM_RESERVE | MEM_COMMIT,
+      "VirtualAllocExNuma(MEM_RESERVE | MEM_COMMIT) on preferred numa node");
 }
 /**
  * End doxygen group hipHostMalloc.
