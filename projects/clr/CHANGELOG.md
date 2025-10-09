@@ -52,7 +52,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 
-* Support for rocBLAS and hipBLASL targeting the new AMD GPUs gfx1150 and gfx1151.
 * Support for the `hipMemAllocationTypeUncached` flag, enabling developers to allocate uncached memory. This flag is now supported in the following APIs:
     - `hipMemGetAllocationGranularity` determines the recommended allocation granularity for uncached memory.
     - `hipMemCreate` allocates memory with uncached properties.
