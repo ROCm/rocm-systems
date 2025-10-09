@@ -1,7 +1,7 @@
 .. meta::
    :description: ROCm Compute Profiler installation and deployment
    :keywords: Omniperf, ROCm Compute Profiler, ROCm, tool, Instinct, accelerator, AMD,
-              install, deploy, Grafana, client, configuration, modulefiles
+              install, deploy, client, configuration, modulefiles
 
 **********************************************
 Installing and deploying ROCm Compute Profiler
@@ -16,11 +16,6 @@ ROCm Compute Profiler consists of two installation components.
     block, dispatch, kernel, and more.
   * Provides a CLI-based analysis mode.
   * Provides a standalone web interface for importing analysis metrics.
-
-* :doc:`Grafana server for ROCm Compute Profiler <grafana-setup>` (server-side) (*optional*)
-
-  * Hosts the MongoDB backend and Grafana instance.
-  * Is packaged in a Docker container for easy setup.
 
 Determine what you need to install based on how you would like to interact with
 ROCm Compute Profiler. See the following decision tree to help determine what installation is

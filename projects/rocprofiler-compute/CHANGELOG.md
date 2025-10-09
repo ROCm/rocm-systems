@@ -182,6 +182,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Usage of `rocm-smi` in favor of `amd-smi`.
 * Hardware IP block-based filtering has been removed in favor of analysis report block-based filtering.
 * Removed aggregated analysis view from TUI analyze mode.
+* Removed `database` mode from `rocprofiler-compute`
 
 ### Optimized
 
