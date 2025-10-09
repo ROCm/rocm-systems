@@ -439,6 +439,8 @@ jobs:
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocr-runtime
+            projects/clr
+            projects/hip
           submodules: false
           set-safe-directory: true
 
@@ -681,6 +683,8 @@ jobs:
           projects/aqlprofile
           projects/rocprofiler-register
           projects/rocr-runtime
+          projects/clr
+          projects/hip
         submodules: false
         set-safe-directory: true
 
