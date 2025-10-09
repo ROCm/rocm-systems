@@ -902,7 +902,7 @@ class Roofline:
                     )
 
                     status_text = point["status"]
-                    
+
                     if "Compute Bound" in status_text:
                         status_color = "DarkOrange"
                     elif "Memory Bound" in status_text:
@@ -920,7 +920,7 @@ class Roofline:
                         row=2,
                         col=1,
                     )
-                    
+
                     fig.add_annotation(
                         x=data_positions[3],
                         y=y_pos,
