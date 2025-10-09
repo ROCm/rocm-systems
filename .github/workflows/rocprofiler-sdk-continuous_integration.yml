@@ -110,6 +110,8 @@ jobs:
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocr-runtime
+            projects/clr
+            projects/hip
           submodules: false
           set-safe-directory: true
 
@@ -240,6 +242,33 @@ jobs:
           cmake --build build --target all --parallel 16
           cmake --build build --target install
           echo "✅ ROCR-Runtime Installation complete!"
+
+      - name: Build and Install HIP
+        if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+        shell: bash
+        working-directory: projects
+        run: |
+          export HIP_DIR=$PWD/hip
+          export CLR_DIR=$PWD/clr
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          echo "Install HIP..."
+          cd $CLR_DIR
+          cmake \
+            -DHIP_COMMON_DIR=$HIP_DIR \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DHIP_PLATFORM=amd \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
+            -DHIP_CATCH_TEST=0 \
+            -DCLR_BUILD_HIP=ON \
+            -DCLR_BUILD_OCL=ON \
+            -S $CLR_DIR \
+            -B build
+          cmake --build build --target all --parallel 16
+          cmake --build build --target install
+          echo "✅ HIP Installation complete!"
 
       - name: Build and Install Aqlprofile
         shell: bash
@@ -410,6 +439,8 @@ jobs:
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocr-runtime
+            projects/clr
+            projects/hip
           submodules: false
           set-safe-directory: true
 
@@ -512,6 +543,33 @@ jobs:
           cmake --build build --target all --parallel 16
           cmake --build build --target install
           echo "✅ ROCR-Runtime Installation complete!"
+
+      - name: Build and Install HIP
+        if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+        shell: bash
+        working-directory: projects
+        run: |
+          export HIP_DIR=$PWD/hip
+          export CLR_DIR=$PWD/clr
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          echo "Install HIP..."
+          cd $CLR_DIR
+          cmake \
+            -DHIP_COMMON_DIR=$HIP_DIR \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DHIP_PLATFORM=amd \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+            -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
+            -DHIP_CATCH_TEST=0 \
+            -DCLR_BUILD_HIP=ON \
+            -DCLR_BUILD_OCL=ON \
+            -S $CLR_DIR \
+            -B build
+          cmake --build build --target all --parallel 16
+          cmake --build build --target install
+          echo "✅ HIP Installation complete!"
 
       - name: Build and Install Aqlprofile
         shell: bash
@@ -625,6 +683,8 @@ jobs:
           projects/aqlprofile
           projects/rocprofiler-register
           projects/rocr-runtime
+          projects/clr
+          projects/hip
         submodules: false
         set-safe-directory: true
 
@@ -723,6 +783,33 @@ jobs:
         cmake --build build --target all --parallel 16
         cmake --build build --target install
         echo "✅ ROCR-Runtime Installation complete!"
+
+    - name: Build and Install HIP
+      if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+      shell: bash
+      working-directory: projects
+      run: |
+        export HIP_DIR=$PWD/hip
+        export CLR_DIR=$PWD/clr
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        echo "Install HIP..."
+        cd $CLR_DIR
+        cmake \
+          -DHIP_COMMON_DIR=$HIP_DIR \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DHIP_PLATFORM=amd \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
+          -DHIP_CATCH_TEST=0 \
+          -DCLR_BUILD_HIP=ON \
+          -DCLR_BUILD_OCL=ON \
+          -S $CLR_DIR \
+          -B build
+        cmake --build build --target all --parallel 16
+        cmake --build build --target install
+        echo "✅ HIP Installation complete!"
 
     - name: Build and Install Aqlprofile
       shell: bash
