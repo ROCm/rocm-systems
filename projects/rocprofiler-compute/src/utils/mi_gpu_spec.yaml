@@ -301,7 +301,7 @@ mi_gpu_spec:
                   cpx: 8
             chip_ids:
               physical: 30112
-              virutal: 30128
+              virtual: 30128
           - gpu_model: mi355
             partition_mode:
               compute_partition_mode:
