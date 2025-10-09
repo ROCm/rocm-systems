@@ -61,7 +61,7 @@ void MemcpyFromSymbolShell(F f, const void* symbol, size_t offset, const std::ve
 
   std::vector<T> symbol_values(expected.size());
   HIP_CHECK(hipMemcpy(symbol_values.data(), dst_alloc.ptr(), size, hipMemcpyDefault));
-  REQUIRE_THAT(expected, Catch::Equals(symbol_values));
+  REQUIRE_THAT(expected, Catch::Matchers::Equals(symbol_values));
 }
 
 template <typename T, typename F>
@@ -82,7 +82,7 @@ void MemcpyToSymbolShell(F f, const void* symbol, size_t offset, const std::vect
 
   std::vector<T> symbol_values(set_values.size());
   HIP_CHECK(hipMemcpyFromSymbol(symbol_values.data(), symbol, size, offset * sizeof(T)));
-  REQUIRE_THAT(set_values, Catch::Equals(symbol_values));
+  REQUIRE_THAT(set_values, Catch::Matchers::Equals(symbol_values));
 }
 
 template <typename F>

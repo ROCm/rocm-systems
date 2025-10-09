@@ -1144,11 +1144,13 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
   // 4;
   if ((pAllocateArray->NumChannels != 1) && (pAllocateArray->NumChannels != 2) &&
       (pAllocateArray->NumChannels != 4)) {
+    LogPrintfError("Invalid number of channels: %d",pAllocateArray->NumChannels);
     return hipErrorInvalidValue;
   }
   unsigned int flags = hipArrayDefault | hipArrayLayered | hipArraySurfaceLoadStore |
                        hipArrayTextureGather;  // hipArrayCubemap isn't supported
   if (pAllocateArray->Flags & (~flags)) {
+    LogPrintfError("Invalid flags: %d",pAllocateArray->Flags);
     return hipErrorInvalidValue;
   }
   if (pAllocateArray->Flags & hipArrayTextureGather) {
@@ -1233,6 +1235,7 @@ hipError_t hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAl
   HIP_INIT_API(hipArray3DCreate, array, pAllocateArray);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   if (pAllocateArray == nullptr) {
+    LogPrintfError("Array is nullptr: %p", pAllocateArray);
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipArrayCreate(array, pAllocateArray, 0 /* numMipLevels */));

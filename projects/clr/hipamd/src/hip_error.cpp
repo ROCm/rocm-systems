@@ -191,6 +191,10 @@ const char* ihipGetErrorName(hipError_t hip_error) {
       return "hipErrorStreamCaptureWrongThread";
     case hipErrorGraphExecUpdateFailure:
       return "hipErrorGraphExecUpdateFailure";
+    case hipErrorInvalidTexture:
+      return "hipErrorInvalidTexture";
+    case hipErrorInvalidChannelDescriptor:
+      return "hipErrorInvalidChannelDescriptor";
     case hipErrorTbd:
       return "hipErrorTbd";
     default:
@@ -345,6 +349,10 @@ const char* ihipGetErrorString(hipError_t hip_error) {
       return "runtime memory call returned error";
     case hipErrorRuntimeOther:
       return "runtime call other than memory returned error";
+    case hipErrorInvalidChannelDescriptor:
+      return "channel descriptor passed to the API is not valid";
+    case hipErrorInvalidTexture:
+      return "texture object passed to the API is not valid";
     case hipErrorUnknown:
     default:
       return "unknown error";

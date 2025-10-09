@@ -694,6 +694,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         LogPrintfError(
             "No compatible code objects found for: %s, value of HIP_FORCE_SPIRV_CODEOBJECT: %d",
             device->devices()[0]->isa().targetId(), HIP_FORCE_SPIRV_CODEOBJECT);
+        LogPrintfError("Found code objects: %llu size", code_obj_map.size());
+        for (const auto& co: code_obj_map) {
+          LogPrintfError("Code object: %s", co.first);
+        }
         break;
       }
     }
