@@ -3288,25 +3288,25 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 15
     struct
     {
-        hipLibrary_t*      library;
-        const void*        code;
-        hipJitOption**     jitOptions;
-        void**             jitOptionsValues;
-        unsigned int       numJitOptions;
-        hipLibraryOption** libraryOptions;
-        void**             libraryOptionValues;
-        unsigned int       numLibraryOptions;
+        hipLibrary_t*     library;
+        const void*       code;
+        hipJitOption*     jitOptions;
+        void**            jitOptionsValues;
+        unsigned int      numJitOptions;
+        hipLibraryOption* libraryOptions;
+        void**            libraryOptionValues;
+        unsigned int      numLibraryOptions;
     } hipLibraryLoadData;
     struct
     {
-        hipLibrary_t*      library;
-        const char*        fileName;
-        hipJitOption**     jitOptions;
-        void**             jitOptionsValues;
-        unsigned int       numJitOptions;
-        hipLibraryOption** libraryOptions;
-        void**             libraryOptionValues;
-        unsigned int       numLibraryOptions;
+        hipLibrary_t*     library;
+        const char*       fileName;
+        hipJitOption*     jitOptions;
+        void**            jitOptionsValues;
+        unsigned int      numJitOptions;
+        hipLibraryOption* libraryOptions;
+        void**            libraryOptionValues;
+        unsigned int      numLibraryOptions;
     } hipLibraryLoadFromFile;
     struct
     {
