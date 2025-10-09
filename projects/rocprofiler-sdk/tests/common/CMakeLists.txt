@@ -217,17 +217,8 @@ function(rocprofiler_add_integration_execute_test NAME)
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
         )
-    set(_SINGLE_OPTS
-        "TARGET"
-        "WORKING_DIRECTORY"
-        "DEPENDS"
-        "TIMEOUT"
-        "LABELS"
-        "DISABLED"
-        "FIXTURES_SETUP"
-        "FIXTURES_REQUIRED"
-        "FIXTURES_CLEANUP"
-        "DISABLED_MEMCHECKS")
+    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS" "DISABLED"
+                     "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "ARGS"
         "COMMAND"
@@ -235,6 +226,9 @@ function(rocprofiler_add_integration_execute_test NAME)
         "ATTACHED_FILES_ON_FAIL"
         "ENVIRONMENT"
         "PRELOAD"
+        "FIXTURES_SETUP"
+        "FIXTURES_REQUIRED"
+        "FIXTURES_CLEANUP"
         "PASS_REGULAR_EXPRESSION"
         "FAIL_REGULAR_EXPRESSION"
         "SKIP_REGULAR_EXPRESSION")
@@ -311,7 +305,7 @@ function(rocprofiler_add_integration_execute_test NAME)
 
     # Helper to set a property only if the arg is set
     function(_rocprofiler_set_test_property_if_arg TEST_NAME PROPERTY_NAME)
-        if(DEFINED "arg_${PROPERTY_NAME}")
+        if(arg_${PROPERTY_NAME})
             set_tests_properties(${TEST_NAME} PROPERTIES ${PROPERTY_NAME}
                                                          "${arg_${PROPERTY_NAME}}")
         endif()
@@ -373,7 +367,7 @@ function(rocprofiler_add_integration_execute_test NAME)
 
     else()
 
-        message(FATAL_ERROR "Target '${arg_TARGET}' not found")
+        message(WARNING "Target '${arg_TARGET}' not found")
 
         add_test(
             NAME "${arg_NAME}"
@@ -396,17 +390,8 @@ function(rocprofiler_add_integration_validate_test NAME)
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
-    set(_SINGLE_OPTS
-        "TARGET_DEPENDS"
-        "WORKING_DIRECTORY"
-        "DEPENDS"
-        "TIMEOUT"
-        "LABELS"
-        "DISABLED"
-        "FIXTURES_SETUP"
-        "FIXTURES_REQUIRED"
-        "FIXTURES_CLEANUP"
-        "DISABLED_MEMCHECKS")
+    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS"
+                     "DISABLED" "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "TEST_PATHS"
         "CONFIG"
@@ -418,6 +403,9 @@ function(rocprofiler_add_integration_validate_test NAME)
         "PYTHON_PATH"
         "ENVIRONMENT"
         "PRELOAD"
+        "FIXTURES_SETUP"
+        "FIXTURES_REQUIRED"
+        "FIXTURES_CLEANUP"
         "PASS_REGULAR_EXPRESSION"
         "FAIL_REGULAR_EXPRESSION"
         "SKIP_REGULAR_EXPRESSION")
@@ -501,23 +489,42 @@ function(rocprofiler_add_integration_validate_test NAME)
 
     endforeach()
 
+    # Build the properties list for pytest_discover_tests
+    set(_TEST_PROPERTIES
+        DISABLED
+        "${arg_DISABLED}"
+        TIMEOUT
+        ${arg_TIMEOUT}
+        LABELS
+        "${arg_LABELS}"
+        FAIL_REGULAR_EXPRESSION
+        "${arg_FAIL_REGULAR_EXPRESSION}"
+        SKIP_REGULAR_EXPRESSION
+        "${arg_SKIP_REGULAR_EXPRESSION}")
+
+    # Add fixture properties if they are set
+    if(arg_FIXTURES_REQUIRED)
+        list(APPEND _TEST_PROPERTIES FIXTURES_REQUIRED "${arg_FIXTURES_REQUIRED}")
+    endif()
+    if(arg_FIXTURES_SETUP)
+        list(APPEND _TEST_PROPERTIES FIXTURES_SETUP "${arg_FIXTURES_SETUP}")
+    endif()
+    if(arg_FIXTURES_CLEANUP)
+        list(APPEND _TEST_PROPERTIES FIXTURES_CLEANUP "${arg_FIXTURES_CLEANUP}")
+    endif()
+
     pytest_discover_tests(
         ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
         TEST_PATHS ${arg_TEST_PATHS}
         WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
         TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
         TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
-        TEST_PATHS ${arg_TEST_PATHS}
         LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
         PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
         ENVIRONMENT "${arg_ENVIRONMENT}"
         DEPENDS "${arg_DEPENDS}"
         EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
         DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
-        PROPERTIES
-        TIMEOUT ${arg_TIMEOUT}
-        LABELS "${arg_LABELS}"
-        FAIL_REGULAR_EXPRESSION "${arg_FAIL_REGULAR_EXPRESSION}"
-        FIXTURES_REQUIRED "${arg_FIXTURES_REQUIRED}")
+        PROPERTIES ${_TEST_PROPERTIES})
 
 endfunction()

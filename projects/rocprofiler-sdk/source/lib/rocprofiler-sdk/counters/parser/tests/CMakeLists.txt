@@ -14,13 +14,9 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET parser-test
     SOURCES ${ROCPROFILER_LIB_PARSER_TEST_SOURCES}
-    TEST_LIST parser-tests_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${parser-tests_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 45
+    LABELS "unittests"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

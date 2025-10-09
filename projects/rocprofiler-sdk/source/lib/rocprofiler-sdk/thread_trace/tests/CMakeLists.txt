@@ -19,13 +19,10 @@ target_link_libraries(
             GTest::gtest_main
             rocprofiler-sdk::counter-test-constants)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET thread-trace-packet-test
     SOURCES ${ROCPROFILER_THREAD_TRACE_TEST_SOURCES}
     TEST_LIST thread-trace-packet-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${thread-trace-packet-test_TESTS}
-    PROPERTIES TIMEOUT 10 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 10
+    LABELS "unittests"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

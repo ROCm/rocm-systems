@@ -19,10 +19,8 @@ endif()
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(kernel-rename-env "${PRELOAD_ENV}")
-
-rocprofiler_configure_pytest_files(CONFIG pytest.ini input-kernel-rename.yml
-                                   COPY validate.py conftest.py)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
+               ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml @ONLY)
 
 ##########################################################################################
 #
@@ -30,8 +28,8 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini input-kernel-rename.yml
 #
 ##########################################################################################
 
-add_test(
-    NAME rocprofv3-test-kernel-rename-cmd-line-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-rename-cmd-line
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --sys-trace no --hsa-trace=0
         --hsa-core-trace=1 --hip-compiler-trace False --hip-runtime-trace --kernel-trace
@@ -39,28 +37,27 @@ add_test(
         --output-format pftrace json otf2 --log-level env --kernel-rename
         --perfetto-shmem-size-hint 128 --perfetto-buffer-size 2048000
         --perfetto-buffer-fill-policy ring_buffer --perfetto-backend inprocess --
-        $<TARGET_FILE:transpose>)
+        $<TARGET_FILE:transpose>
+    DEPENDS transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-kernel-rename-cmd-line)
 
-set_tests_properties(
-    rocprofv3-test-kernel-rename-cmd-line-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${kernel-rename-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(
-    NAME rocprofv3-test-kernel-rename-cmd-line-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.json
-        --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace
-        --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2)
-
-set_tests_properties(
-    rocprofv3-test-kernel-rename-cmd-line-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-kernel-rename-execute" FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-rename-cmd-line
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.json
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-rename-cmd-line)
 
 ##########################################################################################
 #
@@ -68,29 +65,28 @@ set_tests_properties(
 #
 ##########################################################################################
 
-add_test(
-    NAME rocprofv3-test-kernel-rename-inp-yaml-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-rename-inp-yaml
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml -- $<TARGET_FILE:transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml -- $<TARGET_FILE:transpose>
+    DEPENDS transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)
 
-set_tests_properties(
-    rocprofv3-test-kernel-rename-inp-yaml-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${kernel-rename-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(
-    NAME rocprofv3-test-kernel-rename-inp-yaml-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.json
-        --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace
-        --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2)
-
-set_tests_properties(
-    rocprofv3-test-kernel-rename-inp-yaml-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-kernel-rename-inp-yaml-execute" FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-rename-inp-yaml
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.json
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-rename-inp-yaml)

@@ -19,14 +19,10 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET pcs-test
-    SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
-    TEST_LIST pcs-tests_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${pcs-tests_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests;pc-sampling" SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;pc-sampling"
+    SKIP_REGULAR_EXPRESSION "PC sampling unavailable"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
