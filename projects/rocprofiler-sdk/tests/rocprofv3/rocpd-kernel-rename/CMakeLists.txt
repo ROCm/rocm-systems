@@ -52,7 +52,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-no-rename)
+    FIXTURES_SETUP rocprofv3-test-rocpd-rename)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-rename
@@ -77,7 +77,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db3
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -95,8 +95,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-no-rename-csv-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-no-rename)
+    FIXTURES_SETUP rocprofv3-test-rocpd-rename-csv-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-rename)
 
 #########################################################################################
 #
@@ -121,5 +121,4 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_REQUIRED
-        rocprofv3-test-rocpd-rename rocprofv3-test-rocpd-rename-csv-generation
-        rocprofv3-test-rocpd-no-rename-csv-generation)
+        rocprofv3-test-rocpd-rename-csv-generation)

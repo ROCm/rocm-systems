@@ -35,7 +35,8 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-rocprofiler_configure_pytest_files(CONFIG input-negate-aggregate-tracing-options.yml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-negate-aggregate-tracing-options.yml.in
+               ${CMAKE_CURRENT_BINARY_DIR}/input-negate-aggregate-tracing-options.yml @ONLY)
 
 ##########################################################################################
 #

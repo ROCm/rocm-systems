@@ -63,7 +63,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc
+    FIXTURES_SETUP rocprofv3-test-rocpd
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -81,8 +81,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-otf2-generation
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 rocprofiler_add_integration_execute_test(
@@ -95,9 +95,9 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc-otf2-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -115,8 +115,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-perfetto-generation
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 rocprofiler_add_integration_execute_test(
@@ -130,9 +130,9 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc-perfetto-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -150,8 +150,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-csv-generation
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 #########################################################################################
@@ -168,8 +168,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-summary-generation
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 rocprofiler_add_integration_execute_test(
@@ -182,9 +182,9 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-multiproc-summary-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -213,5 +213,4 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED
-        rocprofv3-test-rocpd rocprofv3-test-rocpd-otf2-generation
-        rocprofv3-test-rocpd-perfetto-generation rocprofv3-test-rocpd-csv-generation)
+        rocprofv3-test-rocpd-generation)
