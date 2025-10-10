@@ -33,4 +33,3 @@ find_library(MSCCLPP_NCCL_STATIC_LIB
 include (FindPackageHandleStandardArgs)
 find_package_handle_standard_args(mscclpp_nccl_static DEFAULT_MSG MSCCLPP_INCLUDE_DIRS MSCCLPP_NCCL_STATIC_LIB)
 mark_as_advanced(MSCCLPP_INCLUDE_DIRS MSCCLPP_NCCL_STATIC_LIB)
-    
