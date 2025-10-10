@@ -145,6 +145,15 @@ int perfetto_writer_add_slice_with_args(perfetto_writer_t *writer,
                                         uint64_t start_ts, uint64_t end_ts,
                                         const char *name, uint32_t pid, uint32_t tid,
                                         const char *args_json) {
+    // Default category is "HIP" for backward compatibility
+    return perfetto_writer_add_slice_with_args_and_category(writer, start_ts, end_ts,
+                                                             name, pid, tid, args_json, "HIP");
+}
+
+int perfetto_writer_add_slice_with_args_and_category(perfetto_writer_t *writer,
+                                        uint64_t start_ts, uint64_t end_ts,
+                                        const char *name, uint32_t pid, uint32_t tid,
+                                        const char *args_json, const char *category) {
     if (!writer) return -1;
 
     chrome_trace_writer_t *chrome_writer = (chrome_trace_writer_t*)writer;
@@ -158,7 +167,9 @@ int perfetto_writer_add_slice_with_args(perfetto_writer_t *writer,
     fprintf(chrome_writer->file, "      \"name\": ");
     escape_json_string(chrome_writer->file, name);
     fprintf(chrome_writer->file, ",\n");
-    fprintf(chrome_writer->file, "      \"cat\": \"HIP\",\n");
+    fprintf(chrome_writer->file, "      \"cat\": ");
+    escape_json_string(chrome_writer->file, category ? category : "HIP");
+    fprintf(chrome_writer->file, ",\n");
     fprintf(chrome_writer->file, "      \"ph\": \"X\",\n");  // Complete event
     fprintf(chrome_writer->file, "      \"ts\": %llu,\n", (unsigned long long)start_ts);
     fprintf(chrome_writer->file, "      \"dur\": %llu,\n", (unsigned long long)(end_ts - start_ts));
@@ -199,6 +210,34 @@ int perfetto_writer_add_instant_event(perfetto_writer_t *writer, uint64_t timest
     fprintf(chrome_writer->file, "      \"pid\": %u,\n", pid);
     fprintf(chrome_writer->file, "      \"tid\": %u,\n", tid);
     fprintf(chrome_writer->file, "      \"s\": \"g\"\n");  // Global scope
+    fprintf(chrome_writer->file, "    }");
+
+    chrome_writer->first_event = 0;
+    fflush(chrome_writer->file);
+    return 0;
+}
+
+int perfetto_writer_add_flow_event(perfetto_writer_t *writer, uint64_t timestamp,
+                                   const char *name, uint32_t pid, uint32_t tid,
+                                   uint64_t flow_id, const char *phase) {
+    if (!writer) return -1;
+
+    chrome_trace_writer_t *chrome_writer = (chrome_trace_writer_t*)writer;
+
+    if (!chrome_writer->first_event) {
+        fprintf(chrome_writer->file, ",\n");
+    }
+
+    fprintf(chrome_writer->file, "    {\n");
+    fprintf(chrome_writer->file, "      \"name\": ");
+    escape_json_string(chrome_writer->file, name);
+    fprintf(chrome_writer->file, ",\n");
+    fprintf(chrome_writer->file, "      \"cat\": \"flow\",\n");
+    fprintf(chrome_writer->file, "      \"ph\": \"%s\",\n", phase);
+    fprintf(chrome_writer->file, "      \"ts\": %llu,\n", (unsigned long long)timestamp);
+    fprintf(chrome_writer->file, "      \"pid\": %u,\n", pid);
+    fprintf(chrome_writer->file, "      \"tid\": %u,\n", tid);
+    fprintf(chrome_writer->file, "      \"id\": %llu\n", (unsigned long long)flow_id);
     fprintf(chrome_writer->file, "    }");
 
     chrome_writer->first_event = 0;

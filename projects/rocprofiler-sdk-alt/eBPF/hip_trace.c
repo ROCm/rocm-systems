@@ -18,8 +18,9 @@
 #include "chrome_trace_writer.h"
 // No longer using generated code - reverting to manual approach
 
-// Forward declaration for generated function
+// Forward declarations for generated functions
 const char* get_function_name_by_id(int func_id);
+int attach_generated_hip_functions(struct hip_trace_bpf *skel, const char *lib_path, int *attached_count);
 
 static volatile bool exiting = false;
 

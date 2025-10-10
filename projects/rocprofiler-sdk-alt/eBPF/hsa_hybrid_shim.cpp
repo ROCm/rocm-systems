@@ -23,6 +23,7 @@
 #include <time.h>
 #include <dlfcn.h>
 #include <sys/types.h>
+#include <sys/syscall.h>
 #include <stdarg.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
@@ -56,6 +57,7 @@ typedef struct __attribute__((packed)) {
     uint32_t event_type;  // 2=dispatch, 3=complete
     uint32_t queue_id;
     uint64_t agent_id;    // HSA agent handle
+    uint32_t correlation_id;  // Link to HIP API that triggered this dispatch
     char kernel_name[MAX_KERNEL_NAME];
     uint64_t kernel_object;
     uint32_t grid_size_x, grid_size_y, grid_size_z;
@@ -135,6 +137,7 @@ typedef struct {
     uint64_t dispatch_time;           // CPU timestamp at dispatch
     uint64_t write_index;
     uint32_t queue_id;
+    uint32_t correlation_id;          // Correlation ID from eBPF (links to HIP API)
     char kernel_name[MAX_KERNEL_NAME];
     uint64_t kernel_object;           // Kernel object address
     uint32_t workgroup_size_x;        // Workgroup dimensions
@@ -157,6 +160,7 @@ static pthread_mutex_t g_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_next_queue_id = 0;
 static int g_initialized = 0;
 static int g_kernel_events_fd = -1;  // Ring buffer FD for sending kernel events to eBPF
+static int g_correlation_map_fd = -1; // FD for correlation_map to read correlation IDs
 static volatile int g_running = 1;
 static uint64_t g_timestamp_frequency_hz = 0;  // HSA system timestamp frequency for conversion
 
@@ -211,6 +215,23 @@ static inline uint64_t get_timestamp_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+
+/* Get correlation ID from eBPF map for current thread */
+static inline uint32_t get_correlation_id_from_ebpf(void) {
+    if (g_correlation_map_fd < 0) return 0;
+
+    // Get current thread ID in the format eBPF uses (PID << 32 | TID)
+    pid_t pid = getpid();
+    pid_t tid = syscall(SYS_gettid);
+    uint64_t key = ((uint64_t)pid << 32) | (uint64_t)tid;
+
+    uint32_t correlation_id = 0;
+    if (bpf_map_lookup_elem(g_correlation_map_fd, &key, &correlation_id) == 0) {
+        return correlation_id;
+    }
+
+    return 0; // No correlation ID found (not in a traced HIP API call)
 }
 
 /* Convert HSA system clock ticks to nanoseconds */
@@ -405,13 +426,31 @@ static void extract_kernel_name(const hsa_kernel_dispatch_packet_t* pkt, char* b
 
 /* Send kernel event to eBPF ring buffer */
 static void send_kernel_event(kernel_event_t* event) {
-    if (g_kernel_events_fd < 0) return;
+    if (g_kernel_events_fd < 0) {
+        static int warned = 0;
+        if (!warned) {
+            fprintf(stderr, "[SHIM] WARNING: kernel_events_fd not open, cannot send events\n");
+            warned = 1;
+        }
+        return;
+    }
 
-    // Send event to eBPF ring buffer via perf_event
-    // For now, use bpf_map_update_elem to push to a ring buffer map
-    // The unified eBPF program will consume these events
-    uint32_t key = 0;
-    bpf_map_update_elem(g_kernel_events_fd, &key, event, BPF_ANY);
+    // CRITICAL FIX: Use per-CPU array with rotating slot index
+    // This reduces event overwrites compared to single-slot
+    static __thread uint32_t slot_index = 0;
+    const uint32_t MAX_SLOTS = 16;
+    uint32_t key = slot_index % MAX_SLOTS;
+    slot_index++;
+
+    int ret = bpf_map_update_elem(g_kernel_events_fd, &key, event, BPF_ANY);
+    if (ret != 0) {
+        static int err_count = 0;
+        if (err_count < 5) {
+            fprintf(stderr, "[SHIM] ERROR: Failed to send kernel event (type=%u, slot=%u): %s\n",
+                    event->event_type, key, strerror(errno));
+            err_count++;
+        }
+    }
 }
 
 /* Async Signal Handler Callback - called when kernel completes */
@@ -428,7 +467,7 @@ static bool async_signal_handler(hsa_signal_value_t value, void* data) {
     uint64_t gpu_end_time = get_timestamp_ns();
 
     if (real_hsa_amd_profiling_get_dispatch_time) {
-        hsa_amd_profiling_dispatch_time_t dispatch_time;
+        hsa_amd_profiling_dispatch_time_t dispatch_time = {0};
         hsa_status_t status = real_hsa_amd_profiling_get_dispatch_time(
             sinfo->agent, sinfo->signal, &dispatch_time);
 
@@ -461,6 +500,7 @@ static bool async_signal_handler(hsa_signal_value_t value, void* data) {
     event.event_type = EVENT_KERNEL_COMPLETE;
     event.queue_id = sinfo->queue_id;
     event.agent_id = sinfo->agent.handle;  // Store agent ID for categorization
+    event.correlation_id = sinfo->correlation_id;  // Link to HIP API
     strncpy(event.kernel_name, sinfo->kernel_name, MAX_KERNEL_NAME - 1);
     event.kernel_object = sinfo->kernel_object;
     event.grid_size_x = sinfo->grid_size_x;
@@ -531,6 +571,10 @@ static void write_interceptor_callback(
                     sinfo->dispatch_time = get_timestamp_ns();
                     sinfo->write_index = user_pkt_index + i;
                     sinfo->queue_id = qinfo->queue_id;
+
+                    /* Get correlation ID from eBPF map (links this dispatch to HIP API) */
+                    sinfo->correlation_id = get_correlation_id_from_ebpf();
+
                     extract_kernel_name(pkt, sinfo->kernel_name, sizeof(sinfo->kernel_name));
 
                     /* Capture kernel dispatch information */
@@ -552,6 +596,7 @@ static void write_interceptor_callback(
                     dispatch_event.event_type = EVENT_KERNEL_DISPATCH;
                     dispatch_event.queue_id = sinfo->queue_id;
                     dispatch_event.agent_id = sinfo->agent.handle;  // Store agent ID for categorization
+                    dispatch_event.correlation_id = sinfo->correlation_id;  // Link to HIP API
                     strncpy(dispatch_event.kernel_name, sinfo->kernel_name, MAX_KERNEL_NAME - 1);
                     dispatch_event.kernel_object = sinfo->kernel_object;
                     dispatch_event.grid_size_x = sinfo->grid_size_x;
@@ -563,7 +608,9 @@ static void write_interceptor_callback(
                     dispatch_event.group_segment_size = sinfo->group_segment_size;
                     dispatch_event.private_segment_size = sinfo->private_segment_size;
 
-                    send_kernel_event(&dispatch_event);
+                    // DON'T send dispatch events - they flood the single-slot map and overwrite completion events
+                    // The HIP API uprobes already capture dispatch timing
+                    // send_kernel_event(&dispatch_event);
 
                     /* Reset signal to 0 before kernel dispatch */
                     if (real_hsa_signal_store_screlease) {
@@ -672,7 +719,13 @@ static void init_shim(void) {
     /* Open eBPF ring buffer for sending kernel events */
     g_kernel_events_fd = bpf_obj_get("/sys/fs/bpf/kernel_events");
     if (g_kernel_events_fd < 0) {
-    } else {
+        fprintf(stderr, "[SHIM] WARNING: Failed to open kernel_events map: %s\n", strerror(errno));
+    }
+
+    /* Open eBPF correlation_map for reading correlation IDs */
+    g_correlation_map_fd = bpf_obj_get("/sys/fs/bpf/correlation_map");
+    if (g_correlation_map_fd < 0) {
+        fprintf(stderr, "[SHIM] WARNING: Failed to open correlation_map: %s\n", strerror(errno));
     }
 
     memset(g_queues, 0, sizeof(g_queues));
@@ -692,6 +745,10 @@ static void cleanup_shim(void) {
 
     if (g_kernel_events_fd >= 0) {
         close(g_kernel_events_fd);
+    }
+
+    if (g_correlation_map_fd >= 0) {
+        close(g_correlation_map_fd);
     }
 
 }
@@ -890,6 +947,7 @@ api_registration_callback(rocprofiler_intercept_table_t type,
     real_hsa_amd_profiling_get_dispatch_time =
         amd_ext_table->hsa_amd_profiling_get_dispatch_time_fn;
 
+    // DEBUG: Log function pointer initialization
 }
 
 extern "C"

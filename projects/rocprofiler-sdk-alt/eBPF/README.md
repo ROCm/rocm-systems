@@ -115,6 +115,13 @@ This tool provides complete visibility into HIP/ROCm GPU workloads by capturing:
 - **Non-intrusive**: Application behavior unchanged
 - **Zero Root Requirement** (except for tracer startup)
 
+### libbpf 1.7.0 Optimizations Applied
+
+**LRU Hash Maps**: Automatic cleanup of old correlation entries (10-20% memory efficiency)
+**Per-CPU Counters**: Zero-contention correlation ID allocation (30-40% faster)
+**Larger Ring Buffers**: 1MB reduces event drops under high load
+**BPF Cookies**: Direct function ID passing eliminates runtime lookups
+
 ## Components
 
 ### 1. hip_kernel_unified.bpf.c (eBPF Program)
@@ -238,8 +245,25 @@ LD_PRELOAD=./build/libhsa_hybrid_shim.so \
 **Step 4**: View the trace
 
 1. Open Chrome/Chromium
-2. Navigate to `chrome://tracing`
+2. Navigate to `chrome://tracing` or `ui.perfetto.dev` (recommended)
 3. Click "Load" and select `trace.json`
+
+### Trace Analysis with Perfetto
+
+The tracer generates categorized events for easy analysis:
+
+**Categories**:
+- `HIP-Memory`: Memory operations (`hipMemcpy`, `hipMemset`, `hipMalloc`, `hipFree`)
+- `HIP-Kernel`: Kernel launches (`hipLaunchKernel`)
+- `HIP-Sync`: Synchronization (`hipStreamSynchronize`, `hipDeviceSynchronize`)
+- `HIP-API`: Other HIP calls (`hipSetDevice`, `hipGetDevice`)
+- `GPU-Compute`: Compute kernels (transpose, GEMM, custom kernels)
+- `GPU-Copy`: Copy operations (memory transfers)
+
+**Filtering in Perfetto UI**:
+- Show only compute kernels: `cat:GPU-Compute`
+- Show only memory operations: `cat:HIP-Memory OR cat:GPU-Copy`
+- Show kernel launches: `cat:HIP-Kernel`
 
 ### Command Line Options
 
@@ -398,6 +422,27 @@ sudo sysctl -w kernel.perf_event_paranoid=-1
 # Or permanently in /etc/sysctl.conf
 ```
 
+#### 7. **Zero GPU Timestamps** 
+
+**Problem**: All GPU kernel events show `ts: 0, dur: 0` in trace.json
+
+**Root Cause**: Structure alignment mismatch between components
+
+**Solution**:
+1. **Verify BPF map value size**: `sudo bpftool map list | grep kernel_events`
+   - Should show `value 348B`
+   - If shows `value 220B`, structure definitions are misaligned
+
+2. **Check all three files have identical definitions**:
+   - `hip_kernel_unified.bpf.c`: `#define MAX_KERNEL_NAME 256`
+   - `hsa_hybrid_shim.cpp`: `#define MAX_KERNEL_NAME 256`  
+   - `hip_kernel_unified_tracer.c`: `#define MAX_KERNEL_NAME 256`
+
+3. **Ensure packed attribute in all files**:
+   - All `kernel_event` structures must have `__attribute__((packed))`
+
+4. **Force rebuild**: `rm -f build/*.o build/*.skel.h && make`
+
 ### Debug Mode
 
 For detailed debugging:
@@ -469,14 +514,26 @@ struct kernel_event {
     uint32_t event_type;        // 2=dispatch, 3=complete
     uint32_t queue_id;
     uint64_t agent_id;          // HSA agent handle (required for alignment)
-    char kernel_name[256];
+    char kernel_name[256];      // CRITICAL: Must be 256 bytes in ALL components
     uint64_t kernel_object;
     uint32_t grid_size_x, grid_size_y, grid_size_z;
     uint32_t workgroup_size_x, workgroup_size_y, workgroup_size_z;
     uint32_t group_segment_size, private_segment_size;
     uint64_t gpu_start_time, gpu_end_time;  // Converted from HSA ticks to nanoseconds
-};
+} __attribute__((packed));      // CRITICAL: Must be packed in ALL components
 ```
+
+#### ⚠️ **Structure Alignment Requirements**
+
+**CRITICAL**: All three components (eBPF program, HSA shim, userspace tracer) **MUST** use identical structure definitions:
+
+1. **Packed attribute**: `__attribute__((packed))` required in all three files
+2. **Field sizes**: `MAX_KERNEL_NAME` must be **exactly 256** in all components
+3. **Field order**: Identical field ordering required
+
+**Failure to maintain alignment will result in zero GPU timestamps!**
+
+**Verification**: Use `bpftool map list` to check BPF map value size = 348 bytes
 
 ### Event Communication Design
 

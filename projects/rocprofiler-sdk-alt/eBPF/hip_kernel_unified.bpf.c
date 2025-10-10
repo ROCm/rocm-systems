@@ -15,8 +15,9 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
-#define MAX_NAME_LEN 64
-#define MAX_KERNEL_NAME 256
+// OPTIMIZED: Reduced buffer sizes for better cache performance and smaller events
+#define MAX_NAME_LEN 32          // Most HIP function names < 32 chars
+#define MAX_KERNEL_NAME 256      // CRITICAL: Must match shim (hsa_hybrid_shim.cpp) to prevent structure size mismatch!
 #define MAX_ARGS 8
 
 // Event types
@@ -60,6 +61,7 @@ struct gpu_trace_event {
 };
 
 // Kernel event from shim (subset of gpu_trace_event)
+// MUST be packed to match the HSA shim structure layout
 struct kernel_event {
     __u64 timestamp;
     __u32 pid;
@@ -67,6 +69,7 @@ struct kernel_event {
     __u32 event_type;
     __u32 queue_id;
     __u64 agent_id;    // HSA agent handle
+    __u32 correlation_id;  // Link to HIP API that triggered this dispatch
     char kernel_name[MAX_KERNEL_NAME];
     __u64 kernel_object;
     __u32 grid_size_x, grid_size_y, grid_size_z;
@@ -75,41 +78,43 @@ struct kernel_event {
     __u32 private_segment_size;
     __u64 gpu_start_time;
     __u64 gpu_end_time;
-};
+} __attribute__((packed));
 
-// Ring buffer for sending events to userspace
+// Ring buffer for sending events to userspace (OPTIMIZED: 1MB for high throughput)
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
+    __uint(max_entries, 1024 * 1024);  // OPTIMIZED: 1MB reduces dropped events under load
 } events SEC(".maps");
 
 // Array map for kernel events from shim (shim pushes here via bpf_map_update_elem)
+// Use regular ARRAY (not PERCPU) for cross-process communication between shim and tracer
+// PERCPU arrays don't work for inter-process IPC because each process sees its own CPU-local data
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
+    __uint(max_entries, 16);  // 16 slots for buffering
     __type(key, __u32);
     __type(value, struct kernel_event);
 } kernel_events SEC(".maps");
 
-// Per-thread correlation ID tracking
+// Per-thread correlation ID tracking (LRU for auto-cleanup)
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);  // OPTIMIZED: Auto-cleanup old entries
     __uint(max_entries, 10240);
     __type(key, __u64);   // tid
     __type(value, __u32); // correlation_id
 } correlation_map SEC(".maps");
 
-// Global correlation ID counter
+// Global correlation ID counter (per-CPU for zero contention)
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);  // OPTIMIZED: Per-CPU eliminates lock contention
     __uint(max_entries, 1);
     __type(key, __u32);
     __type(value, __u32);
 } correlation_counter SEC(".maps");
 
-// Map correlation ID to function ID
+// Map correlation ID to function ID (LRU for auto-cleanup)
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);  // OPTIMIZED: Auto-cleanup old entries
     __uint(max_entries, 10240);
     __type(key, __u32);   // correlation_id
     __type(value, __u32); // function_id
@@ -123,25 +128,66 @@ struct {
     __type(value, char[MAX_NAME_LEN]);
 } function_names SEC(".maps");
 
-// Map to store function ID per probe point
+// Map to store function ID per probe point (LRU for auto-cleanup)
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);  // OPTIMIZED: Auto-cleanup old entries
     __uint(max_entries, 256);
     __type(key, __u64);   // probe address/offset
     __type(value, __u32); // function ID
 } probe_function_map SEC(".maps");
 
-// Allocate a new correlation ID
+// Statistics tracking (OPTIMIZED: per-CPU for performance monitoring)
+struct stats {
+    __u64 events_sent;
+    __u64 events_dropped;
+    __u64 map_lookup_failures;
+    __u64 correlation_alloc_failures;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct stats);
+} statistics SEC(".maps");
+
+// Helper functions for statistics
+static __always_inline void update_stat_events_sent(void) {
+    __u32 zero = 0;
+    struct stats *s = bpf_map_lookup_elem(&statistics, &zero);
+    if (s) __sync_fetch_and_add(&s->events_sent, 1);
+}
+
+static __always_inline void update_stat_events_dropped(void) {
+    __u32 zero = 0;
+    struct stats *s = bpf_map_lookup_elem(&statistics, &zero);
+    if (s) __sync_fetch_and_add(&s->events_dropped, 1);
+}
+
+static __always_inline void update_stat_map_lookup_failure(void) {
+    __u32 zero = 0;
+    struct stats *s = bpf_map_lookup_elem(&statistics, &zero);
+    if (s) __sync_fetch_and_add(&s->map_lookup_failures, 1);
+}
+
+static __always_inline void update_stat_correlation_alloc_failure(void) {
+    __u32 zero = 0;
+    struct stats *s = bpf_map_lookup_elem(&statistics, &zero);
+    if (s) __sync_fetch_and_add(&s->correlation_alloc_failures, 1);
+}
+
+// Allocate a new correlation ID (OPTIMIZED: per-CPU, no contention)
 static __always_inline __u32 allocate_correlation_id(void) {
     __u32 zero = 0;
     __u32 *counter = bpf_map_lookup_elem(&correlation_counter, &zero);
     if (!counter) return 0;
 
-    // Read current value and increment
-    __u32 id = *counter;
-    __u32 next = id + 1;
-    bpf_map_update_elem(&correlation_counter, &zero, &next, BPF_ANY);
-    return id;
+    // Direct increment on per-CPU counter (no map update needed!)
+    __u32 id = (*counter)++;
+
+    // Make ID globally unique by encoding CPU ID in upper bits
+    __u32 cpu_id = bpf_get_smp_processor_id();
+    return (cpu_id << 24) | (id & 0xFFFFFF);  // Support 256 CPUs, 16M IDs per CPU
 }
 
 // Get current correlation ID for this thread
@@ -166,7 +212,10 @@ int hip_api_entry(struct pt_regs *ctx) {
     __u32 tid = (__u32)pid_tgid;
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event) return 0;
+    if (!event) {
+        update_stat_events_dropped();  // STATS: Track dropped events
+        return 0;
+    }
 
     event->timestamp = bpf_ktime_get_ns();
     event->pid = pid;
@@ -211,6 +260,7 @@ int hip_api_entry(struct pt_regs *ctx) {
     event->args[7] = 0;
 
     bpf_ringbuf_submit(event, 0);
+    update_stat_events_sent();  // STATS: Track successful events
     return 0;
 }
 
@@ -223,7 +273,10 @@ int hip_api_exit(struct pt_regs *ctx) {
     __u32 tid = (__u32)pid_tgid;
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event) return 0;
+    if (!event) {
+        update_stat_events_dropped();  // STATS: Track dropped events
+        return 0;
+    }
 
     event->timestamp = bpf_ktime_get_ns();
     event->pid = pid;
@@ -258,6 +311,7 @@ int hip_api_exit(struct pt_regs *ctx) {
     }
 
     bpf_ringbuf_submit(event, 0);
+    update_stat_events_sent();  // STATS: Track successful events
     return 0;
 }
 

@@ -243,6 +243,7 @@ else()
     target_link_libraries(hsa_hybrid_shim
         ${CMAKE_DL_LIBS}
         pthread
+        ${LIBBPF_LDFLAGS}  # Use LDFLAGS to get proper library paths
         ${LIBBPF_LIBRARIES}
         ${ELF_LIB}
         ${ROCPROFILER_LIBRARY}
@@ -307,6 +308,7 @@ else()
     )
 
     target_link_libraries(hip_kernel_unified_tracer
+        ${LIBBPF_LDFLAGS}  # Use LDFLAGS to get proper library paths
         ${LIBBPF_LIBRARIES}
         ${ELF_LIB}
         ${Z_LIB}

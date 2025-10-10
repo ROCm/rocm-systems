@@ -40,9 +40,21 @@ int perfetto_writer_add_slice_with_args(perfetto_writer_t *writer,
                                         const char *name, uint32_t pid, uint32_t tid,
                                         const char *args_json);
 
+// Add a slice event with arguments and custom category
+int perfetto_writer_add_slice_with_args_and_category(perfetto_writer_t *writer,
+                                        uint64_t start_ts, uint64_t end_ts,
+                                        const char *name, uint32_t pid, uint32_t tid,
+                                        const char *args_json, const char *category);
+
 // Add an instant event (for kernel dispatch events)
 int perfetto_writer_add_instant_event(perfetto_writer_t *writer, uint64_t timestamp,
                                      const char *name, uint32_t pid, uint32_t tid);
+
+// Add a flow event to connect two events (for API -> Kernel correlation)
+// Use ph='s' for flow start and ph='f' for flow finish
+int perfetto_writer_add_flow_event(perfetto_writer_t *writer, uint64_t timestamp,
+                                   const char *name, uint32_t pid, uint32_t tid,
+                                   uint64_t flow_id, const char *phase);
 
 // Finalize the trace file
 int perfetto_writer_finalize(perfetto_writer_t *writer);

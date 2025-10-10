@@ -592,8 +592,73 @@ add_custom_command(
 | GPU Profiling API | Any | ≥ 5.0 | hsa_amd_profiling_* |
 | Chrome Trace JSON | Any | Any | Standard format |
 
+## Critical Implementation Details
+
+### Structure Alignment Requirements
+
+**⚠️ CRITICAL**: All three components must use **identical** `kernel_event` structure definitions.
+
+#### The Zero Timestamp Bug
+
+**Root Cause**: Structure size mismatches between components cause BPF map value truncation.
+
+**Example of Failure**:
+- **HSA shim** (`hsa_hybrid_shim.cpp`): 348-byte structure (MAX_KERNEL_NAME=256)
+- **eBPF program** (`hip_kernel_unified.bpf.c`): 220-byte structure (MAX_KERNEL_NAME=128) 
+- **Tracer** (`hip_kernel_unified_tracer.c`): 220-byte structure (MAX_KERNEL_NAME=128)
+
+**Result**: When shim writes 348 bytes to BPF map configured for 220 bytes, kernel truncates data, losing `gpu_start_time` and `gpu_end_time` fields → all GPU kernel events show `ts: 0, dur: 0`.
+
+#### Required Synchronization
+
+**All three files MUST have identical definitions**:
+
+```c
+// IDENTICAL in all files:
+#define MAX_KERNEL_NAME 256  
+
+struct kernel_event {
+    uint64_t timestamp;
+    uint32_t pid, tid;
+    uint32_t event_type;
+    uint32_t queue_id;
+    uint64_t agent_id;
+    uint32_t correlation_id;
+    char kernel_name[256];           // CRITICAL: Must be 256 in ALL files
+    uint64_t kernel_object;
+    uint32_t grid_size_x, grid_size_y, grid_size_z;
+    uint32_t workgroup_size_x, workgroup_size_y, workgroup_size_z;
+    uint32_t group_segment_size, private_segment_size;
+    uint64_t gpu_start_time, gpu_end_time;
+} __attribute__((packed));           // CRITICAL: Must be packed in ALL files
+```
+
+#### Verification Steps
+
+1. **Check BPF map value size**: `sudo bpftool map list | grep kernel_events`
+   - Should show `value 348B`
+   - If shows `value 220B`, structure definitions are misaligned
+
+2. **Verify structure size in each component**:
+   ```bash
+   # Check all three have MAX_KERNEL_NAME=256
+   grep "MAX_KERNEL_NAME" hip_kernel_unified.bpf.c
+   grep "MAX_KERNEL_NAME" hsa_hybrid_shim.cpp  
+   grep "MAX_KERNEL_NAME" hip_kernel_unified_tracer.c
+   ```
+
+3. **Force rebuild after changes**: `rm -f build/*.o build/*.skel.h && make`
+
+#### Impact of Alignment Bugs
+
+- **Zero GPU timestamps**: Events show `ts: 0, dur: 0` 
+- **Kernel duration = 0**: No GPU execution timing visibility
+- **Correlation works**: HIP API events still correlate to kernel events
+- **Silent failure**: No error messages, just missing data
+
 ---
 
 **Document Status**: ✅ Complete
-**Implementation**: ✅ Production-ready
+**Implementation**: ✅ Production-ready  
 **Testing**: ✅ Validated on ROCm 5.4-7.1
+**Critical Lesson**: ✅ Structure alignment verified
