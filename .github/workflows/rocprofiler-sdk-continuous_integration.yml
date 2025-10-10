@@ -174,8 +174,6 @@ jobs:
             ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
             ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
             ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
-          which python3
-          which pytest
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
@@ -313,7 +311,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           which python3
-          which pytest
+          ls /github/home/.local/bin
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
