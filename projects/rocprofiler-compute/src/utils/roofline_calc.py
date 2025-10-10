@@ -26,7 +26,7 @@
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import pandas as pd
 
@@ -201,9 +201,23 @@ def calc_ceilings(
     roofline_parameters: dict[str, Any],
     dtype: str,
     benchmark_data: dict[str, list[str]],
+    ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
+
+    if ai_data:
+        max_ai = 0
+        for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+            if cache_level in ai_data and ai_data[cache_level][0]:
+                cache_max = max(ai_data[cache_level][0])
+                max_ai = max(max_ai, cache_max)
+
+        dynamic_xmax = max_ai * 1.2 if max_ai > 0 else 1000
+    else:
+        dynamic_xmax = 1000
+    print(XMAX, dynamic_xmax)
+
     # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
@@ -281,18 +295,24 @@ def calc_ceilings(
     # ----------------------------------------------------------------------------------
     if dtype in PEAK_OPS_DATATYPES:
         # Plot FMA roof
-        x0 = min(x2, XMAX) if x2 < XMAX else XMAX
+        x0 = min(x2, dynamic_xmax) if x2 < dynamic_xmax else dynamic_xmax
 
-        console_debug(f"FMA ROOF [{x0}, {XMAX}], [{peak_ops},{peak_ops}]")
-        graph_points["valu"].extend([[x0, XMAX], [peak_ops, peak_ops], peak_ops])
+        console_debug(f"FMA ROOF [{x0}, {dynamic_xmax}], [{peak_ops},{peak_ops}]")
+        graph_points["valu"].extend([
+            [x0, dynamic_xmax],
+            [peak_ops, peak_ops],
+            peak_ops,
+        ])
 
     # Plot MFMA roof
     if dtype in MFMA_DATATYPES:  # assert that mfma has been assigned
-        x0_mfma = min(x2_mfma, XMAX) if x2_mfma < XMAX else XMAX
+        x0_mfma = min(x2_mfma, dynamic_xmax) if x2_mfma < dynamic_xmax else dynamic_xmax
 
-        console_debug(f"MFMA ROOF [{x0_mfma}, {XMAX}], [{peak_mfma},{peak_mfma}]")
+        console_debug(
+            f"MFMA ROOF [{x0_mfma}, {dynamic_xmax}], [{peak_mfma},{peak_mfma}]"
+        )
         graph_points["mfma"].extend([
-            [x0_mfma, XMAX],
+            [x0_mfma, dynamic_xmax],
             [peak_mfma, peak_mfma],
             peak_mfma,
         ])
@@ -774,7 +794,7 @@ def calc_ai_profile(
 
 
 def construct_roof(
-    roofline_parameters: dict[str, Any], dtype: str
+    roofline_parameters: dict[str, Any], dtype: str, ai_data: Optional[dict] = None
 ) -> dict[str, list[Union[list[float], float, None]]]:
     workload_dir = roofline_parameters.get("workload_dir")
     if isinstance(workload_dir, list):
@@ -817,4 +837,4 @@ def construct_roof(
     # ------------------
     #  Generate Roofline
     # ------------------
-    return calc_ceilings(roofline_parameters, dtype, benchmark_data)
+    return calc_ceilings(roofline_parameters, dtype, benchmark_data, ai_data)
