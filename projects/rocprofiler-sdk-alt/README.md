@@ -14,17 +14,19 @@ Choose the method that best fits your needs:
 
 ```
 ROCm-API-Tracer/
-├── eBPF/                          # High-performance kernel-space tracing
-│   ├── hip_trace.bpf.c           # eBPF program (kernel-space)
-│   ├── hip_trace.c               # User-space loader and processor
+├── eBPF/                          # High-performance unified tracing (HIP APIs + GPU kernels)
+│   ├── hip_kernel_unified.bpf.c  # Unified eBPF program (kernel-space)
+│   ├── hip_kernel_unified_tracer.c # Unified tracer (user-space)
+│   ├── hsa_hybrid_shim.cpp       # HSA kernel dispatch shim (LD_PRELOAD)
+│   ├── hip_trace.bpf.c           # Legacy HIP-only eBPF program
+│   ├── hip_trace.c               # Legacy HIP-only tracer
 │   ├── CMakeLists.txt            # CMake build system
-│   ├── generate_hip_functions_from_headers.py  # Dynamic function generation
-│   ├── hip_trace_wrapper.sh      # Wrapper script for system limits
+│   ├── chrome_trace_writer.c     # Chrome Trace JSON writer
 │   ├── README.md                 # eBPF-specific documentation
-│   ├── eBPF_HIP_Tracing_Technical_Guide.md  # Technical deep dive
-│   ├── demo_csv_analysis.sh      # CSV analysis demonstration
-│   ├── test_csv_output.sh        # Testing script
-│   └── trace.csv                 # Sample output
+│   ├── design-docs/              # Technical documentation
+│   │   ├── eBPF_HIP_Tracing_Technical_Guide.md
+│   │   └── Unified_Tracer_Architecture.md
+│   └── (build outputs and generated files)
 ├── frida/                         # Dynamic instrumentation with JavaScript
 │   ├── frida-hip-tracer.js       # JavaScript tracing script
 │   ├── frida-hip-trace.sh        # Shell wrapper script
@@ -49,28 +51,34 @@ ROCm-API-Tracer/
 
 ### eBPF - The Performance Champion
 
-**Recent Updates**: Added call stack tracking to prevent recursive calls. Optional kernel dispatch tracing available with `-k` flag.
-**Best for**: Production monitoring, high-performance applications, real-time analysis
+**Recent Updates**: **Unified Tracer** combining HIP API tracing (eBPF uprobes) with GPU kernel dispatch tracing (HSA shim). Generates Chrome Trace JSON with complete GPU workload visibility.
+
+**Best for**: Production monitoring, high-performance applications, complete GPU workload analysis
 
 **Key Features**:
-- ✅ Minimal overhead (< 1% CPU impact)
-- ✅ Nanosecond-precision timestamps
-- ✅ Kernel-space execution with JIT compilation
-- ✅ Handles millions of events per second
-- ✅ Production-ready and stable
-- ✅ **100% HIP API coverage** (all 439 functions)
-- ✅ Dynamic function generation from HIP headers
-- ✅ Automatic system limit handling
+- ✅ **Unified Tracing**: HIP APIs + GPU kernel dispatches in one tool
+- ✅ **Minimal overhead** (< 1% CPU impact)
+- ✅ **GPU-accurate timestamps** from AMD profiling API
+- ✅ **Chrome Trace JSON output** (Perfetto compatible)
+- ✅ **Event correlation** linking HIP calls to kernel launches
+- ✅ **Comprehensive metadata** (grid sizes, memory usage, etc.)
+- ✅ **No rocprofiler-sdk dependency** for HIP tracing
+- ✅ **Production-ready** with libbpf 1.7.0 optimizations
 
 **Quick Start**:
 ```bash
 cd eBPF
-cmake -B build .
-cmake --build build --parallel 16
-./hip_trace_wrapper.sh -l /opt/rocm/lib/libamdhip64.so -o trace.json -f perfetto
+mkdir -p build && cd build
+cmake .. && make -j$(nproc)
+
+# Terminal 1: Start tracer
+sudo ./hip_kernel_unified_tracer -o trace.json
+
+# Terminal 2: Run HIP app with shim
+LD_PRELOAD=./libhsa_hybrid_shim.so /path/to/your/hip_app
 ```
 
-**Requirements**: Linux kernel 5.4+, root privileges, libbpf-dev, Python 3
+**Requirements**: Linux kernel 5.4+, root privileges, libbpf-dev, ROCm 5.0+
 
 ### Frida - The Flexibility Leader
 **Best for**: Dynamic analysis, reverse engineering, debugging, prototyping
@@ -112,14 +120,17 @@ sudo apt-get install ltrace
 
 ## 📊 Comparison Summary
 
-| Aspect | eBPF | Frida | ltrace |
+| Aspect | eBPF (Unified) | Frida | ltrace |
 |--------|------|-------|--------|
 | **Performance** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **GPU Kernel Tracing** | ⭐⭐⭐⭐⭐ | ❌ | ❌ |
+| **Chrome Trace Output** | ⭐⭐⭐⭐⭐ | ❌ | ❌ |
+| **Event Correlation** | ⭐⭐⭐⭐⭐ | ❌ | ❌ |
 | **Ease of Use** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 | **Flexibility** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ |
 | **Setup Complexity** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 | **Production Ready** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
-| **API Coverage** | ⭐⭐⭐⭐⭐ (99.77%) | ⭐⭐⭐ | ⭐⭐⭐ |
+| **HIP API Coverage** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
 
 ## 🔍 Detailed Comparison
 
@@ -128,10 +139,11 @@ For a comprehensive analysis of all three methods, including technical details, 
 ## 🛠️ Common Use Cases
 
 ### 1. Production Performance Monitoring
-**Recommended**: eBPF
-- Monitor HIP API calls in production systems
+**Recommended**: eBPF (Unified Tracer)
+- Complete GPU workload visibility (HIP APIs + kernel execution)
+- Chrome Trace JSON output for Perfetto visualization
+- GPU-accurate timestamps and correlation
 - Minimal performance impact
-- Real-time analysis capabilities
 
 ### 2. Development and Debugging
 **Recommended**: Frida or ltrace

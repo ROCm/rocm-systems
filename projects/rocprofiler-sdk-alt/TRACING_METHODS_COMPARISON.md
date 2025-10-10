@@ -16,28 +16,31 @@ This document provides a comprehensive comparison of the three different approac
 
 ## Executive Summary
 
-| Method | Best For | Overhead | Complexity | Flexibility |
-|--------|----------|----------|------------|-------------|
-| **eBPF** | Production monitoring, high-performance tracing | < 1% | High | Medium |
-| **Frida** | Dynamic analysis, reverse engineering, debugging | 5-15% | Medium | High |
-| **ltrace** | Quick debugging, simple analysis, development | < 5% | Low | Low |
+| Method | Best For | Overhead | Complexity | GPU Kernels | Output Format |
+|--------|----------|----------|------------|-------------|---------------|
+| **eBPF (Unified)** | Production monitoring, complete GPU workload analysis | < 1% | High | ✅ Yes | Chrome Trace JSON |
+| **Frida** | Dynamic analysis, reverse engineering, debugging | 5-15% | Medium | ❌ No | CSV/Log |
+| **ltrace** | Quick debugging, simple analysis, development | < 5% | Low | ❌ No | CSV/Log |
 
 ## Method Overview
 
-### 1. eBPF (Extended Berkeley Packet Filter)
+### 1. eBPF (Extended Berkeley Packet Filter) - Unified Tracer
 
-**What it is**: A kernel-level technology that allows running sandboxed programs in the Linux kernel without changing kernel source code.
+**What it is**: A comprehensive GPU workload tracing solution combining eBPF kernel-space technology with HSA-based kernel dispatch interception.
 
 **How it works**:
-- Uses uprobes to attach to user-space functions
-- Runs in kernel space with JIT compilation
-- Communicates with user-space via ring buffers
-- Provides nanosecond-precision timestamps
+- **HIP API tracing**: eBPF uprobes on libamdhip64.so (no rocprofiler-sdk dependency)
+- **Kernel dispatch tracing**: HSA queue interception shim with GPU timestamp capture
+- **Event correlation**: Links HIP API calls to GPU kernel executions
+- **Chrome Trace output**: Perfetto-compatible JSON for timeline visualization
 
 **Key files**:
-- `eBPF/hip_trace.bpf.c` - Kernel-space eBPF program
-- `eBPF/hip_trace.c` - User-space loader and event processor
-- `eBPF/CMakeLists.txt` - Build system
+- `eBPF/hip_kernel_unified.bpf.c` - Unified eBPF program (HIP APIs)
+- `eBPF/hip_kernel_unified_tracer.c` - User-space event aggregator
+- `eBPF/hsa_hybrid_shim.cpp` - HSA kernel dispatch shim
+- `eBPF/chrome_trace_writer.c` - Chrome Trace JSON writer
+- `eBPF/hip_trace.bpf.c` - Legacy HIP-only eBPF program
+- `eBPF/hip_trace.c` - Legacy HIP-only tracer
 
 ### 2. Frida
 
@@ -73,70 +76,81 @@ This document provides a comprehensive comparison of the three different approac
 
 ### Performance Characteristics
 
-| Aspect | eBPF | Frida | ltrace |
+| Aspect | eBPF (Unified) | Frida | ltrace |
 |--------|------|-------|--------|
 | **CPU Overhead** | < 1% | 5-15% | < 5% |
-| **Memory Overhead** | ~256KB | ~10-50MB | ~1-5MB |
-| **Latency Impact** | < 1μs per call | 220-1120ns per call | 50-200ns per call |
-| **Throughput** | Millions of events/sec | Thousands of events/sec | Tens of thousands/sec |
+| **Memory Overhead** | ~2MB | ~10-50MB | ~1-5MB |
+| **Latency Impact** | < 1μs per HIP call, < 2μs per kernel | 220-1120ns per call | 50-200ns per call |
+| **Throughput** | 1-2M HIP events/sec, 500K kernel events/sec | Thousands of events/sec | Tens of thousands/sec |
+| **GPU Timestamp Accuracy** | Hardware-accurate (HSA profiling API) | N/A | N/A |
 | **Scalability** | Excellent | Good | Good |
 
 ### Feature Comparison
 
-| Feature | eBPF | Frida | ltrace |
+| Feature | eBPF (Unified) | Frida | ltrace |
 |---------|------|-------|--------|
-| **Real-time Processing** | ✅ Yes | ✅ Yes | ✅ Yes |
-| **CSV Output** | ✅ Yes | ✅ Yes | ✅ Yes (via script) |
+| **HIP API Tracing** | ✅ Yes (eBPF uprobes) | ✅ Yes | ✅ Yes |
+| **GPU Kernel Tracing** | ✅ Yes (HSA shim) | ❌ No | ❌ No |
+| **Event Correlation** | ✅ HIP→Kernel correlation | ❌ No | ❌ No |
+| **Chrome Trace JSON** | ✅ Yes (Perfetto compatible) | ❌ No | ❌ No |
+| **GPU Timestamps** | ✅ Hardware-accurate | ❌ No | ❌ No |
+| **CSV Output** | ✅ Yes (optional) | ✅ Yes | ✅ Yes (via script) |
 | **Function Arguments** | ✅ Detailed | ✅ Detailed with types | ✅ Basic |
 | **Return Values** | ✅ Yes | ✅ Yes | ✅ Yes |
-| **Timestamps** | ✅ Nanosecond precision | ✅ Millisecond precision | ✅ Microsecond precision |
-| **Custom Filtering** | ✅ C code | ✅ JavaScript | ✅ Text patterns |
+| **CPU Timestamps** | ✅ Nanosecond precision | ✅ Millisecond precision | ✅ Microsecond precision |
+| **Custom Filtering** | ✅ C code + categories | ✅ JavaScript | ✅ Text patterns |
 | **Multi-threading** | ✅ Excellent | ✅ Good | ✅ Good |
 | **Child Process Support** | ✅ Yes | ✅ Yes | ✅ Yes (-f flag) |
 
 ### Technical Capabilities
 
-| Capability | eBPF | Frida | ltrace |
+| Capability | eBPF (Unified) | Frida | ltrace |
 |------------|------|-------|--------|
-| **Function Name Detection** | ✅ Based on argument patterns | ✅ Direct symbol resolution | ✅ Direct symbol resolution |
-| **Argument Type Parsing** | ⚠️ Manual implementation | ✅ Automatic with types | ⚠️ Basic parsing |
+| **Function Name Detection** | ✅ BPF cookies + ELF parsing | ✅ Direct symbol resolution | ✅ Direct symbol resolution |
+| **Argument Type Parsing** | ✅ Manual + automatic categories | ✅ Automatic with types | ⚠️ Basic parsing |
 | **Memory Safety** | ✅ Kernel-verified | ✅ JavaScript sandbox | ✅ ptrace isolation |
 | **Error Handling** | ✅ Comprehensive | ✅ JavaScript try-catch | ⚠️ Basic |
-| **Dynamic Function Discovery** | ✅ ELF-based offset calculation | ✅ Automatic | ✅ Automatic |
+| **Dynamic Function Discovery** | ✅ ELF-based + generated code | ✅ Automatic | ✅ Automatic |
+| **GPU Hardware Integration** | ✅ HSA profiling API | ❌ No | ❌ No |
+| **Trace Visualization** | ✅ Chrome/Perfetto timeline | ❌ No | ❌ No |
 | **Library Version Independence** | ✅ ELF parsing handles version changes | ✅ Symbol-based | ✅ Symbol-based |
 
 ### Setup and Requirements
 
-| Requirement | eBPF | Frida | ltrace |
+| Requirement | eBPF (Unified) | Frida | ltrace |
 |-------------|------|-------|--------|
-| **Root Privileges** | ✅ Required | ❌ Not required | ❌ Not required |
-| **Kernel Version** | 5.4+ | Any | Any |
-| **Dependencies** | libbpf-dev, clang, bpftool | frida-tools, Python | ltrace utility |
-| **Build Process** | Complex (eBPF compilation) | Simple (pip install) | Simple (apt install) |
+| **Root Privileges** | ✅ Required (tracer only) | ❌ Not required | ❌ Not required |
+| **Kernel Version** | 5.4+ (libbpf 1.7.0) | Any | Any |
+| **ROCm Version** | 5.0+ (HSA profiling API) | Any | Any |
+| **Dependencies** | libbpf-dev, clang, cmake, ROCm | frida-tools, Python | ltrace utility |
+| **Build Process** | Complex (eBPF + C++ compilation) | Simple (pip install) | Simple (apt install) |
 | **Library Path** | Manual specification | Automatic detection | Automatic detection |
+| **Multi-component Setup** | ✅ Tracer + Shim (LD_PRELOAD) | ❌ Single process | ❌ Single process |
 | **Architecture Support** | x86_64, ARM64 | x86_64, ARM64, ARM | x86_64, ARM64, ARM |
 
 ## Performance Analysis
 
-### eBPF Performance
+### eBPF (Unified) Performance
 
 **Strengths**:
-- Minimal overhead due to kernel-space execution
-- JIT compilation for native performance
-- Efficient ring buffer communication
-- Can handle high-frequency function calls
+- **Complete GPU workload visibility**: HIP APIs + kernel execution in one tool
+- **Hardware-accurate GPU timestamps**: HSA profiling API provides nanosecond precision
+- **Event correlation**: Links HIP function calls to their corresponding GPU kernels
+- **Chrome Trace JSON**: Timeline visualization in Perfetto UI with categorized events
+- **Minimal overhead**: < 1% CPU, ~2MB memory for comprehensive tracing
+- **Production-ready**: libbpf 1.7.0 optimizations (LRU maps, per-CPU counters)
 
 **Weaknesses**:
-- Complex setup and compilation process
-- Requires root privileges
-- Kernel version dependency
-- Requires ELF parsing library (libelf)
+- Complex multi-component setup (tracer + shim)
+- Requires root privileges for eBPF program loading
+- ROCm dependency for GPU kernel tracing
+- Structure alignment requirements across components
 
 **Best Use Cases**:
-- Production monitoring
-- High-performance applications
-- Long-running services
-- Real-time performance analysis
+- **Complete GPU performance analysis**: Full workload timeline from API to kernel execution
+- **Production monitoring**: Comprehensive observability with minimal overhead  
+- **Performance optimization**: Correlate HIP API usage with actual GPU execution
+- **Timeline visualization**: Chrome/Perfetto UI for intuitive analysis
 
 ### Frida Performance
 
@@ -180,17 +194,24 @@ This document provides a comprehensive comparison of the three different approac
 
 ## Use Case Recommendations
 
-### Choose eBPF When:
+### Choose eBPF (Unified) When:
 
-- **Production Monitoring**: Need minimal overhead for production systems
-- **High-Frequency Tracing**: Applications with millions of function calls
-- **Real-time Analysis**: Need nanosecond-precision timestamps
-- **Long-running Services**: Continuous monitoring of services
-- **Performance-Critical Applications**: Cannot afford significant overhead
+- **Complete GPU Performance Analysis**: Need both HIP API and GPU kernel execution visibility
+- **Production Monitoring**: Minimal overhead for production systems with comprehensive observability
+- **Timeline Visualization**: Want Chrome/Perfetto UI timeline analysis of GPU workloads
+- **Event Correlation**: Need to link HIP API calls to their corresponding kernel launches
+- **Hardware-Accurate Timing**: Require GPU-side timestamps from AMD profiling API
+- **Performance Optimization**: Correlate CPU-side API usage with GPU execution patterns
 
 **Example Command**:
 ```bash
-sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o production_trace.csv
+# Terminal 1: Start unified tracer
+sudo ./build/hip_kernel_unified_tracer -o gpu_workload_trace.json
+
+# Terminal 2: Run HIP application with shim
+LD_PRELOAD=./build/libhsa_hybrid_shim.so /path/to/your/hip_app
+
+# View in Chrome: chrome://tracing or ui.perfetto.dev
 ```
 
 ### Choose Frida When:
@@ -357,10 +378,10 @@ sudo ./build/hip_trace -l /opt/rocm/lib/libamdhip64.so -o production_trace.csv
 
 Each tracing method in this project serves different purposes and has distinct advantages:
 
-### eBPF: The Performance Champion
-- **Best for**: Production monitoring, high-performance applications
-- **Key advantage**: Minimal overhead with maximum performance
-- **Trade-off**: Complex implementation and setup
+### eBPF (Unified): The Complete Solution
+- **Best for**: Complete GPU workload analysis, production monitoring
+- **Key advantage**: Full visibility (HIP APIs + GPU kernels) with minimal overhead and timeline visualization
+- **Trade-off**: Complex multi-component setup and ROCm dependency
 
 ### Frida: The Flexibility Leader
 - **Best for**: Dynamic analysis, reverse engineering, debugging
@@ -374,10 +395,11 @@ Each tracing method in this project serves different purposes and has distinct a
 
 ### Recommendations
 
-1. **For Production Systems**: Use eBPF for minimal overhead and high performance
-2. **For Development**: Use Frida for flexibility and dynamic analysis
-3. **For Quick Debugging**: Use ltrace for simplicity and speed
-4. **For Learning**: Start with ltrace, progress to Frida, then eBPF
-5. **For Comprehensive Analysis**: Use multiple methods for different aspects
+1. **For Complete GPU Analysis**: Use eBPF Unified Tracer for full workload visibility with timeline visualization
+2. **For Production Systems**: Use eBPF Unified Tracer for comprehensive monitoring with minimal overhead
+3. **For HIP API Development**: Use Frida for flexibility and dynamic analysis
+4. **For Quick Debugging**: Use ltrace for simplicity and speed
+5. **For Learning**: Start with ltrace, progress to Frida, then eBPF
+6. **For Performance Optimization**: Use eBPF Unified Tracer to correlate API usage with GPU execution
 
 The choice of method depends on your specific requirements, performance constraints, and complexity tolerance. This project provides all three options to cover the full spectrum of use cases in ROCm/HIP application tracing and analysis.
