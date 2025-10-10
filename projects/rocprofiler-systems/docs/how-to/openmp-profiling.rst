@@ -14,7 +14,7 @@ Only a subset of the OMPT callbacks are processed:
 .. code-block:: shell
 
   |----------------------------------+---------------------------|
-  |          OpenMP Callback         |        Track Name         |
+  |          OMPT Callback           |        Track Name         |
   |----------------------------------+---------------------------|
   | ompt_callback_cancel             | omp_cancel                |
   | ompt_callback_dependences        | omp_dependences           |
