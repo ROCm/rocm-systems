@@ -1912,51 +1912,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       hsa_signal_handle(event.signal)->Release();
     }
   }
-
-}
-
-Runtime::AsyncEventItemPool& Runtime::AsyncEventItemPool::Instance() {
-  static AsyncEventItemPool inst;
-  return inst;
-}
-
-void Runtime::AsyncEventItemPool::allocate_block(size_t count) {
-    size_t bytes = count * sizeof(AsyncEventItem);
-    void* block = std::aligned_alloc(alignof(AsyncEventItem), bytes);
-    if (block == nullptr) throw std::bad_alloc();
-    block_list_.push_back({block, count});
-    auto *base = reinterpret_cast<AsyncEventItem*>(block);
-    for (size_t i = 0; i < count; ++i) {
-      new (&base[i]) AsyncEventItem();
-      free_list_.push_back(&base[i]);
-    }
-}
-
-Runtime::AsyncEventItem* Runtime::AsyncEventItemPool::alloc() {
-  ScopedAcquire<HybridMutex> lock(&lock_);
-  if (free_list_.empty()) {
-    allocate_block(block_size_);
-    if (block_size_ < maxblocksize_) {
-      block_size_ *= 2;
-    }
-  }
-  AsyncEventItem* item = free_list_.back();
-  free_list_.pop_back();
-  return item;
-}
-
-void Runtime::AsyncEventItemPool::free(AsyncEventItem* item) {
-  if (item == nullptr) return;
-  ScopedAcquire<HybridMutex> lock(&lock_);
-  free_list_.push_back(item);
-}
-
-void Runtime::AsyncEventItemPool::clear() {
-  for (auto& blk : block_list_) {
-    std::free(blk.first);
-  }
-  block_list_.clear();
-  free_list_.clear();
+  new_async_events_.Clear();
 }
 
 void Runtime::ConcurrentAsyncEvents::PushBack(hsa_signal_t signal,
@@ -1964,7 +1920,7 @@ void Runtime::ConcurrentAsyncEvents::PushBack(hsa_signal_t signal,
                                              hsa_signal_value_t value,
                                              hsa_amd_signal_handler handler, void* arg) {
   // Allocate memory for the new event item
-  AsyncEventItem* item = AsyncEventItemPool::Instance().alloc();
+  AsyncEventItem* item = asyncEventPool_.alloc();
   item->init(signal, cond, value, handler, arg);
   event_queue_.enqueue(item);
 }
@@ -1973,15 +1929,16 @@ void Runtime::ConcurrentAsyncEvents::Clear() {
   // Dequeue all items to clear the queue
   while (!event_queue_.empty()) {
     AsyncEventItem* item = event_queue_.dequeue();
-    AsyncEventItemPool::Instance().free(item);
+    asyncEventPool_.free(item);
   }
+  asyncEventPool_.clear();
 }
 
 bool Runtime::ConcurrentAsyncEvents::GetEvent(AsyncEventItem& event) {
   AsyncEventItem* item = event_queue_.dequeue();
   if (item != nullptr) {
     event = *item;
-    AsyncEventItemPool::Instance().free(item);
+    asyncEventPool_.free(item);
     return true;
   }
   return false;
@@ -1993,14 +1950,14 @@ bool Runtime::ConcurrentAsyncEvents::GetAllEvents(std::vector<AsyncEventItem>& a
     item = event_queue_.dequeue();
     if (item == nullptr) return false;
     all_events.emplace_back(*item);
-    AsyncEventItemPool::Instance().free(item);
+    asyncEventPool_.free(item);
   }
   return true;
 }
 
 void Runtime::ConcurrentAsyncEvents::AddEventsBack(const std::vector<AsyncEventItem>& events) {
   for (const auto& event : events) {
-    AsyncEventItem* item = AsyncEventItemPool::Instance().alloc();
+    AsyncEventItem* item = asyncEventPool_.alloc();
     *item = event;
     event_queue_.enqueue(item);
   }

@@ -76,6 +76,7 @@
 #include "core/util/os.h"
 #include "core/util/utils.h"
 #include "core/util/mpsc_queue.hpp"
+#include "core/util/mempool.hpp"
 
 #include "core/inc/amd_loader_context.hpp"
 #include "core/inc/amd_hsa_code.hpp"
@@ -633,28 +634,6 @@ class Runtime {
       return core::Signal::Convert(signal);
     }
   };
-
-  class AsyncEventItemPool {
-    public:
-      static AsyncEventItemPool& Instance();
-      AsyncEventItemPool() : block_size_(preallocblocks_ * minblock_) {}
-      ~AsyncEventItemPool() { clear(); }
-
-      AsyncEventItem* alloc();
-      void free(AsyncEventItem* ptr);
-      void clear();
-
-    private:
-      void allocate_block(size_t count);
-      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
-      static const size_t preallocblocks_ = 512;
-      static const size_t maxblocksize_ = 1ULL << 28;
-      HybridMutex lock_;
-      std::vector<AsyncEventItem*> free_list_;
-      std::vector<std::pair<void*, size_t>> block_list_;
-      size_t block_size_;
-  };
-
   // New concurrent events structure using lock-free queue
   struct ConcurrentAsyncEvents {
     ConcurrentAsyncEvents() {}
@@ -677,7 +656,10 @@ class Runtime {
     //! Add events back to queue (for events that need to be kept)
     void AddEventsBack(const std::vector<AsyncEventItem>& events);
   private:
+    //AsyncEventItem Queue
     ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
+    // AsyncEventItem Pool
+    ::rocr::GenericMemPool<AsyncEventItem, 512> asyncEventPool_;
   };
 
   struct PrefetchRange;
