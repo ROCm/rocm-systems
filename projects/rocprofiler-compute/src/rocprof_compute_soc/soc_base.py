@@ -24,7 +24,6 @@
 ##############################################################################
 
 import argparse
-import json
 import math
 import os
 import re
@@ -58,6 +57,17 @@ from utils.utils import (
     mibench,
     parse_sets_yaml,
 )
+
+python_lib_path = os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi"
+sys.path.append(python_lib_path)
+# If the python library is installed, it will overwrite the path above
+
+try:
+    import amdsmi
+except ImportError as e:
+    print(f"Unhandled import error: {e}")
+    print("Failed to import the amdsmi Python library.")
+    sys.exit(1)
 
 
 class OmniSoC_Base:
@@ -102,7 +112,7 @@ class OmniSoC_Base:
         return self.__compatible_profilers
 
     def populate_mspec(self) -> None:
-        from utils.specs import run, search, total_sqc
+        from utils.specs import search, total_sqc
 
         if (
             not hasattr(self._mspec, "rocminfo_lines")
@@ -167,29 +177,31 @@ class OmniSoC_Base:
                 )
             )
 
-        # Parse json from amd-smi static --clock
-        static_data = json.loads(
-            run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
-        )
+        # amd-smi info
+        try:
+            amdsmi.amdsmi_init()
 
-        # Extract GPU data
-        gpu_list = (
-            static_data
-            if isinstance(static_data, list)
-            else static_data.get("gpu_data", [])
-        )
-        gpu_data = gpu_list[0] if gpu_list else {}
+            devices = amdsmi.amdsmi_get_processor_handles()
+            if len(devices) == 0:
+                console_error("No AMD GPU detected!")
+                return
 
-        frequency_levels = (
-            gpu_data.get("clock", {}).get("mem", {}).get("frequency_levels")
-        )
-        if frequency_levels:
             # Extract max memory clock frequency
-            amd_smi_mclk = frequency_levels[max(frequency_levels.keys())]
+            amd_smi_mclk = amdsmi.amdsmi_get_gpu_od_volt_info(devices[0])[
+                "curr_sclk_range"
+            ]["upper_bound"]
             # 100 Mhz -> 100
-            self._mspec.max_mclk = amd_smi_mclk.split()[0]
+            self._mspec.max_mclk = amd_smi_mclk / 10**6
 
-        console_debug(f"max mem clock is {self._mspec.max_mclk}")
+            console_debug(f"max mem clock is {self._mspec.max_mclk}")
+
+        except Exception as e:
+            console_warning(f"amd-smi init failed: {e}")
+        finally:
+            try:
+                amdsmi.amdsmi_shut_down()
+            except Exception as e:
+                console_warning(f"amd-smi shutdown failed: {e}")
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -220,44 +232,31 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-
-        from utils.specs import run
-
-        # TODO: use amd-smi python api when available
-        # Load AMD-SMI data
-        static_data = run(
-            ["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True
-        )
+        # amd-smi info
         try:
-            parsed_data = json.loads(static_data)
-            gpu_list = (
-                parsed_data
-                if isinstance(parsed_data, list)
-                else parsed_data.get("gpu_data", [])
-            )
-        except json.JSONDecodeError:
-            gpu_list = []
-        gpu_data = gpu_list[0] if gpu_list else {}
+            amdsmi.amdsmi_init()
 
-        # Try detection methods until we find a match
-        detection_methods = [
-            ("asic", "market_name"),
-            ("vbios", "name"),
-            ("board", "product_name"),
-        ]
+            devices = amdsmi.amdsmi_get_processor_handles()
+            if len(devices) == 0:
+                console_warning("No AMD GPU detected!")
+                return
 
-        gpu_model = None
-        for section, field in detection_methods:
-            detected_name = gpu_data.get(section, {}).get(field, "").lower()
-            for model in mi_gpu_specs.get_all_gpu_models():
-                if model in detected_name:
-                    console_log(f'GPU model "{model}" detected using {section}.{field}')
-                    gpu_model = model
-                    break
+            board_info = amdsmi.amdsmi_get_gpu_board_info(devices[0])
+            gpu_model = board_info["product_name"]
 
-        if not gpu_model:
-            console_warning("Unable to determine the GPU model from amd-smi.")
-            return
+            console_debug(f"GPU Model: {gpu_model}")
+
+            if not gpu_model:
+                console_warning("Unable to determine the GPU model from amd-smi.")
+                return
+
+        except Exception as e:
+            console_warning(f"amd-smi init failed: {e}")
+        finally:
+            try:
+                amdsmi.amdsmi_shut_down()
+            except Exception as e:
+                console_warning(f"amd-smi shutdown failed: {e}")
 
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
 

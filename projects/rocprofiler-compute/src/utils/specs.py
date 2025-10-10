@@ -28,11 +28,11 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
 import re
 import socket
 import subprocess
+import sys
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
@@ -52,6 +52,17 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
+
+python_lib_path = os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi"
+sys.path.append(python_lib_path)
+# If the python library is installed, it will overwrite the path above
+
+try:
+    import amdsmi
+except ImportError as e:
+    print(f"Unhandled import error: {e}")
+    print("Failed to import the amdsmi Python library.")
+    sys.exit(1)
 
 T = TypeVar("T")
 
@@ -252,57 +263,35 @@ def extract_gpu_info() -> dict[str, Any]:
         "memory_partition": None,
     }
 
-    # Load amd-smi static data for GPU 0
-    static_output = run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
-    if static_output is None:
-        return result
-
+    # amd-smi info
     try:
-        static_data = json.loads(static_output)
-    except json.JSONDecodeError as e:
-        console_warning(f"Failed to parse amd-smi static output: {e}")
-        return result
+        amdsmi.amdsmi_init()
 
-    # Extract GPU data
-    gpu_list = (
-        static_data
-        if isinstance(static_data, list)
-        else static_data.get("gpu_data", [])
-    )
-    gpu_data = gpu_list[0] if gpu_list else {}
-    result["vbios"] = gpu_data.get("vbios", {}).get("part_number")
+        devices = amdsmi.amdsmi_get_processor_handles()
+        if len(devices) == 0:
+            console_warning("No AMD GPU detected!")
+            return result
 
-    # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
-    partition_output = run(
-        ["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False
-    )
-    partition_data = {}
+        device = devices[0]  # FIXME: only using GPU 0 for now
+        result["vbios"] = amdsmi.amdsmi_get_gpu_vbios_info(device)["part_number"]
+        result["compute_partition"] = amdsmi.amdsmi_get_gpu_compute_partition(device)
+        result["memory_partition"] = amdsmi.amdsmi_get_gpu_memory_partition(device)
 
-    if partition_output:
+    except Exception as e:
+        console_warning(f"amd-smi init failed: {e}")
+    finally:
         try:
-            partition_data = json.loads(partition_output)
-        except json.JSONDecodeError:
-            partition_data = {}
-
-    current_partition = partition_data.get("current_partition", [{}])[0]
-
-    # Extract partition values with gpu_data fallback (amd-smi < 26.0.0)
-    result["compute_partition"] = (
-        current_partition.get("accelerator_type")
-        or gpu_data.get("partition", {}).get("accelerator_partition")
-        or gpu_data.get("partition", {}).get("compute_partition")
-    )
-    result["memory_partition"] = current_partition.get("memory") or gpu_data.get(
-        "partition", {}
-    ).get("memory_partition")
+            amdsmi.amdsmi_shut_down()
+        except Exception as e:
+            console_warning(f"amd-smi shutdown failed: {e}")
 
     # Apply defaults and warnings
-    if not result["compute_partition"]:
+    if result["compute_partition"] == "N/A" or result["compute_partition"] is None:
         console_warning("Cannot detect accelerator partition from amd-smi.")
         console_warning("Applying default accelerator partition: SPX")
         result["compute_partition"] = "SPX"
 
-    if not result["memory_partition"]:
+    if result["memory_partition"] == "N/A" or result["memory_partition"] is None:
         console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
