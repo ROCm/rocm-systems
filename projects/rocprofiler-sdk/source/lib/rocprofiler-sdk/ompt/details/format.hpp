@@ -212,6 +212,26 @@ struct formatter<ompt_work_t> : rocprofiler::ompt::details::base_formatter
 };
 
 template <>
+struct formatter<ompt_mutex_t> : rocprofiler::ompt::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(const ompt_mutex_t& v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_lock);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_test_lock);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_nest_lock);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_test_nest_lock);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_critical);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_atomic);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, mutex_ordered);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+
+template <>
 struct formatter<ompt_task_status_t> : rocprofiler::ompt::details::base_formatter
 {
     template <typename Ctx>
@@ -227,6 +247,27 @@ struct formatter<ompt_task_status_t> : rocprofiler::ompt::details::base_formatte
             ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, task_late_fulfill);
             ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, task_switch);
             ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, taskwait_complete);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+
+template <>
+struct formatter<ompt_target_t> : rocprofiler::ompt::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(const ompt_target_t& v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_enter_data);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_exit_data);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_update);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_nowait);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_enter_data_nowait);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_exit_data_nowait);
+            ROCP_SDK_OMPT_FORMAT_CASE_STMT(ompt, target_update_nowait);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
