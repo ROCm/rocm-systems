@@ -556,6 +556,7 @@ class Graph {
     roots_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     leafs_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     wait_order_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    streams_dev_.reserve(g_devices.size());
   }
   void RemoveUserObjectFromOwingGraphs(UserObject* uObj) {
     for (auto& g : uObj->owning_graphs_) {
@@ -673,12 +674,6 @@ class Graph {
   //! Schedules all nodes in the graph into different streams
   void ScheduleNodes();
 
-  //! Update streams for the graph execution
-  hipError_t UpdateStreams(
-      hip::Stream* launch_stream,                       //!< Launch stream from the application
-      const std::vector<hip::Stream*>& parallel_stream  //!< The list of parallel streams
-  );
-
   //! Runs one node on the assigned stream
   bool RunOneNode(Node node,  //!< Node for the execution on GPU
                   bool wait   //!< Wait dependencies
@@ -780,6 +775,10 @@ class Graph {
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
+  //!< Maps stream ID to the set of device IDs that use that stream.
+  //!< Used to track which devices are accessed by each parallel stream
+  //!< during multi-device graph execution scheduling.
+  std::unordered_map<int, std::set<int>> streams_dev_ids_;
 
  private:
   friend class GraphExec;
@@ -802,6 +801,13 @@ class Graph {
   std::unordered_set<GraphNode*> capturedNodes_;
   bool graphInstantiated_;
   std::unordered_map<Node, Node> clonedNodes_;
+  //! Map of device ID to vector of streams allocated for that device during graph execution.
+  //! Each device may require multiple streams to handle parallel execution of graph nodes.
+  std::unordered_map<int, std::vector<hip::Stream*>> streams_dev_;
+
+  //! Map tracking the maximum number of concurrent streams required per device for graph execution.
+  //! Key: device ID, Value: maximum number of streams needed for that device
+  std::unordered_map<int, int> max_streams_dev_;
 };
 
 class GraphExec : public amd::ReferenceCountedObject, public Graph {
@@ -816,13 +822,16 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
-    for (auto stream : parallel_streams_) {
-      if (stream != nullptr) {
+    for (auto streams : parallel_streams_) {
+      for (auto stream : streams.second) {
+        if (stream != nullptr) {
         stream->finish();
-        constexpr bool kForceDestroy = true;
-        hip::Stream::Destroy(stream, kForceDestroy);
+          constexpr bool kForceDestroy = true;
+          hip::Stream::Destroy(stream, kForceDestroy);
+        }
       }
     }
+    parallel_streams_.clear();
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       if (kernArgManager_ != nullptr) {
         kernArgManager_->release();
@@ -856,7 +865,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::vector<Node>& GetNodes() { return topoOrder_; }
   uint64_t GetFlags() const { return flags_; }
   hipError_t Init();
-  hipError_t CreateStreams(uint32_t num_streams);
+  hipError_t CreateStreams(uint32_t num_streams, int devId = 0);
   hipError_t Run(hip::Stream* stream);
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
@@ -874,12 +883,21 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
+  //! Enqueue a multi-device linear graph for execution
+  hipError_t EnqueueMultiDeviceLinearGraph(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  //! Update streams for the graph execution with launch stream from application
+  void UpdateStreams(hip::Stream* launch_stream);
+  //! Find the number of streams required per device for multi-device graph execution
+  //! This method analyzes the stream-to-device mappings and recursively processes
+  //! child graphs to determine the maximum concurrent streams needed per device
+  void FindStreamsReqPerDev();
 
  protected:
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
   std::vector<Node> topoOrder_;
-  std::vector<hip::Stream*> parallel_streams_;
+  //! parallel streams per device
+  std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   int instantiateDeviceId_ = -1;
