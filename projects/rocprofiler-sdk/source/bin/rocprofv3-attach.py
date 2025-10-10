@@ -30,7 +30,7 @@ import time
 
 ROCPROFV3_ATTACH_DIR = os.path.dirname(os.path.realpath(__file__))
 ROCM_DIR = os.path.dirname(ROCPROFV3_ATTACH_DIR)
-ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-attach.so"
+ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk-rocattach.so"
 
 
 def main(

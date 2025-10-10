@@ -176,8 +176,9 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
 auto
 get_this_library_path()
 {
-    auto _this_lib_path = get_linked_path("librocprofv3-attach.so.1", {RTLD_NOLOAD | RTLD_LAZY});
-    LOG_IF(FATAL, !_this_lib_path) << "librocprofv3-attach.so.1"
+    auto _this_lib_path =
+        get_linked_path("librocprofiler-sdk-rocattach.so.1", {RTLD_NOLOAD | RTLD_LAZY});
+    LOG_IF(FATAL, !_this_lib_path) << "librocprofiler-sdk-rocattach.so.1"
                                    << " could not locate itself in the list of loaded libraries";
     return fs::path{*_this_lib_path}.parent_path().string();
 }
