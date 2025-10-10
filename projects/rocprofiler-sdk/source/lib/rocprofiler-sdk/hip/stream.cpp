@@ -128,18 +128,24 @@ get_stream_id(hipStream_t stream)
         if(thr_stream_id.handle == 0) thr_stream_id = add_stream(stream);
         return thr_stream_id;
     }
-    return get_stream_map()->rlock(
-        [](const stream_map_t& _data, hipStream_t _stream) {
+    auto stream_id = get_stream_map()->rlock(
+        [](const stream_map_t& _data,
+           hipStream_t         _stream) -> std::optional<rocprofiler_stream_id_t> {
             ROCP_WARNING_IF(_data.count(_stream) == 0)
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
-            // Stream may not be tracked during attachment. You should use queue grouping with
-            // attachment
-            if(_data.count(_stream) == 0) return add_stream(_stream);
-            return _data.at(_stream);
+            if(_data.count(_stream) != 0)
+                return std::optional<rocprofiler_stream_id_t>{_data.at(_stream)};
+            return std::nullopt;
         },
         stream);
+    // Handle attach case where stream ID is not present
+    if(stream_id == std::nullopt)
+    {
+        return add_stream(stream);
+    }
+    return *stream_id;
 }
 
 // Map rocprofiler_hip_stream_operation_t to respective name
