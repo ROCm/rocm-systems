@@ -12,7 +12,7 @@ WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
-ARG PYTHON_VERSIONS="8 9 10 11 12"
+ARG PYTHON_VERSIONS="9 10 11 12"
 
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
