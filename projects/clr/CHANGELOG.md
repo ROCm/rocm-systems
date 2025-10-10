@@ -27,6 +27,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
     - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+    - `hipMemGetDefaultMemPool`  gets the default memory pool for a given location and allocation type
 * New HIP flags
     - `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
     - Support for flags in `hipGetProcAddress`, enables searching for the per-thread version symbols.

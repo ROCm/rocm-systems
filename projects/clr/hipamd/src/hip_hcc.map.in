@@ -645,6 +645,7 @@ global:
     hipOccupancyAvailableDynamicSMemPerBlock;
     hipGetProcAddress_spt;
     hipKernelGetParamInfo;
+    hipMemGetDefaultMemPool;
 local:
     *;
 } hip_7.1;

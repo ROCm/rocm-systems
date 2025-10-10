@@ -468,7 +468,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelGetName = 448,
   HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock = 449,
   HIP_API_ID_hipKernelGetParamInfo = 450,
-  HIP_API_ID_LAST = 450,
+  HIP_API_ID_hipMemGetDefaultMemPool = 451,
+  HIP_API_ID_LAST = 451,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -774,6 +775,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMemGetAddressRange: return "hipMemGetAddressRange";
     case HIP_API_ID_hipMemGetAllocationGranularity: return "hipMemGetAllocationGranularity";
     case HIP_API_ID_hipMemGetAllocationPropertiesFromHandle: return "hipMemGetAllocationPropertiesFromHandle";
+    case HIP_API_ID_hipMemGetDefaultMemPool: return "hipMemGetDefaultMemPool";
     case HIP_API_ID_hipMemGetHandleForAddressRange: return "hipMemGetHandleForAddressRange";
     case HIP_API_ID_hipMemGetInfo: return "hipMemGetInfo";
     case HIP_API_ID_hipMemImportFromShareableHandle: return "hipMemImportFromShareableHandle";
@@ -1218,6 +1220,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMemGetAddressRange", name) == 0) return HIP_API_ID_hipMemGetAddressRange;
   if (strcmp("hipMemGetAllocationGranularity", name) == 0) return HIP_API_ID_hipMemGetAllocationGranularity;
   if (strcmp("hipMemGetAllocationPropertiesFromHandle", name) == 0) return HIP_API_ID_hipMemGetAllocationPropertiesFromHandle;
+  if (strcmp("hipMemGetDefaultMemPool", name) == 0) return HIP_API_ID_hipMemGetDefaultMemPool;
   if (strcmp("hipMemGetHandleForAddressRange", name) == 0) return HIP_API_ID_hipMemGetHandleForAddressRange;
   if (strcmp("hipMemGetInfo", name) == 0) return HIP_API_ID_hipMemGetInfo;
   if (strcmp("hipMemImportFromShareableHandle", name) == 0) return HIP_API_ID_hipMemImportFromShareableHandle;
@@ -2985,6 +2988,13 @@ typedef struct hip_api_data_s {
       hipMemAllocationProp prop__val;
       hipMemGenericAllocationHandle_t handle;
     } hipMemGetAllocationPropertiesFromHandle;
+    struct {
+      hipMemPool_t* memPool;
+      hipMemPool_t memPool__val;
+      hipMemLocation* location;
+      hipMemLocation location__val;
+      hipMemAllocationType type;
+    } hipMemGetDefaultMemPool;
     struct {
       void* handle;
       hipDeviceptr_t dptr;
@@ -5631,6 +5641,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemGetAllocationPropertiesFromHandle.prop = (hipMemAllocationProp*)prop; \
   cb_data.args.hipMemGetAllocationPropertiesFromHandle.handle = (hipMemGenericAllocationHandle_t)handle; \
 };
+// hipMemGetDefaultMemPool[('hipMemPool_t*', 'memPool'), ('hipMemLocation*', 'location'), ('hipMemAllocationType', 'type')]
+#define INIT_hipMemGetDefaultMemPool_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemGetDefaultMemPool.memPool = (hipMemPool_t*)memPool; \
+  cb_data.args.hipMemGetDefaultMemPool.location = (hipMemLocation*)location; \
+  cb_data.args.hipMemGetDefaultMemPool.type = (hipMemAllocationType)type; \
+};
 // hipMemGetHandleForAddressRange[('void*', 'handle'), ('hipDeviceptr_t', 'dptr'), ('size_t', 'size'), ('hipMemRangeHandleType', 'handleType'), ('unsigned long long', 'flags')]
 #define INIT_hipMemGetHandleForAddressRange_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipMemGetHandleForAddressRange.handle = (void*)handle; \
@@ -7895,6 +7911,11 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipMemGetAllocationPropertiesFromHandle[('hipMemAllocationProp*', 'prop'), ('hipMemGenericAllocationHandle_t', 'handle')]
     case HIP_API_ID_hipMemGetAllocationPropertiesFromHandle:
       if (data->args.hipMemGetAllocationPropertiesFromHandle.prop) data->args.hipMemGetAllocationPropertiesFromHandle.prop__val = *(data->args.hipMemGetAllocationPropertiesFromHandle.prop);
+      break;
+// hipMemGetDefaultMemPool[('hipMemPool_t*', 'memPool'), ('hipMemLocation*', 'location'), ('hipMemAllocationType', 'type')]
+    case HIP_API_ID_hipMemGetDefaultMemPool:
+      if (data->args.hipMemGetDefaultMemPool.memPool) data->args.hipMemGetDefaultMemPool.memPool__val = *(data->args.hipMemGetDefaultMemPool.memPool);
+      if (data->args.hipMemGetDefaultMemPool.location) data->args.hipMemGetDefaultMemPool.location__val = *(data->args.hipMemGetDefaultMemPool.location);
       break;
 // hipMemGetHandleForAddressRange[('void*', 'handle'), ('hipDeviceptr_t', 'dptr'), ('size_t', 'size'), ('hipMemRangeHandleType', 'handleType'), ('unsigned long long', 'flags')]
     case HIP_API_ID_hipMemGetHandleForAddressRange:
@@ -10678,6 +10699,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipMemGetAllocationPropertiesFromHandle.prop == NULL) oss << "prop=NULL";
       else { oss << "prop="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetAllocationPropertiesFromHandle.prop__val); }
       oss << ", handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetAllocationPropertiesFromHandle.handle);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipMemGetDefaultMemPool:
+      oss << "hipMemGetDefaultMemPool(";
+      if (data->args.hipMemGetDefaultMemPool.memPool == NULL) oss << "memPool=NULL";
+      else { oss << "memPool="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetDefaultMemPool.memPool__val); }
+      if (data->args.hipMemGetDefaultMemPool.location == NULL) oss << ", location=NULL";
+      else { oss << ", location="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetDefaultMemPool.location__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetDefaultMemPool.type);
       oss << ")";
     break;
     case HIP_API_ID_hipMemGetHandleForAddressRange:

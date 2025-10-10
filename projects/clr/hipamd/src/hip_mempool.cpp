@@ -309,7 +309,8 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
     HIP_RETURN(hipErrorInvalidValue);
   }
   // validate hipMemAllocationType value
-  if (pool_props->allocType != hipMemAllocationTypePinned) {
+  if (pool_props->allocType != hipMemAllocationTypePinned &&
+      pool_props->allocType != hipMemAllocationTypeManaged) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   // Make sure the pool creation occurs on a valid device
@@ -357,6 +358,11 @@ hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool) {
   // Force default pool if the current one is destroyed
   if (hip_mem_pool == device->GetCurrentMemoryPool()) {
     device->SetCurrentMemoryPool(device->GetDefaultMemoryPool());
+  }
+
+  // Same for managed pool
+  if (hip_mem_pool == device->GetCurrentManagedMemoryPool()) {
+    device->SetCurrentManagedMemoryPool(device->GetDefaultManagedMemoryPool());
   }
 
   hip_mem_pool->release();
@@ -486,6 +492,33 @@ hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
   auto memory = getMemoryObject(*ptr, offset);
   mpool->AddBusyMemory(memory);
   mpool->retain();
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  HIP_INIT_API(hipMemGetDefaultMemPool, memPool, location, type);
+  if (memPool == nullptr || location == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id < 0 || location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    *memPool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetDefaultMemoryPool());
+  } else if (type == hipMemAllocationTypeManaged) {
+    *memPool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetDefaultManagedMemoryPool());
+  } else {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

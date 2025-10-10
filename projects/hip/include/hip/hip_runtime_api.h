@@ -1224,6 +1224,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeManaged = 0x2,
   hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
@@ -6375,6 +6376,16 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
  * #hipErrorNotFound,
  */
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
+
+/**
+ * @brief Returns the default memory pool for a given location and allocation type
+ * 
+ * @param [out] memPool
+ * @param [in] location
+ * @param [in] type
+ */
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
 
 /**
  * @brief Load hip Library from inmemory object
