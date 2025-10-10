@@ -106,9 +106,9 @@ hipError_t LibraryContainer::BuildIt() {
   return hipSuccess;
 }
 
-hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* image, hipJitOption** jitOptions,
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* image, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
-                              hipLibraryOption** libraryOptions, void** libraryOptionValues,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions) {
   HIP_INIT_API(hipLibraryLoadData, library, image, jitOptions, jitOptionsValues, numJitOptions,
                libraryOptions, libraryOptionValues, numLibraryOptions);
@@ -127,8 +127,8 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* image, hipJitOp
 }
 
 hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fname,
-                                  hipJitOption** jitOptions, void** jitOptionsValues,
-                                  unsigned int numJitOptions, hipLibraryOption** libraryOptions,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions) {
   HIP_INIT_API(hipLibraryLoadFromFile, library, fname, jitOptions, jitOptionsValues, numJitOptions,
                libraryOptions, libraryOptionValues, numLibraryOptions);
@@ -143,7 +143,7 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fname,
 hipError_t hipLibraryUnload(hipLibrary_t library) {
   HIP_INIT_API(hipLibraryUnload, library);
   if (library == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   auto l = reinterpret_cast<hip::LibraryContainer*>(library);
   delete l;
