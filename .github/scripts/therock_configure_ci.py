@@ -9,7 +9,6 @@ import fnmatch
 import json
 import logging
 import subprocess
-import sys
 from therock_matrix import subtree_to_project_map, project_map
 import time
 from typing import Mapping, Optional, Iterable

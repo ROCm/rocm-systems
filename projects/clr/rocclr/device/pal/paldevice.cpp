@@ -2138,6 +2138,27 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   return true;
 }
 
+// PAL Device file I/O stubs: PAL doesn't implement AIS file I/O yet.
+// Provide definitions so the vtable and linker are satisfied.
+// Replace with a real implementation if/when PAL supports file I/O.
+bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                      uint64_t* size_copied, int32_t* status) {
+  if (size_copied) {
+    *size_copied = 0;
+  }
+  LogError("PAL Device: amdFileRead not supported on this backend");
+  return false;
+}
+
+bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) {
+  if (size_copied) {
+    *size_copied = 0;
+  }
+  LogError("PAL Device: amdFileWrite not supported on this backend");
+  return false;
+}
+
 amd::Memory* Device::findMapTarget(size_t size) const {
   // Must be serialised for access
   amd::ScopedLock lk(mapCacheOps_);
