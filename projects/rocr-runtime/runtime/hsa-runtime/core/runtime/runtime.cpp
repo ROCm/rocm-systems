@@ -1030,6 +1030,10 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
   bool allocation_map_entry_found = false;
 
+  if (!bootstrap_lock().IsAvailableHint()) {
+    return HSA_STATUS_ERROR;
+  }
+
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
      // change with calls to memory APIs.
     ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
