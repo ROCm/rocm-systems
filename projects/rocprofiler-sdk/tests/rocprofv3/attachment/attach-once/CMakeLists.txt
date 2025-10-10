@@ -27,6 +27,10 @@ endif()
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+set(attachment-env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
 # Test that launches the app and attaches to it (CSV format)
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-once
@@ -39,6 +43,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${attachment-env}"
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
     FAIL_REGULAR_EXPRESSION
         "failed to retrieve stream ID|ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")

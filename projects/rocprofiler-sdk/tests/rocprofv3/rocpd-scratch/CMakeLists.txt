@@ -73,5 +73,4 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation
-                      rocprofv3-test-rocpd-scratch-perfetto-generation)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation)

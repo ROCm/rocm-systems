@@ -344,6 +344,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} FIXTURES_SETUP)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} FIXTURES_REQUIRED)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} FIXTURES_CLEANUP)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} WILL_FAIL)
 
     elseif(arg_TARGET AND TARGET ${arg_TARGET})
 
@@ -364,6 +365,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} FIXTURES_SETUP)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} FIXTURES_REQUIRED)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} FIXTURES_CLEANUP)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} WILL_FAIL)
 
     else()
 
@@ -489,42 +491,24 @@ function(rocprofiler_add_integration_validate_test NAME)
 
     endforeach()
 
-    # Build the properties list for pytest_discover_tests
-    set(_TEST_PROPERTIES
-        DISABLED
-        "${arg_DISABLED}"
-        TIMEOUT
-        ${arg_TIMEOUT}
-        LABELS
-        "${arg_LABELS}"
-        FAIL_REGULAR_EXPRESSION
-        "${arg_FAIL_REGULAR_EXPRESSION}"
-        SKIP_REGULAR_EXPRESSION
-        "${arg_SKIP_REGULAR_EXPRESSION}")
-
-    # Add fixture properties if they are set
-    if(arg_FIXTURES_REQUIRED)
-        list(APPEND _TEST_PROPERTIES FIXTURES_REQUIRED "${arg_FIXTURES_REQUIRED}")
-    endif()
-    if(arg_FIXTURES_SETUP)
-        list(APPEND _TEST_PROPERTIES FIXTURES_SETUP "${arg_FIXTURES_SETUP}")
-    endif()
-    if(arg_FIXTURES_CLEANUP)
-        list(APPEND _TEST_PROPERTIES FIXTURES_CLEANUP "${arg_FIXTURES_CLEANUP}")
-    endif()
-
-    pytest_discover_tests(
-        ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
-        TEST_PATHS ${arg_TEST_PATHS}
-        WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
-        TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
-        TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
-        LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
-        PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
-        ENVIRONMENT "${arg_ENVIRONMENT}"
-        DEPENDS "${arg_DEPENDS}"
-        EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
-        DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
-        PROPERTIES ${_TEST_PROPERTIES})
+pytest_discover_tests(
+    ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
+    TEST_PATHS ${arg_TEST_PATHS}
+    WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
+    TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
+    TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
+    LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
+    PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
+    ENVIRONMENT "${arg_ENVIRONMENT}"
+    DEPENDS "${arg_DEPENDS}"
+    EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
+    DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
+    PROPERTIES
+        DISABLED ${arg_DISABLED}
+        TIMEOUT ${arg_TIMEOUT}
+        LABELS "${arg_LABELS}"
+        FAIL_REGULAR_EXPRESSION "${arg_FAIL_REGULAR_EXPRESSION}"
+        FIXTURES_REQUIRED ${arg_FIXTURES_REQUIRED}
+)
 
 endfunction()
