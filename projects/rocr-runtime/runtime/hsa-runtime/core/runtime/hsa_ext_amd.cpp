@@ -565,6 +565,9 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
     ret = new core::InterruptSignal(initial_value);
   }
 
+  if (ret == nullptr)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   *hsa_signal = core::Signal::Convert(ret);
   return HSA_STATUS_SUCCESS;
   CATCH;
