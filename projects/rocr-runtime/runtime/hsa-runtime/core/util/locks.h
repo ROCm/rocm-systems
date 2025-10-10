@@ -114,6 +114,16 @@ class KernelMutex {
   bool Acquire() { return os::AcquireMutex(lock_); }
   void Release() { os::ReleaseMutex(lock_); }
 
+  // Check whether lock is available or not. The lock may not be available
+  // by the time the caller tries to acquire it, so it should only be used
+  // as a hint.
+  bool IsAvailableHint() {
+    if (Try()) {
+      Release();
+      return true;
+    }
+    return false;
+  }
  private:
   os::Mutex lock_;
 
