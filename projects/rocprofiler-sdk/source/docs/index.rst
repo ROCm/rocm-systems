@@ -28,6 +28,10 @@ The documentation is structured as follows:
 
     * :ref:`installing-rocprofiler-sdk`
 
+  .. grid-item-card:: Quick Reference
+
+    * :ref:`quick-guide`
+
   .. grid-item-card:: How to
 
     * :doc:`Samples <how-to/samples>`
