@@ -76,10 +76,10 @@ get_stream_map()
 }
 
 auto
-add_stream(hipStream_t stream)
+add_stream(hipStream_t stream, bool reindex_existing = true)
 {
     return get_stream_map()->wlock(
-        [](stream_map_t& _data, hipStream_t _stream) {
+        [](stream_map_t& _data, hipStream_t _stream, const bool _reindex_existing) {
             static uint64_t idx_offset = 0;
 
             auto idx = _data.size() + idx_offset;
@@ -91,6 +91,8 @@ add_stream(hipStream_t stream)
 
             if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
             {
+                // Do not change the index if attachment mode is currently active
+                if(!_reindex_existing) return _data.at(_stream);
                 idx_offset += 1;
                 // Handle special hipStreamPerThread case where each thread has it's own implicit
                 // stream ID. No need to update map since hipStreamPerThread is defined as 0x02
@@ -108,7 +110,8 @@ add_stream(hipStream_t stream)
             }
             return _data.at(_stream);
         },
-        stream);
+        stream,
+        reindex_existing);
 }
 
 auto
@@ -140,12 +143,13 @@ get_stream_id(hipStream_t stream)
             return std::nullopt;
         },
         stream);
-    // Handle attach case where stream ID is not present
-    if(stream_id == std::nullopt)
-    {
-        return add_stream(stream);
-    }
-    return *stream_id;
+    // Stream ID already exists
+    if(stream_id) return *stream_id;
+
+    ROCP_CI_LOG_IF(WARNING, !rocprofiler::registration::get_attach_status()->has_attach_table)
+        << fmt::format("Stream ID is not present in {} when attach feature is not being used",
+                       __FUNCTION__);
+    return add_stream(stream, false);
 }
 
 // Map rocprofiler_hip_stream_operation_t to respective name

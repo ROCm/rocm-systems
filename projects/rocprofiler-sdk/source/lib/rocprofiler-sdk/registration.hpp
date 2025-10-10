@@ -87,5 +87,14 @@ attach();
 // call tool_detach function for all registered clients
 rocprofiler_status_t
 detach();
+
+struct attach_status
+{
+    bool has_attach_table = false;
+    bool is_attached      = false;
+};
+
+struct attach_status*
+get_attach_status();
 }  // namespace registration
 }  // namespace rocprofiler

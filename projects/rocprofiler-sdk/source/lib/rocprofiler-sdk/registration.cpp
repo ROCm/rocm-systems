@@ -173,19 +173,6 @@ get_status()
     return _v;
 }
 
-struct attach_status
-{
-    bool has_attach_table = false;
-    bool is_attached      = false;
-};
-
-auto*
-get_attach_status()
-{
-    static auto*& _v = common::static_object<attach_status>::construct(false);
-    return _v;
-}
-
 auto&
 get_invoked_configures()
 {
@@ -749,6 +736,13 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
     }
 }
 }  // namespace
+
+struct attach_status*
+get_attach_status()
+{
+    static auto*& _v = common::static_object<attach_status>::construct(false);
+    return _v;
+}
 
 void
 init_logging()
