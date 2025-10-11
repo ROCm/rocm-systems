@@ -815,7 +815,13 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       break;
     case 11:
     case 12:
-      sdma = (isDXG ? static_cast<BlitSdmaBase*>(new BlitSdmaV4()) : static_cast<BlitSdmaBase*>(new BlitSdmaV5()));
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
+      } else if (isa_->GetMinorVersion() >= 5) {
+        sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
+      } else {
+        sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV5());
+      }
       copy_size_override = copy_size_overrides[1];
       break;
     default:
