@@ -272,7 +272,7 @@ class Command : public Event {
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  std::string* capturedKernelName_ = nullptr;  //!< Kenrnel under capture
+  const std::string** capturedKernelNameRef_ = nullptr;  //!< Pointer to kernel name reference under capture  //!< Kenrnel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -320,17 +320,17 @@ class Command : public Event {
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
-                            std::string* capturedKernelName) {
+                            const std::string** capturedKernelNameRef) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
     graphKernArgMgr_ = graphKernArgMgr;
-    capturedKernelName_ = capturedKernelName;
+    capturedKernelNameRef_ = capturedKernelNameRef;
   }
 
   //! Updates kernel name with the captured kernel name
-  void SetKernelName(const std::string& kernelName) {
-    if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = kernelName;
+  void SetKernelNameRef(const std::string* kernelNameRef) {
+    if (capturedKernelNameRef_ != nullptr) {
+      *capturedKernelNameRef_ = kernelNameRef;
     }
   }
 
@@ -1382,7 +1382,7 @@ class Marker : public Command {
 class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
-  const std::vector<std::string>* kernelNamesRef_;
+  const std::vector<const std::string*>* kernelNamesRef_;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
 
  public:
@@ -1393,7 +1393,7 @@ class AccumulateCommand : public Command {
         kernelNamesRef_(nullptr) {}
 
   //! Set external kernel names reference
-  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }
 
@@ -1403,7 +1403,7 @@ class AccumulateCommand : public Command {
   }
 
   //! Returns the kernel names reference
-  const std::vector<std::string>& getKernelNames() const {
+  const std::vector<const std::string*>& getKernelNames() const {
     return *kernelNamesRef_;
   }
 

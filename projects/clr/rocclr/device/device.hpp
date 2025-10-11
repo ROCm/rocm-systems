@@ -1354,7 +1354,7 @@ class VirtualDevice : public amd::HeapObject {
 
   //! Dispatches multiple AQL packets in a single batch operation
   virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<std::string>& kernelNames,
+                                      const std::vector<const std::string*>& kernelNames,
                                       amd::AccumulateCommand* vcmd = nullptr) = 0 ;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }

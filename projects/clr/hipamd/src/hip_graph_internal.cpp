@@ -539,7 +539,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
 
           // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
-          std::vector<std::string> nodeKernelNames;
+          std::vector<const std::string*> nodeKernelNames;
           status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
                                                      &nodeKernelNames);
 
@@ -656,7 +656,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 
         // Capture new packets for this node
         std::vector<uint8_t*> newPackets;
-        std::vector<std::string> newKernelNames;
+        std::vector<const std::string*> newKernelNames;
         hipError_t status =
             node->CaptureAndFormPacket(kernArgManager_, &newPackets, &newKernelNames);
         if (status != hipSuccess) {
@@ -750,7 +750,7 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
         } else {
           // Slow path: some nodes disabled, create filtered vectors
           std::vector<uint8_t*> enabledPackets;
-          std::vector<std::string> enabledKernelNames;
+          std::vector<const std::string*> enabledKernelNames;
           for (const auto& range : batch.nodeRanges) {
             if (range.enabled) {
               // Add packets for this enabled node
@@ -828,9 +828,9 @@ hipError_t GraphExec::EnqueueMultiDeviceLinearGraph(hip::Stream* launch_stream) 
     if (topoOrder_[i]->GraphCaptureEnabled()) {
       if (topoOrder_[i]->GetEnabled()) {
         std::vector<uint8_t*>& gpuPackets = topoOrder_[i]->GetAqlPackets();
-        std::vector<std::string> kernelNames;
+        std::vector<const std::string*> kernelNames;
         for (auto& packet : gpuPackets) {
-          kernelNames.push_back(topoOrder_[i]->GetKernelName());
+          kernelNames.push_back(&topoOrder_[i]->GetKernelName());
         }
         currStream->vdev()->dispatchAqlPacketBatch(gpuPackets, kernelNames, accumulate);
       }
