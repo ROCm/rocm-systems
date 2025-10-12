@@ -88,10 +88,10 @@ TEST_CASE("Unit_hipKernelLookUp_PerfTest") {
   }
   for (int nDev = 1; nDev <= mgpu; nDev++) {
     count = 0;
-    INFO("RUNNING ON " << nDev << " DEVICES\n");
+    printf("RUNNING ON %d DEVICES\n", nDev);
     kill = false;
     std::vector<std::thread> threads;
-    for (int i = 0; i < nDev * 4; i++) threads.push_back(std::thread(thread_jobs, i / 4, i % 4));
+    for (int i = 0; i < nDev * 4; i++) threads.push_back(std::thread(thread_jobs, i / mgpu, i % 4));
     usleep(1000000);
     auto t1 = std::chrono::system_clock::now();
     int counter = int(count);
@@ -105,7 +105,7 @@ TEST_CASE("Unit_hipKernelLookUp_PerfTest") {
       for (int i = 0; i < nDev * 4; i++) {
         if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - thread_report[i]).count() >=
             1000000) {
-          INFO("Thread " << i / 4 << "/" << i % 4 << " is stuck\n");
+          INFO("Thread " << i / (nDev * 4) << "/" << i % (nDev * 4) << " is stuck\n");
         }
       }
       total_count += counter2 - counter;
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipKernelLookUp_PerfTest") {
       t1 = t2;
       counter = counter2;
     }
-    INFO("AVERAGE: " << total_count << "/" << total_time << " = " << total_count / total_time);
+    printf("AVERAGE: %ld / %f = %f job/s\n", total_count, total_time, total_count / total_time);
     kill = true;
     for (auto& t : threads) t.join();
     for (int i = 0; i < nDev; i++) {

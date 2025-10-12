@@ -7,27 +7,12 @@
 #
 # ----------------------------------------------------------------------------- #
 
-if(ROCmVersion_DIR)
-    set(_rocm_root "${ROCmVersion_DIR}")
-elseif(DEFINED ENV{ROCM_PATH})
-    set(_rocm_root "$ENV{ROCM_PATH}")
-else()
-    set(_rocm_root "/opt/rocm")
-endif()
-
-set(_rocm_llvm_lib "${_rocm_root}/lib/llvm/lib")
-
-set(_rocm_ld_env
-    "LD_PRELOAD=libomptarget.so"
-    "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}"
-)
-
-if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
+if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
     message(
         FATAL_ERROR
-        "libomptarget.so not found in ${_rocm_llvm_lib}. "
-        "Verify that ROCm is installed correctly and that _rocm_root "
-        "(${_rocm_root}) points at the right location."
+        "libomptarget.so not found in \"${ROCM_LLVM_LIB_PATH}\". "
+        "Verify that ROCm is installed correctly and that ROCM_PATH "
+        "(${ROCM_PATH}) points at the right location."
     )
 endif()
 
@@ -107,8 +92,8 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
               -e -v 1 --label return args -E ^GOMP
-            REWRITE_TIMEOUT 180
-            RUNTIME_TIMEOUT 360
+            SAMPLING_TIMEOUT 300
+            REWRITE_TIMEOUT 300
             ENVIRONMENT
               "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
             REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
@@ -133,6 +118,8 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
             GPU ON
             LABELS "openmp;ompvv;openmp-target"
             REWRITE_ARGS -e -v 2
+            SAMPLING_TIMEOUT 300
+            REWRITE_TIMEOUT 300
             ENVIRONMENT
               "${_ompvv_offload_environment}"
             REWRITE_RUN_PASS_REGEX

@@ -9,12 +9,14 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-sdk-rocm_release_compatibility.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
       - '!projects/rocprofiler-sdk/*.md'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-sdk-rocm_release_compatibility.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
@@ -77,6 +79,10 @@ jobs:
       run: |
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y wget
+        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb
+        apt-get install -y -o Dpkg::Options::="--force-confnew" /tmp/amdgpu-install_7.0.70000-1_all.deb
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11

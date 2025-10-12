@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # This script generates ssl keys and self-signed certificates
 
 INSTALL_RT="artifacts"

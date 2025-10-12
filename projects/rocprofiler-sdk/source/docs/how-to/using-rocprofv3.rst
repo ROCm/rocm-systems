@@ -61,6 +61,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Sets the desired log level. |br| |br| |br|
        | Specifies the path to a YAML file consisting of extra counter definitions.
 
+   * - Process attachment
+     - | ``-p`` PID \| ``--pid`` PID \| ``--attach`` PID
+     - | Attaches to a running process by process ID and profiles it dynamically. This enables profiling of applications that are already running without needing to restart them from the profiler. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration.
+
    * - Aggregate tracing
      - | ``-r`` [BOOL] \| ``--runtime-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
        | ``-s`` [BOOL] \| ``--sys-trace`` [BOOL]
@@ -589,6 +593,62 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :file: /data/rocjpeg_api_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
+
+Process Attachment
++++++++++++++++++++
+
+``rocprofv3`` supports attaching to already running processes to profile them dynamically without requiring application restart. This is particularly useful for long-running applications, services, or when you need to profile an application that is already in a specific state.
+
+Process attachment uses the ``-p``, ``--pid``, or ``--attach`` options (all equivalent) followed by the target process ID. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration.
+
+**Basic attachment syntax:**
+
+.. code-block:: bash
+
+    rocprofv3 -p <PID> <tracing_options>
+    # or
+    rocprofv3 --pid <PID> <tracing_options>  
+    # or
+    rocprofv3 --attach <PID> <tracing_options>
+
+**Example: Attach to a running process and collect HIP traces:**
+
+.. code-block:: bash
+
+    # Find the process ID of your application
+    ps aux | grep my_application
+    
+    # Attach to the process (replace 12345 with actual PID)
+    rocprofv3 --attach 12345 --hip-trace --output-format csv
+
+**Example: Attach with multiple tracing options:**
+
+.. code-block:: bash
+
+    rocprofv3 -p 12345 --hip-trace --kernel-trace --memory-copy-trace --output-format json
+
+**Example: Attach with counter collection:**
+
+.. code-block:: bash
+
+    rocprofv3 --pid 12345 --pmc SQ_WAVES GRBM_COUNT --output-format csv
+
+**Important considerations for process attachment:**
+
+- The target process must be running and actively using GPU resources for meaningful profiling data
+- Attachment requires appropriate system permissions (may need elevated privileges depending on the target process)
+- The profiler will collect data for the entire remaining lifetime of the process or until the configured collection period expires
+- Use ``--attach-duration-msec`` to specify how long to profile the attached process (in milliseconds)
+
+**Example with duration control:**
+
+.. code-block:: bash
+
+    # Attach and profile for 5 seconds
+    rocprofv3 --attach 12345 --attach-duration-msec 5000 --sys-trace --output-format csv
+
+The attachment functionality works with all tracing and profiling options available in ``rocprofv3``, providing the same comprehensive analysis capabilities as standard application launching.
+
 
 Post-processing tracing options
 ++++++++++++++++++++++++++++++++

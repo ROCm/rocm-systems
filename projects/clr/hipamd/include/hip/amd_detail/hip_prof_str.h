@@ -456,7 +456,12 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemPrefetchAsync_v2 = 436,
   HIP_API_ID_hipMemAdvise_v2 = 437,
   HIP_API_ID_hipStreamGetId = 438,
-  HIP_API_ID_LAST = 438,
+  HIP_API_ID_hipLibraryLoadData = 439,
+  HIP_API_ID_hipLibraryLoadFromFile = 440,
+  HIP_API_ID_hipLibraryUnload = 441,
+  HIP_API_ID_hipLibraryGetKernel = 442,
+  HIP_API_ID_hipLibraryGetKernelCount = 443,
+  HIP_API_ID_LAST = 443,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -922,6 +927,11 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipUserObjectRetain: return "hipUserObjectRetain";
     case HIP_API_ID_hipWaitExternalSemaphoresAsync: return "hipWaitExternalSemaphoresAsync";
     case HIP_API_ID_hipModuleGetFunctionCount: return "hipModuleGetFunctionCount";
+    case HIP_API_ID_hipLibraryLoadData: return "hipLibraryLoadData";
+    case HIP_API_ID_hipLibraryLoadFromFile: return "hipLibraryLoadFromFile";
+    case HIP_API_ID_hipLibraryUnload: return "hipLibraryUnload";
+    case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
+    case HIP_API_ID_hipLibraryGetKernelCount: return "hipLibraryGetKernelCount";
   };
   return "unknown";
 };
@@ -1355,6 +1365,11 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipUserObjectRetain", name) == 0) return HIP_API_ID_hipUserObjectRetain;
   if (strcmp("hipWaitExternalSemaphoresAsync", name) == 0) return HIP_API_ID_hipWaitExternalSemaphoresAsync;
   if (strcmp("hipModuleGetFunctionCount", name) == 0) return HIP_API_ID_hipModuleGetFunctionCount;
+  if (strcmp("hipLibraryLoadData", name) == 0) return HIP_API_ID_hipLibraryLoadData;
+  if (strcmp("hipLibraryLoadFromFile", name) == 0) return HIP_API_ID_hipLibraryLoadFromFile;
+  if (strcmp("hipLibraryUnload", name) == 0) return HIP_API_ID_hipLibraryUnload;
+  if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
+  if (strcmp("hipLibraryGetKernelCount", name) == 0) return HIP_API_ID_hipLibraryGetKernelCount;
   return HIP_API_ID_NONE;
 }
 
@@ -3936,6 +3951,44 @@ typedef struct hip_api_data_s {
       unsigned int numExtSems;
       hipStream_t stream;
     } hipWaitExternalSemaphoresAsync;
+    struct {
+      hipLibrary_t* library;
+      hipLibrary_t library__val;
+      const void* image;
+      hipJitOption** jitOptions;
+      void** jitOptionsValues;
+      unsigned int numJitOptions;
+      hipLibraryOption** libraryOptions;
+      void** libraryOptionValues;
+      unsigned int numLibraryOptions;
+    } hipLibraryLoadData;
+    struct {
+      hipLibrary_t* library;
+      hipLibrary_t library__val;
+      const char* fname;
+      char fname__val;
+      hipJitOption** jitOptions;
+      void** jitOptionsValues;
+      unsigned int numJitOptions;
+      hipLibraryOption** libraryOptions;
+      void** libraryOptionValues;
+      unsigned int numLibraryOptions;
+    } hipLibraryLoadFromFile;
+    struct {
+      hipLibrary_t library;
+    } hipLibraryUnload;
+    struct {
+      hipKernel_t* kernel;
+      hipKernel_t kernel__val;
+      hipLibrary_t library;
+      const char* kname;
+      char kname__val;
+    } hipLibraryGetKernel;
+    struct {
+      unsigned int *count;
+      unsigned int count__val;
+      hipLibrary_t library;
+    } hipLibraryGetKernelCount;
   } args;
   uint64_t *phase_data;
 } hip_api_data_t;
@@ -6601,6 +6654,46 @@ typedef struct hip_api_data_s {
 #define INIT_hipTexRefSetMipmapFilterMode_CB_ARGS_DATA(cb_data) {};
 // hipUnbindTexture()
 #define INIT_hipUnbindTexture_CB_ARGS_DATA(cb_data) {};
+// hipLibraryLoadData()
+#define INIT_hipLibraryLoadData_CB_ARGS_DATA(cb_data)                                              \
+  {                                                                                                \
+    cb_data.args.hipLibraryLoadData.library = (hipLibrary_t*)library;                              \
+    cb_data.args.hipLibraryLoadData.image = (const void*)image;                                    \
+    cb_data.args.hipLibraryLoadData.jitOptions = (hipJitOption**)jitOptions;                       \
+    cb_data.args.hipLibraryLoadData.jitOptionsValues = (void**)jitOptionsValues;                   \
+    cb_data.args.hipLibraryLoadData.numJitOptions = (unsigned int)numJitOptions;                   \
+    cb_data.args.hipLibraryLoadData.libraryOptions = (hipLibraryOption**)libraryOptions;           \
+    cb_data.args.hipLibraryLoadData.libraryOptionValues = (void**)libraryOptionValues;             \
+    cb_data.args.hipLibraryLoadData.numLibraryOptions = (unsigned int)numLibraryOptions;           \
+  };
+// hipLibraryLoadFromFile()
+#define INIT_hipLibraryLoadFromFile_CB_ARGS_DATA(cb_data)                                          \
+  {                                                                                                \
+    cb_data.args.hipLibraryLoadFromFile.library = (hipLibrary_t*)library;                          \
+    cb_data.args.hipLibraryLoadFromFile.fname = (const char*)fname;                                \
+    cb_data.args.hipLibraryLoadFromFile.jitOptions = (hipJitOption**)jitOptions;                   \
+    cb_data.args.hipLibraryLoadFromFile.jitOptionsValues = (void**)jitOptionsValues;               \
+    cb_data.args.hipLibraryLoadFromFile.numJitOptions = (unsigned int)numJitOptions;               \
+    cb_data.args.hipLibraryLoadFromFile.libraryOptions = (hipLibraryOption**)libraryOptions;       \
+    cb_data.args.hipLibraryLoadFromFile.libraryOptionValues = (void**)libraryOptionValues;         \
+    cb_data.args.hipLibraryLoadFromFile.numLibraryOptions = (unsigned int)numLibraryOptions;       \
+  };
+// hipLibraryUnload()
+#define INIT_hipLibraryUnload_CB_ARGS_DATA(cb_data)                            \
+  { cb_data.args.hipLibraryUnload.library = (hipLibrary_t)library; };
+// hipLibraryGetKernel()
+#define INIT_hipLibraryGetKernel_CB_ARGS_DATA(cb_data)                         \
+  {                                                                            \
+    cb_data.args.hipLibraryGetKernel.kernel = (hipKernel_t *)kernel;           \
+    cb_data.args.hipLibraryGetKernel.library = (hipLibrary_t)library;          \
+    cb_data.args.hipLibraryGetKernel.kname = (const char *)kname;              \
+  };
+// hipLibraryGetKernelCount()
+#define INIT_hipLibraryGetKernelCount_CB_ARGS_DATA(cb_data)                    \
+  {                                                                            \
+    cb_data.args.hipLibraryGetKernelCount.count = (unsigned int *)count;       \
+    cb_data.args.hipLibraryGetKernelCount.library = (hipLibrary_t)library;     \
+  };
 
 #define INIT_NONE_CB_ARGS_DATA(cb_data) {};
 
@@ -8287,9 +8380,27 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipModuleGetFunctionCount[('unsigned int*', 'count'), ('hipModule_t', 'mod')]
     case HIP_API_ID_hipModuleGetFunctionCount:
-      if (data->args.hipModuleGetFunctionCount.count) data->args.hipModuleGetFunctionCount.count__val = *(data->args.hipModuleGetFunctionCount.count);
+      if (data->args.hipModuleGetFunctionCount.count)
+        data->args.hipModuleGetFunctionCount.count__val =
+            *(data->args.hipModuleGetFunctionCount.count);
       break;
-    default: break;
+    case HIP_API_ID_hipLibraryLoadData:
+      if (data->args.hipLibraryLoadData.library)
+        data->args.hipLibraryLoadData.library__val = *(data->args.hipLibraryLoadData.library);
+      break;
+    case HIP_API_ID_hipLibraryLoadFromFile:
+      if (data->args.hipLibraryLoadFromFile.library)
+        data->args.hipLibraryLoadFromFile.library__val =
+            *(data->args.hipLibraryLoadFromFile.library);
+      if (data->args.hipLibraryLoadFromFile.fname)
+        data->args.hipLibraryLoadFromFile.fname__val = *(data->args.hipLibraryLoadFromFile.fname);
+      break;
+    case HIP_API_ID_hipLibraryGetKernel:
+      if (data->args.hipLibraryGetKernel.kernel)
+        data->args.hipLibraryGetKernel.kernel__val = *(data->args.hipLibraryGetKernel.kernel);
+      break;
+    default:
+      break;
   };
 }
 
@@ -11741,8 +11852,110 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.count__val); }
       oss << ", mod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.mod);
       oss << ")";
-    break;
-    default: oss << "unknown";
+      break;
+    case HIP_API_ID_hipLibraryLoadData:
+      oss << "hipLibraryLoadData(";
+      if (data->args.hipLibraryLoadData.library == NULL)
+        oss << "library=NULL";
+      else {
+        oss << "library=";
+        roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.library__val);
+      }
+      oss << ", image=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.image);
+      oss << ", jitOptions=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.jitOptions);
+      oss << ", jitOptionsValues=";
+      roctracer::hip_support::detail::operator<<(oss,
+                                                 data->args.hipLibraryLoadData.jitOptionsValues);
+      oss << ", numJitOptions=";
+      roctracer::hip_support::detail::operator<<(oss,
+                                                 data->args.hipLibraryLoadData.numJitOptions);
+      oss << ", libraryOptions=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadData.libraryOptions);
+      oss << ", libraryOptionsValues=";
+      roctracer::hip_support::detail::operator<<(
+          oss, data->args.hipLibraryLoadData.libraryOptionValues);
+      oss << ", numLibraryOptions=";
+      roctracer::hip_support::detail::operator<<(oss,
+                                                 data->args.hipLibraryLoadData.numLibraryOptions);
+      oss << ")";
+      break;
+    case HIP_API_ID_hipLibraryLoadFromFile:
+      oss << "hipLibraryLoadFromFile(";
+      if (data->args.hipLibraryLoadFromFile.library == NULL)
+        oss << "library=NULL";
+      else {
+        oss << "library=";
+        roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.library__val);
+      }
+      if (data->args.hipLibraryLoadFromFile.fname == NULL)
+        oss << "fname=NULL";
+      else {
+        oss << "fname=";
+        roctracer::hip_support::detail::operator<<(oss,
+                                                   data->args.hipLibraryLoadFromFile.fname__val);
+      }
+      oss << ", jitOptions=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.jitOptions);
+      oss << ")";
+      oss << ", jitOptionsValues=";
+      roctracer::hip_support::detail::operator<<(
+          oss, data->args.hipLibraryLoadFromFile.jitOptionsValues);
+      oss << ")";
+      oss << ", numJitOptions=";
+      roctracer::hip_support::detail::operator<<(oss,
+                                                 data->args.hipLibraryLoadFromFile.numJitOptions);
+      oss << ")";
+      oss << ", libraryOptions=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryLoadFromFile.libraryOptions);
+      oss << ")";
+      oss << ", libraryOptionsValues=";
+      roctracer::hip_support::detail::operator<<(
+          oss, data->args.hipLibraryLoadFromFile.libraryOptionValues);
+      oss << ")";
+      oss << ", numLibraryOptions=";
+      roctracer::hip_support::detail::operator<<(oss,
+                                                 data->args.hipLibraryLoadFromFile.numLibraryOptions);
+      oss << ")";
+      break;
+    case HIP_API_ID_hipLibraryUnload:
+      oss << "hipLibraryUnload(";
+      oss << ", library=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryUnload.library);
+      break;
+    case HIP_API_ID_hipLibraryGetKernel:
+      oss << "hipLibraryGetKernel(";
+      if (data->args.hipLibraryGetKernel.kernel == NULL)
+        oss << "kernel=NULL";
+      else {
+        oss << "kernel=";
+        roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernel.kernel__val);
+      }
+      oss << ", library=";
+      roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernel.library);
+      if (data->args.hipLibraryGetKernel.kname == NULL)
+        oss << "kname=NULL";
+      else {
+        oss << "kname=";
+        roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernel.kname__val);
+      }
+      break;
+    case HIP_API_ID_hipLibraryGetKernelCount:
+      oss << "hipLibraryGetKernelCount(";
+      if (data->args.hipLibraryGetKernelCount.count == NULL)
+        oss << "count=NULL";
+      else {
+        oss << "count=";
+        roctracer::hip_support::detail::operator<<(
+            oss, data->args.hipLibraryGetKernelCount.count__val);
+      }
+      oss << ", library=";
+      roctracer::hip_support::detail::operator<<(
+          oss, data->args.hipLibraryGetKernelCount.library);
+      break;
+    default:
+      oss << "unknown";
   };
   return strdup(oss.str().c_str());
 }
