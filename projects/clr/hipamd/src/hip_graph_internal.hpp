@@ -320,6 +320,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   const std::vector<Node>& GetDependencies() const { return dependencies_; }
   /// Update graph node dependecies
   void SetDependencies(std::vector<Node>& dependencies) {
+    dependencies_.clear();
     for (auto entry : dependencies) {
       dependencies_.push_back(entry);
     }
@@ -366,6 +367,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   const std::vector<Node>& GetEdges() const { return edges_; }
   /// Updates graph node children
   void SetEdges(std::vector<Node>& edges) {
+    edges_.clear();
     for (auto entry : edges) {
       edges_.push_back(entry);
     }
@@ -425,19 +427,10 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   unsigned int GetEnabled() const { return isEnabled_; }
   void SetEnabled(unsigned int isEnabled) { isEnabled_ = isEnabled; }
-  // Returns true if capture is enabled for the current node.
+
+  // Base implementation returns false; specific node types should override.
   virtual bool GraphCaptureEnabled() {
-    bool isGraphCapture = false;
-    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
-      switch (GetType()) {
-        case hipGraphNodeTypeMemset:
-          isGraphCapture = true;
-          break;
-        default:
-          break;
-      }
-    }
-    return isGraphCapture;
+    return false;
   }
   virtual void PrintAttributes(std::ostream& out, hipGraphDebugDotFlags flag) override {
     out << "[";
@@ -565,7 +558,7 @@ class Graph {
       }
     }
   }
-  ~Graph() {
+  virtual ~Graph() {
     for (auto node : vertices_) {
       delete node;
     }
@@ -672,7 +665,31 @@ class Graph {
   );
 
   //! Schedules all nodes in the graph into different streams
-  void ScheduleNodes();
+  hipError_t ScheduleNodes();
+
+  //! Schedules nodes into batches for optimized execution
+  hipError_t ScheduleNodesIntoBatches();
+
+  //! Find independent execution paths in the graph
+  std::vector<std::vector<Node>> FindExecutionPaths();
+
+
+  //! Recursively find all paths from a node
+  void FindPathsRecursive(Node node, std::vector<Node>& current_path,
+                          std::unordered_set<unsigned int>& visited,
+                          std::vector<std::vector<Node>>& all_paths);
+
+  //! Flatten child graph metadata nodes in a path by transferring dependencies and edges
+  void FlattenChildGraphMetadata(std::vector<Node>& path);
+
+  //! Create segments from execution paths
+  void CreateSegmentsFromPaths(const std::vector<std::vector<Node>>& execution_paths);
+
+  //! Resolve dependencies between segments
+  void ResolveSegmentDependencies();
+
+  //! Calculate dependency levels for segments using topological sort
+  void CalculateSegmentTopoDependencyLevels();
 
   //! Runs one node on the assigned stream
   bool RunOneNode(Node node,  //!< Node for the execution on GPU
@@ -801,6 +818,7 @@ class Graph {
   std::unordered_set<GraphNode*> capturedNodes_;
   bool graphInstantiated_;
   std::unordered_map<Node, Node> clonedNodes_;
+
   //! Map of device ID to vector of streams allocated for that device during graph execution.
   //! Each device may require multiple streams to handle parallel execution of graph nodes.
   std::unordered_map<int, std::vector<hip::Stream*>> streams_dev_;
@@ -808,9 +826,36 @@ class Graph {
   //! Map tracking the maximum number of concurrent streams required per device for graph execution.
   //! Key: device ID, Value: maximum number of streams needed for that device
   std::unordered_map<int, int> max_streams_dev_;
+
+  // Batch-based scheduling structures
+  struct Batch {
+    int id = -1;
+    int stream_id = 0;
+    std::vector<Node> nodes;
+    std::vector<int> incoming_stream_ids;
+    Node last_node = nullptr;
+  };
+
+  // Segment dependency structures
+  struct Segment {
+    int id = -1;
+    int stream_id = -1;                         // Assigned stream for this segment
+    int dependency_level = -1;                  // Topological level (0 = root, 1 = depends on root, etc.)
+    std::vector<Node> nodes;
+    std::vector<int> segment_ids_dependencies;  // Segments this segment depends on
+    std::vector<int> segment_ids_edges;         // Segments that depend on this segment
+    Node first_node = nullptr;
+    Node last_node = nullptr;
+  };
+
+  std::vector<Batch> batches_;
+  //! Pointer to GraphExec for accessing its members during scheduling
+  //! Set during ScheduleNodes() if called on a GraphExec object
+  GraphExec* graphExec_ = nullptr;
 };
 
 class GraphExec : public amd::ReferenceCountedObject, public Graph {
+  friend class Graph;  // Allow Graph to access GraphExec's protected members
  public:
   static std::unordered_set<GraphExec*> graphExecSet_;
   static amd::Monitor graphExecSetLock_;
@@ -832,7 +877,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       }
     }
     parallel_streams_.clear();
-    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
       if (kernArgManager_ != nullptr) {
         kernArgManager_->release();
       }
@@ -841,8 +886,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       static_cast<ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
     }
 
-    packetBatches_.clear();
-    nodeCaptureStatus_.clear();
+    segmentBatches_.clear();
   }
 
   Node GetClonedNode(Node node) {
@@ -882,9 +926,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
-  hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
-  //! Enqueue a multi-device linear graph for execution
-  hipError_t EnqueueMultiDeviceLinearGraph(hip::Stream* hip_stream);
+
+  hipError_t EnqueueSegmentedGraph(hip::Stream* launch_stream,
+                                   const std::vector<hip::Stream*>& parallel_streams);
+  hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
+                            amd::AccumulateCommand* accumulate);
+
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
   void UpdateStreams(hip::Stream* launch_stream);
@@ -909,6 +956,11 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // Main dispatch vectors - always ready for batch dispatch
     std::vector<uint8_t*> dispatchPackets;
     std::vector<std::string> dispatchKernelNames;
+
+    // Cached filtered lists - built on-demand when nodes are disabled
+    std::vector<uint8_t*> enabledPackets;
+    std::vector<std::string> enabledKernelNames;
+
     // Node tracking
     struct NodeRange {
       size_t startIndex;    // Start index in dispatchPackets
@@ -921,13 +973,31 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
+    // Rebuild cached filtered lists if cache is stale
+    void rebuildFilteredLists();
+  };
+
+  //! Structure linking packet batches to segments
+  struct SegmentBatch {
+    int segment_id;           // Segment this batch belongs to
+    std::vector<bool> node_capture_status; // Capture status for each node in this segment
+    std::vector<PacketBatch> packet_batches; // All packet batches for this segment
+
+    SegmentBatch(int seg_id) : segment_id(seg_id) {}
   };
 
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
-  //! Each batch contains packets from consecutive captured nodes
-  std::vector<PacketBatch> packetBatches_;
-  //! Track which nodes were successfully captured (true) vs need individual execution (false)
-  std::vector<bool> nodeCaptureStatus_;
+  //! Each entry links a packet batch to its segment
+  std::vector<SegmentBatch> segmentBatches_;
+
+  //! Segment information for batch scheduling
+  std::vector<Segment> segments_;
+  //! Map of node to segment ID
+  std::unordered_map<Node, int> node_to_segment_id_;
+  //! Maximum dependency level in the segment graph
+  int max_dependency_level_ = -1;
+  //!< Map of dependency level to list of segment IDs at that level
+  std::unordered_map<int, std::vector<int>> segments_per_level_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
@@ -950,6 +1020,13 @@ class ChildGraphNode : public GraphNode, public GraphExec {
 
   bool GetGraphCaptureStatus() { return graphCaptureStatus_; }
 
+  bool GraphCaptureEnabled() override {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
+      return graphCaptureStatus_;
+    }
+    return false;
+  }
+
   std::vector<Node>& GetChildGraphNodeOrder() { return topoOrder_; }
 
   void SetStream(hip::Stream* stream) override { stream_ = stream; }
@@ -960,7 +1037,17 @@ class ChildGraphNode : public GraphNode, public GraphExec {
 
   void EnqueueCommands(hip::Stream* stream) override {
     if (graphCaptureStatus_) {
-      hipError_t status = EnqueueGraphWithSingleList(stream);
+      // Use segment-based enqueue for captured graphs
+      amd::AccumulateCommand* accumulate = new amd::AccumulateCommand(*stream, {}, nullptr);
+      for (const auto& segment : segments_) {
+        hipError_t status = EnqueueSegment(segment, stream, accumulate);
+        if (status != hipSuccess) {
+          accumulate->release();
+          return;
+        }
+      }
+      accumulate->enqueue();
+      accumulate->release();
     } else if (max_streams_ == 1) {
       for (int i = 0; i < topoOrder_.size(); i++) {
         topoOrder_[i]->SetStream(stream_);
@@ -1137,7 +1224,7 @@ class GraphKernelNode : public GraphNode {
     }
     hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
     amd::Kernel* kernel = function->kernel();
-    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
       auto device = g_devices[dev_id_]->devices()[0];
       device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(*device));
       kernargSegmentByteSize_ = devKernel->KernargSegmentByteSize();
@@ -1471,14 +1558,13 @@ class GraphKernelNode : public GraphNode {
   }
 
   virtual bool GraphCaptureEnabled() override {
-    bool isGraphCapture = false;
-    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
       // Disable capture for cooperative kernels
       if (!coopKernel_) {
-        isGraphCapture = true;
+        return true;
       }
     }
-    return isGraphCapture;
+    return false;
   }
 };
 
@@ -1632,17 +1718,16 @@ class GraphMemcpyNode : public GraphNode {
     }
   }
   virtual bool GraphCaptureEnabled() override {
-    bool isGraphCapture = false;
-    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
       switch (copyParams_.kind) {
         case hipMemcpyDeviceToDevice:
-          isGraphCapture = true;
+          return true;
           break;
         default:
           break;
       }
     }
-    return isGraphCapture;
+    return false;
   }
 };
 
@@ -1867,18 +1952,17 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     }
   }
   virtual bool GraphCaptureEnabled() override {
-    bool isGraphCapture = false;
-    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
       hip::MemcpyType type = ihipGetMemcpyType(src_, dst_, kind_);
       switch (type) {
         case hipCopyBuffer:
-          isGraphCapture = true;
+          return true;
           break;
         default:
           break;
       }
     }
-    return isGraphCapture;
+    return false;
   }
 };
 
@@ -2137,6 +2221,13 @@ class GraphMemsetNode : public GraphNode {
     } else {
       return shape_;
     }
+  }
+
+  virtual bool GraphCaptureEnabled() override {
+    if (DEBUG_HIP_GRAPH_PACKET_ENGINE) {
+      return true;
+    }
+    return false;
   }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
