@@ -2102,7 +2102,7 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
-  if (mem_seg == kIoMemory) {
+  if (memSegment == kIoMemory) {
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
