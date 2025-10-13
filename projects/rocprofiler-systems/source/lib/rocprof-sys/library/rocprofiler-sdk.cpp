@@ -57,7 +57,8 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
-#include <rocprofiler-sdk/registration.h>
+// #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <timemory/defines.h>
@@ -99,7 +100,7 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
     pop_thread_state();
 }
 
-#if(ROCPROFILER_VERSION < 700)
+#if (ROCPROFILER_VERSION < 700)
 /**
  * @brief Stream ID.
  */
@@ -215,8 +216,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             }
         }
 
-        // Removes any numeric index enclosed in square brackets at the end of the string.
-        // For example, "example[123]" will be converted to "example".
+        // Removes any numeric index enclosed in square brackets at the end of the
+        // string. For example, "example[123]" will be converted to "example".
         auto _old_name_v = name_v;
         name_v =
             std::regex_replace(name_v, std::regex{ "^(.*)(\\[)([0-9]+)(\\])$" }, "$1");
@@ -251,11 +252,11 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         auto found_counters =
             timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
 
-        ROCPROFSYS_ABORT_F(
-            "Unable to find all counters for agent %i (gpu-%li, %s) in %s. Found: %s\n",
-            tool_agent_v->agent->node_id, tool_agent_v->device_id,
-            tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
-            found_counters.c_str());
+        ROCPROFSYS_ABORT_F("Unable to find all counters for agent %i (gpu-%li, %s) "
+                           "in %s. Found: %s\n",
+                           tool_agent_v->agent->node_id, tool_agent_v->device_id,
+                           tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
+                           found_counters.c_str());
     }
 
     if(!counters_v.empty())
@@ -371,7 +372,7 @@ template <typename CorrelationIdType>
 uint64_t
 get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
     {
         return correlation_id.ancestor;
@@ -487,7 +488,7 @@ size_t
 get_mem_copy_dst_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     return record.dst_address.value;
 #else
     return 0;
@@ -498,19 +499,19 @@ size_t
 get_mem_copy_src_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     return record.src_address.value;
 #else
     return 0;
 #endif
 }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 size_t
 get_mem_alloc_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
 {
-#    if(ROCPROFILER_VERSION >= 700)
+#    if (ROCPROFILER_VERSION >= 700)
     return record.address.value;
 #    else
     return static_cast<size_t>(record.address.handle);
@@ -544,6 +545,7 @@ void
 cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record, uint64_t stream_handle)
 {
     auto queue_handle  = record->dispatch_info.queue_id.handle;
+
 
     trace_cache::get_metadata_registry().add_queue(queue_handle);
     trace_cache::get_metadata_registry().add_stream(stream_handle);
@@ -903,7 +905,7 @@ get_kernel_dispatch_timestamps()
     return _v;
 }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 // To handle events without finalization, perfetto push must occur in start
 // Allows capture of worker thread implicit and sync tasks
 void
@@ -913,8 +915,8 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
 {
     static bool is_first_implicit_call = true;
 
-    // Ignore first ompt_implicit_call as this is created after runtime initialization but
-    // before first region
+    // Ignore first ompt_implicit_call as this is created after runtime initialization
+    // but before first region
     //  Respective end is also not received due to finalization occurring too late
     if(is_first_implicit_call && (record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT &&
                                   record.operation == ROCPROFILER_OMPT_ID_implicit_task))
@@ -1124,7 +1126,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                             user_data, ts);
                 break;
             }
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_start(record, user_data, ts);
@@ -1137,7 +1139,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
             {
                 tool_tracing_callback_start(category::rocm_rocjpeg_api{}, record,
@@ -1159,11 +1161,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1207,7 +1209,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                            ts, _bt_data);
                 break;
             }
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
@@ -1220,7 +1222,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
             {
                 tool_tracing_callback_stop(category::rocm_rocjpeg_api{}, record,
@@ -1243,11 +1245,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1282,15 +1284,15 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 }
             }
             break;
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 // Callbacks that are received but that we do not process
                 static const std::set<rocprofiler_ompt_operation_t> ompt_no_process = {
                     ROCPROFILER_OMPT_ID_callback_functions,  // "Fake" callback
-                    // There is no point in handling ompt_thread_begin events as the
-                    // corresponding ompt_thread_end event will not occur unless
-                    // runtime is finalized earlier
+                    // There is no point in handling ompt_thread_begin events as
+                    // the corresponding ompt_thread_end event will not occur
+                    // unless runtime is finalized earlier
                     ROCPROFILER_OMPT_ID_thread_begin,
                     ROCPROFILER_OMPT_ID_thread_end,
                 };
@@ -1320,7 +1322,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_device_initialize:
                     case ROCPROFILER_OMPT_ID_device_finalize:
                     case ROCPROFILER_OMPT_ID_device_load:
-                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by runtime
+                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by
+                    // runtime
                     case ROCPROFILER_OMPT_ID_task_create:
                     case ROCPROFILER_OMPT_ID_task_schedule:
                     case ROCPROFILER_OMPT_ID_mutex_released:
@@ -1330,9 +1333,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_task_dependence:
                     case ROCPROFILER_OMPT_ID_error:
                     {
-                        // These callbacks are considered instant events and should start
-                        // and immediately call stop as no corresponding "end" will be
-                        // received
+                        // These callbacks are considered instant events and should
+                        // start and immediately call stop as no corresponding "end"
+                        // will be received
                         ompt_tracing_callback_start(record, user_data, ts);
                         ROCPROFILER_CALL(
                             rocprofiler_get_timestamp(&ts));  // Set artificial end ts
@@ -1386,7 +1389,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
-
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
@@ -1622,7 +1624,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
                 auto* record =
@@ -1827,7 +1829,7 @@ set_kernel_rename_and_stream_correlation_id(
     return 0;
 }
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
 void
 tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
                          rocprofiler_user_data_t* /* user_data */, void* /* data */)
@@ -1859,7 +1861,8 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
                                  (unsigned long) stream_id.handle);
             stream_id_push(stream_id);
         }
-        // Pop stream ID off of stream stack after underlying HIP function is completed
+        // Pop stream ID off of stream stack after underlying HIP function is
+        // completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
             ROCPROFSYS_VERBOSE_F(3,
@@ -1896,6 +1899,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->client_fini = fini_func;
 
     _data->initialize();
+
     if(!_counter_events.empty()) _data->initialize_event_info();
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
@@ -1908,7 +1912,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION
 #endif
         };
@@ -1931,11 +1935,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
             ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
 #endif
         })
@@ -1959,7 +1963,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         external_corr_id_request_kinds.size(),
         set_kernel_rename_and_stream_correlation_id, _data));
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
        (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
     {
@@ -1994,7 +1998,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->memory_copy_buffer));
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
@@ -2118,6 +2122,43 @@ tool_fini(void* callback_data)
     delete tool_data;
     tool_data = nullptr;
 }
+
+int
+tool_attach(rocprofiler_client_detach_t /*detach_func*/,
+            rocprofiler_context_id_t* /*context_ids*/, uint64_t /*context_ids_length*/,
+            void* tool_data)
+{
+    pid_t target_pid = getppid();
+    pid_t tool_pid   = getpid();
+    ROCPROFSYS_VERBOSE(0, "Attaching SDK tool. Target PID: %d, tool PID %d", target_pid,
+                       tool_pid);
+
+    auto* _tool_data = reinterpret_cast<client_data*>(tool_data);
+
+    ROCPROFILER_CALL(rocprofiler_start_context(_tool_data->primary_ctx));
+
+    return 0;
+}
+void
+tool_detach(void* /*tool_data*/)
+{
+    ROCPROFSYS_VERBOSE(0, "Detaching tool");
+    flush();
+    stop();
+
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::shutdown();
+
+    if(get_counter_storage())
+    {
+        get_counter_storage()->clear();
+        delete get_counter_storage();
+        get_counter_storage() = nullptr;
+    }
+
+    rocprofsys_finalize();
+}
+
 }  // namespace
 
 void
@@ -2189,67 +2230,92 @@ get_rocm_events_info()
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
 
-extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t version, const char* runtime_version, uint32_t priority,
-                      rocprofiler_client_id_t* id)
+extern "C"
 {
-    // only activate once
+    rocprofiler_tool_configure_result_t* rocprofiler_configure(
+        uint32_t version, const char* runtime_version, uint32_t priority,
+        rocprofiler_client_id_t* id)
     {
-        static bool _first = true;
-        if(!_first) return nullptr;
-        _first = false;
+        // only activate once
+        {
+            static bool _first = true;
+            if(!_first) return nullptr;
+            _first = false;
+        }
+
+        if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
+        if(!tim::settings::enabled()) return nullptr;
+
+        if(!rocprofsys::config::settings_are_configured() &&
+           rocprofsys::get_state() < rocprofsys::State::Active)
+            rocprofsys_init_tooling_hidden();
+
+        if(!rocprofsys::config::get_use_rocm())
+        {
+            return nullptr;
+        }
+
+        // set the client name
+        id->name = "rocprofsys";
+
+        // ensure tool data exists
+        if(!rocprofsys::rocprofiler_sdk::tool_data)
+            rocprofsys::rocprofiler_sdk::tool_data =
+                new rocprofsys::rocprofiler_sdk::client_data{};
+
+        // store client info
+        rocprofsys::rocprofiler_sdk::tool_data->client_id = id;
+
+        // compute major/minor/patch version info
+        uint32_t major = version / 10000;
+        uint32_t minor = (version % 10000) / 100;
+        uint32_t patch = version % 100;
+
+        // generate info string
+        auto info = std::stringstream{};
+        info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "."
+             << patch << " (" << runtime_version << ")";
+
+        ROCPROFSYS_VERBOSE_F(0, "%s\n", info.str().c_str());
+        ROCPROFSYS_VERBOSE_F(2, "client_id=%u, priority=%u\n", id->handle, priority);
+
+        ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
+            rocprofsys::rocprofiler_sdk::thread_precreate,
+            rocprofsys::rocprofiler_sdk::thread_postcreate,
+            ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
+                ROCPROFILER_MARKER_LIBRARY,
+            nullptr));
+
+        // create configure data
+        static auto cfg = rocprofiler_tool_configure_result_t{
+            sizeof(rocprofiler_tool_configure_result_t),
+            &::rocprofsys::rocprofiler_sdk::tool_init,
+            &::rocprofsys::rocprofiler_sdk::tool_fini,
+            rocprofsys::rocprofiler_sdk::tool_data
+        };
+
+        // return pointer to configure data
+        return &cfg;
     }
 
-    if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
-    if(!tim::settings::enabled()) return nullptr;
-
-    if(!rocprofsys::config::settings_are_configured() &&
-       rocprofsys::get_state() < rocprofsys::State::Active)
-        rocprofsys_init_tooling_hidden();
-
-    if(!rocprofsys::config::get_use_rocm())
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        uint32_t /*version*/, const char* /*runtime_version*/, uint32_t /*priority*/,
+        rocprofiler_client_id_t* /*id*/)
     {
-        return nullptr;
+        // This function is called right after rocprofiler_configure with the same
+        // parameters. The data returned is only used when attaching to a running process.
+
+        std::cout << ">>>>>>>>>>> ROCPROFILER CONFIGRE ATTACH <<<<<<<<<<<" << std::endl;
+
+        // create configure data using experimental struct with attach/detach support
+        static auto cfg = rocprofiler_tool_configure_attach_result_t{
+            sizeof(rocprofiler_tool_configure_attach_result_t),
+            &rocprofsys::rocprofiler_sdk::tool_attach,
+            &rocprofsys::rocprofiler_sdk::tool_detach,
+            rocprofsys::rocprofiler_sdk::tool_data
+        };
+
+        // return pointer to configure data
+        return &cfg;
     }
-
-    // set the client name
-    id->name = "rocprofsys";
-
-    // ensure tool data exists
-    if(!rocprofsys::rocprofiler_sdk::tool_data)
-        rocprofsys::rocprofiler_sdk::tool_data =
-            new rocprofsys::rocprofiler_sdk::client_data{};
-
-    // store client info
-    rocprofsys::rocprofiler_sdk::tool_data->client_id = id;
-
-    // compute major/minor/patch version info
-    uint32_t major = version / 10000;
-    uint32_t minor = (version % 10000) / 100;
-    uint32_t patch = version % 100;
-
-    // generate info string
-    auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "."
-         << patch << " (" << runtime_version << ")";
-
-    ROCPROFSYS_VERBOSE_F(0, "%s\n", info.str().c_str());
-    ROCPROFSYS_VERBOSE_F(2, "client_id=%u, priority=%u\n", id->handle, priority);
-
-    ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
-        rocprofsys::rocprofiler_sdk::thread_precreate,
-        rocprofsys::rocprofiler_sdk::thread_postcreate,
-        ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-            ROCPROFILER_MARKER_LIBRARY,
-        nullptr));
-
-    // create configure data
-    static auto cfg =
-        rocprofiler_tool_configure_result_t{ sizeof(rocprofiler_tool_configure_result_t),
-                                             &::rocprofsys::rocprofiler_sdk::tool_init,
-                                             &::rocprofsys::rocprofiler_sdk::tool_fini,
-                                             rocprofsys::rocprofiler_sdk::tool_data };
-
-    // return pointer to configure data
-    return &cfg;
 }

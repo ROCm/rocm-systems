@@ -344,7 +344,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                          "memory_copy,scratch_memory" };
 
-#    if(ROCPROFILER_VERSION < 10000)
+#    if (ROCPROFILER_VERSION < 10000)
     _domain_defaults.append(",page_migration");
 #    endif
 
@@ -409,7 +409,7 @@ get_callback_domains()
     ROCPROFSYS_WARNING_IF(_version.formatted == 0,
                           "Warning! rocprofiler-sdk version not initialized\n");
 
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     if(_version.formatted >= 600)
     {
         // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
@@ -418,7 +418,7 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
     }
 #    endif
-#    if(ROCPROFILER_VERSION >= 700)
+#    if (ROCPROFILER_VERSION >= 700)
     if(_version.formatted >= 700)
     {
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
@@ -505,10 +505,10 @@ get_buffered_domains()
     const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
         ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
 #    endif
-#    if(ROCPROFILER_VERSION < 10000)
+#    if (ROCPROFILER_VERSION < 10000)
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
@@ -553,7 +553,7 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API);
         }
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
         else if(itr == "memory_allocation")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);

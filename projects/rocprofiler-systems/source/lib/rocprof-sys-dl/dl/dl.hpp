@@ -33,6 +33,8 @@
 
 #include "rocprofiler-systems/user.h"
 
+#include <rocprofiler-sdk/experimental/registration.h>
+
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -92,6 +94,10 @@ extern "C"
     void rocprofsys_progress(const char*) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_annotated_progress(const char*, rocprofsys_annotation_t*,
                                        size_t) ROCPROFSYS_PUBLIC_API;
+
+    int tool_attach(rocprofiler_client_detach_t detach_func,
+                    rocprofiler_context_id_t* context_ids, uint64_t context_ids_length,
+                    void* tool_data) ROCPROFSYS_PUBLIC_API;
 
 #if defined(ROCPROFSYS_DL_SOURCE) && (ROCPROFSYS_DL_SOURCE > 0)
     void rocprofsys_preinit_library(void) ROCPROFSYS_HIDDEN_API;
