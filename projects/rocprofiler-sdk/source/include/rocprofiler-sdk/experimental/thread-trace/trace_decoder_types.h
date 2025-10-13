@@ -214,11 +214,15 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
 
 typedef struct rocprofiler_thread_trace_decoder_other_simd_t
 {
-    rocprofiler_thread_trace_decoder_wave_t base;
+    uint8_t cu;    ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
+    uint8_t simd;  ///< SIMD ID [0,3].
 
-    uint8_t other_simd;
+    int64_t begin_time;  ///< Min instruction time in this data chunk.
+    int64_t end_time;    ///< Max instruction time in this data chunk.
+
+    uint64_t                                 instructions_size;   ///< instructions_array size
+    rocprofiler_thread_trace_decoder_inst_t* instructions_array;  ///< Instructions executed
 } rocprofiler_thread_trace_decoder_other_simd_t;
-
 
 /**
  * @brief Defines the type of payload received by rocprofiler_thread_trace_decoder_callback_t

@@ -1,43 +1,47 @@
 #pragma once
-
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
-
-#include <cstdint>
-#include <mutex>
-#include <string>
-#include <vector>
 #include <filesystem>
+
+#include <algorithm>
+#include <nlohmann/json.hpp>
+#include <vector>
+#include "outputfile.hpp"
 
 namespace rocprofiler
 {
 namespace att_wrapper
 {
-
-struct OtherSimdInstEvent
+inline void
+write_other_simd_json(const rocprofiler_thread_trace_decoder_other_simd_t& rec,
+                      const std::filesystem::path&                         filepath)
 {
-    uint8_t cu    = 0;
-    uint8_t simd  = 0;
-    uint8_t other = 0;
+    nlohmann::json out;
+    out["type"]       = "OTHER_SIMD_INSTRUCTIONS";
+    out["cu"]         = rec.cu;
+    out["simd_sel"]   = rec.simd;
+    out["begin_time"] = rec.begin_time;
+    out["end_time"]   = rec.end_time;
 
-    int64_t time      = 0;
-    int32_t duration  = 0;
-    uint32_t stall    = 0;
+    nlohmann::json events = nlohmann::json::array();
 
-    uint32_t category = 0;
-};
+    if(rec.instructions_array && rec.instructions_size > 0)
+    {
+        events.reserve(rec.instructions_size);
+        for(uint64_t k = 0; k < rec.instructions_size; ++k)
+        {
+            const auto& in = rec.instructions_array[k];
+            events.push_back({
+                {"time", in.time},
+                {"duration", in.duration},
+                {"category", static_cast<uint8_t>(in.category)},
+            });
+        }
+    }
 
-class OtherSimdFile
-{
-public:
-    explicit OtherSimdFile() = default;
+    out["events"] = std::move(events);
 
-    void Ingest(const rocprofiler_thread_trace_decoder_other_simd_t& rec);
-    void WriteJson(const std::filesystem::path& filepath) const;
-
-private:
-    mutable std::mutex mtx_;
-    std::vector<OtherSimdInstEvent> events_;
-};
+    OutputFile(filepath.string()) << out;
+}
 
 }  // namespace att_wrapper
 }  // namespace rocprofiler

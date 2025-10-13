@@ -81,14 +81,21 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OTHER_SIMD)
     {
-        if(tool.other_simd && trace_events != nullptr)
+        if(trace_size != 0)
         {
-            const auto* recs =
-                static_cast<const rocprofiler_thread_trace_decoder_other_simd_t*>(trace_events);
-            for(size_t i = 0; i < trace_size; ++i)
-            {
-                tool.other_simd->Ingest(recs[i]);
-            }
+            const auto& r =
+                *static_cast<const rocprofiler_thread_trace_decoder_other_simd_t*>(trace_events);
+
+            const int    se = tool.config.shader_engine;
+            const size_t i  = tool.other_simd_count++;
+
+            const auto file = tool.config.filemgr->dir / ("other_simd_se" + std::to_string(se) +
+                                                          "_" + std::to_string(i) + ".json");
+
+            write_other_simd_json(r, file);
+
+            tool.config.filemgr->add_other_simd(
+                file, se, static_cast<size_t>(r.begin_time), static_cast<size_t>(r.end_time), i);
         }
     }
 
@@ -140,7 +147,7 @@ ToolData::ToolData(std::vector<char>&                    _data,
     if(other_simd && config.filemgr)
     {
         std::string filename = "se" + std::to_string(config.shader_engine) + "_other_simd.json";
-        auto out_path = config.filemgr->dir / filename;
+        auto        out_path = config.filemgr->dir / filename;
         other_simd->WriteJson(out_path);
     }
 }

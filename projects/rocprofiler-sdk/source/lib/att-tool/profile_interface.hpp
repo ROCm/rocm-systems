@@ -38,8 +38,8 @@
 #include <unordered_map>
 #include <vector>
 #include "code.hpp"
-#include "wave.hpp"
 #include "other_simd.hpp"
+#include "wave.hpp"
 
 #define C_API_BEGIN                                                                                \
     try                                                                                            \
@@ -76,7 +76,7 @@ struct ToolData
 
     rocprofiler_thread_trace_decoder_id_t decoder{};
 
-    std::unique_ptr<OtherSimdFile> other_simd{};
+    int32_t other_simd_count = 0;
 };
 
 }  // namespace att_wrapper

@@ -68,11 +68,20 @@ public:
 
     void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
 
+    void FilenameMgr::add_other_simd(const Fspath& file,
+                                     int           se,
+                                     size_t        start,
+                                     size_t        end,
+                                     size_t        index);
+
     Fspath                    dir{};
     Fspath                    filename{};
     std::map<Coord, WaveName> streams{};
     std::vector<std::string>  perfcounters{};
     int                       gfxip = 9;
+
+    using OtherSIMDName = WaveName;
+    std::map<int, std::vector<OtherSIMDName>> other_simd_files{};
 };
 
 }  // namespace att_wrapper

@@ -38,6 +38,14 @@ FilenameMgr::addwave(const Fspath& name, Coord coord, size_t begint, size_t endt
     streams.emplace(coord, WaveName{name.filename(), begint, endt});
 }
 
+void
+FilenameMgr::add_other_simd(const Fspath& file, int se, size_t start, size_t end, size_t index)
+{
+    auto& vec = other_simd_files[se];
+    if(index >= vec.size()) vec.resize(index + 1);
+    vec[index] = OtherSIMDName{file.filename(), start, end};
+}
+
 FilenameMgr::~FilenameMgr()
 {
     if(!GlobalDefs::get().has_format("json")) return;
@@ -50,12 +58,23 @@ FilenameMgr::~FilenameMgr()
                 [to_string(coord.id)] = {data.name, data.begin, data.end};
     }
 
+    nlohmann::json other_simd;
+    for(auto& [se, vec] : other_simd_files)
+    {
+        nlohmann::json arr = nlohmann::json::array();
+        arr.reserve(vec.size());
+        for(const auto& w : vec)
+            arr.push_back({w.name, w.begin, w.end});
+        other_simd[to_string(se)] = std::move(arr);
+    }
+
     const nlohmann::json metadata = {{"global_begin_time", 0},
                                      {"gfxv", (gfxip > 9) ? "navi" : "vega"},
                                      {"gfxip", gfxip},
                                      {"version", TOOL_VERSION},
                                      {"counter_names", perfcounters},
-                                     {"wave_filenames", namelist}};
+                                     {"wave_filenames", namelist},
+                                     {"other_simd_filenames", other_simd}};
 
     OutputFile(filename) << metadata;
 }
