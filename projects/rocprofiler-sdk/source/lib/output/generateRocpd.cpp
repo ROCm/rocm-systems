@@ -1762,32 +1762,34 @@ write_rocpd(
                         }
 
                         // Add snapshot fields
-#define ADD_ARB_STATE_FIELD(field)                                                                 \
-    add_pmc_value(                                                                                 \
-        evt_id, #field, std::to_string(static_cast<bool>(stochastic_record.snapshot.field)))
+#define ADD_ARB_STATE_FIELD_IF_TRUE(field)                                                         \
+    if(static_cast<bool>(stochastic_record.snapshot.field))                                        \
+    {                                                                                              \
+        add_pmc_value(evt_id, #field, "1");                                                        \
+    }
 
-                        ADD_ARB_STATE_FIELD(dual_issue_valu);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_valu);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_matrix);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_lds);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_lds_direct);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_scalar);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_vmem_tex);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_flat);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_exp);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_misc);
-                        ADD_ARB_STATE_FIELD(arb_state_issue_brmsg);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_valu);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_matrix);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_lds);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_lds_direct);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_scalar);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_vmem_tex);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_flat);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_exp);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_misc);
-                        ADD_ARB_STATE_FIELD(arb_state_stall_brmsg);
-#undef ADD_ARB_STATE_FIELD
+                        ADD_ARB_STATE_FIELD_IF_TRUE(dual_issue_valu);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_valu);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_matrix);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_lds);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_lds_direct);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_scalar);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_vmem_tex);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_flat);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_exp);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_misc);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_brmsg);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_valu);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_matrix);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_lds);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_lds_direct);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_scalar);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_vmem_tex);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_flat);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_exp);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_misc);
+                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_brmsg);
+#undef ADD_ARB_STATE_FIELD_IF_TRUE
 
                         // Add memory counters when available
                         if(stochastic_record.flags.has_memory_counter)
