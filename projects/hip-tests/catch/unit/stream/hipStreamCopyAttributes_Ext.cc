@@ -19,71 +19,112 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following negative scenarios
+ *  - 1) With Invalid source Stream
+ *  - 2) With Invalid destination Stream
+ *  - 3) With Invalid source and destination Stream
+ * Test source
+ * ------------------------
+ *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+// Will be enabled for AMD after the fix for SWDEV-560304
+#if HT_NVIDIA
 TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
   hipStream_t dstStream = nullptr;
   HIP_CHECK(hipStreamCreate(&dstStream));
 
-  std::cout << "At line " << __LINE__ << std::endl;
-
   SECTION("Invalid src Stream") {
-    HIP_CHECK_ERROR(hipStreamCopyAttributes(dstStream, reinterpret_cast<hipStream_t>(-1)),
-                    hipErrorInvalidResourceHandle);
-    std::cout << "At line " << __LINE__ << std::endl;
+    HIP_CHECK_ERROR(
+        hipStreamCopyAttributes(dstStream, reinterpret_cast<hipStream_t>(-1)),
+        hipErrorInvalidResourceHandle);
   }
 
   SECTION("Invalid dst Stream") {
-    HIP_CHECK_ERROR(hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1), srcStream),
-                    hipErrorInvalidResourceHandle);
-    std::cout << "At line " << __LINE__ << std::endl;
+    HIP_CHECK_ERROR(
+        hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1), srcStream),
+        hipErrorInvalidResourceHandle);
   }
 
   SECTION("Invalid src & dst Streams") {
     HIP_CHECK_ERROR(hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1),
-                    reinterpret_cast<hipStream_t>(-1)),
-	  			    hipErrorInvalidResourceHandle);
-    std::cout << "At line " << __LINE__ << std::endl;
+                                            reinterpret_cast<hipStream_t>(-1)),
+                    hipErrorInvalidResourceHandle);
   }
 
-  HIP_CHECK(hipStreamDestroy(srcStream)); 
-  HIP_CHECK(hipStreamDestroy(dstStream)); 
+  HIP_CHECK(hipStreamDestroy(srcStream));
+  HIP_CHECK(hipStreamDestroy(dstStream));
 }
+#endif
 
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following scenario
+ *  - 1) create one context and create stream_1 in that
+ *  - 2) create another context and create stream_2 in that
+ *  - 3) Copy stream attributes from stream_1 to stream_2
+ * Test source
+ * ------------------------
+ *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
 TEST_CASE("Unit_hipStreamCopyAttributes_Negative_InTwoContexts") {
-  //hipInit(0);
+  HIP_CHECK(hipInit(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  std::cout << "At line " << __LINE__ << std::endl;
 
   hipCtx_t context1, context2;
-  HIP_CHECK(hipCtxCreate(&context1, 0, device)); 
-  std::cout << "At line " << __LINE__ << std::endl;
+  HIP_CHECK(hipCtxCreate(&context1, 0, device));
 
   HIP_CHECK(hipCtxSetCurrent(context1));
-  std::cout << "At line " << __LINE__ << std::endl;
 
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
-  std::cout << "At line " << __LINE__ << std::endl;
 
-  HIP_CHECK(hipCtxCreate(&context2, 0, device)); 
-  std::cout << "At line " << __LINE__ << std::endl;
+  HIP_CHECK(hipCtxCreate(&context2, 0, device));
   HIP_CHECK(hipCtxSetCurrent(context2));
-  std::cout << "At line " << __LINE__ << std::endl;
 
   hipStream_t dstStream = nullptr;
   HIP_CHECK(hipStreamCreate(&dstStream));
-  std::cout << "At line " << __LINE__ << std::endl;
 
-  HIP_CHECK_ERROR(hipStreamCopyAttributes(dstStream, srcStream), hipErrorInvalidValue);
-  std::cout << "At line " << __LINE__ << std::endl;
+// Will make generic after the fix for SWDEV-560305
+#if HT_AMD
+  hipError_t expectedError = hipSuccess;
+#elif HT_NVIDIA
+  hipError_t expectedError = hipErrorInvalidValue;
+#endif
+  HIP_CHECK_ERROR(hipStreamCopyAttributes(dstStream, srcStream), expectedError);
 
-  HIP_CHECK(hipCtxDestroy(context1));
+  HIP_CHECK(hipStreamDestroy(dstStream));
   HIP_CHECK(hipCtxDestroy(context2));
-  
+
+  HIP_CHECK(hipCtxSetCurrent(context1));
+  HIP_CHECK(hipStreamDestroy(srcStream));
+  HIP_CHECK(hipCtxDestroy(context1));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks behavior of hipStreamCopyAttributes
+ *  - with SynchronizationPolicy attribute and with all possible values
+ * Test source
+ * ------------------------
+ *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
 TEST_CASE("Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues") {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
@@ -107,9 +148,23 @@ TEST_CASE("Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues") {
   REQUIRE(valueOut.syncPolicy == syncPolicy);
 
   HIP_CHECK(hipStreamDestroy(srcStream));
-  HIP_CHECK(hipStreamDestroy(dstStream)); 
+  HIP_CHECK(hipStreamDestroy(dstStream));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following scenario
+ *  - 1) create stream_1 and set hipSyncPolicyAuto
+ *  - 2) create stream_2 and set hipSyncPolicySpin
+ *  - 3) Copy stream attributes from stream_1 to stream_2
+ * Test source
+ * ------------------------
+ *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
 TEST_CASE("Unit_hipStreamCopyAttributes_ValuesSetAtStart_InSameContext") {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
@@ -133,20 +188,32 @@ TEST_CASE("Unit_hipStreamCopyAttributes_ValuesSetAtStart_InSameContext") {
   REQUIRE(valueOut.syncPolicy == hipSynchronizationPolicy::hipSyncPolicyAuto);
 
   HIP_CHECK(hipStreamDestroy(srcStream));
-  HIP_CHECK(hipStreamDestroy(dstStream)); 
+  HIP_CHECK(hipStreamDestroy(dstStream));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following scenario
+ *  - 1) create one context and create stream_1 and set hipSyncPolicyAuto
+ *  - 2) create another context and create stream_2 and set hipSyncPolicySpin
+ *  - 3) Copy stream attributes from stream_1 to stream_2
+ * Test source
+ * ------------------------
+ *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
 TEST_CASE("Unit_hipStreamCopyAttributes_ValuesSetAtStart_InDifferentContexts") {
+  HIP_CHECK(hipInit(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  std::cout << "At line " << __LINE__ << std::endl;
 
   hipCtx_t context1, context2;
-  HIP_CHECK(hipCtxCreate(&context1, 0, device)); 
-  std::cout << "At line " << __LINE__ << std::endl;
+  HIP_CHECK(hipCtxCreate(&context1, 0, device));
 
   HIP_CHECK(hipCtxSetCurrent(context1));
-  std::cout << "At line " << __LINE__ << std::endl;
 
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
@@ -157,10 +224,8 @@ TEST_CASE("Unit_hipStreamCopyAttributes_ValuesSetAtStart_InDifferentContexts") {
   valueToSetForSrc.syncPolicy = hipSynchronizationPolicy::hipSyncPolicyAuto;
   HIP_CHECK(hipStreamSetAttribute(srcStream, attr, &valueToSetForSrc));
 
-  HIP_CHECK(hipCtxCreate(&context2, 0, device)); 
-  std::cout << "At line " << __LINE__ << std::endl;
+  HIP_CHECK(hipCtxCreate(&context2, 0, device));
   HIP_CHECK(hipCtxSetCurrent(context2));
-  std::cout << "At line " << __LINE__ << std::endl;
 
   hipStream_t dstStream = nullptr;
   HIP_CHECK(hipStreamCreate(&dstStream));
@@ -169,17 +234,24 @@ TEST_CASE("Unit_hipStreamCopyAttributes_ValuesSetAtStart_InDifferentContexts") {
   valueToSetForDst.syncPolicy = hipSynchronizationPolicy::hipSyncPolicySpin;
   HIP_CHECK(hipStreamSetAttribute(dstStream, attr, &valueToSetForDst));
 
-  HIP_CHECK(hipStreamCopyAttributes(dstStream, srcStream));
+// Will make generic after the fix for SWDEV-560305
+#if HT_AMD
+  hipError_t expectedError = hipSuccess;
+#elif HT_NVIDIA
+  hipError_t expectedError = hipErrorInvalidValue;
+#endif
+  HIP_CHECK_ERROR(hipStreamCopyAttributes(dstStream, srcStream), expectedError);
 
+#if HT_AMD
   hipStreamAttrValue valueOut;
   HIP_CHECK(hipStreamGetAttribute(dstStream, attr, &valueOut));
   REQUIRE(valueOut.syncPolicy == hipSynchronizationPolicy::hipSyncPolicyAuto);
+#endif
 
   HIP_CHECK(hipStreamDestroy(dstStream));
   HIP_CHECK(hipCtxDestroy(context2));
 
   HIP_CHECK(hipCtxSetCurrent(context1));
-  HIP_CHECK(hipCtxDestroy(context2));
   HIP_CHECK(hipStreamDestroy(srcStream));
+  HIP_CHECK(hipCtxDestroy(context1));
 }
-
