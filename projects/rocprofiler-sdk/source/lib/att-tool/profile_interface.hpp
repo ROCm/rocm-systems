@@ -39,6 +39,7 @@
 #include <vector>
 #include "code.hpp"
 #include "wave.hpp"
+#include "other_simd.hpp"
 
 #define C_API_BEGIN                                                                                \
     try                                                                                            \
@@ -74,6 +75,8 @@ struct ToolData
     size_t            num_waves = 0;
 
     rocprofiler_thread_trace_decoder_id_t decoder{};
+
+    std::unique_ptr<OtherSimdFile> other_simd{};
 };
 
 }  // namespace att_wrapper

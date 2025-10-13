@@ -79,6 +79,18 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
             tool.config.realtime->add(
                 tool.config.shader_engine, static_cast<realtime_t*>(trace_events), trace_size);
     }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OTHER_SIMD)
+    {
+        if(tool.other_simd && trace_events != nullptr)
+        {
+            const auto* recs =
+                static_cast<const rocprofiler_thread_trace_decoder_other_simd_t*>(trace_events);
+            for(size_t i = 0; i < trace_size; ++i)
+            {
+                tool.other_simd->Ingest(recs[i]);
+            }
+        }
+    }
 
     if(trace_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
@@ -124,6 +136,13 @@ ToolData::ToolData(std::vector<char>&                    _data,
     auto status =
         rocprofiler_trace_decode(decoder, get_trace_data, _data.data(), _data.size(), this);
     ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << ": " << status;
+
+    if(other_simd && config.filemgr)
+    {
+        std::string filename = "se" + std::to_string(config.shader_engine) + "_other_simd.json";
+        auto out_path = config.filemgr->dir / filename;
+        other_simd->WriteJson(out_path);
+    }
 }
 
 ToolData::~ToolData() = default;

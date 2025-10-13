@@ -212,6 +212,14 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
     uint32_t reserved;
 } rocprofiler_thread_trace_decoder_shaderdata_t;
 
+typedef struct rocprofiler_thread_trace_decoder_other_simd_t
+{
+    rocprofiler_thread_trace_decoder_wave_t base;
+
+    uint8_t other_simd;
+} rocprofiler_thread_trace_decoder_other_simd_t;
+
+
 /**
  * @brief Defines the type of payload received by rocprofiler_thread_trace_decoder_callback_t
  */
@@ -226,6 +234,7 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,  ///< rocprofiler_thread_trace_decoder_shaderdata_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OTHER_SIMD,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY
