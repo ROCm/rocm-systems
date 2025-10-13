@@ -553,8 +553,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
         if (HSA_STATUS_SUCCESS != result) {
           LogError("hsa_amd_signal_async_handler() failed to set the handler!");
         } else {
-          ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Set Handler: handle(0x%lx), timestamp(%p)",
-                  prof_signal->signal_.handle, prof_signal);
+          ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+                  "Set Handler: handle(0x%lx), timestamp(%p), blocking CB=%d",
+                  prof_signal->signal_.handle, prof_signal,
+                  ts->command().Callback() != nullptr && ts->GetBlocking());
         }
       }
     }
@@ -1076,7 +1078,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
-  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
           "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], private_seg_size=%u, "
@@ -1367,8 +1369,7 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
 
   dispatchBlockingWait();
 
-  // Add all kernel names in bulk
-  vcmd->addKernelNames(kernelNames);
+  vcmd->setKernelNamesRef(&kernelNames);
 
   // Dispatch all packets with a single doorbell ring
   // Cast packets vector to AQL packets vector on the fly
@@ -1453,7 +1454,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, BarrierAND Header = 0x%x (type=%d, barrier=%d, acquire=%d,"
           " release=%d), "
           "dep_signal=[0x%zx, 0x%zx, 0x%zx, 0x%zx, 0x%zx], completion_signal=0x%zx, "
@@ -1543,7 +1544,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
-  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, BarrierValue Header = 0x%x AmdFormat = 0x%x "
           "(type=%d, barrier=%d, acquire=%d, release=%d), "
           "signal=0x%zx, value = 0x%llx mask = 0x%llx cond: %s, completion_signal=0x%zx, "
@@ -3688,7 +3689,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     if (isGraphCapture) {
       argBuffer = command_->getGraphKernArg(gpuKernel.KernargSegmentByteSize(),
                                             gpuKernel.KernargSegmentAlignment(), dev().index());
-      command_->SetKernelName(gpuKernel.getDemangledName().c_str());
+      command_->SetKernelName(gpuKernel.getDemangledName());
     } else {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
               "KernargSegmentByteSize = %lu "
