@@ -715,6 +715,16 @@ jobs:
     - name: Init/Update submodules
       run: git submodule update --init --recursive --jobs 16
 
+    - name: Cache APT packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          /var/cache/apt/archives
+          /var/lib/apt/lists
+        key: apt-${{ runner.os }}-${{ hashFiles('**/apt-packages.txt') }}
+        restore-keys: |
+          apt-${{ runner.os }}-
+
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
