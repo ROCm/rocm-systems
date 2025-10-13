@@ -780,6 +780,7 @@ hipError_t hipSetDevice(int device) {
 
   if (static_cast<unsigned int>(device) < g_devices.size()) {
     hip::setCurrentDevice(device);
+    hip::getCurrentDevice()->SetActiveStatus();
 
     HIP_RETURN(hipSuccess);
   } else if (g_devices.empty()) {
