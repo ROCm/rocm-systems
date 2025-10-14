@@ -977,7 +977,8 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
 
         for (auto agentPermsIt = mappedHandleIt->second.allowed_agents.begin();
              agentPermsIt != mappedHandleIt->second.allowed_agents.end(); agentPermsIt++) {
-          allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
+          if ((*agentPermsIt).second.permissions != HSA_ACCESS_PERMISSION_NONE)
+            allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
         }
 
         AMD::callback_t<decltype(alloc)> Alloc(alloc);
