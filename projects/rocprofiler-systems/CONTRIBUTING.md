@@ -48,7 +48,7 @@ By creating a pull request, you agree to the statements made in the [code licens
 
 ### Process ###
 
-* Fork the repository and create your branch from `amd-staging`.
+* Fork the repository and create your branch from `develop`.
 * If you've added code that should be tested, add tests.
 * Ensure the test suite passes.
 * Make sure your code conforms to the format. Use clang-format-18 and/or gersemi.
@@ -59,7 +59,7 @@ By creating a pull request, you agree to the statements made in the [code licens
 ### Setting Up the Development Environment ###
 
 * It is recommended to [fork](https://github.com/ROCm/rocm-systems/fork) the repository.
-* Clone your forked repository: `git clone https://github.com/ROCm/<yourgithub-id>/rocm-systems.git`
+* Clone your forked repository: `git clone https://github.com/<yourgithub-id>/rocm-systems.git`
 * Navigate to the project directory: `cd rocm-systems`
 * Set the original repository URL as the remote upstream using `git remote add upstream https://github.com/ROCm/rocm-systems` (or `git remote set-url upstream https://github.com/ROCm/rocm-systems`)
 * Verify if origin and upstream points correctly with `git remote -v`.
