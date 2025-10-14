@@ -177,6 +177,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline analysis now runs on GPU 0 by default instead of all GPUs.
 
+* `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
+
 ### Removed
 
 * Usage of `rocm-smi` in favor of `amd-smi`.
