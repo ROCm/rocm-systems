@@ -1748,36 +1748,67 @@ def main(argv=None):
         args = get_args(cmd_args, inp_args[0])
 
         if args.pid:
+            # For reattachment support, args must be the same as previous rocprofv3 sessions
+            # Store args in a temporary file for future sessions. If the temporary file already exists,
+            # compare those args and error out if the tracing options are not the same.
             import pickle
 
             if args.collection_period:
                 fatal_error("--collection-period is not compatible with attach mode")
 
             fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
-            if os.path.exists(fname):
+            if not os.path.exists(fname):
+                # if this is the first attachment, write the temp configuration file for future attachments
+                with open(fname, "wb") as ofs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Saving attach configuration to {fname}...")
+                    pickle.dump(args, ofs)
+            else:
+                # if this is not the first attachment
                 # load the configuration from the previous attachment
                 with open(fname, "rb") as ifs:
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Loading attach configuration from {fname}...")
-                    prev_args = pickle.load(ifs)
+                    previous_args = pickle.load(ifs)
 
-                args = get_args(
-                    args,
-                    dotdict(prev_args),
-                    filter=[
-                        ".*_trace",
-                        "^pc_sampling_.*$",
-                        "^att_.*$",
-                        "^(pmc|pmc_groups|output_config|extra_counters)$",
-                        "^kernel_(include_regex|exclude_regex|iteration_range)$",
-                    ],
-                )
+                # compare the previous arguments used to the current attachments's arguments
+                keys_to_ignore = [
+                    "input",
+                    "output_file",
+                    "output_directory",
+                    "output_format",
+                    "__dict__",
+                ]
+                prev_args_filtered = {
+                    k: v for k, v in previous_args.items() if k not in keys_to_ignore
+                }
+                curr_args_filtered = {
+                    k: v for k, v in args.items() if k not in keys_to_ignore
+                }
 
-            # write the configuration for future attachments
-            with open(fname, "wb") as ofs:
-                if args.log_level in ("config", "info", "trace"):
-                    print(f"Saving attach configuration to {fname}...")
-                pickle.dump(args, ofs)
+                if prev_args_filtered != curr_args_filtered:
+                    # if args are not the same, error out with a message describing the difference
+                    different_keys = {
+                        k
+                        for k, v in prev_args_filtered.items()
+                        if k in curr_args_filtered and v != curr_args_filtered[k]
+                    }
+                    prev_diff = {
+                        k: v
+                        for k, v in prev_args_filtered.items()
+                        if k not in curr_args_filtered or k in different_keys
+                    }
+                    curr_diff = {
+                        k: v
+                        for k, v in curr_args_filtered.items()
+                        if k not in prev_args_filtered or k in different_keys
+                    }
+                    fatal_error(
+                        "Reattaching to a previously used PID with different rocprofv3 arguments has been detected. "
+                        "This is not allowed.\n"
+                        f"Unique to previous arguments: {prev_diff}\n"
+                        f"Unique to current arguments: {curr_diff}"
+                    )
 
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
