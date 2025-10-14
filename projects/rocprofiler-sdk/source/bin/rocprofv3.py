@@ -233,7 +233,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 For attachment profiling of running processes:
 
     $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
-    $ rocprofv3 --attach 1234 --attach-duration 10 --hsa-trace
+    $ rocprofv3 --attach 1234 --attach-duration-msec 10 --hsa-trace
 
 """
 

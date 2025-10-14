@@ -74,10 +74,14 @@ typedef union {
   uint32_t raw;
 } aqlprofile_att_header_marker_t;
 
-inline att_header_packet_t getHeaderPacket(int SE, int CU, int SIMD) {
+inline att_header_packet_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id) {
   att_header_packet_t header{.raw = 0};
+  // Requires decoder version 0.1.2 or higher
+  if(id == aql_profile::MI300_GPU_ID) header.gfx9_version2 = 5;
+  else if(id == aql_profile::MI350_GPU_ID) header.gfx9_version2 = 6;
+  else header.gfx9_version2 = 4;
+
   header.legacy_version = 0x11;
-  header.gfx9_version2 = 4;
   header.SEID = SE;
   header.DCU = CU;
   header.DSIMDM = SIMD;
@@ -156,7 +160,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     char* sample_data_ptr = (char*)cpu_sample.data();
     if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
       auto* header = reinterpret_cast<att_header_packet_t*>(cpu_sample.data());
-      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask());
+      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId());
       sample_data_ptr += sizeof(att_header_packet_t);
       sample_size_plus_header = sample_size + sizeof(att_header_packet_t);
     }
