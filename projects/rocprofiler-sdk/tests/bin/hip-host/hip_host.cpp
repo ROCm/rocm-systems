@@ -132,7 +132,7 @@ printBool(const char* label, int v, int width = 28)
 void
 printIfNonzero(const char* label, int v, int width = 28)
 {
-    if(v >= 0) std::cout << std::left << std::setw(width) << label << ": " << v << "\n";
+    if(v != 0) std::cout << std::left << std::setw(width) << label << ": " << v << "\n";
 }
 }  // namespace
 
