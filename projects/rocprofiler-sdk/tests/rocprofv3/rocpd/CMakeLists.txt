@@ -11,7 +11,6 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(rocprofv3-rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     "OMPI_ALLOW_RUN_AS_ROOT=1"
     "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
@@ -81,6 +80,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
@@ -95,6 +95,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd
@@ -115,6 +116,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
@@ -130,6 +132,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd
@@ -150,6 +153,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
@@ -168,6 +172,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
@@ -182,6 +187,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd

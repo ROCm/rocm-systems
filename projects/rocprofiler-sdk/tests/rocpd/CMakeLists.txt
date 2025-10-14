@@ -12,7 +12,6 @@ find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
@@ -31,6 +30,7 @@ foreach(_SUBPARSER "" "-convert" "-query" "-summary")
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 120
         LABELS "integration-tests;rocpd"
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
 
@@ -41,5 +41,6 @@ foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 120
         LABELS "integration-tests;rocpd"
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
