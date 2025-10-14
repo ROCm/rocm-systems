@@ -937,3 +937,14 @@ or library to ``/home/user``, which is where the instrumented libraries are loca
 
    patchelf --remove-rpath <exe-or-library>
    patchelf --set-rpath '/home/user' <exe-or-library>
+
+Main function detection issues
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you encounter issues with ROCm Systems Profiler not properly detecting or instrumenting
+your program's main function, you can explicitly specify the main function using
+the ``--main-function`` (or ``-m``) option.
+
+.. code-block:: shell
+
+   rocprof-sys-instrument --main-function '<function-symbol-name>' -o ./foo.inst -- ./foo
