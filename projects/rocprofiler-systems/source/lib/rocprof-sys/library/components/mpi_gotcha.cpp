@@ -282,10 +282,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
     rocprofsys::mpi::is_finalized()            = true;
 #else
     if(is_root_process() && rocprofsys::get_state() < rocprofsys::State::Finalized)
-    {
-        // rocprofsys_pop_trace_hidden(_data.tool_id.c_str());
         rocprofsys_finalize_hidden();
-    }
 #endif
 }
 

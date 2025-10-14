@@ -35,7 +35,7 @@ else()
         CACHE BOOL
         "Internal variable used by rocprofiler-systems"
     )
-    rocprofiler_systems_message(STATUS "Gfortran was not found, disabling fortran MPI tests")
+    rocprofiler_systems_message(STATUS "gfortran was not found, disabling fortran MPI tests")
 endif()
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
@@ -111,21 +111,9 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
             $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
     )
 
-    if(GFORTRAN_VERSION VERSION_GREATER_EQUAL "10")
-        set(FORTRAN_COMPILE_FLAGS "-w;-fallow-argument-mismatch")
-    else()
-        set(FORTRAN_COMPILE_FLAGS "-w;-Wno-argument-mismatch")
-    endif()
-
-    add_executable(mpi-fortran-array mpi_array.f)
-    target_compile_options(mpi-fortran-array PRIVATE ${FORTRAN_COMPILE_FLAGS})
-    target_link_libraries(mpi-fortran-array PRIVATE mpi-fortran-interface-library)
-
+    # Also tests the case where Fortran Main has FuncReturnStatus == NORETURN
     add_executable(mpi-fortran-intervals intervals_mpi.f90)
     target_link_libraries(mpi-fortran-intervals PRIVATE mpi-fortran-interface-library)
-
-    add_executable(mpi-fortran-poisson poisson_mpi.f90)
-    target_link_libraries(mpi-fortran-poisson PRIVATE mpi-fortran-interface-library)
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -157,7 +145,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     )
     if(ENABLE_FORTRAN_MPI_CTESTS)
         install(
-            TARGETS mpi-fortran-poisson mpi-fortran-intervals mpi-fortran-array
+            TARGETS mpi-fortran-intervals
             DESTINATION bin
             COMPONENT rocprofiler-systems-examples
         )

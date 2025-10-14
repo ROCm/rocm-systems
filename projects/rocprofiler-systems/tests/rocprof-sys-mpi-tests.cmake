@@ -177,7 +177,7 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
         )
     endif()
 
-    foreach(_FORTRAN_EXAMPLE poisson intervals array)
+    foreach(_FORTRAN_EXAMPLE intervals)
         rocprofiler_systems_add_test(
             SKIP_RUNTIME
             NAME "mpi-fortran-${_FORTRAN_EXAMPLE}"
