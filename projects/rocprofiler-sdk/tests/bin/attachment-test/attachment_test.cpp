@@ -94,7 +94,7 @@ execute_kernels(const size_t      tid,
         if(err != hipSuccess)
         {
             std::cerr << "Failed to copy data for thread " << tid << " with stream " << stream_id
-              << " on device " << device_id << "...\n";
+                      << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -113,7 +113,7 @@ execute_kernels(const size_t      tid,
         if(err != hipSuccess)
         {
             std::cerr << "Failed to copy data for thread " << tid << " with stream " << stream_id
-              << " on device " << device_id << "...\n";
+                      << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -124,7 +124,7 @@ execute_kernels(const size_t      tid,
         if(err != hipSuccess)
         {
             std::cerr << "Failed to synchronize stream " << stream_id << " with thread " << tid
-              << " on device " << device_id << "...\n";
+                      << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
