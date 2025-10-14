@@ -462,7 +462,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryGetKernel = 442,
   HIP_API_ID_hipLibraryGetKernelCount = 443,
   HIP_API_ID_hipMemGetHandleForAddressRange = 444,
-  HIP_API_ID_LAST = 444,
+  HIP_API_ID_hipStreamCopyAttributes = 445,
+  HIP_API_ID_LAST = 445,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -885,6 +886,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipStreamBatchMemOp: return "hipStreamBatchMemOp";
     case HIP_API_ID_hipStreamBeginCapture: return "hipStreamBeginCapture";
     case HIP_API_ID_hipStreamBeginCaptureToGraph: return "hipStreamBeginCaptureToGraph";
+    case HIP_API_ID_hipStreamCopyAttributes: return "hipStreamCopyAttributes";
     case HIP_API_ID_hipStreamCreate: return "hipStreamCreate";
     case HIP_API_ID_hipStreamCreateWithFlags: return "hipStreamCreateWithFlags";
     case HIP_API_ID_hipStreamCreateWithPriority: return "hipStreamCreateWithPriority";
@@ -1323,6 +1325,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipStreamBatchMemOp", name) == 0) return HIP_API_ID_hipStreamBatchMemOp;
   if (strcmp("hipStreamBeginCapture", name) == 0) return HIP_API_ID_hipStreamBeginCapture;
   if (strcmp("hipStreamBeginCaptureToGraph", name) == 0) return HIP_API_ID_hipStreamBeginCaptureToGraph;
+  if (strcmp("hipStreamCopyAttributes", name) == 0) return HIP_API_ID_hipStreamCopyAttributes;
   if (strcmp("hipStreamCreate", name) == 0) return HIP_API_ID_hipStreamCreate;
   if (strcmp("hipStreamCreateWithFlags", name) == 0) return HIP_API_ID_hipStreamCreateWithFlags;
   if (strcmp("hipStreamCreateWithPriority", name) == 0) return HIP_API_ID_hipStreamCreateWithPriority;
@@ -3731,6 +3734,10 @@ typedef struct hip_api_data_s {
       size_t numDependencies;
       hipStreamCaptureMode mode;
     } hipStreamBeginCaptureToGraph;
+    struct {
+      hipStream_t dst;
+      hipStream_t src;
+    } hipStreamCopyAttributes;
     struct {
       hipStream_t* stream;
       hipStream_t stream__val;
@@ -6397,6 +6404,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamBeginCaptureToGraph.numDependencies = (size_t)numDependencies; \
   cb_data.args.hipStreamBeginCaptureToGraph.mode = (hipStreamCaptureMode)mode; \
 };
+// hipStreamCopyAttributes[('hipStream_t', 'dst'), ('hipStream_t', 'src')]
+#define INIT_hipStreamCopyAttributes_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamCopyAttributes.dst = (hipStream_t)dst; \
+  cb_data.args.hipStreamCopyAttributes.src = (hipStream_t)src; \
+};
 // hipStreamCreate[('hipStream_t*', 'stream')]
 #define INIT_hipStreamCreate_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipStreamCreate.stream = (hipStream_t*)stream; \
@@ -8226,6 +8238,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipStreamBeginCaptureToGraph:
       if (data->args.hipStreamBeginCaptureToGraph.dependencies) data->args.hipStreamBeginCaptureToGraph.dependencies__val = *(data->args.hipStreamBeginCaptureToGraph.dependencies);
       if (data->args.hipStreamBeginCaptureToGraph.dependencyData) data->args.hipStreamBeginCaptureToGraph.dependencyData__val = *(data->args.hipStreamBeginCaptureToGraph.dependencyData);
+      break;
+// hipStreamCopyAttributes[('hipStream_t', 'dst'), ('hipStream_t', 'src')]
+    case HIP_API_ID_hipStreamCopyAttributes:
       break;
 // hipStreamCreate[('hipStream_t*', 'stream')]
     case HIP_API_ID_hipStreamCreate:
@@ -11570,6 +11585,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", dependencyData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.dependencyData__val); }
       oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.numDependencies);
       oss << ", mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.mode);
+      oss << ")";
+    break;
+     case HIP_API_ID_hipStreamCopyAttributes:
+      oss << "hipStreamCopyAttributes(";
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamCopyAttributes.dst);
+      oss << ", src="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamCopyAttributes.src);
       oss << ")";
     break;
     case HIP_API_ID_hipStreamCreate:
