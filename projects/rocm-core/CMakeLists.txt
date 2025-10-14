@@ -149,6 +149,14 @@ if(BUILD_SHARED_LIBS)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT CORE_RUNTIME )
 
+  # Install rdhc folder
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+          COMPONENT CORE_RUNTIME
+          FILES_MATCHING
+          PATTERN "*"
+          PATTERN "__pycache__" EXCLUDE)
+
 else()
   install ( FILES ${BUILD_DIR}/version
             DESTINATION .info
@@ -168,6 +176,15 @@ else()
   install ( FILES ${BUILD_DIR}/rocmmod
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT ${STATIC_COMP_TYPE} )
+
+  # Install rdhc folder
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+          COMPONENT ${STATIC_COMP_TYPE}
+          FILES_MATCHING
+          PATTERN "*"
+          PATTERN "__pycache__" EXCLUDE)
+
 endif()
 
 ## Cmake module config file configurations
