@@ -76,7 +76,6 @@
 #include "core/util/os.h"
 #include "core/util/utils.h"
 #include "core/util/mpsc_queue.hpp"
-#include "core/util/mempool.hpp"
 
 #include "core/inc/amd_loader_context.hpp"
 #include "core/inc/amd_hsa_code.hpp"
@@ -618,7 +617,7 @@ class Runtime {
     AsyncEventItem(const AsyncEventItem& other)
         : signal(other.signal), cond(other.cond), value(other.value),
           handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
-    
+
     void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
         signal = sig;
         cond = c;
@@ -633,6 +632,25 @@ class Runtime {
       }
       return core::Signal::Convert(signal);
     }
+  };
+
+  class AsyncEventsPool : private BaseShared {
+    public:
+      AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
+      ~AsyncEventsPool() { clear(); }
+
+      AsyncEventItem* alloc();
+      void free(AsyncEventItem* item);
+      void clear();
+
+    private:
+      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+      static const size_t preallocblocks_ = 512;
+      static const size_t maxblocksize_ = 1ULL << 28;
+      HybridMutex lock_;
+      std::vector<AsyncEventItem*> free_list_;
+      std::vector<std::pair<void*, size_t>> block_list_;
+      size_t block_size_;
   };
   // New concurrent events structure using lock-free queue
   struct ConcurrentAsyncEvents {
@@ -658,8 +676,7 @@ class Runtime {
   private:
     //AsyncEventItem Queue
     ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
-    // AsyncEventItem Pool
-    ::rocr::GenericMemPool<AsyncEventItem, 512> asyncEventPool_;
+    AsyncEventsPool asyncEventPool_;
   };
 
   struct PrefetchRange;

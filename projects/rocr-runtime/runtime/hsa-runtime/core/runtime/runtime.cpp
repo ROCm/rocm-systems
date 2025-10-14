@@ -1892,7 +1892,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         continue;
       }
       async_events_.PushBack(event.signal, event.cond, event.value, event.handler,event.arg);
-    } 
+    }
     // Call plain functions
     for (size_t i = 0; i < functions.size(); i++) {
       functions[i].first(functions[i].second);
@@ -1915,6 +1915,67 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   new_async_events_.Clear();
 }
 
+void Runtime::AsyncEventsPool::clear() {
+  ifdebug {
+    size_t capacity = 0;
+    for (auto& block : block_list_) capacity += block.second;
+    if (capacity != free_list_.size())
+      debug_print("Warning: Resource leak detected by AsyncEventsPool, %ld items leaked.\n",
+                  capacity - free_list_.size());
+  }
+
+  for (auto& block : block_list_) free_()(block.first);
+  block_list_.clear();
+  free_list_.clear();
+}
+
+Runtime::AsyncEventItem* Runtime::AsyncEventsPool::alloc() {
+  ScopedAcquire<HybridMutex> lock(&lock_);
+  if (free_list_.empty()) {
+    AsyncEventItem* block = reinterpret_cast<AsyncEventItem*>(
+        allocate_()(block_size_ * sizeof(AsyncEventItem), __alignof(AsyncEventItem), core::MemoryRegion::AllocateNonPaged, 0));
+    if (block == nullptr) {
+      block_size_ = minblock_;
+      block = reinterpret_cast<AsyncEventItem*>(
+          allocate_()(block_size_ * sizeof(AsyncEventItem), __alignof(AsyncEventItem), core::MemoryRegion::AllocateNonPaged, 0));
+      if (block == nullptr) throw std::bad_alloc();
+    }
+
+    MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(block); });
+    block_list_.push_back(std::make_pair(block, block_size_));
+    throwGuard.Dismiss();
+
+    for (int i = 0; i < block_size_; i++) {
+      free_list_.push_back(&block[i]);
+    }
+    if (block_size_ > maxblocksize_)
+      block_size_ *= 2;
+  }
+  AsyncEventItem* ret = free_list_.back();
+  new (ret) AsyncEventItem();
+  free_list_.pop_back();
+  return ret;
+}
+
+void Runtime::AsyncEventsPool::free(AsyncEventItem* ptr) {
+  if (ptr == nullptr) return;
+
+  ptr->~AsyncEventItem();
+  ScopedAcquire<HybridMutex> lock(&lock_);
+
+  ifdebug {
+    bool valid = false;
+    for (auto& block : block_list_) {
+      if ((block.first <= ptr) &&
+          (uintptr_t(ptr) < uintptr_t(block.first) + block.second * sizeof(AsyncEventItem))) {
+        valid = true;
+        break;
+      }
+    }
+    assert(valid && "Object does not belong to pool.");
+  }
+  free_list_.push_back(ptr);
+}
 void Runtime::ConcurrentAsyncEvents::PushBack(hsa_signal_t signal,
                                              hsa_signal_condition_t cond,
                                              hsa_signal_value_t value,
@@ -1948,7 +2009,9 @@ bool Runtime::ConcurrentAsyncEvents::GetAllEvents(std::vector<AsyncEventItem>& a
   AsyncEventItem* item = nullptr;
   while (!event_queue_.empty()) {
     item = event_queue_.dequeue();
-    if (item == nullptr) return false;
+    if (item == nullptr) {
+      return false;
+    }
     all_events.emplace_back(*item);
     asyncEventPool_.free(item);
   }
