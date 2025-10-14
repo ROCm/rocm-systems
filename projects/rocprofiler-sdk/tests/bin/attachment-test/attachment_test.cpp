@@ -90,10 +90,11 @@ execute_kernels(const size_t      tid,
 
         // Copy data to device
         roctxMark("Start_H2D_Copy");
-        auto err = hipMemcpyWithStream(d_data, h_data, bytes, hipMemcpyHostToDevice, stream);
+        auto err = hipMemcpyAsync(d_data, h_data, bytes, hipMemcpyHostToDevice, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data to device" << std::endl;
+            std::cerr << "Failed to copy data for thread " << tid << " with stream " << stream_id
+              << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -108,10 +109,11 @@ execute_kernels(const size_t      tid,
 
         // Copy data back
         roctxMark("Start_D2H_Copy");
-        err = hipMemcpyWithStream(h_data, d_data, bytes, hipMemcpyDeviceToHost, stream);
+        err = hipMemcpyAsync(h_data, d_data, bytes, hipMemcpyDeviceToHost, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data from device" << std::endl;
+            std::cerr << "Failed to copy data for thread " << tid << " with stream " << stream_id
+              << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -121,7 +123,8 @@ execute_kernels(const size_t      tid,
         err = hipStreamSynchronize(stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to synchronize stream" << std::endl;
+            std::cerr << "Failed to synchronize stream " << stream_id << " with thread " << tid
+              << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
