@@ -61,7 +61,7 @@ FilenameMgr::~FilenameMgr()
     nlohmann::json other_simd;
     for(auto& [se, vec] : other_simd_files)
     {
-        nlohmann::json arr = nlohmann::json::array();
+        nlohmann::json::array_t arr;
         arr.reserve(vec.size());
         for(const auto& w : vec)
             arr.push_back({w.name, w.begin, w.end});

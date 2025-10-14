@@ -26,6 +26,7 @@
 #endif
 
 #include "profile_interface.hpp"
+#include "filenames.hpp"
 #include "perfcounter.hpp"
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
@@ -89,8 +90,8 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
             const int    se = tool.config.shader_engine;
             const size_t i  = tool.other_simd_count++;
 
-            const auto file = tool.config.filemgr->dir / ("other_simd_se" + std::to_string(se) +
-                                                          "_" + std::to_string(i) + ".json");
+            Fspath file = tool.config.filemgr->dir / ("other_simd_se" + std::to_string(se) + "_" +
+                                                      std::to_string(i) + ".json");
 
             write_other_simd_json(r, file);
 
@@ -143,13 +144,6 @@ ToolData::ToolData(std::vector<char>&                    _data,
     auto status =
         rocprofiler_trace_decode(decoder, get_trace_data, _data.data(), _data.size(), this);
     ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << ": " << status;
-
-    if(other_simd && config.filemgr)
-    {
-        std::string filename = "se" + std::to_string(config.shader_engine) + "_other_simd.json";
-        auto        out_path = config.filemgr->dir / filename;
-        other_simd->WriteJson(out_path);
-    }
 }
 
 ToolData::~ToolData() = default;

@@ -68,11 +68,7 @@ public:
 
     void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
 
-    void FilenameMgr::add_other_simd(const Fspath& file,
-                                     int           se,
-                                     size_t        start,
-                                     size_t        end,
-                                     size_t        index);
+    void add_other_simd(const Fspath& file, int se, size_t start, size_t end, size_t index);
 
     Fspath                    dir{};
     Fspath                    filename{};

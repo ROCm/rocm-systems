@@ -13,7 +13,7 @@ namespace att_wrapper
 {
 inline void
 write_other_simd_json(const rocprofiler_thread_trace_decoder_other_simd_t& rec,
-                      const std::filesystem::path&                         filepath)
+                      const Fspath&                                        filepath)
 {
     nlohmann::json out;
     out["type"]       = "OTHER_SIMD_INSTRUCTIONS";
@@ -22,7 +22,7 @@ write_other_simd_json(const rocprofiler_thread_trace_decoder_other_simd_t& rec,
     out["begin_time"] = rec.begin_time;
     out["end_time"]   = rec.end_time;
 
-    nlohmann::json events = nlohmann::json::array();
+    nlohmann::json::array_t events;
 
     if(rec.instructions_array && rec.instructions_size > 0)
     {
