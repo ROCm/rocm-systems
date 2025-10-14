@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 15
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 16
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -713,6 +713,7 @@ typedef hipError_t (*t_hipStreamAddCallback)(hipStream_t stream, hipStreamCallba
 typedef hipError_t (*t_hipStreamAttachMemAsync)(hipStream_t stream, void* dev_ptr, size_t length,
                                                 unsigned int flags);
 typedef hipError_t (*t_hipStreamBeginCapture)(hipStream_t stream, hipStreamCaptureMode mode);
+typedef hipError_t (*t_hipStreamCopyAttributes)(hipStream_t dst, hipStream_t src);
 typedef hipError_t (*t_hipStreamCreate)(hipStream_t* stream);
 typedef hipError_t (*t_hipStreamCreateWithFlags)(hipStream_t* stream, unsigned int flags);
 typedef hipError_t (*t_hipStreamCreateWithPriority)(hipStream_t* stream, unsigned int flags,
@@ -1679,8 +1680,11 @@ struct HipDispatchTable {
   t_hipLibraryGetKernel hipLibraryGetKernel_fn;
   t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
+  t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17
 
   // ******************************************************************************************* //
   //
