@@ -7,6 +7,6 @@ call to `__hipUnregisterFatBinary(nullptr)` in the destructor of a global variab
 which (should) result in the destructor being invoked after rocprofiler-sdk has
 finalized. The intention is to trigger the initialization of the `HipCompilerDispatchTable`
 after rocprofiler-sdk has finalized. When a rocprofiler-sdk tool is loaded, the output should
-has the following message:
+have the following message:
 
 > `... registration.cpp:###] rocprofiler-sdk has been finalized, ignoring rocprofiler_set_api_table("hip_compiler", 60400, 0, ..., 1) call`
