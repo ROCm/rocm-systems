@@ -58,7 +58,7 @@ def create_output_folder(output_path, consolidate) -> str:
     return output_path
 
 
-def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
+def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
     """
     Processes a YAML file containing rocprofiler-sdk/rocpd metadata and returns a list of database files.
     Also expands wildcards in both YAML 'files' and direct input parameters.
@@ -138,6 +138,7 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
     # If all exist, then we can return the list of DBs
     return_list = input_files
 
+    skip_auto_merge = kwargs.get("skip_auto_merge", False)
     if skip_auto_merge:
         print("Skip auto merge and packaging.")
     else:
@@ -145,14 +146,16 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
             print(
                 f"More than {IDEAL_NUMBER_OF_DATABASE_FILES} database files found. It is recommended to merge and package databases"
             )
-            fewer_input_files = merge_and_repackage(input_files)
+            fewer_input_files = merge_and_repackage(input_files, **kwargs)
             print(f"Reduced to {len(fewer_input_files)} database files.")
             return_list = fewer_input_files
 
     return return_list
 
 
-def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -> list:
+def merge_and_repackage(
+    input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES, **kwargs
+) -> list:
     """
     Merges and repackages the input database files.
 
@@ -196,6 +199,7 @@ def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -
     merged_output_folder = create_output_folder(".", consolidate=True)
     os.makedirs(merged_output_folder, exist_ok=True)
 
+    copy_instead_of_move = kwargs.get("copy", False)
     # Beging batch processing the DBs
     reduced_file_list = []
     for i in range(0, original_num_dbs, target_num_dbs_to_merge):
@@ -207,7 +211,10 @@ def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -
         elif len(batch_files) == 1:
             # optimize, if just 1 db, no need to call merge, just copy it
             dest_file = os.path.join(merged_output_folder, merged_filename)
-            shutil.copy2(batch_files[0], dest_file)
+            if copy_instead_of_move:
+                shutil.copy2(batch_files[0], dest_file)
+            else:
+                shutil.move(batch_files[0], dest_file)
             reduced_file_list.append(str(dest_file))
 
     for item in reduced_file_list:
@@ -273,7 +280,7 @@ def add_args(parser):
         "-c",
         "--consolidate",
         action="store_true",
-        help="Consolidate (copy) database files into a new folder and generate metadata file pointing to that folder",
+        help="Consolidate database files into a new folder and generate metadata file pointing to that folder",
     )
 
     package_options.add_argument(
@@ -285,10 +292,17 @@ def add_args(parser):
         required=False,
     )
 
+    package_options.add_argument(
+        "--copy",
+        action="store_true",
+        help="Copy database files instead of moving them",
+    )
+
     def process_args(input, args):
         valid_args = [
             "consolidate",
             "output_path",
+            "copy",
         ]
         ret = {}
         for itr in valid_args:
@@ -304,7 +318,7 @@ def add_args(parser):
 def execute(input_files, **kwargs):
     import glob
 
-    output_path_kw = kwargs.get("output_path", ".")
+    output_path_kw = kwargs.get("output_path", os.getcwd())
     consolidate = kwargs.get("consolidate", False)
 
     output_path = create_output_folder(output_path_kw, consolidate)
@@ -319,17 +333,21 @@ def execute(input_files, **kwargs):
             expanded_files.append(itr)
     db_files = expanded_files
 
+    copy_instead_of_move = kwargs.get("copy", False)
     if consolidate:
         # Create a new folder with current date and time
         os.makedirs(output_path, exist_ok=True)
-        copied_files = []
+        consolidated_files = []
         for db_file in db_files:
             dest_file = os.path.join(output_path, os.path.basename(db_file))
             # Only copy if source and destination are not the same file
             if os.path.abspath(db_file) != os.path.abspath(dest_file):
-                shutil.copy2(db_file, dest_file)
-            copied_files.append(dest_file)
-        db_files = copied_files
+                if copy_instead_of_move:
+                    shutil.copy2(db_file, dest_file)
+                else:
+                    shutil.move(db_file, dest_file)
+            consolidated_files.append(dest_file)
+        db_files = consolidated_files
 
     metadata_path = create_metadata_file(db_files, output_path)
 
@@ -362,7 +380,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    input_files = flatten_rocpd_yaml_input_file(args.input, skip_auto_merge=True)
+    input_files = flatten_rocpd_yaml_input_file(
+        args.input, skip_auto_merge=True, copy=args.copy
+    )
 
     package_args = process_args(None, args)
 

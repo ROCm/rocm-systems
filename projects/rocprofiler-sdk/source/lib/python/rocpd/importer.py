@@ -40,7 +40,9 @@ __all__ = ["RocpdImportData", "execute_statement"]
 def internal_init(_input, _output, skip_auto_merge):
     from . import package
 
-    _input = package.flatten_rocpd_yaml_input_file(_input, skip_auto_merge)
+    _input = package.flatten_rocpd_yaml_input_file(
+        _input, skip_auto_merge=skip_auto_merge
+    )
     assert not os.path.isdir(_output), "Output database name must not be a directory"
     assert _check_for_valid_dbs(
         _input
