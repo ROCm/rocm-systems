@@ -134,8 +134,8 @@ get_stream_id(hipStream_t stream)
     auto stream_id = get_stream_map()->rlock(
         [](const stream_map_t& _data,
            hipStream_t         _stream) -> std::optional<rocprofiler_stream_id_t> {
-            ROCP_ERROR_IF(!rocprofiler::registration::get_attach_status()->has_attach_table &&
-                          _data.count(_stream) == 0)
+            ROCP_WARNING_IF(_data.count(_stream) == 0 &&
+                            !rocprofiler::registration::get_attach_status()->has_attach_table)
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
