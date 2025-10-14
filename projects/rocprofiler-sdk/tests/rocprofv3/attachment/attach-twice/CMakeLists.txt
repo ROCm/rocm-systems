@@ -47,7 +47,7 @@ set_tests_properties(
     PROPERTIES TIMEOUT
                120
                LABELS
-               "integration-tests"
+               "integration-tests;attachment"
                ENVIRONMENT
                "${attachment-env}"
                FAIL_REGULAR_EXPRESSION
@@ -73,7 +73,7 @@ set_tests_properties(
     PROPERTIES TIMEOUT
                30
                LABELS
-               "integration-tests"
+               "integration-tests;attachment"
                DEPENDS
                rocprofv3-test-attachment-attach-twice-execute
                FIXTURES_REQUIRED
@@ -96,7 +96,7 @@ set_tests_properties(
     PROPERTIES TIMEOUT
                30
                LABELS
-               "integration-tests"
+               "integration-tests;attachment"
                DEPENDS
                rocprofv3-test-attachment-attach-twice-execute
                FIXTURES_REQUIRED

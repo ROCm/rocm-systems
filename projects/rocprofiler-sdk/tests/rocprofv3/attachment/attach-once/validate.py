@@ -69,11 +69,11 @@ def test_attachment_kernel_trace(kernel_input_data):
             thread_id = int(row["Thread_Id"])
             stream_id = int(row["Stream_Id"])
             kernel_threads.add(thread_id)
-            memory_copy_streams.add(stream_id)
+            kernel_streams.add(stream_id)
 
     # Exactly 8 streams and 32 threads
     len(kernel_threads) == NUM_KERNEL_THREADS
-    memory_copy_streams == expected_stream_ids
+    kernel_streams == expected_stream_ids
 
 
 def test_attachment_memory_copy_trace(memory_copy_input_data):
