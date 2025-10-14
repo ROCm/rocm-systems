@@ -16,7 +16,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
 #include "warp_common.hh"
@@ -129,7 +128,7 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<>&) {
   size_t logSize;
   std::string scalarName, intrinsicName;
   hiprtcResult compileResult;
-  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES"};
+  const char* options[] = {"-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES"};
 
   opToString<int, Op>(scalarName, intrinsicName);
   compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
