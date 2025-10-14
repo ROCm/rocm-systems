@@ -40,6 +40,7 @@ __global__ void null_kernel() {
   __shared__ int temp[256];
   temp[threadIdx.x] = sinf(float(threadIdx.x));
 }
+
 void rocm_null_gpu_job(void* stream) {
   hipLaunchKernelGGL(null_kernel, 1, 256, 0, (hipStream_t)stream);
 }
@@ -47,6 +48,7 @@ std::vector<std::vector<hipStream_t>> stream_pool;
 std::atomic<int> counter(0);
 bool do_kill = false;
 std::chrono::system_clock::time_point thread_reports[16];
+
 void thread_job(int dev, int virt) {
   HIP_CHECK_PERF(hipSetDevice(dev));  // use dev
   uint8_t* mem;
@@ -107,22 +109,18 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pool.resize(mgpu);
   HIP_CHECK_PERF(hipSetDeviceFlags(hipDeviceScheduleSpin));
-  std::vector<uint8_t*> memory_buffers[2];
   for (int i = 0; i < mgpu; i++) {
     HIP_CHECK_PERF(hipSetDevice(i));
     stream_pool[i].resize(12);
-    memory_buffers[i].resize(128);
     for (int j = 0; j < 12; j++)
       HIP_CHECK_PERF(hipStreamCreateWithFlags(&stream_pool[i][j], hipStreamNonBlocking));
-    for (int j = 0; j < 128; j++)
-      HIP_CHECK_PERF(hipMalloc(&memory_buffers[i][j], 4096 * ((j & 1) + 1)));
   }
   for (int nDev = 1; nDev <= mgpu; nDev++) {
     counter = 0;
     printf("RUNNING ON %d DEVICES\n", nDev);
     do_kill = false;
     std::vector<std::thread> threads;
-    for (int i = 0; i < nDev * 4; i++) threads.push_back(std::thread(thread_job, i / 4, i % 4));
+    for (int i = 0; i < nDev * 4; i++) threads.push_back(std::thread(thread_job, i / mgpu, i % 4));
     usleep(1000000);
     auto t1 = std::chrono::system_clock::now();
     int count = int(counter);
@@ -136,7 +134,7 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
       for (int i = 0; i < nDev * 4; i++) {
         if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - thread_reports[i]).count() >=
             1000000) {
-          printf("Thread %d/%d is stuck\n", i / 4, i % 4);
+          INFO("Thread " << i / (nDev * 4) << "/" << i % (nDev * 4) << " is stuck\n");
         }
       }
       total_count += count2 - count;

@@ -58,7 +58,7 @@ static void hostNodeCallback(void* data) {
 TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
-
+  hipGraph_t graph{nullptr};
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 #if HT_NVIDIA  // EXSWHTEC-228
   SECTION("Pass stream as nullptr") {
@@ -69,6 +69,8 @@ TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
   SECTION("Pass functions as nullptr") {
     HIP_CHECK_ERROR(hipLaunchHostFunc(stream, nullptr, nullptr), hipErrorInvalidValue);
   }
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**

@@ -231,7 +231,7 @@ class webui_analysis(OmniAnalyze_Base):
                         roof_obj.empirical_roofline(
                             ret_df=parser.apply_filters(
                                 workload=base_data[base_run],
-                                dir=self.dest_dir,
+                                dir_path=self.dest_dir,
                                 is_gui=True,
                                 debug=args.debug,
                             )

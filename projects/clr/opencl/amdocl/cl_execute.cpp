@@ -213,7 +213,12 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
   }
 #endif  // CL_VERSION
   if (global_work_size == NULL) {
-    return CL_INVALID_VALUE;
+    if ((OPENCL_MAJOR == 2 && OPENCL_MINOR >= 1) || (OPENCL_MAJOR > 2)) {
+      static size_t inputZeroes[3] = {0, 0, 0};
+      global_work_size = inputZeroes;
+    } else {
+      return CL_INVALID_VALUE;
+    }
   }
 
   if (local_work_size == NULL) {

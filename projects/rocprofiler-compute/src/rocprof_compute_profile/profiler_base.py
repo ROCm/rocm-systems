@@ -32,7 +32,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -109,7 +108,7 @@ class RocProfCompute_Base:
                     "Please verify."
                 )
             args.remaining = " ".join(args.remaining)
-        else:
+        elif not args.attach_pid:
             console_error(
                 "Profiling command required. Pass application executable after -- "
                 "at the end of options.\n"
@@ -357,6 +356,9 @@ class RocProfCompute_Base:
         args = self.get_args()
         console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
 
+        if args.attach_pid:
+            args.remaining = ""
+
         self._filter_blocks = self._soc.profiling_setup()
 
         # Write profiling configuration as yaml file
@@ -463,15 +465,23 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             console_log("profiling", f"Current input file: {fname}")
-
-            if self.__profiler in (
-                "rocprofv1",
-                "rocprofv2",
-                "rocprofv3",
-                "rocprofiler-sdk",
-            ):
-                options = self.get_profiler_options(str(fname), self._soc)
-                start_time = time.time()
+            options = self.get_profiler_options(str(fname), self._soc)
+            start_time = time.time()
+            if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
+                # Only 1-run case is permitted for attach/detach
+                if (isinstance(options, list) and "--pid" in options) or (
+                    isinstance(options, dict)
+                    and (options.get("ROCPROF_ATTACH_PID") is not None)
+                ):
+                    if total_runs > 1:
+                        console_error(
+                            f"Cannot attach process for profiling as the requested "
+                            f"performance counters exceed the collection capacity of "
+                            f"single pass counter collection. The current setup of "
+                            f"requested counter blocks needs {total_runs} number of "
+                            f'passes. Please use "--block" or "--set" '
+                            f"to adjust or reduce the requested performance metrics!"
+                        )
                 run_prof(
                     fname=str(fname),
                     profiler_options=options,
@@ -531,5 +541,5 @@ class RocProfCompute_Base:
         self._soc.post_profiling()
 
 
-def test_df_column_equality(df: pd.DataFrame) -> np.bool:
+def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()

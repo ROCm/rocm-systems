@@ -13,10 +13,13 @@ set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES
     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} benchmark_test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES
-    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfx9test.hpp gfx9test.cpp
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfxtest.hpp gfx9test.cpp
     gfx950test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES
     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} multigpu.cpp)
+
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX12_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfxtest.hpp gfx12test.cpp)
 
 add_executable(pcs_gfx9_test)
 
@@ -97,4 +100,27 @@ gtest_add_tests(
 set_tests_properties(
     ${pcs_thread_test_TESTS}
     PROPERTIES TIMEOUT 75 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_executable(pcs_gfx12_test)
+
+target_sources(pcs_gfx12_test
+               PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX12_TEST_SOURCES})
+target_include_directories(pcs_gfx12_test PRIVATE ${PCTEST_INCLUDE_DIR})
+
+target_link_libraries(
+    pcs_gfx12_test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+gtest_add_tests(
+    TARGET pcs_gfx12_test
+    SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX12_TEST_SOURCES}
+    TEST_LIST pcs_gfx12_test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(
+    ${pcs_gfx12_test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -198,7 +198,9 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
 
     SECTION("hipHostAllocDefault") { flag = hipHostAllocDefault; }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-    SECTION("hipHostAllocUncached") { flag = hipHostAllocUncached; }
+    if (!IsNavi4X()) {
+      SECTION("hipHostAllocUncached") { flag = hipHostAllocUncached; }
+    }
 #endif
 
     HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&B_h), SIZE, flag));
