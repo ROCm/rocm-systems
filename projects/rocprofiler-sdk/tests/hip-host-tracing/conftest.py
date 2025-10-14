@@ -30,7 +30,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--input",
         action="store",
-        default="kernel-tracing-test.json",
+        default="hip-host-tracing-test.json",
         help="Input JSON",
     )
 
