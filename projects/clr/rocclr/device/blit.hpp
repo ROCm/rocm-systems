@@ -33,7 +33,7 @@
 namespace amd::device {
 
 //! Blit Manager Abstraction class
-class BlitManager : public amd::HeapObject {
+class BlitManager {
  public:
   //! HW accelerated setup
   union Setup {

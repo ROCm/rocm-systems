@@ -60,7 +60,7 @@ class Runtime : AllStatic {
 
 /*@}*/
 
-class RuntimeTearDown : public HeapObject {
+class RuntimeTearDown {
   static std::vector<ReferenceCountedObject*> external_;
 
  public:

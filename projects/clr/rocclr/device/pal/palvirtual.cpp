@@ -172,8 +172,9 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   }
 
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
+  void* queueMem = ::operator new(sizeof(VirtualGPU::Queue) + allocSize);
   VirtualGPU::Queue* queue =
-      new (allocSize) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
+      new (queueMem) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
@@ -182,7 +183,8 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       uint32_t index = AllocedQueues(gpu, qCreateInfo.engineType);
       // Create PAL queue object
       if (index < GPU_MAX_HW_QUEUES) {
-        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo(gpu.dev());
+        void* infoMem = ::operator new(sizeof(Device::QueueRecycleInfo) + qSize);
+        Device::QueueRecycleInfo* info = new (infoMem) Device::QueueRecycleInfo(gpu.dev());
         if (info == nullptr) {
           LogError("Could not create QueueRecycleInfo!");
           return nullptr;

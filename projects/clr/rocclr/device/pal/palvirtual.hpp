@@ -78,7 +78,7 @@ enum class BarrierType : uint8_t {
 //! Virtual GPU
 class VirtualGPU : public device::VirtualDevice {
  public:
-  class Queue : public amd::HeapObject {
+  class Queue {
    public:
     static constexpr uint MaxCommands = 256;
     static constexpr uint StartCmdBufIdx = 1;
@@ -218,7 +218,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint max_command_buffers_;
   };
 
-  struct CommandBatch : public amd::HeapObject {
+  struct CommandBatch {
     amd::Command* head_;           //!< Command batch head
     GpuEvent events_[AllEngines];  //!< Last known GPU events
     TimeStamp* lastTS_;            //!< TS associated with command batch
