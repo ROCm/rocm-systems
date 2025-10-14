@@ -211,7 +211,8 @@ TEST_CASE("Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture") {
   HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
 
   // Device alloc (async so it belongs to the captured stream)
-  HIP_CHECK(hipMallocAsync(&d_arrayA, arraySize * sizeof(double), captureStream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&d_arrayA), arraySize * sizeof(double),
+                           captureStream));
 
   // Initialize host data via a host function in the stream
   set_vector_args args{h_array, initValue};

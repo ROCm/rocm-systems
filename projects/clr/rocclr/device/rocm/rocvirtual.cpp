@@ -127,6 +127,9 @@ void Timestamp::checkGpuTime() {
   if (HwProfiling()) {
     uint64_t start = std::numeric_limits<uint64_t>::max();
     uint64_t end = 0;
+    uint64_t sdmaStart = std::numeric_limits<uint64_t>::max();
+    uint64_t sdmaEnd = 0;
+
 
     for (auto it : signals_) {
       amd::ScopedLock lock(it->LockSignalOps());
@@ -140,41 +143,45 @@ void Timestamp::checkGpuTime() {
       if (command().GetBatchHead() == nullptr || command().profilingInfo().marker_ts_ ||
           command().type() == CL_COMMAND_TASK) {
         hsa_amd_profiling_dispatch_time_t time = {};
+        hsa_amd_profiling_async_copy_time_t timeSdma = {};
         amd_signal_t* amdSignal = reinterpret_cast<amd_signal_t*>(it->signal_.handle);
 
-        if (it->engine_ == HwQueueEngine::Compute) {
-          Hsa::profiling_get_dispatch_time(gpu()->gpu_device(), it->signal_, &time);
+        if (it->engine_ == HwQueueEngine::SdmaInter || it->engine_ == HwQueueEngine::SdmaRead ||
+            it->engine_ == HwQueueEngine::SdmaWrite || it->engine_ == HwQueueEngine::SdmaIntra) {
+          Hsa::profiling_get_async_copy_time(it->signal_, &timeSdma);
+          sdmaStart = std::min(timeSdma.start, sdmaStart);
+          sdmaEnd = std::max(timeSdma.end, sdmaEnd);
+          // set dispatch time to be used in logging.
+          time.start = timeSdma.start;
+          time.end = timeSdma.end;
         } else {
-          hsa_amd_profiling_async_copy_time_t time_sdma = {};
-          Hsa::profiling_get_async_copy_time(it->signal_, &time_sdma);
-          time.start = time_sdma.start;
-          time.end = time_sdma.end;
+          Hsa::profiling_get_dispatch_time(gpu()->gpu_device(), it->signal_, &time);
+          start = std::min(time.start, start);
+          end = std::max(time.end, end);
         }
-
-        start = std::min(time.start, start);
-        end = std::max(time.end, end);
 
         if ((command().type() == CL_COMMAND_TASK) && (it->flags_.isPacketDispatch_ == true)) {
           static_cast<amd::AccumulateCommand&>(command()).addTimestamps(time.start, time.end);
         }
 
         ClPrint(amd::LOG_INFO, amd::LOG_TS,
-                "Signal = (0x%lx), Translated start/end = %ld / %ld, "
-                "Elapsed = %ld ns, ticks start/end = %ld / %ld, Ticks elapsed = %ld",
+                "Signal = (0x%lx), Translated start/end = %ld / %ld, Elapsed = %ld ns, "
+                "ticks start/end = %ld / %ld, Ticks elapsed = %ld, Engine = %u",
                 it->signal_.handle, time.start, time.end, time.end - time.start,
-                amdSignal->start_ts, amdSignal->end_ts, amdSignal->end_ts - amdSignal->start_ts);
+                amdSignal->start_ts, amdSignal->end_ts, amdSignal->end_ts - amdSignal->start_ts,
+                it->engine_);
       }
       it->flags_.done_ = true;
     }
     signals_.clear();
-    if (end != 0) {
+    if (end != 0 || sdmaEnd != 0) {
       // Check if it's the first execution and update start time
       if (!accum_ena_) {
-        start_ = start * ticksToTime_;
+        start_ = ((sdmaEnd != 0) ? sdmaStart : start) * ticksToTime_;
         accum_ena_ = true;
       }
       // Progress the end time always
-      end_ = end * ticksToTime_;
+      end_ = ((sdmaEnd != 0) ? sdmaEnd : end) * ticksToTime_;
     }
   }
 }
@@ -1288,38 +1295,37 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         uint8_t packetType =
             extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (packetType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Graph shader name : %s",
-                  (*kernelNames)[packetIndex].c_str());
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Graph shader name : %s, device id : %u",
+                  (*kernelNames)[packetIndex].c_str(), dev().index());
 
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-                  "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
-                  "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-                  "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
-                  "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
-                  "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
-                  "rptr=%u, wptr=%u",
-                  gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
-                  extractAqlBits(header, HSA_PACKET_HEADER_BARRIER,
-                                HSA_PACKET_HEADER_WIDTH_BARRIER),
-                  extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                                HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-                  extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                                HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-                  packet->setup,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_x,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_y,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_z,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_x,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_y,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_z,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->private_segment_size,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->group_segment_size,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernel_object,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
-                  Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
-            }
+          ClPrint(
+              amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
+              "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
+              "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+              "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
+              "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
+              "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
+              "rptr=%u, wptr=%u",
+              gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
+              extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
+              extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                             HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+              extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                             HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+              packet->setup, reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_x,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_y,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_z,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_x,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_y,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_z,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->private_segment_size,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->group_segment_size,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernel_object,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
+              Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
+        }
       }
     }
 
@@ -1625,6 +1631,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   profiling_ = profiling;
   cooperative_ = cooperative;
 
+  // Initialize barrier and barrier value packets
+  barrier_packet_.header = kInvalidAql;
+  barrier_value_packet_.header.header = kInvalidAql;
+
   constexpr uint16_t kernelDispatchHBits =
       (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
   constexpr uint16_t barrierHBits = (1 << HSA_PACKET_HEADER_BARRIER);
@@ -1723,11 +1733,6 @@ bool VirtualGPU::create() {
     LogError("Could not create BlitManager!");
     return false;
   }
-
-  // Initialize barrier and barrier value packets
-  memset(&barrier_packet_, 0, sizeof(barrier_packet_));
-  barrier_packet_.header = kInvalidAql;
-  barrier_value_packet_.header.header = kInvalidAql;
 
   // Create a object of PrintfDbg
   printfdbg_ = new PrintfDbg(roc_device_);

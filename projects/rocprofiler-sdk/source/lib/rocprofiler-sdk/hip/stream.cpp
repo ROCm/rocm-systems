@@ -416,13 +416,38 @@ enable_stream_stack()
     return false;
 }
 
+#define HIP_RUNTIME_API_TABLE_VERSION                                                              \
+    ROCPROFILER_SDK_COMPUTE_VERSION(                                                               \
+        HIP_RUNTIME_API_TABLE_MAJOR_VERSION, 0, HIP_RUNTIME_API_TABLE_STEP_VERSION)
+
+#define HIP_STREAM_EXPLICIT_DISABLE(TABLE, OPERATION, REASON)                                      \
+    template <>                                                                                    \
+    struct explicit_disable_update<TABLE, OPERATION> : std::true_type                              \
+    {                                                                                              \
+        static constexpr auto reason = REASON;                                                     \
+    };
+
+template <size_t TableIdx, size_t OpIdx>
+struct explicit_disable_update : std::false_type
+{};
+
+#if HIP_RUNTIME_API_TABLE_VERSION >= ROCPROFILER_SDK_COMPUTE_VERSION(0, 0, 16)
+HIP_STREAM_EXPLICIT_DISABLE(ROCPROFILER_HIP_TABLE_ID_Runtime,
+                            ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamCopyAttributes,
+                            "has multiple HIP stream arguments")
+#endif
+
+#undef HIP_RUNTIME_API_TABLE_VERSION
+#undef HIP_STREAM_EXPLICIT_DISABLE
+
 template <size_t TableIdx, typename Tp, size_t OpIdx>
 void
 update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 {
-    using table_type         = typename hip_table_lookup<TableIdx>::type;
-    using info_type          = hip_api_info<TableIdx, OpIdx>;
-    using function_args_type = decltype(info_type::get_args_type());
+    using table_type            = typename hip_table_lookup<TableIdx>::type;
+    using info_type             = hip_api_info<TableIdx, OpIdx>;
+    using explicit_disable_type = explicit_disable_update<TableIdx, OpIdx>;
+    using function_args_type    = decltype(info_type::get_args_type());
 
     static_assert(info_type::table_idx == ROCPROFILER_HIP_TABLE_ID_Runtime,
                   "This function should only be instantiated for HIP runtime API");
@@ -440,7 +465,15 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 
         constexpr auto num_args = function_args_type::size();
 
-        if constexpr(common::mpl::is_one_of<hipStream_t, function_args_type>::value)
+        if constexpr(explicit_disable_type::value)
+        {
+            ROCP_INFO << fmt::format(
+                "[hip stream] {} is explicitly disabled from stream tracing: {}",
+                info_type::name,
+                explicit_disable_type::reason);
+            return;
+        }
+        else if constexpr(common::mpl::is_one_of<hipStream_t, function_args_type>::value)
         {
             constexpr auto stream_idx =
                 common::mpl::index_of<hipStream_t, function_args_type>::value;
