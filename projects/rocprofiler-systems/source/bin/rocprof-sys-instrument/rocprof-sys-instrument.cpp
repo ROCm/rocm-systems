@@ -1718,8 +1718,11 @@ main(int argc, char** argv)
     }
     // Note: Some Fortran compilers (e.g. Cray) may name the Fortran main function after
     // the program name in the PROGRAM statement. E.g, "PROGRAM hello" becomes "hello_"
-    // in the disassembly. In such cases, to avoid possible problems, users should specify
-    // their Fortran main with "--main-function"
+    // in the disassembly.
+    // This is not a problem as the compiler will also generate a corresponding "main"
+    // symbol that has the same start address, allowing Dyninst to latch onto that.
+    // However, if problems persist, users should specify their main with
+    // "--main-function"
 
     if(!main_func) main_func = find_function(app_image, main_fname.c_str());
     auto* user_start_func = find_function(app_image, "rocprofsys_user_start_trace",
