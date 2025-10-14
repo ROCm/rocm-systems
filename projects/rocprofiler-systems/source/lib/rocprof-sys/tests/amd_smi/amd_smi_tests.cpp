@@ -155,10 +155,8 @@ TEST_F(AmdSmiTests, AmdSmiSetup)
     amd_smi_impl<mock_smi_service_factory, _settings_api, _perfetto_api, _rocpd_api>
         smi_impl;
     EXPECT_CALL(*g_mock_smi_service, get_version)
-        .WillRepeatedly(DoAll(
-            [] { std::cout << "get version!\n"; },
-            testing::Return(version{
-                .numeric_representation = { .major = 1, .minor = 2, .release = 3 } })));
+        .WillRepeatedly(testing::Return(version{
+            .numeric_representation = { .major = 1, .minor = 2, .release = 3 } }));
 
     EXPECT_CALL(*g_mock_smi_service, get_processors);
     smi_impl.setup();

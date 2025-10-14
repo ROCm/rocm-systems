@@ -5,6 +5,7 @@
 #include "library/amd_smi/common.hpp"
 #include "library/thread_info.hpp"
 
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys
@@ -14,6 +15,49 @@ namespace amd_smi
 
 namespace
 {
+
+/*
+Perfetto order
+    0. GPU Current Power
+    1. GPU GFX Busy
+    2. GPU MM Busy
+    3. GPU Memory Usage
+    4. GPU Temperature
+    5. GPU UMC Busy
+*/
+struct track_description
+{
+    const char* const   track_name;
+    const char* const   units;
+    std::vector<size_t> track_indexes;
+};
+
+const auto GFX_BUSY_TEST_VALUE = smi_metric_options{ .bits{ .gfx_activity = 1 } }.value;
+const auto UMC_BUSY_TEST_VALUE = smi_metric_options{ .bits{ .umc_activity = 1 } }.value;
+const auto MM_BUSY_TEST_VALUE  = smi_metric_options{ .bits{ .mm_activity = 1 } }.value;
+const auto TEMPERATURE_TEST_VALUE =
+    smi_metric_options{ .bits{ .hotspot_temperature = 1, .edge_temperature = 1 } }.value;
+const auto CURRENT_POWER_TEST_VALUE =
+    smi_metric_options{ .bits{ .current_socket_power = 1, .average_socket_power = 1 } }
+        .value;
+const auto MEMORY_USAGE_TEST_VALUE =
+    smi_metric_options{ .bits{ .memory_usage = 1 } }.value;
+const auto VCN_ACTIVITY_TEST_VALUE =
+    smi_metric_options{ .bits{ .vcn_activity = 1 } }.value;
+const auto JPEG_ACTIVITY_TEST_VALUE =
+    smi_metric_options{ .bits{ .jpeg_activity = 1 } }.value;
+
+std::unordered_map<uint32_t, track_description> perfetto_track_info{
+    { GFX_BUSY_TEST_VALUE, { "GFX Busy", "%" } },
+    { UMC_BUSY_TEST_VALUE, { "UMC Busy", "%" } },
+    { MM_BUSY_TEST_VALUE, { "MM Busy", "%" } },
+    { TEMPERATURE_TEST_VALUE, { "Temperature", "deg C" } },
+    { CURRENT_POWER_TEST_VALUE, { "Current Power", "watts" } },
+    { MEMORY_USAGE_TEST_VALUE, { "Memory Usage", "megabytes" } },
+    { VCN_ACTIVITY_TEST_VALUE, { "VCN Activity", "%" } },
+    { JPEG_ACTIVITY_TEST_VALUE, { "JPEG Activity", "%" } },
+};
+
 struct amd_smi_sample
 {
     size_t      timestamp;
@@ -58,34 +102,10 @@ struct perfetto
                             JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
             }
         };
-        struct track_description
-        {
-            const char* const track_name;
-            const char* const units;
-        };
-        std::map<uint32_t, track_description> perfetto_track_names{
-            { smi_metric_options{ .bits{ .gfx_activity = 1 } }.value,
-              { "GFX Busy", "%" } },
-            { smi_metric_options{ .bits{ .umc_activity = 1 } }.value,
-              { "UMC Busy", "%" } },
-            { smi_metric_options{ .bits{ .mm_activity = 1 } }.value, { "MM Busy", "%" } },
-            { smi_metric_options{
-                  .bits{ .hotspot_temperature = 1, .edge_temperature = 1 } }
-                  .value,
-              { "Temperature ", "deg C" } },
-            { smi_metric_options{
-                  .bits{ .current_socket_power = 1, .average_socket_power = 1 } }
-                  .value,
-              { "Current Power", "watts" } },
-            { smi_metric_options{ .bits{ .memory_usage = 1 } }.value,
-              { "Memory Usage", "megabytes" } },
-            { smi_metric_options{ .bits{ .vcn_activity = 1 } }.value,
-              { "VCN Activity", "%" } },
-            { smi_metric_options{ .bits{ .jpeg_activity = 1 } }.value,
-              { "JPEG Activity", "%" } },
-        };
 
-        for(auto& [num, description] : perfetto_track_names)
+        auto index{ 0 };
+
+        for(auto& [num, description] : perfetto_track_info)
         {
             auto metric_map_id = num & metrics.value;
             if(metric_map_id > 0)
@@ -97,8 +117,10 @@ struct perfetto
                     {
                         for(std::size_t i = 0; i < AMDSMI_MAX_NUM_VCN; ++i)
                         {
-                            counter_track::emplace(
-                                device_index, addendum_blk(i, "VCN Activity", xcp), "%");
+                            description.track_indexes.emplace_back(counter_track::emplace(
+                                device_index,
+                                addendum_blk(i, description.track_name, xcp),
+                                description.units));
                         }
                     }
                 }
@@ -109,15 +131,18 @@ struct perfetto
                     {
                         for(std::size_t i = 0; i < AMDSMI_MAX_NUM_JPEG_ENGINES; ++i)
                         {
-                            counter_track::emplace(
-                                device_index, addendum_blk(i, "JPEG Activity", xcp), "%");
+                            description.track_indexes.emplace_back(counter_track::emplace(
+                                device_index,
+                                addendum_blk(i, description.track_name, xcp),
+                                description.units));
                         }
                     }
                 }
                 else
                 {
-                    counter_track::emplace(device_index, addendum(description.track_name),
-                                           description.units);
+                    description.track_indexes.emplace_back(counter_track::emplace(
+                        device_index, addendum(description.track_name),
+                        description.units));
                 }
             }
         }
@@ -169,66 +194,78 @@ struct perfetto
             double _gfxbusy = itr.metrics.gfx_activity;
             double _umcbusy = itr.metrics.umc_activity;
             double _mmbusy  = itr.metrics.mm_activity;
-            double _temp    = itr.metrics.hotspot_temperature;
+            double _temp    = _enabled_metrics.bits.hotspot_temperature
+                                  ? itr.metrics.hotspot_temperature
+                                  : itr.metrics.edge_temperature;
             double _power   = _enabled_metrics.bits.average_socket_power
                                   ? itr.metrics.average_socket_power
                                   : itr.metrics.current_socket_power;
             double _usage =
                 itr.metrics.memory_usage / static_cast<double>(units::megabyte);
 
-            size_t track_index = 0;
-
             if(_enabled_metrics.bits.gfx_activity)
             {
+                const auto& track_index =
+                    perfetto_track_info.at(GFX_BUSY_TEST_VALUE).track_indexes[0];
                 TRACE_COUNTER("device_busy_gfx",
-                              counter_track::at(device_index, track_index++), _ts,
+                              counter_track::at(device_index, track_index), _ts,
                               _gfxbusy);
             }
             if(_enabled_metrics.bits.umc_activity)
             {
+                const auto& track_index =
+                    perfetto_track_info.at(UMC_BUSY_TEST_VALUE).track_indexes[0];
                 TRACE_COUNTER("device_busy_umc",
-                              counter_track::at(device_index, track_index++), _ts,
+                              counter_track::at(device_index, track_index), _ts,
                               _umcbusy);
             }
             if(_enabled_metrics.bits.mm_activity)
             {
+                const auto& track_index =
+                    perfetto_track_info.at(MM_BUSY_TEST_VALUE).track_indexes[0];
                 TRACE_COUNTER("device_busy_mm",
-                              counter_track::at(device_index, track_index++), _ts,
-                              _mmbusy);
+                              counter_track::at(device_index, track_index), _ts, _mmbusy);
             }
             if(_enabled_metrics.bits.edge_temperature ||
                _enabled_metrics.bits.hotspot_temperature)
             {
-                TRACE_COUNTER("device_temp",
-                              counter_track::at(device_index, track_index++), _ts, _temp);
+                const auto& track_index =
+                    perfetto_track_info.at(TEMPERATURE_TEST_VALUE).track_indexes[0];
+                TRACE_COUNTER("device_temp", counter_track::at(device_index, track_index),
+                              _ts, _temp);
             }
             if(_enabled_metrics.bits.average_socket_power ||
                _enabled_metrics.bits.current_socket_power)
             {
+                const auto& track_index =
+                    perfetto_track_info.at(CURRENT_POWER_TEST_VALUE).track_indexes[0];
                 TRACE_COUNTER("device_power",
-                              counter_track::at(device_index, track_index++), _ts,
-                              _power);
+                              counter_track::at(device_index, track_index), _ts, _power);
             }
             if(_enabled_metrics.bits.memory_usage)
             {
+                const auto& track_index =
+                    perfetto_track_info.at(MEMORY_USAGE_TEST_VALUE).track_indexes[0];
                 TRACE_COUNTER("device_memory_usage",
-                              counter_track::at(device_index, track_index++), _ts,
-                              _usage);
+                              counter_track::at(device_index, track_index), _ts, _usage);
             }
             if(_enabled_metrics.bits.vcn_activity)
             {
                 std::for_each(
                     std::begin(itr.metrics.xcp_stats), std::end(itr.metrics.xcp_stats),
-                    [&](const auto& xcp_stats) {
+                    [&, engine_id = 0](const auto& xcp_stats) mutable {
                         std::for_each(
                             std::begin(xcp_stats.vcn_busy), std::end(xcp_stats.vcn_busy),
                             [&](const auto& vcn_val) {
                                 if(vcn_val != std::numeric_limits<uint16_t>::max())
                                 {
+                                    const auto& track_index =
+                                        perfetto_track_info.at(VCN_ACTIVITY_TEST_VALUE)
+                                            .track_indexes[engine_id++];
                                     TRACE_COUNTER(
                                         "device_vcn_activity",
-                                        counter_track::at(device_index, track_index++),
-                                        _ts, vcn_val);
+                                        counter_track::at(device_index, track_index), _ts,
+                                        vcn_val);
                                 }
                             });
                     });
@@ -238,16 +275,19 @@ struct perfetto
             {
                 std::for_each(
                     std::begin(itr.metrics.xcp_stats), std::end(itr.metrics.xcp_stats),
-                    [&](const auto& xcp_stats) {
+                    [&, engine_id = 0](const auto& xcp_stats) mutable {
                         std::for_each(
                             std::begin(xcp_stats.jpeg_busy),
                             std::end(xcp_stats.jpeg_busy), [&](const auto& jpeg_val) {
                                 if(jpeg_val != std::numeric_limits<uint16_t>::max())
                                 {
+                                    const auto& track_index =
+                                        perfetto_track_info.at(JPEG_ACTIVITY_TEST_VALUE)
+                                            .track_indexes[engine_id++];
                                     TRACE_COUNTER(
                                         "device_jpeg_activity",
-                                        counter_track::at(device_index, track_index++),
-                                        _ts, jpeg_val);
+                                        counter_track::at(device_index, track_index), _ts,
+                                        jpeg_val);
                                 }
                             });
                     });
