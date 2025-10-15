@@ -617,7 +617,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
-          source ${{ env.PYTHON_VENV_ACTIVATE }} \
+          source ${{ env.PYTHON_VENV_ACTIVATE }}; \
           PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH \
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
