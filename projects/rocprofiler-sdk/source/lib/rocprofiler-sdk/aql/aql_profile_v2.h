@@ -403,6 +403,7 @@ struct aqlprofile_att_buffer_status_v0_t
   uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_v0_t)
   void*    data;        // Read data from, if is full
   uint64_t read_size;   // Number of bytes to read, if is full
+  uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
   bool     needs_swap;  // If buffer requires swap
   bool     is_too_late;
   bool     error;
@@ -411,17 +412,17 @@ struct aqlprofile_att_buffer_status_v0_t
 /**
  * @brief Fn to retrieve buffer status.
  * Must be called at least once with has_buffer_swapped=true for every swap packet inserted.
- * @param[inout] handle To be passed to iterate_data()
+ * @param[out] out Query result
  * @param[in] handle What was passed to aqlprofile_att_get_buffer_packets
  * @param[in] shader_engine_id Shader engine (SE) ID
  * @param[in] flags Must be zero
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_get_buffer_status(aqlprofile_att_buffer_status_v0_t* out,
-                                              aqlprofile_handle_t handle,
-                                              int shader_engine_id,
-                                              int flags);
+hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_v0_t* out,
+                                                 aqlprofile_handle_t handle,
+                                                 int shader_engine_id,
+                                                 int flags);
 
 /**
  * @brief Callback for iteration of all possible event coordinate IDs and coordinate names.

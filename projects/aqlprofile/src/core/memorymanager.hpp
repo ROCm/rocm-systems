@@ -202,8 +202,8 @@ class TraceMemoryManager : public MemoryManager {
     aqlprofile_buffer_desc_flags_t flags{};
     flags.device_access = true;
     flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
-    next_buffer.emplace_back(AllocMemory(outputbuf_size, flags));
-    return next_buffer.back().get();
+    extra_output_buffers.emplace_back(AllocMemory(outputbuf_size, flags));
+    return extra_output_buffers.back().get();
   }
   
   void* AddExtraCmdBuf(size_t size)
@@ -251,10 +251,13 @@ class TraceMemoryManager : public MemoryManager {
   }
 
   int GetSimdMask() const { return simd_mask; }
+  bool isDoubleBuffer() const { return !extra_cmd_buffers.empty() && !extra_output_buffers.empty(); }
 
   pm4_builder::TraceConfig config{};
 
+
   std::atomic<size_t> current_buffer{0};
+  std::atomic<size_t> buffer_swaps{0};
 
  protected:
   int target_cu = -1;
@@ -263,7 +266,7 @@ class TraceMemoryManager : public MemoryManager {
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   std::unique_ptr<void, MemoryDeleter> trace_control_buf = nullptr;
   
-  std::vector<std::unique_ptr<void, MemoryDeleter>> next_buffer{};
+  std::vector<std::unique_ptr<void, MemoryDeleter>> extra_output_buffers{};
   std::vector<std::unique_ptr<void, MemoryDeleter>> extra_cmd_buffers{};
 };
 

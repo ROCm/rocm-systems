@@ -191,7 +191,8 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
         aql_params.push_back(param);
     }
 
-    aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS), {3}});
+    if (params.triple_buffering)
+        aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS), {3}});
 }
 
 std::unique_ptr<hsa::TraceControlAQLPacket>

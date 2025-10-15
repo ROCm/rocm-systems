@@ -158,7 +158,12 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     size_t sample_size_plus_header = sample_size;
 
     char* sample_data_ptr = (char*)cpu_sample.data();
-    if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
+    if (memorymgr->isDoubleBuffer())
+    {
+      size_t buf_num = memorymgr->config.buffer_data.size();
+      sample_ptr = memorymgr->config.buffer_data[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
+    }
+    else if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
       auto* header = reinterpret_cast<att_header_packet_t*>(cpu_sample.data());
       *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId());
       sample_data_ptr += sizeof(att_header_packet_t);
@@ -354,7 +359,7 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
 
 extern "C" {
 
-PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_status(
+PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
   aqlprofile_att_buffer_status_v0_t* out,
   aqlprofile_handle_t handle,
   int shader_engine_id,
@@ -368,7 +373,8 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_status(
   auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
   if (manager == nullptr) return HSA_STATUS_ERROR;
 
-  uint32_t status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status_double_buffer;
+  volatile auto& control = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
+  uint32_t status        = control.status_double_buffer;
   
   out->_size       = sizeof(aqlprofile_att_buffer_status_v0_t);
   out->is_too_late = false;
@@ -380,6 +386,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_status(
     auto& config    = manager->config;
     out->read_size  = config.capacity_per_se;
     out->data       = config.buffer_data.at(manager->current_buffer.fetch_add(1) % config.buffer_data.size());
+    out->num_swaps  = manager->buffer_swaps.fetch_add(1);
   }
 
   return HSA_STATUS_SUCCESS;
@@ -402,6 +409,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   if (manager == nullptr) return HSA_STATUS_ERROR;
 
   auto& buffers = manager->config.buffer_data;
+  if (buffers.size() < 2) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(manager->GetAgent());
   pm4_builder::SqttBuilder* sqttbuilder = pm4_factory->GetSqttBuilder();

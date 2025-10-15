@@ -35,6 +35,7 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
+#include <future>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -69,6 +70,7 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
     uint64_t perf_exclude_mask  = 0;
     bool     no_detail_simd     = false;
+    bool     triple_buffering   = false;
 
     bool bSerialize = false;
 
@@ -99,8 +101,8 @@ public:
     thread_trace_parameter_pack  params;
     const rocprofiler_agent_id_t agent_id;
 
-    [[nodiscard]] std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
-                                                       bool                          bWait) const;
+    std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
+                                         bool                          bWait) const;
 
     template <typename VecType>
     [[nodiscard]] std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
@@ -114,6 +116,9 @@ public:
     }
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
+    void start_worker(std::shared_ptr<std::atomic<bool>> flag);
+    rocprofiler_status_t stop_worker();
+
 private:
     hsa_queue_t*     queue{nullptr};
     std::atomic<int> active_traces{0};
@@ -121,6 +126,8 @@ private:
 
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
+
+    std::future<rocprofiler_status_t> worked_thread{};
 };
 
 class DispatchThreadTracer
@@ -190,6 +197,7 @@ private:
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
     std::mutex agent_mut;
+    std::shared_ptr<std::atomic<bool>> worker_flag{nullptr};
 };
 
 void
