@@ -32,7 +32,6 @@ import os
 import re
 import socket
 import subprocess
-import sys
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
@@ -42,6 +41,12 @@ from typing import Any, Optional, TypeVar
 import pandas as pd
 
 import config
+from utils.amdsmi_interface import (
+    amdsmi_ctx,
+    get_gpu_compute_partition,
+    get_gpu_memory_partition,
+    get_gpu_vbios_part_number,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -52,17 +57,6 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
-
-python_lib_path = os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi"
-sys.path.append(python_lib_path)
-# If the python library is installed, it will overwrite the path above
-
-try:
-    import amdsmi
-except ImportError as e:
-    print(f"Unhandled import error: {e}")
-    print("Failed to import the amdsmi Python library.")
-    sys.exit(1)
 
 T = TypeVar("T")
 
@@ -263,27 +257,10 @@ def extract_gpu_info() -> dict[str, Any]:
         "memory_partition": None,
     }
 
-    # amd-smi info
-    try:
-        amdsmi.amdsmi_init()
-
-        devices = amdsmi.amdsmi_get_processor_handles()
-        if len(devices) == 0:
-            console_warning("No AMD GPU detected!")
-            return result
-
-        device = devices[0]  # FIXME: only using GPU 0 for now
-        result["vbios"] = amdsmi.amdsmi_get_gpu_vbios_info(device)["part_number"]
-        result["compute_partition"] = amdsmi.amdsmi_get_gpu_compute_partition(device)
-        result["memory_partition"] = amdsmi.amdsmi_get_gpu_memory_partition(device)
-
-    except Exception as e:
-        console_warning(f"amd-smi init failed: {e}")
-    finally:
-        try:
-            amdsmi.amdsmi_shut_down()
-        except Exception as e:
-            console_warning(f"amd-smi shutdown failed: {e}")
+    with amdsmi_ctx():
+        result["vbios"] = get_gpu_vbios_part_number()
+        result["compute_partition"] = get_gpu_compute_partition()
+        result["memory_partition"] = get_gpu_memory_partition()
 
     # Apply defaults and warnings
     if result["compute_partition"] == "N/A" or result["compute_partition"] is None:

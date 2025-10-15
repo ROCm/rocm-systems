@@ -36,6 +36,7 @@ import yaml
 
 import config
 from roofline import Roofline
+from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
     console_error,
@@ -57,17 +58,6 @@ from utils.utils import (
     mibench,
     parse_sets_yaml,
 )
-
-python_lib_path = os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi"
-sys.path.append(python_lib_path)
-# If the python library is installed, it will overwrite the path above
-
-try:
-    import amdsmi
-except ImportError as e:
-    print(f"Unhandled import error: {e}")
-    print("Failed to import the amdsmi Python library.")
-    sys.exit(1)
 
 
 class OmniSoC_Base:
@@ -177,31 +167,8 @@ class OmniSoC_Base:
                 )
             )
 
-        # amd-smi info
-        try:
-            amdsmi.amdsmi_init()
-
-            devices = amdsmi.amdsmi_get_processor_handles()
-            if len(devices) == 0:
-                console_error("No AMD GPU detected!")
-                return
-
-            # Extract max memory clock frequency
-            amd_smi_mclk = amdsmi.amdsmi_get_gpu_od_volt_info(devices[0])[
-                "curr_sclk_range"
-            ]["upper_bound"]
-            # 100 Mhz -> 100
-            self._mspec.max_mclk = amd_smi_mclk / 10**6
-
-            console_debug(f"max mem clock is {self._mspec.max_mclk}")
-
-        except Exception as e:
-            console_warning(f"amd-smi init failed: {e}")
-        finally:
-            try:
-                amdsmi.amdsmi_shut_down()
-            except Exception as e:
-                console_warning(f"amd-smi shutdown failed: {e}")
+        with amdsmi_ctx():
+            self._mspec.max_mclk = str(get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -232,31 +199,8 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        # amd-smi info
-        try:
-            amdsmi.amdsmi_init()
-
-            devices = amdsmi.amdsmi_get_processor_handles()
-            if len(devices) == 0:
-                console_warning("No AMD GPU detected!")
-                return
-
-            board_info = amdsmi.amdsmi_get_gpu_board_info(devices[0])
-            gpu_model = board_info["product_name"]
-
-            console_debug(f"GPU Model: {gpu_model}")
-
-            if not gpu_model:
-                console_warning("Unable to determine the GPU model from amd-smi.")
-                return
-
-        except Exception as e:
-            console_warning(f"amd-smi init failed: {e}")
-        finally:
-            try:
-                amdsmi.amdsmi_shut_down()
-            except Exception as e:
-                console_warning(f"amd-smi shutdown failed: {e}")
+        with amdsmi_ctx():
+            gpu_model = get_gpu_model()
 
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
 
