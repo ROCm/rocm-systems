@@ -136,7 +136,7 @@ rocprofiler_add_integration_validate_test(
          --csv-kernel-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_kernel_trace.csv
          --csv-memory-allocation-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_allocation_trace.csv
          --csv-memory-copy-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_copy_trace.csv
          --json-input

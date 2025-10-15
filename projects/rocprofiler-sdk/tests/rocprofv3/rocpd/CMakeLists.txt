@@ -218,5 +218,4 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED
-        rocprofv3-test-rocpd-generation)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)

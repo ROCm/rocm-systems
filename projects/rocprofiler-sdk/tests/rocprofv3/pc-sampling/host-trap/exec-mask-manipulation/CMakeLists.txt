@@ -47,6 +47,7 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;pc-sampling"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -80,6 +81,7 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;pc-sampling"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -112,4 +114,5 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;pc-sampling"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     DISABLED "${IS_PC_SAMPLING_DISABLED}")

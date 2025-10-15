@@ -71,8 +71,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-summary-inp-yaml
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input-summary.yml -- $<TARGET_FILE:transpose> 2 500
-        10
+        ${CMAKE_CURRENT_BINARY_DIR}/input-summary.yml -- $<TARGET_FILE:transpose> 2 500 10
     DEPENDS transpose
     TIMEOUT 45
     LABELS "integration-tests"

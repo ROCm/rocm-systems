@@ -491,24 +491,24 @@ function(rocprofiler_add_integration_validate_test NAME)
 
     endforeach()
 
-pytest_discover_tests(
-    ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
-    TEST_PATHS ${arg_TEST_PATHS}
-    WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
-    TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
-    TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
-    LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
-    PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
-    ENVIRONMENT "${arg_ENVIRONMENT}"
-    DEPENDS "${arg_DEPENDS}"
-    EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
-    DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
-    PROPERTIES
+    pytest_discover_tests(
+        ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
+        TEST_PATHS ${arg_TEST_PATHS}
+        WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
+        TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
+        TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
+        LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
+        PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
+        ENVIRONMENT "${arg_ENVIRONMENT}"
+        DEPENDS "${arg_DEPENDS}"
+        EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
+        DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
+        PROPERTIES
         DISABLED ${arg_DISABLED}
         TIMEOUT ${arg_TIMEOUT}
         LABELS "${arg_LABELS}"
         FAIL_REGULAR_EXPRESSION "${arg_FAIL_REGULAR_EXPRESSION}"
         FIXTURES_REQUIRED ${arg_FIXTURES_REQUIRED}
-)
+        SKIP_REGULAR_EXPRESSION "${arg_SKIP_REGULAR_EXPRESSION}")
 
 endfunction()
