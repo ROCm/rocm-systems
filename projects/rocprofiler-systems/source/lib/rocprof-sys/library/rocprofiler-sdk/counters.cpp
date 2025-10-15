@@ -57,7 +57,6 @@ metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
     const char* COMPONENT        = "";
     const char* BLOCK            = "";
     const char* EXPRESSION       = "";
-    auto        ni               = node_info::get_instance();
     const auto* TARGET_ARCH      = "GPU";
 
     trace_cache::get_metadata_registry().add_pmc_info(
