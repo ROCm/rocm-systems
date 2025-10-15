@@ -18,7 +18,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
 - Updated PAPI module to v7.2.0b2
-- Using ROCprofiler-SDK for tracing OMPT API calls.
+- ROCprofiler-SDK is now used for tracing OMPT API calls.
 
 ## ROCm Systems Profiler 1.1.1 for ROCm 7.0.2
 
