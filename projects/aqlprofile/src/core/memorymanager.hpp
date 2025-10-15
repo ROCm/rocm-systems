@@ -262,7 +262,9 @@ class TraceMemoryManager : public MemoryManager {
   pm4_builder::TraceConfig config{};
   std::atomic<size_t> buffer_swaps{0};
 
+
   std::atomic<size_t> current_buffer{0};
+  std::atomic<size_t> buffer_swaps{0};
 
  protected:
   int target_cu = -1;
