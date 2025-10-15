@@ -3798,12 +3798,12 @@ panels:
       HBM Bandwidth:
         plain: |-
           The total number of bytes read from and written to High-Bandwidth
-            Memory (HBM) per second. The peak empirically measured bandwidth achievable
-            on the specific accelerator is displayed alongside for comparison.
+          Memory (HBM) per second. The peak empirically measured bandwidth achievable
+          on the specific accelerator is displayed alongside for comparison.
         rst: |-
           The total number of bytes read from and written to High-Bandwidth
-            Memory (HBM) per second. The peak empirically measured bandwidth achievable
-            on the specific accelerator is displayed alongside for comparison.
+          Memory (HBM) per second. The peak empirically measured bandwidth achievable
+          on the specific accelerator is displayed alongside for comparison.
         unit: GB/s
       L2 Cache Bandwidth:
         plain: The number of bytes looked up in the L2 cache per unit time. The number
@@ -10885,10 +10885,10 @@ panels:
       unit: Percent
     sL1D-L2 BW Utilization:
       plain: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.
-        Caclulated as total number of bytes read from, written to, or atomically updated
+        Calculated as total number of bytes read from, written to, or atomically updated
         across the sL1D - L2 interface.
       rst: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.
-        Caclulated as total number of bytes read from, written to, or atomically updated
+        Calculated as total number of bytes read from, written to, or atomically updated
         across the sL1D - L2 interface.
       unit: Percent
     sL1D-L2 BW:

@@ -1131,7 +1131,7 @@ Scalar L1D Speed-of-Light:
     unit: Percent
   sL1D-L2 BW Utilization:
     rst: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.
-      Caclulated as total number of bytes read from, written to, or atomically updated
+      Calculated as total number of bytes read from, written to, or atomically updated
       across the sL1D - L2 interface.
     unit: Percent
 Scalar L1D cache accesses:

@@ -152,7 +152,7 @@ Panel Config:
       loaded line the cache. The ratio of the number of sL1D requests that hit over
       the number of all sL1D requests.
     sL1D-L2 BW Utilization: The percentage of the peak theoretical sL1D - L2 interface
-      bandwidth acheived. Caclulated as total number of bytes read from, written to,
+      bandwidth acheived. Calculated as total number of bytes read from, written to,
       or atomically updated across the sL1D - L2 interface.
     sL1D-L2 BW: |-
       The total number of bytes read from, written to, or atomically updated
