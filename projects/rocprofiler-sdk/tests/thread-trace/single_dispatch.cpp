@@ -27,8 +27,6 @@
 
 #include "trace_callbacks.hpp"
 
-[[maybe_unused]] constexpr double WAVE_RATIO_TOLERANCE = 0.05;
-
 namespace ATTTest
 {
 namespace Single
