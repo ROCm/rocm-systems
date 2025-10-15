@@ -53,11 +53,11 @@ metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
 {
     const size_t EVENT_CODE       = 0;
     const size_t INSTANCE_ID      = 0;
-    const char* LONG_DESCRIPTION = "";
-    const char* COMPONENT        = "";
-    const char* BLOCK            = "";
-    const char* EXPRESSION       = "";
-    const auto* TARGET_ARCH      = "GPU";
+    const char*  LONG_DESCRIPTION = "";
+    const char*  COMPONENT        = "";
+    const char*  BLOCK            = "";
+    const char*  EXPRESSION       = "";
+    const auto*  TARGET_ARCH      = "GPU";
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::GPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name.c_str(),
