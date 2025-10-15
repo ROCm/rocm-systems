@@ -40,7 +40,7 @@
                 {
                     "comparison": "greater_than",
                     "description": "Verify that 'rocm_rocdecode_api' appears in category at least 500 times in table regions",
-                    "error_message": "'rocm_rocdecode_api category entries are fewer than expected in regions",
+                    "error_message": "'rocm_rocdecode_api' category entries are fewer than expected in regions",
                     "expected_result": 500,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_rocdecode_api';"
                 },
