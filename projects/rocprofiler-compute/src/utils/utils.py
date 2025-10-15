@@ -990,6 +990,7 @@ def pc_sampling_prof(
             method,
             "--pc-sampling-unit",
             unit,
+            "--kernel-trace",
             "--output-format",
             "csv",
             "json",
