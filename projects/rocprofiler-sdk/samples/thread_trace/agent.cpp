@@ -159,6 +159,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
     if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
+    if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
 
     CHECK_NOTNULL(Results::table);
     auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
