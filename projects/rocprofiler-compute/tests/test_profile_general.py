@@ -71,6 +71,9 @@ config["METRIC_LOGGING"] = False
 num_kernels = 3
 num_devices = 1
 
+attach_detach_interval_msec_no_delay = 10000
+attach_detach_interval_msec_with_delay = 60000
+
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
@@ -153,7 +156,6 @@ ALL_CSVS_MI350 = sorted([
 
 ROOF_ONLY_FILES = sorted([
     "empirRoof_gpu-0_FP32.pdf",
-    "kernelName_legend.pdf",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
@@ -943,7 +945,6 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         return
 
     # Test `--kernel` filtering outputs are present and labelled correctly
-    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
 
     plot_configurations = [
@@ -964,7 +965,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
                 "--kernel",
                 config["kernel_name_1"],
             ],
-            "expected_files": [filter_kernelName, filter_empirRoof],
+            "expected_files": [filter_empirRoof],
         },
     ]
 
@@ -1384,10 +1385,7 @@ def test_roof_sort_dispatches(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1417,10 +1415,7 @@ def test_roof_sort_kernels(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1450,10 +1445,7 @@ def test_roof_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1483,10 +1475,7 @@ def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1616,8 +1605,8 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1630,8 +1619,8 @@ def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
     )
     # Should return code 1 since --block cannot be used with --list-metrics
     assert code == 1
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1778,14 +1767,75 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"])
+    # TODO: temp fix for sdk defautly disable attach/detach,
+    # remove after it sets default to enable
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
 
-    # set the time to detach here to 1 mins, which is 60000 msec
-    time_to_detach = "60000"
+    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
     attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = time_to_detach
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_hip_dynamic_shared",
+        attach_detach_para=attach_detach,
+    )
+
+    # kill the process of the workload at thsi point if it's still running
+    if process_workload.poll() is None:
+        print(
+            f"rocprof-compute has detached and finished, "
+            f"killing workload process (pid={process_workload.pid})..."
+        )
+        process_workload.kill()
+        process_workload.wait()
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.skip(
+    reason="Temporarily disabled: \
+                  waiting for SDK fix for no outputfile with thread sleeping"
+)
+@pytest.mark.live_attach_detach
+def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_compute):
+    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+    workload_dir = test_utils.get_output_dir()
+    # TODO: temp fix for sdk defautly disable attach/detach,
+    # remove after it sets default to enable
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
+
+    process_workload = subprocess.Popen(
+        [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
+    )
+
+    attach_detach = dict()
+    attach_detach["attach_pid"] = process_workload.pid
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_with_delay
 
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -1831,14 +1881,17 @@ def test_live_attach_detach_singlepath_launch_stats(
 ):
     options = ["--set", "launch_stats"]
     workload_dir = test_utils.get_output_dir()
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"])
 
-    # set the time to detach here to 1 mins, which is 60000 msec
-    time_to_detach = "60000"
+    # TODO: temp fix for sdk defautly disable attach/detach,
+    # remove after it sets default to enable
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
+
+    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
     attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = time_to_detach
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
 
     _ = binary_handler_profile_rocprof_compute(
         config,
