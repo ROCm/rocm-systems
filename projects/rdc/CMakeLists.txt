@@ -366,6 +366,11 @@ endif()
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
 
+# API tests (embedded mode, no rdcd daemon required)
+if(BUILD_TESTS)
+    add_subdirectory("new_tests")
+endif()
+
 if(BUILD_EXAMPLES)
     add_subdirectory("example")
 endif()
