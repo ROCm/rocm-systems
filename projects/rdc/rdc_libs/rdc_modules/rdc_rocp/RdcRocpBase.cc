@@ -319,11 +319,13 @@ RdcRocpBase::RdcRocpBase() {
 }
 
 RdcRocpBase::~RdcRocpBase() {
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-  status = hsa_shut_down();
-  assert(status == HSA_STATUS_SUCCESS);
-  status = hsa_shut_down();
-  assert(status == HSA_STATUS_ERROR_NOT_INITIALIZED);
+  if (m_is_initialized == false) {
+    return;
+  }
+  const hsa_status_t status = hsa_shut_down();
+  if ((status == HSA_STATUS_SUCCESS) || (status == HSA_STATUS_ERROR_NOT_INITIALIZED)) {
+    m_is_initialized = false;
+  }
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value_data* data,
