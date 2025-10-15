@@ -729,6 +729,8 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
       address dst = hostDst + copyOffset;
       status = rocrCopyBuffer(dst, dstAgent, stagingBuffer, srcAgent, copysize, copyMetadata);
       if (!status) {
+        // Release Pinned Memory back to pool if any
+        releaseBuffer(outBuffer);
         break;
       }
     } else {  // D2H Path
@@ -745,6 +747,8 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
           memcpy(hostDst + copyOffset, stagingBuffer, copysize);
         }
       } else {
+        // Release Pinned Memory back to pool if any
+        releaseBuffer(outBuffer);
         break;
       }
     }
@@ -2046,8 +2050,9 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
 
       bool isGraphPktCapturing =
           gpu().command() != nullptr && gpu().command()->getPktCapturingState();
-      auto constBuf = isGraphPktCapturing ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment)
-                                          : gpu().allocKernArg(kCBSize, kCBAlignment);
+      auto constBuf = isGraphPktCapturing
+                          ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
+                          : gpu().allocKernArg(kCBSize, kCBAlignment);
 
       // If pattern has been expanded, use the expanded pattern, otherwise use the default pattern.
       if (packed_obj.pattern_expanded_) {
@@ -2141,8 +2146,9 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     // Get constant buffer to allow multipel fills
     bool isGraphPktCapturing =
         gpu().command() != nullptr && gpu().command()->getPktCapturingState();
-    auto constBuf = isGraphPktCapturing ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment)
-                                        : gpu().allocKernArg(kCBSize, kCBAlignment);
+    auto constBuf = isGraphPktCapturing
+                        ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
+                        : gpu().allocKernArg(kCBSize, kCBAlignment);
     memcpy(constBuf, pattern, patternSize);
 
     constexpr bool kDirectVa = true;

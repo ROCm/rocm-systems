@@ -1579,7 +1579,7 @@ typedef enum hipLaunchAttributeID {
 typedef union hipLaunchAttributeValue {
   char pad[64];  ///< 64 byte padding
   hipAccessPolicyWindow
-      accessPolicyWindow;  ///< Value of launch attribute ::hipLaunchAttributePolicyWindow.
+      accessPolicyWindow;  ///< Value of launch attribute ::hipLaunchAttributeAccessPolicyWindow.
   int cooperative;         ///< Value of launch attribute ::hipLaunchAttributeCooperative. Indicates
                            ///< whether the kernel is cooperative.
   int priority;  ///< Value of launch attribute :: hipLaunchAttributePriority. Execution priority of
@@ -3047,6 +3047,14 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                  hipStreamAttrValue* value_out);
+
+/**
+ *@brief Copies attributes from source stream to destination stream.
+ * @param[in] dst - Destination stream
+ * @param[in] src - Source stream
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
 
 // end doxygen Stream
 /**
@@ -6361,9 +6369,9 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
  * @param [in] numLibraryOptions Number of library options
  * @return #hipSuccess, #hipErrorInvalidValue,
  */
-hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption** jitOptions,
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
-                              hipLibraryOption** libraryOptions, void** libraryOptionValues,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions);
 
 /**
@@ -6380,8 +6388,8 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOpt
  * @return #hipSuccess, #hipErrorInvalidValue
  */
 hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
-                                  hipJitOption** jitOptions, void** jitOptionsValues,
-                                  unsigned int numJitOptions, hipLibraryOption** libraryOptions,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions);
 
 /**
@@ -6561,7 +6569,7 @@ hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeO
 /**
  * @brief Creates a linker instance with options.
  * @param [in] numOptions  Number of options
- * @param [in] option  Array of options
+ * @param [in] options  Array of options
  * @param [in] optionValues  Array of option values cast to void*
  * @param [out] stateOut  hip link state created upon success
  *

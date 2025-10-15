@@ -1,0 +1,179 @@
+name: rocprofiler-systems Continuous Integration
+run-name: rocprofiler-systems-ci
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+
+jobs:
+  prepare_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: projects/rocprofiler-systems/.github
+
+      - name: Generate and output matrix
+        id: generate_matrix
+        working-directory: projects/rocprofiler-systems/.github
+        run: |
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-nightly' -I=0 -o=json)
+          else
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ci' -I=0 -o=json)
+          fi
+          echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
+
+  ubuntu:
+    name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
+    needs: prepare_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ${{ fromJSON(needs.prepare_matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.system.runner }}
+    env:
+      HIP_PLATFORM: "amd"
+      ROCPROFSYS_CI: ON
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    permissions:
+      packages: read
+    container:
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
+      options: 
+        --privileged 
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --cap-add CAP_SYS_ADMIN
+        
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: projects/rocprofiler-systems/
+
+      - name: Setup Environment
+        id: setup_env
+        run: |
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
+            MODE=Nightly
+          else
+            MODE=Continuous
+          fi
+          echo "mode=${MODE}" >> $GITHUB_OUTPUT
+
+          if [ '${{ matrix.system.os-release }}' = '24.04']; then
+            CODE_NAME=noble
+          else
+            CODE_NAME=jammy
+          fi
+          echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Install amdgpu and dependencies
+        shell: bash
+        run: |
+          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
+          apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
+          echo "✅ amdgpu and ROCm dependencies Installed!"
+
+      - name: Install MPI
+        run: |
+          apt install -y libopenmpi-dev
+          echo "✅ MPI Installed!"
+
+      # TODO: Remove this and replace with TheRock tarball when runtime error is fixed
+      - name: Install ROCm
+        run: |
+          apt install -y rocm-dev
+          echo "✅ ROCm Installation Complete!"
+
+      # TODO: Enable this step and remove the above step once runtime error is fixed
+      - name: Install Latest Nightly ROCm
+        if: false
+        run: |
+          set -e
+          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          echo "✅ ROCm Installation Complete!"
+
+      - name: Configure, Build, and Test
+        id: run_ci
+        timeout-minutes: 30
+        working-directory: projects/rocprofiler-systems
+        run: |
+          set -e
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory ${PWD}
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          python3 ./scripts/run-ci.py -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
+            --build-jobs 16 \
+            --site ${{ matrix.system.runner }} \
+            --mode ${{ steps.setup_env.outputs.mode }} \
+            -- \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+            -DROCPROFSYS_BUILD_DYNINST=ON \
+            -DROCPROFSYS_BUILD_BOOST=ON \
+            -DROCPROFSYS_BUILD_TBB=ON \
+            -DROCPROFSYS_BUILD_ELFUTILS=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_BUILD_CI=ON \
+            -DROCPROFSYS_BUILD_TESTING=ON \
+            -DROCPROFSYS_USE_PYTHON=ON \
+            -DROCPROFSYS_USE_ROCM=ON \
+            -DROCPROFSYS_MAX_THREADS=64 \
+            -- \
+            -L "rocm" \
+            -LE "rccl|runtime|ompvv"
+
+      - name: Output Logs
+        if: failure() && steps.run_ci.outcome == 'failure'
+        working-directory: projects/rocprofiler-systems
+        run: |
+          echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
+          cat build/Testing/Temporary/LastTest*.log
