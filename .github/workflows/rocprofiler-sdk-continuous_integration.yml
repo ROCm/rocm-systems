@@ -62,7 +62,8 @@ env:
   navi4_EXCLUDE_LABEL_REGEX: ""
 
   GLOBAL_CMAKE_OPTIONS: ""
-  DISABLE_ROCR_BUILD: "false"
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -227,7 +228,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
+        if: env.ENABLE_ROCR_BUILD
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
@@ -244,7 +245,7 @@ jobs:
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install HIP
-        if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+        if: env.ENABLE_HIP_CLR_BUILD
         shell: bash
         working-directory: projects
         run: |
@@ -525,7 +526,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
+        if: env.ENABLE_ROCR_BUILD
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
@@ -545,7 +546,7 @@ jobs:
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install HIP
-        if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+        if: env.ENABLE_HIP_CLR_BUILD
         shell: bash
         working-directory: projects
         run: |
@@ -768,7 +769,7 @@ jobs:
         echo "✅ ROCProfiler-Register Installation complete!"
 
     - name: Build and Install ROCR-Runtime
-      if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
+      if: env.ENABLE_ROCR_BUILD
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
@@ -785,7 +786,7 @@ jobs:
         echo "✅ ROCR-Runtime Installation complete!"
 
     - name: Build and Install HIP
-      if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+      if: env.ENABLE_HIP_CLR_BUILD
       shell: bash
       working-directory: projects
       run: |
