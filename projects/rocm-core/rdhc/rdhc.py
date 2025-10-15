@@ -1748,7 +1748,8 @@ def main():
     parser = argparse.ArgumentParser(description="ROCm Deployment Health Check Tool",
                                     formatter_class=argparse.RawDescriptionHelpFormatter,
                                     usage="sudo -E ./rdhc.py [options]",
-                                    epilog="Usage examples:\n"+
+                                    epilog="Refer the README @<ROCM_INSTALL_PATH>/share/rdhc/README.md \n"+
+                                        "Usage examples:\n"+
                                         "# Run quick test (default tests only)\n" +
                                         "sudo -E ./rdhc.py\n" +
                                         "\n"+

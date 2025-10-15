@@ -16,11 +16,28 @@ do_update_alternatives(){
     fi
 }
 
+remove_rdhc_symlink(){
+
+    # Remove rdhc symlink from bin directory
+    if [[ ${ID_LIKE:-$ID} == "debian" ]] ; then
+        BIN_DIR="@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@"
+    else
+        INSTALL_PREFIX="${RPM_INSTALL_PREFIX0:-@CPACK_PACKAGING_INSTALL_PREFIX@}"
+        BIN_DIR="$INSTALL_PREFIX/@CMAKE_INSTALL_BINDIR@"
+    fi
+    rm -f "$BIN_DIR/rdhc"
+    # Remove bin directory if empty
+    if [ -d "$BIN_DIR" ] && [ -z "$(ls -A "$BIN_DIR")" ]; then
+        rmdir "$BIN_DIR"
+    fi
+}
+
 if [ -e /etc/os-release ] && source /etc/os-release && [[ ${ID_LIKE:-$ID} == "debian" ]]
 then
    case "$1" in
        (remove | upgrade)
            do_update_alternatives
+           remove_rdhc_symlink
        ;;
        (purge)
        ;;
@@ -30,4 +47,5 @@ then
    esac
 else
      do_update_alternatives
+     remove_rdhc_symlink
 fi
