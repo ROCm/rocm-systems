@@ -857,12 +857,8 @@ def run(cmd: list[str], exit_on_error: bool = False) -> str:
             'Try passing a path to an existing workload results in "analyze" mode.'
         )
 
-    if exit_on_error:
-        if cmd[0] == "amd-smi":
-            if p.returncode != 2 and p.returncode != 0:  # type: ignore
-                console_error("No GPU detected. Unable to load amd-smi")
-        elif p.returncode != 0:  # type: ignore
-            console_error(f"Command {cmd} failed with non-zero exit code")
+    if exit_on_error and p.returncode != 0:  # type: ignore
+        console_error(f"Command {cmd} failed with non-zero exit code")
     return p.stdout.decode("utf-8")  # type: ignore
 
 
