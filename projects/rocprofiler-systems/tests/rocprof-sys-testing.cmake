@@ -196,14 +196,27 @@ set(_attach_environment
     "${_test_library_path}"
 )
 
-set(_rocpd_environment
-    "ROCPROFSYS_USE_ROCPD=ON"
-    "ROCPROFSYS_TRACE=OFF"
-    "ROCPROFSYS_PROFILE=OFF"
-    "ROCPROFSYS_USE_SAMPLING=ON"
+set(_rccl_environment
+    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_PROFILE=ON"
+    "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
+    "ROCPROFSYS_USE_PID=OFF"
+    "ROCPROFSYS_USE_RCCLP=ON"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy"
+    "${_test_openmp_env}"
+    "${_test_library_path}"
+)
+
+set(_window_environment
+    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_PROFILE=ON"
+    "ROCPROFSYS_USE_SAMPLING=OFF"
+    "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
+    "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_FILE_OUTPUT=ON"
+    "ROCPROFSYS_VERBOSE=2"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
