@@ -132,7 +132,7 @@ Total Tests: 1
 Using all of the lines prefixed with `406:`, a bash script can be easily created:
 
 ```bash
-# taken from "Environment vriables:"
+# taken from "Environment variables:"
 export LD_PRELOAD=/home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/lib/rocprofiler-sdk/librocprofiler-sdk-json-tool.so.0.0.0
 export ROCPROFILER_TOOL_OUTPUT_FILE=hip-graph-tracing-test.json
 export LD_LIBRARY_PATH=/home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/lib:/usr/lib64:/usr/lib:/usr/local/lib
