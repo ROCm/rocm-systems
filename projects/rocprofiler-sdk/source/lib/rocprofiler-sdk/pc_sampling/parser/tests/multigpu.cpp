@@ -78,9 +78,9 @@ multithread_queue_hammer(size_t tid, Latch* latch)
     std::array<std::vector<std::shared_ptr<MockDispatch<PcSamplingRecordT>>>, NUM_QUEUES>
         active_dispatches;
 
-    int    num_reset_queues         = 0;
-    int    num_samples_generated    = 0;
-    int    num_dispatches_generated = 0;
+    [[maybe_unused]] int    num_reset_queues         = 0;
+    [[maybe_unused]] int    num_samples_generated    = 0;
+    [[maybe_unused]] int    num_dispatches_generated = 0;
     double avg_q_occupancy          = 0;
     size_t max_q_occupancy          = 0;
 
@@ -156,7 +156,7 @@ multithread_queue_hammer(size_t tid, Latch* latch)
 
 /**
  * Benchmarks how fast the parser can process samples on a single threaded case
- * Current: 5600X with -Ofast, up to >140 million samples/s or ~9GB/s R/W (18GB/s bidirectional)
+ * Current: 5600X with -O3 -ffast-math, up to >140 million samples/s or ~9GB/s R/W (18GB/s bidirectional)
  */
 template <typename PcSamplingRecordT>
 static std::pair<size_t, size_t>
