@@ -326,7 +326,7 @@ ROCm Profiling Data (rocpd) output
 
 Use the ``ROCPROFSYS_USE_ROCPD`` setting to trigger the ROCm Systems Profiler to output a
 SQLite3 database. The ROCm Profiling Data (or ``rocpd``) database will soon be the default output
-format. This output format requires ROCprofiler-SDK v1.0 or higher, which is included in ROCm v7.0.
+format. The rocpd output format requires ROCprofiler-SDK 1.0.0 or higher.
 
 Features of rocpd format
 -----------------------------------------------
