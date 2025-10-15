@@ -879,10 +879,12 @@ class Runtime {
   };
 
   struct MappedHandle {
-    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
+    MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
-    ~MappedHandle();
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
+        : mem_handle(mem_handle), address_handle(address_handle),
+          offset(offset), size(size), drm_fd(drm_fd),
+          drm_cpu_addr(drm_cpu_addr), shareable_handle(shareable_handle) {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
