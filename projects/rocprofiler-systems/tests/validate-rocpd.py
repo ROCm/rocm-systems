@@ -136,85 +136,95 @@ def validate_table(cursor, rule, tables) -> bool:
               False if any validation fails or matching table not found in database.
     """
 
-    matching_table = None
+    matching_tables = []
 
     if rule.name:
         for table in tables:
             if table["name"] == rule.name:
-                matching_table = table
+                matching_tables.append(table)
                 break
     elif rule.name_prefix:
         for table in tables:
             if table["name"].startswith(rule.name_prefix):
-                matching_table = table
-                break
+                matching_tables.append(table)
 
-    if not matching_table:
-        print(f"❌ ERROR: Required table '{rule.name}' not found in database")
+    if not matching_tables:
+        if rule.name:
+            print(f"❌ ERROR: Required table '{rule.name}' not found in database")
+        elif rule.name_prefix:
+            print(f"❌ ERROR: No tables found with prefix '{rule.name_prefix}' in database")
         return False
 
-    table_name = matching_table["name"]
+    all_tables_passed = True
 
-    try:
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = cursor.fetchall()
-        column_names = [col["name"] for col in columns]
+    for matching_table in matching_tables:
+        table_name = matching_table["name"]
 
-        missing_columns = [
-            col for col in rule.required_columns if col not in column_names
-        ]
-        if missing_columns:
-            print(
-                f"❌ ERROR: Table '{table_name}' missing required columns: {missing_columns}"
-            )
-            return False
-        else:
-            print(f"✅ All required columns present: {rule.required_columns}")
+        try:
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = cursor.fetchall()
+            column_names = [col["name"] for col in columns]
 
-        cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
-        row_count = cursor.fetchone()["count"]
+            missing_columns = [
+                col for col in rule.required_columns if col not in column_names
+            ]
+            if missing_columns:
+                print(
+                    f"❌ ERROR: Table '{table_name}' missing required columns: {missing_columns}"
+                )
+                all_tables_passed = False
+                continue
+            else:
+                print(f"✅ All required columns present in '{table_name}': {rule.required_columns}")
 
-        if row_count < rule.min_rows:
-            print(
-                f"❌ ERROR: Table '{table_name}' has {row_count} rows, minimum required: {rule.min_rows}"
-            )
-            return False
-        else:
-            print(
-                f"✅ Row count check passed: {row_count} rows (minimum: {rule.min_rows})"
-            )
+            cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
+            row_count = cursor.fetchone()["count"]
 
-        all_queries_passed = True
-        for validation_query in rule.validation_queries:
-            try:
-                query = validation_query.query.replace("{table_name}", table_name)
-                cursor.execute(query)
-                result = cursor.fetchone()
+            if row_count < rule.min_rows:
+                print(
+                    f"❌ ERROR: Table '{table_name}' has {row_count} rows, minimum required: {rule.min_rows}"
+                )
+                all_tables_passed = False
+                continue
+            else:
+                print(
+                    f"✅ Row count check passed for '{table_name}': {row_count} rows (minimum: {rule.min_rows})"
+                )
 
-                if result and "count" in result.keys():
-                    actual_result = result["count"]
-                else:
-                    actual_result = result[0] if result else None
+            all_queries_passed = True
+            for validation_query in rule.validation_queries:
+                try:
+                    query = validation_query.query.replace("{table_name}", table_name)
+                    cursor.execute(query)
+                    result = cursor.fetchone()
 
-                if not validation_query.validate_query(actual_result):
-                    print(f"❌ ERROR: {validation_query.error_message}")
-                    print(
-                        f"   Expected: {validation_query.comparison} {validation_query.expected_result}, Got: {actual_result}"
-                    )
+                    if result and "count" in result.keys():
+                        actual_result = result["count"]
+                    else:
+                        actual_result = result[0] if result else None
+
+                    if not validation_query.validate_query(actual_result):
+                        print(f"❌ ERROR: {validation_query.error_message} (Table: '{table_name}')")
+                        print(
+                            f"   Expected: {validation_query.comparison} {validation_query.expected_result}, Got: {actual_result}"
+                        )
+                        all_queries_passed = False
+                    else:
+                        print(f"✅ Validation query passed for '{table_name}': {validation_query.description}")
+
+                except sqlite3.Error as e:
+                    print(f"❌ ERROR: Failed to execute validation query on '{table_name}': {e}")
+                    print(f"Query: {validation_query.query}")
                     all_queries_passed = False
-                else:
-                    print(f"✅ Validation query passed: {validation_query.description}")
 
-            except sqlite3.Error as e:
-                print(f"❌ ERROR: Failed to execute validation query: {e}")
-                print(f"Query: {validation_query.query}")
-                all_queries_passed = False
+            if not all_queries_passed:
+                all_tables_passed = False
 
-        return all_queries_passed
+        except sqlite3.Error as e:
+            print(f"❌ ERROR: Failed to validate table '{table_name}': {e}")
+            all_tables_passed = False
 
-    except sqlite3.Error as e:
-        print(f"❌ ERROR: Failed to validate table '{table_name}': {e}")
-        return False
+    return all_tables_passed
 
 
 def validate_rocpd(cursor, rules, tables) -> bool:
@@ -257,7 +267,7 @@ def load_validation_rules(validation_rules) -> list:
 
     Returns:
         list: A list of required_table objects.
-              Returns empty list if file doesn't exist or on error.
+              Returns empty list if any file doesn't exist or on error.
     """
     import json
 
