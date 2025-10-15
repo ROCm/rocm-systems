@@ -1631,6 +1631,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   profiling_ = profiling;
   cooperative_ = cooperative;
 
+  // Initialize barrier and barrier value packets
+  barrier_packet_.header = kInvalidAql;
+  barrier_value_packet_.header.header = kInvalidAql;
+
   constexpr uint16_t kernelDispatchHBits =
       (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
   constexpr uint16_t barrierHBits = (1 << HSA_PACKET_HEADER_BARRIER);
@@ -1729,11 +1733,6 @@ bool VirtualGPU::create() {
     LogError("Could not create BlitManager!");
     return false;
   }
-
-  // Initialize barrier and barrier value packets
-  memset(&barrier_packet_, 0, sizeof(barrier_packet_));
-  barrier_packet_.header = kInvalidAql;
-  barrier_value_packet_.header.header = kInvalidAql;
 
   // Create a object of PrintfDbg
   printfdbg_ = new PrintfDbg(roc_device_);

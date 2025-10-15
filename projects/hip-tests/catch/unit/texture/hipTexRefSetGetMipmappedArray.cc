@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 texture<float, 2, hipReadModeElementType> tex;
 
 // Test for hipTexRefSetMipmappedArray and hipTexRefGetMipmappedArray, including error handling
@@ -74,3 +75,4 @@ TEST_CASE("Unit_hipTexRefSetGetMipmappedArray") {
     REQUIRE(err == hipErrorInvalidValue);
   }
 }
+#endif

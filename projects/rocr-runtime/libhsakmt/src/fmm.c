@@ -4573,7 +4573,6 @@ static void fmm_clear_aperture(manageable_aperture_t *app)
 void hsakmt_fmm_clear_all_mem(void)
 {
 	uint32_t i;
-	void *map_addr;
 
 	/* Close render node FDs. The child process needs to open new ones */
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
@@ -4586,6 +4585,14 @@ void hsakmt_fmm_clear_all_mem(void)
 		}
 		drm_render_fds[i] = 0;
 	}
+
+	hsakmt_fmm_clear_all_aperture();
+}
+
+void hsakmt_fmm_clear_all_aperture(void)
+{
+	uint32_t i;
+	void *map_addr;
 
 	fmm_clear_aperture(&mem_handle_aperture);
 	fmm_clear_aperture(&cpuvm_aperture);
