@@ -177,9 +177,9 @@
                 {
                     "comparison": "equals",
                     "description": "Check the sizes of executed memory allocate calls",
-                    "error_message": "NULL entries found where allocated size is 0 or non-existing field",
+                    "error_message": "Entries found where allocated size is 0 or NULL",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM memory_copies WHERE size IS NULL or 0;"
+                    "query": "SELECT COUNT(*) FROM memory_allocations WHERE size IS NULL or 0;"
                 },
                 {
                     "comparison": "greater_than",
