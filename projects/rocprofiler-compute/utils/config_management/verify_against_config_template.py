@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ##############################################################################
 # MIT License
 #
@@ -60,7 +61,7 @@ def load_template(template_file: Path) -> dict[int, dict]:
                 for ds in panel["data_sources"]
             ],
         }
-        for panel in data
+        for panel in data.get("panels", [])
     }
 
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ##############################################################################
 # MIT License
 #
@@ -25,9 +26,10 @@
 
 """
 Parse panel configuration based on YAML files for an architecture.
-Usage: python parse_yaml.py <directory_path> [output_file.yaml]
+Usage: python parse_config_template.py <directory_path> [output_file.yaml] [--latest-arch ARCH]
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -62,23 +64,35 @@ def parse_panel_config(yaml_file):
         if isinstance(value, dict) and "id" in value and "title" in value
     ]
 
+    # Extract panel alias if present
+    panel_alias = panel_config.get("alias")
+
     return {
         "file": filename,
         "panel_id": panel_id,
         "panel_title": panel_config.get("title"),
+        "panel_alias": panel_alias,
         "data_sources": data_sources,
     }
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python parse_yaml.py <directory_path> [output_file.yaml]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Parse panel configuration from YAML files"
+    )
+    parser.add_argument("directory", help="Directory containing YAML files")
+    parser.add_argument("output", nargs="?", help="Output YAML file (optional)")
+    parser.add_argument(
+        "--latest-arch",
+        help="Specify this architecture as latest (adds metadata to output)",
+    )
 
-    directory = Path(sys.argv[1])
+    args = parser.parse_args()
+
+    directory = Path(args.directory)
 
     if not directory.is_dir():
-        print(f"Error: '{sys.argv[1]}' is not a valid directory")
+        print(f"Error: '{args.directory}' is not a valid directory")
         sys.exit(1)
 
     # Parse all YAML files
@@ -98,15 +112,23 @@ def main():
         print(f"File: {panel['file']}")
         print(f"Panel ID: {panel['panel_id']}")
         print(f"Panel Title: {panel['panel_title']}")
+        if panel.get("panel_alias"):
+            print(f"Panel Alias: {panel['panel_alias']}")
         print(f"\nData Sources ({len(panel['data_sources'])}):")
         for ds in panel["data_sources"]:
             print(f"  - {ds['type']}: {ds['id']} - {ds['title']}")
 
     # Save if output file specified
-    if len(sys.argv) > 2:
-        with open(sys.argv[2], "w") as f:
-            yaml.dump(results, f, sort_keys=False, default_flow_style=False)
-        print(f"\nResults saved to: {sys.argv[2]}")
+    if args.output:
+        output_data = results
+
+        # Add metadata if latest-arch specified
+        if args.latest_arch:
+            output_data = {"latest_arch": args.latest_arch, "panels": results}
+
+        with open(args.output, "w") as f:
+            yaml.dump(output_data, f, sort_keys=False, default_flow_style=False)
+        print(f"\nResults saved to: {args.output}")
 
 
 if __name__ == "__main__":

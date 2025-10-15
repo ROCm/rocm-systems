@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ##############################################################################
 # MIT License
 #
@@ -127,9 +128,53 @@ def modify_metrics(config, table_id, metrics):
                 print(f"Modified {metric_name}.{field_name} in table {table_id}")
 
 
+def add_descriptions(config, descriptions):
+    """Add metric descriptions to config."""
+    if "metrics_description" not in config["Panel Config"]:
+        config["Panel Config"]["metrics_description"] = {}
+
+    for metric_name, desc_data in descriptions.items():
+        # Store only plain text in config YAML
+        if isinstance(desc_data, dict):
+            plain_text = desc_data.get("plain", "")
+        else:
+            plain_text = desc_data
+
+        config["Panel Config"]["metrics_description"][metric_name] = plain_text
+        print(f"Added description: {metric_name}")
+
+
+def delete_descriptions(config, descriptions):
+    """Remove metric descriptions from config."""
+    if "metrics_description" not in config["Panel Config"]:
+        return
+
+    for metric_name in descriptions.keys():
+        if metric_name in config["Panel Config"]["metrics_description"]:
+            del config["Panel Config"]["metrics_description"][metric_name]
+            print(f"Deleted description: {metric_name}")
+
+
+def modify_descriptions(config, descriptions):
+    """Modify metric descriptions in config."""
+    if "metrics_description" not in config["Panel Config"]:
+        config["Panel Config"]["metrics_description"] = {}
+
+    for metric_name, desc_data in descriptions.items():
+        # Store only plain text in config YAML
+        if isinstance(desc_data, dict):
+            plain_text = desc_data.get("plain", "")
+        else:
+            plain_text = desc_data
+
+        config["Panel Config"]["metrics_description"][metric_name] = plain_text
+        print(f"Modified description: {metric_name}")
+
+
 def apply_changes(config, changes, category):
     """Apply delta changes to configuration."""
     for change in changes:
+        # Handle metric tables
         for mt_wrapper in change.get("metric_tables", []):
             mt = mt_wrapper.get("metric_table", {})
             table_id = mt.get("id")
@@ -150,6 +195,16 @@ def apply_changes(config, changes, category):
                 if "metrics" in mt:
                     modify_metrics(config, table_id, mt["metrics"])
 
+        # Handle metric descriptions
+        descriptions = change.get("metric_descriptions", {})
+        if descriptions:
+            if category == "Addition":
+                add_descriptions(config, descriptions)
+            elif category == "Deletion":
+                delete_descriptions(config, descriptions)
+            elif category == "Modification":
+                modify_descriptions(config, descriptions)
+
 
 def apply_delta(base_dir, delta_file, output_dir):
     """Apply delta YAML to all files in base directory."""
@@ -161,7 +216,7 @@ def apply_delta(base_dir, delta_file, output_dir):
     changes_by_panel = {}
     for category in ["Addition", "Deletion", "Modification"]:
         for change in delta.get(category, []):
-            panel_id = change.get("Panel Config", {}).get("id")
+            panel_id = change.get("panel_config", {}).get("id")
             if panel_id not in changes_by_panel:
                 changes_by_panel[panel_id] = {
                     "Addition": [],
