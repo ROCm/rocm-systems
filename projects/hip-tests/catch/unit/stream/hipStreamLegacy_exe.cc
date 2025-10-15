@@ -79,6 +79,7 @@ int main() {
   HIP_CHECK(hipMemcpyAsync(devArr1, hostArr2, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
   HIP_CHECK(hipMemcpyAsync(devArr2, devArr1, NBYTES, hipMemcpyDeviceToDevice, hipStreamLegacy));
   HIP_CHECK(hipMemcpyAsync(hostArr3, devArr2, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     if (hostArr3[i] != elementVal) {

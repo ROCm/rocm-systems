@@ -39,6 +39,7 @@ from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
+from utils.gui_components.memchart import get_memchart
 from utils.logger import console_debug, console_error, console_warning, demarcate
 
 
@@ -117,11 +118,11 @@ class webui_analysis(OmniAnalyze_Base):
             [State("container", "children")],
         )
         def generate_from_filter(
-            disp_filt: str,
-            kernel_filter: str,
-            gcd_filter: str,
+            disp_filt: list[str],
+            kernel_filter: list[str],
+            gcd_filter: list[str],
             norm_filt: str,
-            top_n_filt: str,
+            top_n_filt: int,
             div_children: list[html.Section],
         ) -> list[html.Section]:
             console_debug("analysis", f"gui normalization is {norm_filt}")
@@ -151,9 +152,15 @@ class webui_analysis(OmniAnalyze_Base):
             console_debug("analysis", f"gui gpu filter is {gcd_filter}")
             console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
-            base_data[base_run].filter_kernel_ids = [int(kernel_filter)]
-            base_data[base_run].filter_gpu_ids = [int(gcd_filter)]
-            base_data[base_run].filter_dispatch_ids = [int(disp_filt)]
+            base_data[base_run].filter_kernel_ids = (
+                [str(k) for k in kernel_filter] if kernel_filter else []
+            )
+            base_data[base_run].filter_gpu_ids = (
+                [int(g) for g in gcd_filter] if gcd_filter else []
+            )
+            base_data[base_run].filter_dispatch_ids = (
+                [int(d) for d in disp_filt] if disp_filt else []
+            )
             base_data[base_run].filter_top_n = top_n_filt
 
             # Reload the pmc_kernel_top.csv for Top Stats panel
@@ -198,14 +205,9 @@ class webui_analysis(OmniAnalyze_Base):
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
             # ~~~~~~~~~~~~~~~~~~~~~~~
-            div_children = []
-
-            # Append memory chart and roofline
-            from utils.gui_components.memchart import get_memchart
-
-            div_children.append(
+            div_children = [
                 get_memchart(panel_configs[300]["data source"], base_data[base_run])
-            )
+            ]
 
             has_roofline = (Path(self.dest_dir) / "roofline.csv").is_file()
             soc = self.get_socs()
@@ -218,7 +220,7 @@ class webui_analysis(OmniAnalyze_Base):
                             "device_id": 0,
                             "sort_type": "kernels",
                             "mem_level": "ALL",
-                            "include_kernel_names": False,
+                            "include_kernel_names": True,
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             "kernel_filter": False,
@@ -229,7 +231,7 @@ class webui_analysis(OmniAnalyze_Base):
                         roof_obj.empirical_roofline(
                             ret_df=parser.apply_filters(
                                 workload=base_data[base_run],
-                                dir=self.dest_dir,
+                                dir_path=self.dest_dir,
                                 is_gui=True,
                                 debug=args.debug,
                             )
@@ -284,21 +286,21 @@ class webui_analysis(OmniAnalyze_Base):
                             )
                         )
 
-                    # Append the new section with all of it's contents
-                    div_children.append(
-                        html.Section(
-                            id=section_title,
-                            children=[
-                                html.H3(
-                                    children=title,
-                                    style={"color": "white"},
-                                ),
-                                html.Div(
-                                    className="float-container", children=html_section
-                                ),
-                            ],
-                        )
+                # Append the new section with all of it's contents
+                div_children.append(
+                    html.Section(
+                        id=section_title,
+                        children=[
+                            html.H3(
+                                children=title,
+                                style={"color": "white"},
+                            ),
+                            html.Div(
+                                className="float-container", children=html_section
+                            ),
+                        ],
                     )
+                )
 
             # Display pop-up message if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):

@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,6 +40,11 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#if defined(__linux__)
+#include <unistd.h>
+#else
+#include <cstdint>
+#endif
 #include "core/inc/amd_memory_region.h"
 
 #include <algorithm>
@@ -48,15 +53,15 @@
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/util/utils.h"
+#include "core/util/os.h"
 #include "core/inc/exceptions.h"
-#include <unistd.h>
 
 namespace rocr {
 namespace AMD {
 
 // Tracks aggregate size of system memory available on platform
 size_t MemoryRegion::max_sysmem_alloc_size_ = 0;
-const size_t MemoryRegion::kPageSize_ = sysconf(_SC_PAGESIZE);
+const size_t MemoryRegion::kPageSize_ = os::PageSize();
 
 MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
                            bool extended_scope_fine_grain, bool user_visible, core::Agent* owner,

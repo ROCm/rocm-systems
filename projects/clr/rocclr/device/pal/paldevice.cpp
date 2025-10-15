@@ -102,6 +102,7 @@ static constexpr PalDevice supportedPalDevices[] = {
     {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::HawkPoint2},
     {11, 5, 0, Pal::GfxIpLevel::GfxIp11_5, "gfx1150", Pal::AsicRevision::Strix1},
     {11, 5, 1, Pal::GfxIpLevel::GfxIp11_5, "gfx1151", Pal::AsicRevision::StrixHalo},
+    {12, 0, 0, Pal::GfxIpLevel::GfxIp12, "gfx1200", Pal::AsicRevision::Navi44},
     {12, 0, 1, Pal::GfxIpLevel::GfxIp12, "gfx1201", Pal::AsicRevision::Navi48},
 };
 
@@ -2135,6 +2136,27 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
       (largest_block > freeMemory[TotalFreeMemory]) ? freeMemory[TotalFreeMemory] : largest_block;
 
   return true;
+}
+
+// PAL Device file I/O stubs: PAL doesn't implement AIS file I/O yet.
+// Provide definitions so the vtable and linker are satisfied.
+// Replace with a real implementation if/when PAL supports file I/O.
+bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                      uint64_t* size_copied, int32_t* status) {
+  if (size_copied) {
+    *size_copied = 0;
+  }
+  LogError("PAL Device: amdFileRead not supported on this backend");
+  return false;
+}
+
+bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) {
+  if (size_copied) {
+    *size_copied = 0;
+  }
+  LogError("PAL Device: amdFileWrite not supported on this backend");
+  return false;
 }
 
 amd::Memory* Device::findMapTarget(size_t size) const {

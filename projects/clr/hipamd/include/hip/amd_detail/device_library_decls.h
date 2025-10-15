@@ -128,7 +128,8 @@ __device__ inline static __local void* __to_local(unsigned x) { return (__local 
 #endif  //__HIP_DEVICE_COMPILE__
 
 // Using hip.amdgcn.bc - sync threads
-#define __CLK_LOCAL_MEM_FENCE 0x01
+#define __CLK_LOCAL_MEM_FENCE  0x01
+#define __CLK_GLOBAL_MEM_FENCE 0x02
 typedef unsigned __cl_mem_fence_flags;
 
 #endif

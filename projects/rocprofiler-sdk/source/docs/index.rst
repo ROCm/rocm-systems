@@ -28,11 +28,16 @@ The documentation is structured as follows:
 
     * :ref:`installing-rocprofiler-sdk`
 
+  .. grid-item-card:: Quick Reference
+
+    * :ref:`quick-guide`
+
   .. grid-item-card:: How to
 
     * :doc:`Samples <how-to/samples>`
     * :ref:`using-rocprofv3`
     * :ref:`using-rocprofv3-avail`
+    * :ref:`rocprofv3_process_attachment`
     * :ref:`using-rocpd-output-format`
     * :ref:`using-rocprofiler-sdk-roctx`
     * :ref:`using-rocprofv3-with-mpi`
@@ -44,6 +49,7 @@ The documentation is structured as follows:
 
     * :doc:`Tool library <api-reference/tool_library>`
     * :ref:`runtime-intercept-tables`
+    * :doc:`Process attachment <api-reference/process_attachment>`
     * :doc:`Buffered services <api-reference/buffered_services>`
     * :doc:`Callback services <api-reference/callback_services>`
     * :doc:`Counter collection services <api-reference/counter_collection_services>`

@@ -88,7 +88,7 @@ class tui_analysis(OmniAnalyze_Base):
 
         # 1. load top kernel
         parser.load_non_mertrics_table(
-            workload=self._runs[self.path], dir=self.path, args=self.args
+            workload=self._runs[self.path], dir_path=self.path, args=self.args
         )
 
         # 2. Generate kernel-specific dataframes
@@ -114,7 +114,7 @@ class tui_analysis(OmniAnalyze_Base):
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         # Load system info and configure
-        sys_info = file_io.load_sys_info(f"{self.path}/sysinfo.csv")
+        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(

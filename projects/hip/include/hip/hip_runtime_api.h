@@ -692,6 +692,8 @@ typedef struct hipIpcEventHandle_st {
 typedef struct ihipModule_t* hipModule_t;
 typedef struct ihipModuleSymbol_t* hipFunction_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
+typedef struct ihipLibrary_t* hipLibrary_t;
+typedef struct ihipKernel_t* hipKernel_t;
 /**
  * HIP memory pool
  */
@@ -846,7 +848,7 @@ enum hipLimit_t {
 /**
  * Host memory will be forcedly allocated on extended fine grained system memory
  * pool which is with MTYPE_UC.
- * @note  This allocation flag is applicable on AMD devices in Linux only.
+ * @note  This allocation flag is applicable on AMD devices, except for Navi4X, in Linux only.
  */
 #define hipHostMallocUncached 0x10000000
 #define hipHostAllocUncached hipHostMallocUncached
@@ -907,7 +909,7 @@ enum hipLimit_t {
 #define hipExtHostRegisterCoarseGrained 0x8
 
 /** Map host memory onto extended fine grained access host memory pool when enabled.
- * It is applicable on AMD devices in Linux only
+ * It is applicable on AMD devices, except for Navi4X, in Linux only.
  */
 #define hipExtHostRegisterUncached 0x80000000
 
@@ -1577,7 +1579,7 @@ typedef enum hipLaunchAttributeID {
 typedef union hipLaunchAttributeValue {
   char pad[64];  ///< 64 byte padding
   hipAccessPolicyWindow
-      accessPolicyWindow;  ///< Value of launch attribute ::hipLaunchAttributePolicyWindow.
+      accessPolicyWindow;  ///< Value of launch attribute ::hipLaunchAttributeAccessPolicyWindow.
   int cooperative;         ///< Value of launch attribute ::hipLaunchAttributeCooperative. Indicates
                            ///< whether the kernel is cooperative.
   int priority;  ///< Value of launch attribute :: hipLaunchAttributePriority. Execution priority of
@@ -3045,6 +3047,14 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                  hipStreamAttrValue* value_out);
+
+/**
+ *@brief Copies attributes from source stream to destination stream.
+ * @param[in] dst - Destination stream
+ * @param[in] src - Source stream
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
 
 // end doxygen Stream
 /**
@@ -6347,6 +6357,69 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
 /**
+ * @brief Load hip Library from inmemory object
+ *
+ * @param [out] library Output Library
+ * @param [in] code In memory object
+ * @param [in] jitOptions JIT options, CUDA only
+ * @param [in] jitOptionsValues JIT options values, CUDA only
+ * @param [in] numJitOptions Number of JIT options
+ * @param [in] libraryOptions Library options
+ * @param [in] libraryOptionValues Library options values
+ * @param [in] numLibraryOptions Number of library options
+ * @return #hipSuccess, #hipErrorInvalidValue,
+ */
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
+                              void** jitOptionsValues, unsigned int numJitOptions,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
+                              unsigned int numLibraryOptions);
+
+/**
+ * @brief Load hip Library from file
+ *
+ * @param [out] library Output Library
+ * @param [in] fileName file which contains code object
+ * @param [in] jitOptions JIT options, CUDA only
+ * @param [in] jitOptionsValues JIT options values, CUDA only
+ * @param [in] numJitOptions Number of JIT options
+ * @param [in] libraryOptions Library options
+ * @param [in] libraryOptionValues Library options values
+ * @param [in] numLibraryOptions Number of library options
+ * @return #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
+                                  void** libraryOptionValues, unsigned int numLibraryOptions);
+
+/**
+ * @brief Unload HIP Library
+ *
+ * @param [in] library Input created hip library
+ * @return #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipLibraryUnload(hipLibrary_t library);
+
+/**
+ * @brief Get Kernel object from library
+ *
+ * @param [out] pKernel Output kernel object
+ * @param [in] library Input hip library
+ * @param [in] name kernel name to be searched for
+ * @return #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
+
+/**
+ * @brief Get Kernel count in library
+ *
+ * @param [out] count Count of kernels in library
+ * @param [in] library Input created hip library
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
+
+/**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
  * @param [out] attr  Attributes of funtion
@@ -6399,8 +6472,22 @@ hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned l
  */
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
 /**
- * @brief builds module from code object which resides in host memory. Image is pointer to that
- * location.
+ * @brief builds module from code object data which resides in host memory.
+ *
+ * The "image" is a pointer to the location of code object data. This data can be either
+ * a single code object or a fat binary (fatbin), which serves as the entry point for loading and
+ * launching device-specific kernel executions.
+ *
+ * By default, the following command generates a fatbin:
+ *
+ * "amdclang++ -O3 -c --offload-device-only --offload-arch=<GPU_ARCH> <input_file> -o <output_file>"
+ *
+ * For more details, refer to:
+ * <a
+ * href= "https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/kernel_language_cpp_support.html#kernel-compilation">
+ * Kernel Compilation</a> in the HIP kernel language C++ support, or
+ * <a
+ * href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html">HIP runtime compilation (HIP RTC)</a>.
  *
  * @param [in] image  The pointer to the location of data
  * @param [out] module  Retuned module
@@ -6482,7 +6569,7 @@ hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeO
 /**
  * @brief Creates a linker instance with options.
  * @param [in] numOptions  Number of options
- * @param [in] option  Array of options
+ * @param [in] options  Array of options
  * @param [in] optionValues  Array of option values cast to void*
  * @param [out] stateOut  hip link state created upon success
  *

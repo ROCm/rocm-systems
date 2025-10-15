@@ -38,7 +38,6 @@ from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from rocprof_compute_tui.analysis_tui import tui_analysis
-from rocprof_compute_tui.config import DEFAULT_START_PATH
 from rocprof_compute_tui.utils.tui_utils import Logger, LogLevel
 from rocprof_compute_tui.widgets.center_panel.center_area import CenterPanel
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import MenuBar
@@ -56,7 +55,6 @@ class MainView(Horizontal):
 
     def __init__(self) -> None:
         super().__init__(id="main-container")
-        self.start_path = Path(DEFAULT_START_PATH) if DEFAULT_START_PATH else Path.cwd()
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
 
@@ -138,7 +136,7 @@ class MainView(Horizontal):
             analyzer.sanitize()
 
             # 2. Load and process system info and Configure SoC
-            sysinfo_path = Path(self.selected_path) / "sysinfo.csv"
+            sysinfo_path = self.selected_path / "sysinfo.csv"
             if not sysinfo_path.exists():
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
 

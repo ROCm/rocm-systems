@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,6 @@
 #include "utils/options.hpp"
 #include "rockernel.hpp"
 
-#include "hsa/amd_hsa_kernel_code.h"
-
 #include <string>
 #include <vector>
 #include <cstring>
@@ -37,7 +35,7 @@ namespace amd::roc {
 
 static inline const char* hsa_strerror(hsa_status_t status) {
   const char* str = nullptr;
-  if (hsa_status_string(status, &str) == HSA_STATUS_SUCCESS) {
+  if (Hsa::status_string(status, &str) == HSA_STATUS_SUCCESS) {
     return str;
   }
   return "Unknown error";
@@ -46,10 +44,10 @@ static inline const char* hsa_strerror(hsa_status_t status) {
 Program::~Program() {
   // Destroy the executable.
   if (hsaExecutable_.handle != 0) {
-    hsa_executable_destroy(hsaExecutable_);
+    Hsa::executable_destroy(hsaExecutable_);
   }
   if (hsaCodeObjectReader_.handle != 0) {
-    hsa_code_object_reader_destroy(hsaCodeObjectReader_);
+    Hsa::code_object_reader_destroy(hsaCodeObjectReader_);
   }
   releaseClBinary();
 }
@@ -102,7 +100,7 @@ bool Program::defineGlobalVar(const char* name, void* dptr) {
   hsa_agent_t hsa_device = rocDevice().getBackendDevice();
 
   hsa_status_t status =
-      hsa_executable_agent_global_variable_define(hsaExecutable_, hsa_device, name, dptr);
+      Hsa::executable_agent_global_variable_define(hsaExecutable_, hsa_device, name, dptr);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Could not define global variable : ";
     buildLog_ += hsa_strerror(status);
@@ -134,7 +132,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
 
   /* Find HSA Symbol by name */
   status =
-      hsa_executable_get_symbol_by_name(hsaExecutable_, global_name, &hsa_device, &global_symbol);
+      Hsa::executable_get_symbol_by_name(hsaExecutable_, global_name, &hsa_device, &global_symbol);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Failed to find the Symbol by Name: ";
     buildLog_ += hsa_strerror(status);
@@ -144,7 +142,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
 
   /* Find HSA Symbol Type */
   status =
-      hsa_executable_symbol_get_info(global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &sym_type);
+      Hsa::executable_symbol_get_info(global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &sym_type);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Failed to find the Symbol Type : ";
     buildLog_ += hsa_strerror(status);
@@ -161,7 +159,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
   }
 
   /* Retrieve the size of the variable */
-  status = hsa_executable_symbol_get_info(global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE,
+  status = Hsa::executable_symbol_get_info(global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE,
                                           bytes);
 
   if (status != HSA_STATUS_SUCCESS) {
@@ -174,7 +172,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
   // Handle size 0 symbols
   if (*bytes != 0) {
     // Find HSA Symbol Address
-    status = hsa_executable_symbol_get_info(
+    status = Hsa::executable_symbol_get_info(
         global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, device_pptr);
     if (status != HSA_STATUS_SUCCESS) {
       buildLog_ += "Error: Failed to find the Symbol Address : ";
@@ -288,7 +286,7 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
   hsa_agent_t agent = rocDevice().getBackendDevice();
   hsa_status_t status;
 
-  status = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+  status = Hsa::executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
                                      nullptr, &hsaExecutable_);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Executable for AMD HSA Code Object isn't created: ";
@@ -300,7 +298,7 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
   // Load the code object, either with file descriptor and offset
   // or binary image and binary size with URI
   // or binary image and binary size
-  status = hsa_code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
+  status = Hsa::code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: AMD HSA Code Object Reader create failed: ";
     buildLog_ += hsa_strerror(status);
@@ -308,7 +306,7 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
     return false;
   }
 
-  status = hsa_executable_load_agent_code_object(hsaExecutable_, agent, hsaCodeObjectReader_,
+  status = Hsa::executable_load_agent_code_object(hsaExecutable_, agent, hsaCodeObjectReader_,
                                                  nullptr, nullptr);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: AMD HSA Code Object loading failed: ";
@@ -318,7 +316,7 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
   }
 
   // Freeze the executable.
-  status = hsa_executable_freeze(hsaExecutable_, nullptr);
+  status = Hsa::executable_freeze(hsaExecutable_, nullptr);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Freezing the executable failed: ";
     buildLog_ += hsa_strerror(status);

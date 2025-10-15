@@ -305,6 +305,7 @@ TEST_CASE("Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology") {
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(childgraph1));
+  HIP_CHECK(hipGraphDestroy(childgraph2));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }

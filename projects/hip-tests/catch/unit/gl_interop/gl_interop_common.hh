@@ -126,11 +126,6 @@ class EGLContextScopeGuard {
  public:
   EGLContextScopeGuard() {
 
-    if(!HipTest::isImageSupported()) {
-      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
-      exit(1);
-    }
-
     // 1. Initialize EGL
     PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT =
         (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress("eglQueryDevicesEXT");
@@ -214,6 +209,12 @@ class GLContextScopeGuard {
   static constexpr char kEnvarName[] = "GL_CONTEXT_TYPE";
 
   GLContextScopeGuard() {
+
+    if(!HipTest::isImageSupported()) {
+      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+      exit(0);
+    }
+
     char* val = std::getenv(kEnvarName);
     std::string val_str = val == NULL ? "" : val;
 

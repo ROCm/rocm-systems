@@ -17,15 +17,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <hip_test_common.hh>
 #include <hip/hiprtc.h>
-#include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <picojson.h>
 #include <vector>
 #include <string>
 #include <iostream>
 #include <fstream>
-#include <hip_test_common.hh>
 #include "headers/RtcUtility.h"
 #include "headers/RtcFunctions.h"
 #include "headers/RtcKernels.h"

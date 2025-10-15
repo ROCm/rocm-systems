@@ -24,6 +24,7 @@
 ##############################################################################
 
 import argparse
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -147,6 +148,28 @@ Examples:
         "--target", type=str, default=None, help=argparse.SUPPRESS
     )
     profile_group.add_argument(
+        "--attach-pid",
+        type=str,
+        dest="attach_pid",
+        metavar="",
+        default=None,
+        required=False,
+        help="\t\t\tProcess id to be attached for profiling.",
+    )
+    profile_group.add_argument(
+        "--attach-duration-msec",
+        type=str,
+        dest="attach_duration_msec",
+        metavar="",
+        default=None,
+        required=False,
+        help=(
+            "\t\t\tWhen --attach-pid is used, it specifies the attach duration "
+            "in milliseconds. If not set, detachment occurs when "
+            '"Enter" key is pressed.'
+        ),
+    )
+    profile_group.add_argument(
         "-p",
         "--path",
         metavar="",
@@ -163,7 +186,7 @@ Examples:
         metavar="",
         type=str,
         dest="subpath",
-        default="gpu",
+        default="gpu_model",
         required=False,
         help=(
             "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
@@ -329,7 +352,9 @@ Examples:
         type=str,
         dest="rocprofiler_sdk_library_path",
         required=False,
-        default="/opt/rocm/lib/librocprofiler-sdk.so",
+        default=str(
+            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+        ),
         help="\t\t\tSet the path to rocprofiler SDK library.",
     )
     profile_group.add_argument(

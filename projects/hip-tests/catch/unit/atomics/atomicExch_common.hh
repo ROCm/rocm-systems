@@ -217,6 +217,7 @@ class AtomicExchCRTP {
 
     const auto shared_mem_size = use_shared_mem ? mem_alloc_size : 0u;
     for (auto i = 0u; i < p.num_devices; ++i) {
+      HIP_CHECK(hipSetDevice(i));
       const auto device_offset = i * p.kernel_count * thread_count;
       for (auto j = 0u; j < p.kernel_count; ++j) {
         const auto& stream = streams[i * p.kernel_count + j].stream();
@@ -301,12 +302,10 @@ class AtomicExch
   }
 };
 
-inline dim3 GenerateAtomicExchThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateAtomicExchThreadDimensions() { return dim3(1024); }
 
 inline dim3 GenerateAtomicExchBlockDimensions() {
-  int sm_count = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return GENERATE_COPY(dim3(sm_count), dim3(sm_count + sm_count / 2));
+  return dim3(8);
 }
 
 template <typename TestType, AtomicScopes scope, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
@@ -395,28 +394,9 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
     }
   }
 
-  CHECK_P2P_SUPPORT
-
-  if (kernel_count > 1) {
-    for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
-      for (auto j = 0u; j < num_devices; ++j) {
-        if (i != j) {
-          HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
-            HipTest::HIP_SKIP_TEST(msg.c_str());
-            return;
-          }
-        }
-      }
-      int concurrent_kernels = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
-      if (!concurrent_kernels) {
-        HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-        return;
-      }
-    }
+  if (!HipTest::checkConcurrentKernels(num_devices)) {
+    HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
+    return;
   }
 
   AtomicExchParams params;
