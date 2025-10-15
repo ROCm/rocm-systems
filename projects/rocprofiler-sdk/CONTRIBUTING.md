@@ -129,7 +129,7 @@ Labels: integration-tests
 Total Tests: 1
 ```
 
-Using all of the lines prefixed with `406:`, a bash script can be easily created:
+Using all of the lines prefixed with `204:`, a bash script can be easily created:
 
 ```bash
 # taken from "Environment variables:"
