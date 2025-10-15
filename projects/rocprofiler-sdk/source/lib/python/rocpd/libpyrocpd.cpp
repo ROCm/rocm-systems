@@ -536,8 +536,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                 // min start
                 sqlite3_stmt* _stmt_min_start_max_fini = nullptr;
-                uint64_t      _min_start_time         = std::numeric_limits<uint64_t>::max();
-                uint64_t      _max_fini_time          = std::numeric_limits<uint64_t>::min();
+                uint64_t      _min_start_time          = std::numeric_limits<uint64_t>::max();
+                uint64_t      _max_fini_time           = std::numeric_limits<uint64_t>::min();
 
                 sqlite3_prepare_v2(conn,
                                    "SELECT MIN(start), MAX(fini) FROM processes;",
