@@ -558,6 +558,20 @@ def parse_args(args=None):
     )
     ctest_args += ["--repeat"] + repeat_args if len(repeat_args) > 0 else []
 
+    def _drop_empty_regex_flags(args):
+        cleaned = []
+        i = 0
+        regex_flags = {"-E", "-R", "-L", "-LE", "-I"}
+        while i < len(args):
+            if args[i] in regex_flags and i + 1 < len(args) and args[i + 1] == "":
+                i += 2  # skip option + empty value
+                continue
+            cleaned.append(args[i])
+            i += 1
+        return cleaned
+    
+    ctest_args = _drop_empty_regex_flags(ctest_args)
+
     return [cdash_args, cmake_args, ctest_args]
 
 
