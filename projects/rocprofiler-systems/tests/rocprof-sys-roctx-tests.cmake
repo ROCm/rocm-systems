@@ -53,7 +53,7 @@ rocprofiler_systems_add_test(
     TARGET roctx
     GPU ON
     LABELS "roctx"
-    ENVIRONMENT "${_base_environment};${_roctx_environment}"
+    ENVIRONMENT "${_roctx_environment}"
 )
 
 set(ROCTX_LABEL
