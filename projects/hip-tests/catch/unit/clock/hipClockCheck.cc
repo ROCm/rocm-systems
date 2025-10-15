@@ -340,6 +340,8 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
     if (clock_rate != max_clock_rate) {
       UNSCOPED_INFO("clock rate: " << clock_rate << "kHz is not set to maximum: " << max_clock_rate
                                    << "kHz");
+    } else {
+      UNSCOPED_INFO("clock rate: " << clock_rate << "kHz");
     }
   }
 
