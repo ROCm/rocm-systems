@@ -358,52 +358,20 @@ rsmi_status_t is_gpu_metrics_version_supported(const AMDGpuMetricsHeader_v1_t& m
          ? rsmi_status_t::RSMI_STATUS_SUCCESS : rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
 }
 
-
-AMDGpuMetricFactories_t amd_gpu_metrics_factory_table
-{
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV11, std::make_shared<GpuMetricsBase_v11_t>(GpuMetricsBase_v11_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV12, std::make_shared<GpuMetricsBase_v12_t>(GpuMetricsBase_v12_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV13, std::make_shared<GpuMetricsBase_v13_t>(GpuMetricsBase_v13_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV14, std::make_shared<GpuMetricsBase_v14_t>(GpuMetricsBase_v14_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV15, std::make_shared<GpuMetricsBase_v15_t>(GpuMetricsBase_v15_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV16, std::make_shared<GpuMetricsBase_v16_t>(GpuMetricsBase_v16_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV17, std::make_shared<GpuMetricsBase_v17_t>(GpuMetricsBase_v17_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV18, std::make_shared<GpuMetricsBase_v18_t>(GpuMetricsBase_v18_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV19, std::make_shared<GpuMetricsBaseDynamic_t>()},
-};
-
-GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t gpu_metric_version)
-{
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-  LOG_TRACE(ss);
-
-  auto contains = [](const AMDGpuMetricVersionFlags_t metric_version) {
-    return (amd_gpu_metrics_factory_table.find(metric_version) != amd_gpu_metrics_factory_table.end());
-  };
-
-  if (contains(gpu_metric_version)) {
-    ss << __PRETTY_FUNCTION__
-                << " | ======= end ======= "
-                << " | Success "
-                << " | Factory Version: " << static_cast<AMDGpuMetricVersionFlagId_t>(gpu_metric_version)
-                << " |";
-    LOG_TRACE(ss);
-
-    return (amd_gpu_metrics_factory_table.at(gpu_metric_version));
+GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t v) {
+  switch (v) {
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV11: return std::make_shared<GpuMetricsBase_v11_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV12: return std::make_shared<GpuMetricsBase_v12_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV13: return std::make_shared<GpuMetricsBase_v13_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV14: return std::make_shared<GpuMetricsBase_v14_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV15: return std::make_shared<GpuMetricsBase_v15_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV16: return std::make_shared<GpuMetricsBase_v16_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV17: return std::make_shared<GpuMetricsBase_v17_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV18: return std::make_shared<GpuMetricsBase_v18_t>();
+    case AMDGpuMetricVersionFlags_t::kGpuMetricV19: return std::make_shared<GpuMetricsBaseDynamic_t>();
+    default: return nullptr;
   }
-
-  ss << __PRETTY_FUNCTION__
-              << " | ======= end ======= "
-              << " | Fail "
-              << " | Factory Version: " << static_cast<AMDGpuMetricVersionFlagId_t>(gpu_metric_version)
-              << " | Returning = "
-              << "No object from factory."
-              << " |";
-  LOG_ERROR(ss);
-  return nullptr;
 }
-
 
 template<typename>
 constexpr bool is_dependent_false_v = false;
