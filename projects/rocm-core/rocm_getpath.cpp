@@ -22,13 +22,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //
 ////////////////////////////////////////////////////////////////////////////////
-
-#include <string.h>
-#include <stdlib.h>
-#include <limits.h> /* PATH_MAX */
-#include <stdio.h>
+#include <cstring>
+#include <cstdlib>
+#include <climits> /* PATH_MAX */
+#include <cstdio>
+#if !defined(_WIN32) && !defined(__CYGWIN__)
 #include <link.h>
 #include <dlfcn.h>
+#endif
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+#define PATH_MAX MAX_PATH
+#elif !defined(PATH_MAX)
+#define PATH_MAX FILENAME_MAX
+#endif
+#define RC_PATH_MAX (PATH_MAX > 1024 && FILENAME_MAX > 1024 ? 1024 : (PATH_MAX < FILENAME_MAX ? PATH_MAX : FILENAME_MAX))
+
 #include "rocm_getpath.h"
 
 /* Macro for NULL CHECK */
@@ -39,7 +48,7 @@
 #define TARGET_LIB_INSTALL_DIR TARGET_LIBRARY_INSTALL_DIR
 
 /* Target Library Name Buf Size */
-#define LIBRARY_FILENAME_BUFSZ (PATH_MAX+1)
+#define LIBRARY_FILENAME_BUFSZ RC_PATH_MAX+1
 
 /* Internal Function to get Base Path - Ref from Icarus Logic*/
 static int getROCmBase(char *buf);
@@ -109,7 +118,7 @@ static int getROCmBase(char *buf)
          /* Already has at least one terminating */
          len--;
       }
-      if (len > PATH_MAX-1 ) {
+      if (len > LIBRARY_FILENAME_BUFSZ-1 ) {
          return PathValuesTooLong;
       }
       strncpy(buf, envStr, len);
@@ -122,9 +131,83 @@ static int getROCmBase(char *buf)
   }
 
   // If Environment Variable is not set
-  // use dl APIs to get target lib path
+  // use platform-specific APIs to get target lib path
   // and get rocm base install path using the lib Path.
-#if BUILD_SHARED_LIBS
+#if defined(_WIN32) || defined(_WIN64)
+  // Windows implementation using Windows APIs
+  sprintf(libFileName, "%s.dll", TARGET_LIBRARY_NAME);
+
+  HMODULE hModule = LoadLibraryA(libFileName);
+  if (!hModule) {
+    // Try common ROCm installation paths
+    const char* commonPaths[] = {
+      "C:\\Program Files\\AMD\\ROCm\\",
+      "C:\\ROCm\\",
+      "C:\\AMD\\ROCm\\"
+    };
+
+    for (int i = 0; i < sizeof(commonPaths)/sizeof(commonPaths[0]); i++) {
+      char testPath[LIBRARY_FILENAME_BUFSZ];
+      sprintf(testPath, "%s%s\\%s", commonPaths[i], TARGET_LIB_INSTALL_DIR, libFileName);
+      hModule = LoadLibraryA(testPath);
+      if (hModule) {
+        strcpy(buf, commonPaths[i]);
+        len = strlen(buf);
+        FreeLibrary(hModule);
+        return len;
+      }
+    }
+    return PathLinuxRuntimeErrors;
+  }
+
+  // Get the full path of the loaded module
+  char modulePath[LIBRARY_FILENAME_BUFSZ];
+  DWORD pathLen = GetModuleFileNameA(hModule, modulePath, LIBRARY_FILENAME_BUFSZ);
+  FreeLibrary(hModule);
+
+  if (pathLen == 0 || pathLen >= LIBRARY_FILENAME_BUFSZ) {
+    return PathLinuxRuntimeErrors;
+  }
+
+  // Convert backslashes to forward slashes for consistency
+  for (DWORD i = 0; i < pathLen; i++) {
+    if (modulePath[i] == '\\') {
+      modulePath[i] = '/';
+    }
+  }
+
+  // Find the library install directory and strip it to get ROCm base
+  char* libDirPos = strstr(modulePath, TARGET_LIB_INSTALL_DIR);
+  if (libDirPos == NULL) {
+    // If we can't find the expected lib directory, try to get parent directory
+    char* lastSlash = strrchr(modulePath, '/');
+    if (lastSlash && lastSlash > modulePath) {
+      *lastSlash = '\0';
+      // Try one more level up
+      lastSlash = strrchr(modulePath, '/');
+      if (lastSlash && lastSlash > modulePath) {
+        *(lastSlash + 1) = '\0'; // Keep the trailing slash
+        strcpy(buf, modulePath);
+        len = strlen(buf);
+        return len;
+      }
+    }
+    return PathLinuxRuntimeErrors;
+  }
+
+  // Terminate string at the lib directory to get ROCm base path
+  *libDirPos = '\0';
+  strcpy(buf, modulePath);
+  len = strlen(buf);
+
+  // Ensure trailing slash
+  if (len > 0 && buf[len-1] != '/') {
+    buf[len] = '/';
+    buf[len+1] = '\0';
+    len++;
+  }
+
+#elif BUILD_SHARED_LIBS
   sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);
   void *handle=dlopen(libFileName,RTLD_NOW);
   if (!handle){
@@ -158,6 +241,9 @@ static int getROCmBase(char *buf)
     return PathLinuxRuntimeErrors;
   }
   *end = '\0';
+#else
+  // BUILD_SHARED_LIBS not defined
+  return PathLinuxRuntimeErrors;
 #endif
 
   /* Length of Path String up to Parent Directoy (ROCm Base Path)
