@@ -4,7 +4,7 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.2.0 for ROCm 7.1
+## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added
 
@@ -14,7 +14,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Support for tracing OpenMP API in Fortran applications.
 - An error warning that is triggered if the profiler application fails due to SELinux enforcement being enabled. The warning includes steps to disable SELinux enforcement.
 
-## Changed
+### Changed
 
 - Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
 - Updated PAPI module to v7.2.0b2
