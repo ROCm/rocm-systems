@@ -142,10 +142,6 @@ int getEngineFreq(const hipUUID& uuid) {
   static constexpr unsigned int AMDSMI_MAX_STRING_LENGTH = 256;
   typedef void* amdsmi_processor_handle;
   typedef void* amdsmi_socket_handle;
-
-  void* libHdl;
-  int result = -1;
-
   typedef enum {
     AMDSMI_STATUS_SUCCESS = 0,  //!< Call succeeded
   } amdsmi_status_t;
@@ -197,27 +193,38 @@ int getEngineFreq(const hipUUID& uuid) {
   amdsmi_status_t (*fnget_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t,
                                       amdsmi_clk_info_t*);
   amdsmi_status_t (*fnshut_down)();
+  int result = -1;
+  bool smiInitialized = false;
+  auto cleanUp = [&smiInitialized, &fnshut_down](void* handle) {
+    if (smiInitialized)
+      fnshut_down();
 
-  libHdl = dlopen("libamd_smi.so", RTLD_LAZY);
+    if (handle)
+      dlclose(handle);
+  };
+  std::unique_ptr<void, decltype(cleanUp)> libHdl(nullptr, cleanUp);
+
+  libHdl.reset(dlopen("libamd_smi.so", RTLD_LAZY));
 
   if (!libHdl) {
     return -1;
   }
 
   try {
-    loadSym(fninit, "amdsmi_init", libHdl);
-    loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", libHdl);
-    loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", libHdl);
-    loadSym(fnget_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info", libHdl);
-    loadSym(fnget_clock_info, "amdsmi_get_clock_info", libHdl);
-    loadSym(fnshut_down, "amdsmi_shut_down", libHdl);
+    loadSym(fninit, "amdsmi_init", libHdl.get());
+    loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", libHdl.get());
+    loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", libHdl.get());
+    loadSym(fnget_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info", libHdl.get());
+    loadSym(fnget_clock_info, "amdsmi_get_clock_info", libHdl.get());
+    loadSym(fnshut_down, "amdsmi_shut_down", libHdl.get());
   } catch (std::runtime_error&) {
     return -1;
   }
 
   if (fninit(1ul << 1)) {
     return -1;
-  }
+  } else
+    smiInitialized = true;
 
   uint32_t socket_count = 0;
   uint32_t numSocket = 0;
@@ -271,8 +278,6 @@ int getEngineFreq(const hipUUID& uuid) {
     numSocket++;
   }
 
-  fnshut_down();
-  dlclose(libHdl);
   return result;
 }
 #endif
