@@ -30,7 +30,6 @@ from typing import Iterator
 
 from utils.logger import (
     console_debug,
-    console_error,
     console_warning,
 )
 
@@ -66,12 +65,12 @@ def get_device_handle() -> "amdsmi.ProcessorHandle | None":
     try:
         devices = amdsmi.amdsmi_get_processor_handles()
         if len(devices) == 0:
-            console_error("No AMD GPU detected!")
+            console_warning("No AMD GPU detected!")
             return None
         console_debug(f"Found {len(devices)} AMD device(s).")
         return devices[0]
     except Exception as e:
-        console_error(f"Error getting device handle: {e}")
+        console_warning(f"Error getting device handle: {e}")
         return None
 
 
@@ -85,7 +84,7 @@ def get_mem_max_clock() -> float:
         # 100 Mhz -> 100
         return amd_smi_mclk / 10**6
     except Exception as e:
-        console_error(f"Error getting memory clocks: {e}")
+        console_warning(f"Error getting memory clocks: {e}")
         return 0.0
 
 
@@ -97,13 +96,9 @@ def get_gpu_model() -> str:
 
         console_debug(f"GPU Model: {gpu_model}")
 
-        if not gpu_model:
-            console_warning("Unable to determine the GPU model from amd-smi.")
-            return "N/A"
-
         return gpu_model
     except Exception as e:
-        console_error(f"Error getting GPU model: {e}")
+        console_warning(f"Error getting GPU model: {e}")
         return "N/A"
 
 
@@ -118,7 +113,7 @@ def get_gpu_vbios_part_number() -> str:
 
         return vbios_part_number
     except Exception as e:
-        console_error(f"Error getting GPU VBIOS part number: {e}")
+        console_warning(f"Error getting GPU VBIOS part number: {e}")
         return "N/A"
 
 
@@ -131,7 +126,7 @@ def get_gpu_compute_partition() -> str:
 
         return compute_partition
     except Exception as e:
-        console_error(f"Error getting GPU compute partition: {e}")
+        console_warning(f"Error getting GPU compute partition: {e}")
         return "N/A"
 
 
@@ -144,5 +139,5 @@ def get_gpu_memory_partition() -> str:
 
         return memory_partition
     except Exception as e:
-        console_error(f"Error getting GPU memory partition: {e}")
+        console_warning(f"Error getting GPU memory partition: {e}")
         return "N/A"
