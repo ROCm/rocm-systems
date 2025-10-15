@@ -2,7 +2,7 @@
 //
 // MIT License
 //
-// Copyright (c) 2017 - 2023 Advanced Micro Devices, Inc. All rights Reserved.
+// Copyright (c) 2017 - 2025 Advanced Micro Devices, Inc. All rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,13 @@ extern "C" {
 #endif  // __cplusplus
 
 
-#define LIB_API_PUBLIC __attribute__ ((visibility ("default")))
-
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define LIB_API_PUBLIC __declspec(dllexport)
+#define ATTRIBUTE_NON_NULL
+#else
+#define LIB_API_PUBLIC __attribute__((visibility("default")))
+#define ATTRIBUTE_NON_NULL __attribute__((nonnull))
+#endif
 
 #define ROCM_VERSION_MAJOR   @VERSION_MAJOR@
 #define ROCM_VERSION_MINOR   @VERSION_MINOR@
@@ -51,9 +56,9 @@ typedef enum {
 } VerErrors;
 
 
-//  API for getting the version
-//  Return val :  VerErrors : API execution status.  The parameters are valid only when the exetution status is SUCCESS==0
-LIB_API_PUBLIC VerErrors getROCmVersion(unsigned int* Major, unsigned int* Minor, unsigned int* Patch) __attribute__((nonnull)) ;
+//  API for getting the verion
+//  Return val :  VerErros : API execution status.  The parameters are valid only when the exetution status is SUCCESS==0
+LIB_API_PUBLIC VerErrors getROCmVersion(unsigned int* Major, unsigned int* Minor, unsigned int* Patch) ATTRIBUTE_NON_NULL ;
 //  Usage :
 //  int mj=0,mn=0,p=0,ret=0;
 //  ret=getROCMVersion(&mj,&mn,&p);
