@@ -67,7 +67,7 @@ execute_kernels(const size_t      tid,
     const size_t bytes = size * sizeof(float);
 
     float* h_data = new float[size];
-    float* d_data;
+    float* d_data = nullptr;
 
     HIP_ASSERT(hipMalloc(&d_data, bytes));
 
