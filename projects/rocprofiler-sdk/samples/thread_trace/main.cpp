@@ -35,7 +35,7 @@
 #include "hip/hip_runtime.h"
 
 // Two waves per SIMD on MI300
-#define DATA_SIZE (304 * 64 * 4 * 2)
+#define DATA_SIZE (304 * 256 * 8)
 #define HIP_API_CALL(CALL)                                                                         \
     if((CALL) != hipSuccess)                                                                       \
     {                                                                                              \
@@ -143,7 +143,7 @@ public:
 
 #define Launch(kernel, stream, arglast)                                                            \
     hipLaunchKernelGGL(                                                                            \
-        kernel, DATA_SIZE / 512, 512, 0, 0, stream.dst.ptr, stream.src1.ptr, stream.src2.ptr, 6);
+        kernel, DATA_SIZE / 512, 512, 0, 0, stream.dst.ptr, stream.src1.ptr, stream.src2.ptr, arglast);
 
 int
 main(int /*argc*/, char** /*argv*/)
@@ -159,19 +159,16 @@ main(int /*argc*/, char** /*argv*/)
     {
         // Warmup then start
         if(i == streams.size())
-        {
-            HIP_API_CALL(hipDeviceSynchronize());
             roctxProfilerResume(0);
-        }
 
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());
 
         Launch(kernel, stream, 3);
         HIP_API_CALL(hipGetLastError());
+        HIP_API_CALL(hipDeviceSynchronize());
     }
 
-    HIP_API_CALL(hipDeviceSynchronize());
     roctxProfilerPause(0);
 
     return 0;

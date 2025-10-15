@@ -188,13 +188,15 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
+shader_data_callback(rocprofiler_agent_id_t agent,
                      int64_t /* se_id */,
                      void*  se_data,
                      size_t data_size,
                      rocprofiler_user_data_t /* userdata */)
 {
     CHECK_NOTNULL(Results::latencies);
+    std::cout << agent.handle << " Size: " << data_size << std::endl;
+    return;
 
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
@@ -260,10 +262,10 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {TARGET_CU}});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {BUFFER_SIZE}});
-        parameters.push_back(
-            {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {SHADER_MASK}});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u<<30});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TRIPLE_BUFFERING, 1});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,

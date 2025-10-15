@@ -189,7 +189,6 @@ TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
     return pool.api_copy_fn(dst, src, size);
 }
 
-constexpr int NUM_BUFFERS = 3;
 constexpr int SHADER_ENGINE_ID = 0;
 
 TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tracepool,
@@ -211,27 +210,41 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
     this->empty                            = false;
 
-    buffer_swap.resize(NUM_BUFFERS*2);
-
-    uint64_t header{0};
-    uint64_t num_buffers{buffer_swap.size()};
-    std::vector<hsa_ext_amd_aql_pm4_packet_t*> buffer_ptr{};
-    for (auto& buffer : buffer_swap) buffer_ptr.emplace_back(&buffer);
-
-    status = aqlprofile_att_get_buffer_packets(&header, &query_status, buffer_ptr.data(), &num_buffers, tracepool->handle, SHADER_ENGINE_ID, 0);
-    CHECK_HSA(status, "failed to create ATT double buffer packet");
-
-    buffer_swap.resize(num_buffers);
-
     clear();
 };
 
-void TraceControlAQLPacket::query_buffer_status()
+SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle): handle(_handle)
+{
+    uint64_t header{0};
+    uint64_t num_buffers{6};
+    buffer_swap.resize(num_buffers);
+
+    std::vector<hsa_ext_amd_aql_pm4_packet_t*> buffer_ptr{};
+    for (auto& buffer : buffer_swap) buffer_ptr.emplace_back(&buffer);
+
+    auto status = aqlprofile_att_get_buffer_packets(&header, &query_status, buffer_ptr.data(), &num_buffers, handle, SHADER_ENGINE_ID, 0);
+    CHECK_HSA(status, "failed to create ATT double buffer packet");
+
+    buffer_swap.resize(num_buffers);
+}
+
+std::optional<sqtt_buffer_status_t> SQTTBufferingPackets::query_buffer_status()
 {
     aqlprofile_att_buffer_status_v0_t ret{};
 
-    auto status = aqlprofile_att_get_buffer_status(&ret, tracepool->handle, SHADER_ENGINE_ID, 0);
+    auto status = aqlprofile_att_update_buffer_status(&ret, handle, SHADER_ENGINE_ID, 0);
     CHECK_HSA(status, "failed to query ATT status");
+
+    if (!ret.needs_swap) return {};
+
+    ROCP_FATAL_IF((current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
+    
+    auto query = sqtt_buffer_status_t{};
+    query.data = ret.data;
+    query.size = ret.read_size;
+    query.packet = buffer_swap.at(ret.num_swaps % buffer_swap.size());
+
+    return query;
 }
 
 CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool,
