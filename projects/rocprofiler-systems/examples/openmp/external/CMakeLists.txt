@@ -53,7 +53,8 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
     # Precreate bin dir to avoid race condition
     if(NOT EXISTS "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin")
         execute_process(
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin"
+            COMMAND
+                ${CMAKE_COMMAND} -E make_directory "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin"
         )
     endif()
     if(TEST_TYPE STREQUAL "HOST")
@@ -79,25 +80,23 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
 
         add_custom_command(
             OUTPUT "${OMPVV_BIN_DEST}/${TARGET_NAME}"
-            COMMAND make FC=${OMPVV_FC}
-                    DEVICE_TYPE=amd 
-                    OMP_VERSION=${OMPVV_OPENMP_VERSION}
-                    NUM_THREADS_HOST=${OMPVV_NUM_THREADS_HOST}
-                    NUM_THREADS_DEVICE=${OMPVV_NUM_THREADS_DEVICE}
-                    NUM_TEAMS_DEVICE=${OMPVV_NUM_TEAMS_DEVICE}
-                    "FOFFLOADING=${FOFFLOADING_FLAGS}"
-                    "FFLAGS=${CUSTOM_FFLAGS}"
-                    "FLINKFLAGS=${CUSTOM_FLINKFLAGS}"
-                    "SOURCES=${TEST}" compile
-                    > ${CMAKE_CURRENT_BINARY_DIR}/ompvv_compile_${TARGET_NAME}.log 2>&1
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin/${TEST_NAME}.F90.o"
-                    "${OMPVV_BIN_DEST}/${TARGET_NAME}"
+            COMMAND
+                make FC=${OMPVV_FC} DEVICE_TYPE=amd OMP_VERSION=${OMPVV_OPENMP_VERSION}
+                NUM_THREADS_HOST=${OMPVV_NUM_THREADS_HOST}
+                NUM_THREADS_DEVICE=${OMPVV_NUM_THREADS_DEVICE}
+                NUM_TEAMS_DEVICE=${OMPVV_NUM_TEAMS_DEVICE}
+                "FOFFLOADING=${FOFFLOADING_FLAGS}" "FFLAGS=${CUSTOM_FFLAGS}"
+                "FLINKFLAGS=${CUSTOM_FLINKFLAGS}" "SOURCES=${TEST}" compile >
+                ${CMAKE_CURRENT_BINARY_DIR}/ompvv_compile_${TARGET_NAME}.log 2>&1
+            COMMAND
+                ${CMAKE_COMMAND} -E copy_if_different
+                "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin/${TEST_NAME}.F90.o"
+                "${OMPVV_BIN_DEST}/${TARGET_NAME}"
             COMMENT "Compiling OMPVV test: ${TEST_NAME}"
             WORKING_DIRECTORY ${ROCPROFSYS_OMPVV_SOURCE_DIR}
             VERBATIM
             DEPENDS
-                ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${TEST}              
+                ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${TEST}
                 ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE}
         )
 
@@ -106,18 +105,27 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
             set(ROCPROFSYS_OMPVV_HOST_TESTS "${ROCPROFSYS_OMPVV_HOST_TESTS}" PARENT_SCOPE)
         else()
             list(APPEND ROCPROFSYS_OMPVV_OFFLOAD_TESTS ${TARGET_NAME})
-            set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS "${ROCPROFSYS_OMPVV_OFFLOAD_TESTS}" PARENT_SCOPE)
+            set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
+                "${ROCPROFSYS_OMPVV_OFFLOAD_TESTS}"
+                PARENT_SCOPE
+            )
         endif()
 
-        add_custom_target("${TARGET_NAME}-build" ALL DEPENDS "${OMPVV_BIN_DEST}/${TARGET_NAME}")
+        add_custom_target(
+            "${TARGET_NAME}-build"
+            ALL
+            DEPENDS "${OMPVV_BIN_DEST}/${TARGET_NAME}"
+        )
         add_executable("${TARGET_NAME}-exec" IMPORTED GLOBAL)
-        set_target_properties("${TARGET_NAME}-exec" PROPERTIES IMPORTED_LOCATION "${OMPVV_BIN_DEST}/${TARGET_NAME}")
-
+        set_target_properties(
+            "${TARGET_NAME}-exec"
+            PROPERTIES IMPORTED_LOCATION "${OMPVV_BIN_DEST}/${TARGET_NAME}"
+        )
     endforeach()
 endfunction()
 
 # ---------------------------------------------------------------------------------------#
-# Copy OMPVV to build folder 
+# Copy OMPVV to build folder
 # ---------------------------------------------------------------------------------------#
 
 if(NOT EXISTS "${ROCPROFSYS_OMPVV_SOURCE_DIR}")
