@@ -281,6 +281,65 @@ ThreadTracerQueue::unload_codeobj(code_object_id_t id)
     Submit(&packet->packet, true)->WaitOn();
 }
 
+rocprofiler_status_t worker_loop(
+    rocprofiler::hsa::SQTTBufferingPackets packet,
+    ThreadTracerQueue* queue,
+    std::shared_ptr<std::atomic<bool>> flag
+) {
+    auto parameters = queue->params;
+
+    std::vector<char> buffer{};
+    buffer.resize(parameters.buffer_size);
+
+    ROCP_WARNING << "Worker initialized";
+    
+    auto execute = [&]()
+    {
+        queue->Submit(&packet.query_status, true);
+
+        if (auto status = packet.query_buffer_status())
+        {
+            ROCP_WARNING << "Swapping buffer!";
+            queue->Submit(&status->packet, false);
+            if (status->size > buffer.size()) return true;
+
+            auto err = hsa::get_core_table()->hsa_memory_copy_fn(buffer.data(), status->data, status->size);
+            if (err != HSA_STATUS_SUCCESS) return true;
+
+            parameters.shader_cb_fn(queue->agent_id, 0, buffer.data(), status->size, parameters.callback_userdata);
+        }
+        else
+        {
+            ROCP_WARNING << "No swap";
+        }
+        return false;
+    };
+
+    while (flag->load())
+    {
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+        if (execute()) return ROCPROFILER_STATUS_ERROR;
+    }
+    execute();
+
+    ROCP_WARNING << "Worker returning";
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+void ThreadTracerQueue::start_worker(std::shared_ptr<std::atomic<bool>> flag)
+{
+    ROCP_WARNING << "Starting worker";
+    auto packets = rocprofiler::hsa::SQTTBufferingPackets(control_packet->GetHandle());
+
+    worked_thread = std::async(std::launch::async, worker_loop, std::move(packets), this, std::move(flag));
+}
+
+rocprofiler_status_t ThreadTracerQueue::stop_worker()
+{
+    ROCP_WARNING << "Stopping worker";
+    return worked_thread.get();
+}
+
 void
 DispatchThreadTracer::resource_init()
 {
@@ -472,10 +531,21 @@ DeviceThreadTracer::start_context()
     for(auto& [_, tracer] : agents)
     {
         auto packet = tracer->get_control(true);
+        packet->clear();
         packet->populate_before();
 
         auto sig = tracer->SubmitAndSignalLast(packet->before_krn_pkt);
-        if(sig) wait_list.emplace_back(std::move(sig));
+        wait_list.emplace_back(std::move(sig));
+    }
+
+    ROCP_WARNING << "Starting context";
+    worker_flag = std::make_shared<std::atomic<bool>>(true);
+    wait_list.clear();
+
+    for(auto& [_, tracer] : agents)
+    {
+        if (tracer->params.triple_buffering)
+            tracer->start_worker(worker_flag);
     }
 }
 
@@ -491,17 +561,22 @@ DeviceThreadTracer::stop_context()
         return;
     }
 
+    ROCP_WARNING << "Stopping context";
+
     std::vector<wait_t> wait_list{};
 
+    worker_flag->store(false);
     for(auto& [_, tracer] : agents)
     {
+        ROCP_WARNING << "Waiting on worker";
+        if(auto status = tracer->stop_worker())
+            ROCP_CI_LOG(ERROR) << "Thread trace worked returned error " << status;
+
         auto packet = tracer->get_control(false);
-        packet->after_krn_pkt.emplace_back(packet->query_status);
+        packet->clear();
         packet->populate_after();
 
         auto signal = tracer->SubmitAndSignalLast(packet->after_krn_pkt);
-        signal->WaitOn();
-        packet->query_buffer_status();
         if(signal) wait_list.emplace_back(tracer.get(), packet->GetHandle(), std::move(signal));
     }
 

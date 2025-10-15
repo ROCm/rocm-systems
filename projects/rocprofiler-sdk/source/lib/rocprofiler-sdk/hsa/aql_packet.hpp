@@ -30,6 +30,8 @@
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include <optional>
+
 namespace rocprofiler
 {
 namespace aql
@@ -208,8 +210,6 @@ public:
         this->tracepool      = other.tracepool;
         this->packets        = other.packets;
         this->loaded_codeobj = other.loaded_codeobj;
-        this->query_status   = other.query_status;
-        this->buffer_swap    = other.buffer_swap;
     }
 
     aqlprofile_handle_t GetHandle() const { return tracepool->handle; }
@@ -229,16 +229,34 @@ public:
             std::make_shared<CodeobjMarkerAQLPacket>(*tracepool, id, addr, size, true, false);
     }
     bool remove_codeobj(code_object_id_t id) { return loaded_codeobj.erase(id) != 0; }
-    void query_buffer_status();
-
-    hsa_ext_amd_aql_pm4_packet_t query_status{};
-    std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
 
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;
     aqlprofile_att_control_aql_packets_t packets;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
+};
+
+struct sqtt_buffer_status_t
+{
+    void* data;
+    uint64_t size;
+    hsa_ext_amd_aql_pm4_packet_t packet;
+};
+
+class SQTTBufferingPackets
+{
+public:
+    SQTTBufferingPackets(aqlprofile_handle_t handle);
+
+    hsa_ext_amd_aql_pm4_packet_t query_status{};
+    std::optional<sqtt_buffer_status_t> query_buffer_status();
+
+private:
+    const aqlprofile_handle_t handle;
+
+    size_t current_buffer{0};
+    std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
 };
 
 }  // namespace hsa
