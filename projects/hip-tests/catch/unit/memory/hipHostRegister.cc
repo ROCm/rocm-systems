@@ -122,12 +122,10 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
     SECTION("hipExtHostRegisterUncached") {
       HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
     }
-    SECTION("hipHostRegisterPortable | hipHostRegisterMapped | "
-            "hipExtHostRegisterUncached | hipHostRegisterIoMemory") {
+    SECTION("hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached") {
       HIP_CHECK(hipHostRegister(
           A, sizeBytes,
-          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached | 
-          hipHostRegisterIoMemory));
+          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached));
     }
   }
 #endif
@@ -927,7 +925,6 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
       FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-      FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif
