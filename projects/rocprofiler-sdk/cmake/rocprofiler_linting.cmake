@@ -22,8 +22,8 @@ function(_rocprofiler_check_clang_tidy_version _OUT _EXE)
         OUTPUT_VARIABLE _CLANG_TIDY_OUT
         RESULT_VARIABLE _CLANG_TIDY_RET
         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    if(_CLANG_TIDY_RET EQUAL 0
-       AND "${_CLANG_TIDY_OUT}" MATCHES "version 1[5-9]\\.([0-9]+)\\.([0-9]+)")
+    if(_CLANG_TIDY_RET EQUAL 0 AND "${_CLANG_TIDY_OUT}" MATCHES
+                                   "version 1[5-9]\\.([0-9]+)\\.([0-9]+)")
         set(${_OUT}
             ON
             PARENT_SCOPE)
@@ -49,8 +49,7 @@ endif()
 
 find_program(
     ROCPROFILER_CLANG_TIDY_EXE ${_TIDY_REQUIRED}
-    NAMES clang-tidy-19 clang-tidy-18 clang-tidy-17
-          clang-tidy-16 clang-tidy-15 clang-tidy
+    NAMES clang-tidy-19 clang-tidy-18 clang-tidy-17 clang-tidy-16 clang-tidy-15 clang-tidy
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
