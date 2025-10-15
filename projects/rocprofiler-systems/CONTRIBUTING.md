@@ -6,7 +6,7 @@
 
 # Contributing to ROCm Systems Profiler #
 
-We welcome contributions to rocprofiler-systems.  Contributions at a basic level must conform to the MIT license and pass code test requirements (i.e. ctest). The author must also be able to respond to comments/questions on the PR and make any changes requested.
+Contributions to ROCm Systems Profiler are encouraged and welcomed.  Contributions at a basic level must conform to the MIT license and pass the code test requirements (i.e., ctest). The author must also be able to respond to comments/questions on the PR and make any changes requested.
 
 ## Issue Discussion ##
 
