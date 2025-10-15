@@ -33,6 +33,7 @@
 #include "platform/memory.hpp"
 #include "platform/sampler.hpp"
 #include "utils/debug.hpp"
+#include "utils/profiler.hpp"
 #include "os/os.hpp"
 
 #include <fstream>
@@ -188,6 +189,7 @@ void Timestamp::checkGpuTime() {
 
 // ================================================================================================
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
+  PROFILE_START("async callback");
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
   if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
@@ -223,6 +225,7 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
       head = head->getNext();
     }
   }
+  PROFILE_END("async callback");
   ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), handle(0x%lx)",
           static_cast<uint32_t>(value), arg,
           ts->HwProfiling() ? ts->Signals()[0]->signal_.handle : 0);
@@ -552,8 +555,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
           }
         }
         gpu_.QueuedAsyncHandlers()++;
+        PROFILE_START("async handler");
         hsa_status_t result = Hsa::signal_async_handler(
             prof_signal->signal_, HSA_SIGNAL_CONDITION_LT, init_value, &HsaAmdSignalHandler, ts);
+        PROFILE_END("async handler");
         if (HSA_STATUS_SUCCESS != result) {
           LogError("hsa_amd_signal_async_handler() failed to set the handler!");
         } else {
@@ -1417,7 +1422,8 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
                                        hsa_signal_t signal) {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
-
+  
+  PROFILE_START("batch waiting signal");
   if (!skipSignal) {
     // Make sure the wait is issued before queue index reservation
     auto wait_signals = Barriers().WaitingSignal();
@@ -1431,6 +1437,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
       }
     }
   }
+  PROFILE_END("batch waiting signal");
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
@@ -1440,7 +1447,9 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
                                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
   if (!skipSignal && (signal.handle == 0)) {
     // Get active signal for current dispatch if profiling is necessary
+    PROFILE_START("active signal");
     barrier_packet_.completion_signal = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
+    PROFILE_END("active signal");
   } else {
     // Attach external signal to the packet
     barrier_packet_.completion_signal = signal;
@@ -1453,6 +1462,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     fence_dirty_ = false;
   }
 
+  PROFILE_START("write aql packet");
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
   hsa_barrier_and_packet_t* aql_loc =
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
@@ -1460,6 +1470,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  PROFILE_END("write aql packet");
   ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, BarrierAND Header = 0x%x (type=%d, barrier=%d, acquire=%d,"
           " release=%d), "
@@ -1501,7 +1512,9 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   // Dependent signal and external signal cant be true at the same time
   assert(resolveDepSignal & (signal.handle != 0) == 0);
   if (resolveDepSignal) {
+    PROFILE_START("dispatch waiting signal");
     auto wait_signals = Barriers().WaitingSignal();
+    PROFILE_END("dispatch waiting signal");
     if (wait_signals.size() > 0) {
       barrier_value_packet_.signal = wait_signals[0];
       barrier_value_packet_.value = kInitSignalValueOne;
@@ -1525,8 +1538,10 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   if (completionSignal.handle == 0) {
     // Get active signal for current dispatch if profiling is necessary
+    PROFILE_START("completition signal");
     barrier_value_packet_.completion_signal =
         Barriers().ActiveSignal(kInitSignalValueOne, skipTs ? nullptr : timestamp_);
+    PROFILE_END("completition signal");
   } else {
     // Attach external signal to the packet
     barrier_value_packet_.completion_signal = completionSignal;
@@ -1542,6 +1557,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   TrackQueueProgress(barrier_value_packet_, index);
 
+  PROFILE_START("Write packet to queue");
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
@@ -1549,6 +1565,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, rest);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  PROFILE_END("Write packet to queue");
 
   ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
           "SWq=0x%zx, HWq=0x%zx, id=%d, BarrierValue Header = 0x%x AmdFormat = 0x%x "
@@ -3918,23 +3935,29 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       // HSA signal callback
       flush(vcmd.GetBatchHead());
     } else {
+      PROFILE_START("profiling begin");
       profilingBegin(vcmd);
+      PROFILE_END("profiling begin");
       if (timestamp_ != nullptr) {
         const Settings& settings = dev().settings();
         int32_t releaseFlags = vcmd.getCommandEntryScope();
         if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
+          PROFILE_START("Barrier Packet");
           if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
             dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
           } else {
             dispatchBarrierPacket(kNopPacketHeader, false);
           }
+          PROFILE_END("Barrier Packet");
         } else {
+          PROFILE_START("Barrier With Cache");
           // Submit a barrier with a cache flushes.
           if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
             dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
           } else {
             dispatchBarrierPacket(kBarrierPacketHeader, false);
           }
+          PROFILE_END("Barrier With Cache");
           hasPendingDispatch_ = false;
         }
       }

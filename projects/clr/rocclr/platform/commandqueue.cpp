@@ -23,6 +23,7 @@
 #include "device/device.hpp"
 #include "platform/context.hpp"
 #include "utils/flags.hpp"
+#include "utils/profiler.hpp"
 
 /*!
  * \file commandQueue.cpp
@@ -198,7 +199,9 @@ void HostQueue::finish(bool cpu_wait) {
     if (command == NULL) {
       return;
     }
+    PROFILE_START("enqueue marker");
     command->enqueue();
+    PROFILE_END("enqueue marker");
   }
 
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status

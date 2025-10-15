@@ -820,6 +820,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_value_t value,
                                             hsa_amd_signal_handler handler,
                                             void* arg) {
+  PROFILE_START("rocr set handler");
   struct AsyncEventsInfo* asyncInfo = &asyncSignals_;
   int priority = runtime_singleton_->flag().async_events_thread_priority();
 
@@ -859,6 +860,8 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
   hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  
+  PROFILE_END("rocr set handler");
 
   return HSA_STATUS_SUCCESS;
 }
