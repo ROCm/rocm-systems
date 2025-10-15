@@ -9,7 +9,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Added
 
 - ``ROCPROFSYS_ROCM_GROUP_BY_QUEUE`` configuration setting to allow grouping of events by hardware queue, instead of the default grouping.
-- Support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
+- Support for `rocpd` database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
 - Support for profiling Pytorch workloads using the rocPD output database.
 - Support for tracing OpenMP API in Fortran applications.
 - An error warning that is triggered if the profiler application fails due to SELinux enforcement being enabled. The warning includes steps to disable SELinux enforcement.
