@@ -111,7 +111,7 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
 };
 
-double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
+rdc_status_t RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field, double* value) {
   thread_local std::vector<rocprofiler_record_counter_t> records;
 
   auto counter_sampler = CounterSampler::get_samplers()[agent_index];
@@ -135,12 +135,13 @@ double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
   }
 
   // Aggregate counter values. Rocprof v1/v2 summed values across dimensions.
-  double value = 0.0;
+  double temp_value = 0.0;
   for (auto& record : records) {
-    value += record.counter_value;  // Summing up values from all dimensions.
+    temp_value += record.counter_value;  // Summing up values from all dimensions.
   }
+  *value = temp_value;
 
-  return value;
+  return RDC_ST_OK;
 }
 
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
@@ -344,7 +345,14 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
-  const double read_dbl = run_profiler(agent_index, field);
+  double read_dbl = 0.0;
+  auto status = run_profiler(agent_index, field, &read_dbl);
+
+  if (status != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "Profiler failed!");
+    return status;
+  }
+
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
   // divide by elapsed time if needed
@@ -372,7 +380,12 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
       const double active_cycles_val = read_dbl;
       if (active_cycles_val != 0.0) {
         // read second value from profiler
-        const double occupancy_val = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+        double occupancy_val = 0.0;
+        auto status = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU, &occupancy_val);
+        if (status != RDC_ST_OK) {
+          RDC_LOG(RDC_ERROR, "Occupancy read failed!");
+          return status;
+        }
         data->dbl = occupancy_val / active_cycles_val;
       } else {
         return RDC_ST_BAD_PARAMETER;
