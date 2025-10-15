@@ -154,8 +154,26 @@ if(BUILD_SHARED_LIBS)
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
           COMPONENT CORE_RUNTIME
           FILES_MATCHING
-          PATTERN "*"
+          PATTERN "*.txt"
+          PATTERN "*.md"
           PATTERN "__pycache__" EXCLUDE)
+
+  install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocm-core
+            COMPONENT CORE_RUNTIME )
+
+  # Create symlink for rdhc in bin directory
+  add_custom_target ( rdhc_symlink_lib ALL
+                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                     COMMAND ${CMAKE_COMMAND} -E create_symlink
+                     ../${CMAKE_INSTALL_LIBEXECDIR}/rocm-core/rdhc.py
+                     rdhc-link )
+
+  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+            RENAME rdhc
+            COMPONENT CORE_RUNTIME )
 
 else()
   install ( FILES ${BUILD_DIR}/version
@@ -178,12 +196,30 @@ else()
             COMPONENT ${STATIC_COMP_TYPE} )
 
   # Install rdhc folder
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
           COMPONENT ${STATIC_COMP_TYPE}
           FILES_MATCHING
-          PATTERN "*"
+          PATTERN "*.txt"
+          PATTERN "*.md"
           PATTERN "__pycache__" EXCLUDE)
+
+          install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocm-core
+            COMPONENT ${STATIC_COMP_TYPE} )
+
+  # Create symlink for rdhc in bin directory
+  add_custom_target ( rdhc_symlink_static ALL
+                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                     COMMAND ${CMAKE_COMMAND} -E create_symlink
+                     ../${CMAKE_INSTALL_LIBEXECDIR}/rocm-core/rdhc.py
+                     rdhc-link-static )
+
+  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link-static
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+            RENAME rdhc
+            COMPONENT ${STATIC_COMP_TYPE} )
 
 endif()
 

@@ -57,41 +57,11 @@ do_update_alternatives(){
     true
 }
 
-create_rdhc_symlink(){
-    if [[ ${ID_LIKE:-$ID} == "debian" ]] ; then
-        ROCM_INSTALL_PATH="@CPACK_PACKAGING_INSTALL_PREFIX@"
-    else
-        ROCM_INSTALL_PATH="${RPM_INSTALL_PREFIX0:-@CPACK_PACKAGING_INSTALL_PREFIX@}"
-    fi
-
-    ROCM_BIN_PATH="$ROCM_INSTALL_PATH/@CMAKE_INSTALL_BINDIR@"
-    RDHC_SCRIPT_PATH="$ROCM_INSTALL_PATH/share/rdhc/rdhc.py"
-    RDHC_SYMLINK_PATH="$ROCM_BIN_PATH/rdhc"
-
-    # Create bin directory if it doesn't exist
-    if [ ! -d "$ROCM_BIN_PATH" ]; then
-        mkdir -p "$ROCM_BIN_PATH"
-    fi
-
-    # Create symlink if rdhc.py exists and symlink doesn't already exist
-    if [ -f "$RDHC_SCRIPT_PATH" ] && [ ! -L "$RDHC_SYMLINK_PATH" ]; then
-        ln -sf "$RDHC_SCRIPT_PATH" "$RDHC_SYMLINK_PATH"
-        chmod +x "$RDHC_SCRIPT_PATH"
-    fi
-
-    # Verify the symlink works
-    if [ -L "$RDHC_SYMLINK_PATH" ] && [ -x "$RDHC_SCRIPT_PATH" ]; then
-        echo "Created rdhc symlink: $RDHC_SYMLINK_PATH -> $RDHC_SCRIPT_PATH"
-    fi
-    true
-}
-
 if [ -e /etc/os-release ] && source /etc/os-release && [[ ${ID_LIKE:-$ID} == "debian" ]]
 then
     case "$1" in
        (configure)
        do_update_alternatives
-       create_rdhc_symlink
        ;;
        (abort-upgrade|abort-remove|abort-deconfigure)
            echo "$1"
@@ -102,6 +72,5 @@ then
     esac
 else
     do_update_alternatives
-    create_rdhc_symlink
 fi
 
