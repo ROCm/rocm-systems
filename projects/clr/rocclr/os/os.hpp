@@ -453,6 +453,71 @@ inline uint Os::ThreadAffinityMask::getNextSet(uint cpu) const {
   return (uint)-1;
 }
 
+/* Mini numa interface instead of numa lib apis */
+namespace numa {
+
+static constexpr unsigned long bitsPerULong = 8 * sizeof(unsigned long);
+
+class NumaPolicy {
+public:
+  /* Policies extracted from numaif.h*/
+#ifndef MPOL_DEFAULT
+  #define MPOL_DEFAULT     0
+  #define MPOL_PREFERRED   1
+  #define MPOL_BIND        2
+  #define MPOL_INTERLEAVE  3
+  #define MPOL_LOCAL       4
+  #define MPOL_PREFERRED_MANY   5
+  #define MPOL_WEIGHTED_INTERLEAVE   6
+  #define MPOL_MAX         7
+#endif // MPOL_DEFAULT
+  enum class Policy {
+    Default = MPOL_DEFAULT,
+    Prefered = MPOL_PREFERRED,
+    Bind = MPOL_BIND,
+    Interleave = MPOL_INTERLEAVE,
+    Local = MPOL_LOCAL,
+    PreferedMany = MPOL_PREFERRED_MANY,
+    WeightedInterleave = MPOL_WEIGHTED_INTERLEAVE,
+    Max = MPOL_MAX
+  };
+
+  NumaPolicy(const unsigned int n) :
+    nodeMap_((n + bitsPerULong - 1) / bitsPerULong, 0),
+    policy_(Policy::Default) { }
+
+  ~NumaPolicy() { }
+
+  bool getMemPolicy();
+
+  bool isPolicySetAt(const unsigned int nodeIndex) {
+    const unsigned int i = nodeIndex / bitsPerULong;
+    if (i < nodeMap_.size())
+      return ((nodeMap_[i] >> (nodeIndex % bitsPerULong)) & 1) ?
+          true: false;
+    else
+      return false;
+  }
+
+  Policy policy() { return policy_; }
+private:
+  std::vector<unsigned long> nodeMap_; /* Bit mask content will be returned from system call */
+  Policy policy_;
+};
+
+class NumaNode {
+public:
+  NumaNode (unsigned int nodeIndex): nodeIndex_(nodeIndex), cpuMap_(), size_(0) {}
+  ~NumaNode() {}
+  bool schedSetAffinity();
+private:
+  unsigned int nodeIndex_;
+  std::vector<unsigned long> cpuMap_; /* Bit mask of logical CPUs on this node */
+  unsigned int size_; /* Nnumber of valid bits*/
+  bool getAffinity(); /* Get bit mask of logical CPUs on this node */
+};
+} // namespace numa
+
 #else
 
 inline void Os::ThreadAffinityMask::init() {

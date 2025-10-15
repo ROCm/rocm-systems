@@ -19,7 +19,8 @@
  THE SOFTWARE. */
 
 #if !defined(_WIN32) && !defined(__CYGWIN__)
-
+#include <unistd.h>
+#include <sys/syscall.h>
 #include "os/os.hpp"
 #include "thread/thread.hpp"
 #include "utils/util.hpp"
@@ -49,11 +50,6 @@
 #ifndef DT_GNU_HASH
 #define DT_GNU_HASH 0x6ffffef5
 #endif  // DT_GNU_HASH
-
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
-#include <numa.h>
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
-
 #include <atomic>
 #include <vector>
 #include <string>
@@ -66,6 +62,7 @@
 #include <algorithm>
 #include <mutex>
 #include <fstream>
+//#define PRINT_LOG
 
 namespace amd {
 
@@ -329,20 +326,15 @@ void Os::setCurrentThreadName(const char* name) { ::prctl(PR_SET_NAME, name); }
 
 void Os::setPreferredNumaNode(uint32_t node) {
 #ifdef ROCCLR_SUPPORT_NUMA_POLICY
-  if (AMD_CPU_AFFINITY && (numa_available() >= 0)) {
-    if (node > numa_max_node()) {
-      assert(0 && "too big numa node Id");
-      return;
+  if (AMD_CPU_AFFINITY) {
+    numa::NumaNode numaNode(node);
+    if (!numaNode.schedSetAffinity()) {
+      ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+              "numaNode(%u).schedSetAffinity() failed! Ignored!",
+              node);
     }
-    bitmask* bm = numa_allocate_cpumask();
-    numa_node_to_cpus(node, bm);
-    if (numa_sched_setaffinity(0, bm) < 0) {
-      assert(0 && "failed to set affinity");
-    }
-
-    numa_free_cpumask(bm);
   }
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
+#endif // ROCCLR_SUPPORT_NUMA_POLICY
 }
 
 void* Thread::entry(Thread* thread) {
@@ -983,6 +975,94 @@ void Os::CxaDemangle(const std::string& name, std::string* result) {
   free(demangled);
 }
 
+namespace numa {
+bool NumaPolicy::getMemPolicy() {
+  int policy = 0;
+  if (syscall(__NR_get_mempolicy, &policy, nodeMap_.data(),
+      nodeMap_.size() * bitsPerULong, nullptr, 0) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_get_mempolicy, size=%zu) failed to query policy",
+        nodeMap_.size() * bitsPerULong);
+    return false;
+  }
+#ifdef PRINT_LOG
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_get_mempolicy, size=%zu) succeeded to query policy %d, mask[0]=0x%016llx",
+      nodeMap_.size() * bitsPerULong, policy, nodeMap_[0]);
+#endif // PRINT_LOG
+  if (policy < static_cast<int>(Policy::Default) || policy > static_cast<int>(Policy::Max)) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_get_mempolicy) returned wrong policy %d",
+        policy);
+    return false;
+  }
+  policy_ = static_cast<Policy>(policy);
+  return true;
+}
+
+bool NumaNode::getAffinity() {
+  // To-Do: + Cache and lock for better performance
+  const std::string path = "/sys/devices/system/node/node" + std::to_string(nodeIndex_) +
+      "/cpumap";
+
+  std::ifstream file(path);
+  if (!file) {
+    std::cerr << "Failed to open " << path << "\n";
+    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "%s cannot be opened", path);
+    return false;
+  }
+
+  std::string line;
+  std::getline(file, line);
+  file.close();
+
+  // To remove commas and whitespace
+  std::string cleaned;
+  cleaned.reserve(line.size() + 1);
+  for (char c : line) {
+    if (c != ',' && !isspace(c)) {
+      cleaned += c;
+    }
+  }
+
+  constexpr size_t hexsPerULong = 2 * sizeof(unsigned long);
+  cpuMap_.reserve((cleaned.size() + hexsPerULong - 1) / hexsPerULong);
+  // To parse from the end (little-endian layout)
+  for (int i = cleaned.size(); i > 0; i -= hexsPerULong) {
+    size_t start = (i >= hexsPerULong) ? i - hexsPerULong : 0;
+    size_t len = (i >= hexsPerULong) ? hexsPerULong : i;
+
+    std::string chunk = cleaned.substr(start, len);
+    unsigned long value = std::stoul(chunk, nullptr, 16);
+    cpuMap_.push_back(value);
+    if (len == hexsPerULong) {
+      size_ += bitsPerULong;
+    } else {
+      // Last one
+      size_ = bitsPerULong - __builtin_clzl(value);
+    }
+  }
+#ifdef PRINT_LOG
+  fprintf(stderr, "%s has been opened as follows,\n", path.c_str());
+  for (int i = 0; i < cpuMap_.size(); i++) {
+    fprintf(stderr, "0x%016lx, ", cpuMap_[i]);
+  }
+  fprintf(stderr, "\nsize = %u \n", size_);
+#endif
+  return true;
+}
+
+bool NumaNode::schedSetAffinity() {
+  if (!getAffinity() || cpuMap_.size() == 0 || size_ == 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "getCpuMap() failed with nodeIndex= %u, cpuMap_.size()=%zu, size=%u",
+        nodeIndex_, cpuMap_.size(), size_);
+    return false;
+  }
+  if (syscall(__NR_sched_setaffinity, 0, size_, cpuMap_.data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_sched_setaffinity, size=%u) failed",
+           size_);
+    return false;
+  }
+  return true;
+}
+}  // namespace numa
 }  // namespace amd
 
 #endif  // !defined(_WIN32) && !defined(__CYGWIN__)

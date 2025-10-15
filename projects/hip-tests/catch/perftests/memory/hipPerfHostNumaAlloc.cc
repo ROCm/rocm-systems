@@ -48,19 +48,19 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
 
   CONSOLE_PRINT("set cpu %d, gpu %d, numaMode %d, hostMallocflags %u\n", cpuId, gpuId, numaMode,
                 hostMallocflags);
+  if (gpuId >= 0) {
+    HIP_CHECK(hipSetDevice(gpuId));
+  }
 
   if (cpuId >= 0) {
     unsigned long nodeMask = 1 << cpuId;           // NOLINT
     unsigned long maxNode = sizeof(nodeMask) * 8;  // NOLINT
+    // Will override existing numa policy in memory
     if (set_mempolicy(numaMode, numaMode == MPOL_DEFAULT ? NULL : &nodeMask,
                       numaMode == MPOL_DEFAULT ? 0 : maxNode) == -1) {
       WARN("set_mempolicy() failed with err " << errno << "\n");
       return false;
     }
-  }
-
-  if (gpuId >= 0) {
-    HIP_CHECK(hipSetDevice(gpuId));
   }
 
   posix_memalign(reinterpret_cast<void**>(&m), page_size, page_size * NUM_PAGES);
