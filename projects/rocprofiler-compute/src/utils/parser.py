@@ -1517,6 +1517,10 @@ def load_pc_sampling_data(
     json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
     csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
 
+    if not csv_kernel_trace_file_path.exists():
+        console_error(f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False)
+        return pd.DataFrame()
+
     if stochastic_path.exists():
         pc_sampling_method = "stochastic"
         csv_file_path = stochastic_path
@@ -1531,25 +1535,37 @@ def load_pc_sampling_data(
 
     # No kernel filter, return grouped and sorted csv dir_pathectly
     if not workload.filter_kernel_ids:
+        # Load instruction CSV
         df = pd.read_csv(csv_file_path)
-        # Group by 'Instruction_Comment' and count occurrences
+
+        # Load kernel trace CSV
+        kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
+
+        # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
+        merged_df = df.merge(
+            kernel_trace_df,
+            how="left",
+            left_on="Correlation_Id",
+            right_on="Dispatch_Id"
+        )
+
+        # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            df.groupby("Instruction_Comment")
+            merged_df.groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
+                Kernel_Id=("Kernel_Id", "first"),
+                Kernel_Name=("Kernel_Name", "first"),
             )
             .reset_index()
             .rename(columns={"Instruction_Comment": "source_line"})
         )
 
-        grouped_counts = grouped_counts[["source_line", "instruction", "count"]]
+        grouped_counts = grouped_counts[["source_line", "instruction", "count", "Kernel_Id", "Kernel_Name"]]
         grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-            lambda x: f".../{Path(x).name}"
+            lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
         )
-
-        # Sort by the count of occurrences
-        return grouped_counts.sort_values(by="count", ascending=False)
 
     elif len(workload.filter_kernel_ids) > 1:
         console_error(
@@ -1562,9 +1578,6 @@ def load_pc_sampling_data(
     elif len(workload.filter_kernel_ids) == 1:
         if not json_file_path.exists():
             console_error(f"PC sampling: can not read {json_file_path}", exit=False)
-            return pd.DataFrame()
-        elif not csv_kernel_trace_file_path.exists():
-            console_error(f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False)
             return pd.DataFrame()
         else:
             # NB:
