@@ -37,7 +37,7 @@ class validation_rule:
             return result < self.expected_result
         elif self.comparison == "greater_than_or_equal":
             return result >= self.expected_result
-        elif self.comparison == "less_then_or_equal":
+        elif self.comparison == "less_than_or_equal":
             return result <= self.expected_result
         elif self.comparison == "not_equals":
             return result != self.expected_result
