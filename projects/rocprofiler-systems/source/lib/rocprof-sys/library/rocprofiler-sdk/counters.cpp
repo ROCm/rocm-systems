@@ -51,8 +51,8 @@ void
 metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
                                  const std::string& metric_description)
 {
-    size_t      EVENT_CODE       = 0;
-    size_t      INSTANCE_ID      = 0;
+    const size_t EVENT_CODE       = 0;
+    const size_t INSTANCE_ID      = 0;
     const char* LONG_DESCRIPTION = "";
     const char* COMPONENT        = "";
     const char* BLOCK            = "";
