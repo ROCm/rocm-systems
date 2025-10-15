@@ -56,8 +56,8 @@ To enable capturing of OMPT callbacks, the following settings are required:
 
 .. code-block:: shell
 
-  ROCPROFSYS_USE_ROCM=ON
-  ROCPROFSYS_USE_OMPT=ON
+  export ROCPROFSYS_USE_ROCM=ON
+  export ROCPROFSYS_USE_OMPT=ON
 
 .. note::
    OMPT callbacks will not be traced if the system does not have a GPU.
