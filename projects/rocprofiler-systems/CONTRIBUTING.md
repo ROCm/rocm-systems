@@ -22,7 +22,7 @@ Please use the GitHub Issues tab to notify us of issues.
 
 ## Acceptance Criteria ##
 
-Github issues are recommended for any significant change to the code base that adds a feature or fixes a non-trivial issue. If the code change is large without the presence of an issue (or prior discussion with AMD), the change may not be reviewed. Small fixes that fix broken behavior or other bugs are always welcome with or without an associated issue.
+GitHub Issues are recommended for any significant change to the code base that adds a feature or fixes a non-trivial issue. If the code change is large without the presence of an issue (or prior discussion with AMD), the change may not be reviewed. Small fixes that fix broken behavior or other bugs are always welcome, with or without an associated issue.
 
 ## Pull Request Guidelines ##
 
