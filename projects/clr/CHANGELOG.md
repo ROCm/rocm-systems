@@ -7,11 +7,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `hipLibraryLoadData`      Create library object from code
-    - `hipLibraryLoadFromFile`  Create library object from file
-    - `hipLibraryUnload`        Unload library
-    - `hipLibraryGetKernel`     Get a kernel from library
-    - `hipLibraryGetKernelCount` Get kernel count in library
+    - `hipLibraryLoadData`      creates library object from code
+    - `hipLibraryLoadFromFile`  creates library object from file
+    - `hipLibraryUnload`        unloads library
+    - `hipLibraryGetKernel`     gets a kernel from library
+    - `hipLibraryGetKernelCount` gets kernel count in library
+    - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
 
 ## HIP 7.1 for ROCm 7.1
 
@@ -19,23 +20,22 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `hipModuleGetFunctionCount` returns the number of functions within a module
-    - `hipMemsetD2D8` used for setting 2D memory range with specified 8-bit values
-    - `hipMemsetD2D8Async` used for setting 2D memory range with specified 8-bit values asynchronously
-    - `hipMemsetD2D16` used for setting 2D memory range with specified 16-bit values
-    - `hipMemsetD2D16Async` used for setting 2D memory range with specified 16-bit values asynchronously
-    - `hipMemsetD2D32` used for setting 2D memory range with specified 32-bit values
-    - `hipMemsetD2D32Async` used for setting 2D memory range with specified 32-bit values asynchronously
+    - `hipMemsetD2D8` sets 2D memory range with specified 8-bit values
+    - `hipMemsetD2D8Async` asynchronously sets 2D memory range with specified 8-bit values
+    - `hipMemsetD2D16` sets 2D memory range with specified 16-bit values
+    - `hipMemsetD2D16Async` asynchronously sets 2D memory range with specified 16-bit values
+    - `hipMemsetD2D32` sets 2D memory range with specified 32-bit values
+    - `hipMemsetD2D32Async` asynchronously sets 2D memory range with specified 32-bit values
     - `hipStreamSetAttribute` sets attributes such as synchronization policy for a given stream
     - `hipStreamGetAttribute` returns attributes such as priority for a given stream
     - `hipModuleLoadFatBinary`  loads fatbin binary to a module
-    - `hipMemcpyBatchAsync` performs a batch of 1D or 2D memory copied asynchronously
-    - `hipMemcpy3DBatchAsync` performs a batch of 3D memory copied asynchronously
+    - `hipMemcpyBatchAsync` asynchronously performs a batch copy of 1D or 2D memory
+    - `hipMemcpy3DBatchAsync` asynchronously performs a batch copy of 3D memory
     - `hipMemcpy3DPeer` copies memory between devices
-    - `hipMemcpy3DPeerAsync`copied memory between devices asynchronously
-    - `hipMemsetD2D32Async` used for setting 2D memory range with specified 32-bit values
-      asynchronously
+    - `hipMemcpy3DPeerAsync` asynchronously copies memory between devices
+    - `hipMemsetD2D32Async` asynchronously sets 2D memory range with specified 32-bit values
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
-    - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipMemAdvise_v2`         advises about the usage of a given memory range
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
