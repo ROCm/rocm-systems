@@ -28,7 +28,7 @@
 #include "trace_callbacks.hpp"
 
 [[maybe_unused]] constexpr double WAVE_RATIO_TOLERANCE = 0.05;
-constexpr size_t NUM_KERNELS          = 5;
+constexpr size_t                  NUM_KERNELS          = 5;
 
 namespace ATTTest
 {
