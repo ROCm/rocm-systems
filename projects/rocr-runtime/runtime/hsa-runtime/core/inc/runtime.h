@@ -75,6 +75,7 @@
 #include "core/util/locks.h"
 #include "core/util/os.h"
 #include "core/util/utils.h"
+#include "core/util/profiler.hpp"
 
 #include "core/inc/amd_loader_context.hpp"
 #include "core/inc/amd_hsa_code.hpp"
