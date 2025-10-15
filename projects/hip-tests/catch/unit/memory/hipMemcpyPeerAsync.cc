@@ -202,11 +202,9 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_ZeroSize") {
     HIP_CHECK(hipGetLastError());
 
     constexpr int expected_value = 20;
-    HIP_CHECK(hipSetDevice(dst_device));
     VectorSet<<<block_count, thread_count, 0, stream>>>(dst_alloc.ptr(), expected_value,
                                                         element_count);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipSetDevice(src_device));
 
     constexpr int set_value_h = 21;
     std::fill_n(result.host_ptr(), element_count, set_value_h);
