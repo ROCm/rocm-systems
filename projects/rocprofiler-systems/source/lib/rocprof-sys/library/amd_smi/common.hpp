@@ -54,7 +54,7 @@ union smi_metric_options
         uint32_t vcn_activity         : 1;
         uint32_t jpeg_activity        : 1;
     } bits;
-    uint32_t value = 0;
+    uint32_t value;
 };
 
 struct version
