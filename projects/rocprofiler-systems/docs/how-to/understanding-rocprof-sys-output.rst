@@ -329,7 +329,7 @@ SQLite3 database. The ROCm Profiling Data (or ``rocpd``) database will soon be t
 format. This output format requires ROCprofiler-SDK v1.0 or higher, which is included in ROCm v7.0.
 
 Features of rocpd format
-++++++++
+-----------------------------------------------
 
 - **Comprehensive Data Model**: Consolidates all profiling artifacts including
 execution traces, performance counters, hardware metrics, and contextual metadata
