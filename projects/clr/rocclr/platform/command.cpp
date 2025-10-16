@@ -376,27 +376,34 @@ void Command::enqueue() {
       }
     }
 
+    bool isMarker  = (type() == CL_COMMAND_MARKER) || (type() == CL_COMMAND_TASK) ||
+                    ((type() == 0) && profilingInfo().batch_flush_);
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(queue_->vdev()->execution());
-    queue_->FormSubmissionBatch(this);
+    // Lock for only mutable batch metadata(head_/tail_/batch_head_)
+    {
+      ScopedLock sl(queue_->vdev()->execution());
+      queue_->FormSubmissionBatch(this);
+      if (isMarker) {
+        // The current HSA signal tracking logic requires profiling enabled for the markers
+        EnableProfiling();
+        // Update batch head for the current marker. Hence the status of all commands can be
+        // updated upon the marker completion
+        SetBatchHead(queue_->GetSubmissionBatch());
+      }
+    }
+    // Lock not required for submit
+    submit(*queue_->vdev());
 
     // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
-    if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK)) {
-      // The current HSA signal tracking logic requires profiling enabled for the markers
-      EnableProfiling();
-      // Update batch head for the current marker. Hence the status of all commands can be
-      // updated upon the marker completion
-      SetBatchHead(queue_->GetSubmissionBatch());
-
-      submit(*queue_->vdev());
-
-      // The batch will be tracked with the marker now
-      queue_->ResetSubmissionBatch();
-    } else {
-      submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch(this);
+    {
+      ScopedLock sl(queue_->vdev()->execution());
+      if (isMarker) {
+        // The batch will be tracked with the marker now
+        queue_->ResetSubmissionBatch();
+      } else {
+        queue_->FlushSubmissionBatch(this);
+      }
     }
   } else {
     queue_->append(*this);
