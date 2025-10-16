@@ -1023,6 +1023,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       block: GL2C
       event: 96
   - name: GL2C_MC_RDREQ_sum
@@ -1039,6 +1041,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       expression: reduce(GL2C_MC_RDREQ,sum)
   - name: GL2C_MC_WRREQ
     description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_wrreq interface. Atomics may travel
@@ -1071,6 +1075,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       block: GL2C
       event: 88
     - architectures:
@@ -1094,6 +1100,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       expression: reduce(GL2C_MC_WRREQ,sum)
   - name: GL2C_MISS
     description: Number of cache misses.  UC reads count as misses.
@@ -1153,6 +1161,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       - gfx12
       - gfx1200
       - gfx1201
@@ -1493,6 +1503,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       - gfx12
       - gfx1200
       - gfx1201
@@ -2922,6 +2934,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       block: SQ
       event: 256
     - architectures:
@@ -2948,6 +2962,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       block: SQ
       event: 261
     - architectures:
@@ -10587,6 +10603,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       expression: ((GL2C_MC_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32+GL2C_EA_WRREQ_64B_sum*64)/1024
     - architectures:
       - gfx940
@@ -10683,6 +10701,8 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx1150
+      - gfx1151
       - gfx12
       - gfx1200
       - gfx1201
