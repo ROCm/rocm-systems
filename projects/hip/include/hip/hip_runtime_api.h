@@ -4441,6 +4441,19 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* d
  */
 hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data);
+/**
+ * @brief Sets memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+/**
+ * @brief Retrieves memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type);
 // Doxygen end of ordered memory allocator
 /**
  * @}

@@ -488,4 +488,65 @@ hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
   mpool->retain();
   HIP_RETURN(hipSuccess);
 }
+
+// ================================================================================================
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  HIP_INIT_API(hipMemSetMemPool, location, type, pool);
+
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (location == nullptr || pool == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type != hipMemAllocationTypePinned) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto mem_pool = reinterpret_cast<hip::MemoryPool*>(pool);
+
+  if (location->id >= g_devices.size() || mem_pool->Device()->deviceId() != location->id) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // provera po vrednostima? moze samo device?
+  if (location->type != mem_pool->Properties().location.type) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->type == hipMemLocationTypeDevice && type == hipMemAllocationTypePinned) {
+    g_devices[location->id]->SetCurrentMemoryPool(mem_pool);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  HIP_INIT_API(hipMemGetMemPool, pool, location, type);
+  if ((pool == nullptr) || (location == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  //  ostali tipovi?
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type != hipMemAllocationTypePinned) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->type == hipMemLocationTypeDevice && type == hipMemAllocationTypePinned) {
+    *pool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetCurrentMemoryPool());
+  }
+
+  HIP_RETURN(hipSuccess);
+}
 }  // namespace hip
