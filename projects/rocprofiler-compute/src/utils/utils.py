@@ -1210,6 +1210,53 @@ def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
     target_binary["distro"] = distro
     return target_binary
 
+def select_gpu(NoOfGpus) -> list[dict[str, Any]]:
+    result = subprocess.run(['amd-smi'], stdout=subprocess.PIPE, text=True)
+    output = result.stdout
+
+    gpus = [{}]*NoOfGpus
+    lines = output.splitlines()
+    i = 0
+    process_list = False
+
+    while i<len(lines):
+        if "---" in lines[i] or "===" in lines[i]:
+            i += 1
+            continue
+
+        if not process_list:
+            if "AMD Instinct" in lines[i]:
+                
+                # part1 = lines[i][1:].split("%")[1].strip()
+                line = lines[i][1:]
+                temp = re.search(r"(\d+)\s*°C", line)
+                power = re.search(r"(\d+)\s*/\s*(\d+)\s*W", line)
+
+                line = lines[i+1][1:]
+                memory_usage = re.search(r"(\d+)\s*/\s*(\d+)\s*MB", line)
+                mem_used, mem_total = memory_usage.groups() 
+                temperature = temp.group(1)                 
+                power_used, power_max = power.groups()
+
+                gpu_id = int(line.strip().split(' ')[0])
+                gpus[gpu_id] = {'gpu_id': gpu_id ,'memory_used': int(mem_used), 'temperature': int(temperature), 'power_used': int(power_used), 'occupied': 0}
+                i += 2
+            elif "Processes" in lines[i]:
+                process_list = True
+                i += 3
+            else:
+                i += 1
+                
+        else:
+            
+            if "No running processes found" in lines[i]:
+                break
+            gpu_id = lines[i][1:].strip().split(' ')[0]
+            gpus[int(gpu_id)]['occupied'] = 1
+
+    gpus.sort(key=lambda x: (x['occupied'], x['temperature'], x['memory_used'], x['power_used']))
+    return gpus[0]['gpu_id']
+
 
 def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
@@ -1252,6 +1299,16 @@ def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
 
     if not found:
         console_error("roofline", f"Unable to locate expected binary ({binary_paths}).")
+
+    if args.device is None:
+        console_log("roofline", "No device specified for roofline.")
+        num_gpus = len([l for l in mspec.rocminfo_lines if "Device" in l and "GPU" in l])
+        device = select_gpu(num_gpus)
+        args.device = device
+        console_log(
+            "roofline",
+            f"Defaulting to device {args.device}.",
+        )
 
     my_args = [
         path_to_binary,
