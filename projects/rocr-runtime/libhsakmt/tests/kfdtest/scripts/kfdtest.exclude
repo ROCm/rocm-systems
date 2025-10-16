@@ -360,4 +360,5 @@ FILTER[RHEL9]=\
 "KFDPCSamplingTest.*"
 
 FILTER[upstream]=\
-"KFDIPCTest.*"
+"KFDIPCTest.*:"\
+"KFDPCSamplingTest.*"
