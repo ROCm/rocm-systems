@@ -19,6 +19,7 @@ on:
     branches:
       - 'develop'
       - 'docs/**'
+      - 'users/alexxu12/docs-update-workflow' # for testing purpose, remove for deployment
     paths:
      - 'projects/**'
      - 'shared/**'
