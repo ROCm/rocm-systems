@@ -1,47 +1,28 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
-
 """
 Apply delta YAML to base architecture to produce target architecture.
 Usage: python apply_config_deltas.py <base_arch_dir> <delta_yaml> <output_dir>
 """
 
+from __future__ import annotations
+
 import shutil
 import sys
 from pathlib import Path
+from typing import Any, Optional, Union
 
 import yaml
 
 
-def load_yaml(filepath):
+PathLike = Union[str, Path]
+
+
+def load_yaml(filepath: PathLike) -> dict:
     with open(filepath) as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
-def save_yaml(data, filepath):
+def save_yaml(data: dict, filepath: PathLike) -> None:
     with open(filepath, "w") as f:
         yaml.dump(
             data,
@@ -53,50 +34,50 @@ def save_yaml(data, filepath):
         )
 
 
-def find_table_in_config(config, table_id):
+def find_table_in_config(config: dict, table_id: Any) -> Optional[dict]:
     """Find and return the table with given id, or None."""
-    for item in config["Panel Config"]["data source"]:
-        if "metric_table" in item:
-            table = item["metric_table"]
-            if table.get("id") == table_id:
-                return table
+    for item in config.get("Panel Config", {}).get("data source", []):
+        table = item.get("metric_table")
+        if isinstance(table, dict) and table.get("id") == table_id:
+            return table
     return None
 
 
-def add_table(config, metric_table):
+def add_table(config: dict, metric_table: dict) -> None:
     """Add entire new table to config."""
-    config["Panel Config"]["data source"].append({"metric_table": metric_table})
+    config.setdefault("Panel Config", {}).setdefault("data source", []).append({
+        "metric_table": metric_table
+    })
     print(f"Added table: {metric_table.get('id')} - {metric_table.get('title')}")
 
 
-def add_metrics(config, table_id, metrics):
+def add_metrics(config: dict, table_id: Any, metrics: list[dict]) -> None:
     """Add metrics to existing table."""
     table = find_table_in_config(config, table_id)
     if not table:
         print(f"WARNING: Table {table_id} not found for metric addition")
         return
 
-    if "metric" not in table:
-        table["metric"] = {}
-
+    table.setdefault("metric", {})
     for metric_dict in metrics:
         for metric_name, metric_data in metric_dict.items():
             table["metric"][metric_name] = metric_data
             print(f"Added metric: {metric_name} to table {table_id}")
 
 
-def delete_table(config, table_id):
+def delete_table(config: dict, table_id: Any) -> None:
     """Remove entire table from config."""
-    data_source = config["Panel Config"]["data source"]
-    for idx, item in enumerate(data_source):
-        if "metric_table" in item and item["metric_table"].get("id") == table_id:
+    data_source = config.get("Panel Config", {}).get("data source", [])
+    for idx, item in enumerate(list(data_source)):
+        table = item.get("metric_table")
+        if isinstance(table, dict) and table.get("id") == table_id:
             data_source.pop(idx)
             print(f"Deleted table: {table_id}")
             return
     print(f"WARNING: Table {table_id} not found for deletion")
 
 
-def delete_metrics(config, table_id, metrics):
+def delete_metrics(config: dict, table_id: Any, metrics: list[dict]) -> None:
     """Remove specific metrics from table."""
     table = find_table_in_config(config, table_id)
     if not table or "metric" not in table:
@@ -110,7 +91,7 @@ def delete_metrics(config, table_id, metrics):
                 print(f"Deleted metric: {metric_name} from table {table_id}")
 
 
-def modify_metrics(config, table_id, metrics):
+def modify_metrics(config: dict, table_id: Any, metrics: list[dict]) -> None:
     """Modify specific fields in existing metrics."""
     table = find_table_in_config(config, table_id)
     if not table or "metric" not in table:
@@ -122,61 +103,49 @@ def modify_metrics(config, table_id, metrics):
             if metric_name not in table["metric"]:
                 print(f"WARNING: Metric '{metric_name}' not found in table {table_id}")
                 continue
-
             for field_name, field_value in new_fields.items():
                 table["metric"][metric_name][field_name] = field_value
                 print(f"Modified {metric_name}.{field_name} in table {table_id}")
 
 
-def add_descriptions(config, descriptions):
+def add_descriptions(config: dict, descriptions: dict) -> None:
     """Add metric descriptions to config."""
-    if "metrics_description" not in config["Panel Config"]:
-        config["Panel Config"]["metrics_description"] = {}
+    pc = config.setdefault("Panel Config", {})
+    pc.setdefault("metrics_description", {})
+    md = pc["metrics_description"]
 
     for metric_name, desc_data in descriptions.items():
-        # Store only plain text in config YAML
-        if isinstance(desc_data, dict):
-            plain_text = desc_data.get("plain", "")
-        else:
-            plain_text = desc_data
-
-        config["Panel Config"]["metrics_description"][metric_name] = plain_text
+        value = desc_data if isinstance(desc_data, dict) else desc_data
+        md[metric_name] = value
         print(f"Added description: {metric_name}")
 
 
-def delete_descriptions(config, descriptions):
+def delete_descriptions(config: dict, descriptions: dict) -> None:
     """Remove metric descriptions from config."""
-    if "metrics_description" not in config["Panel Config"]:
-        return
-
+    md = config.get("Panel Config", {}).get("metrics_description", {})
     for metric_name in descriptions.keys():
-        if metric_name in config["Panel Config"]["metrics_description"]:
-            del config["Panel Config"]["metrics_description"][metric_name]
+        if metric_name in md:
+            del md[metric_name]
             print(f"Deleted description: {metric_name}")
 
 
-def modify_descriptions(config, descriptions):
+def modify_descriptions(config: dict, descriptions: dict) -> None:
     """Modify metric descriptions in config."""
-    if "metrics_description" not in config["Panel Config"]:
-        config["Panel Config"]["metrics_description"] = {}
+    pc = config.setdefault("Panel Config", {})
+    pc.setdefault("metrics_description", {})
+    md = pc["metrics_description"]
 
     for metric_name, desc_data in descriptions.items():
-        # Store only plain text in config YAML
-        if isinstance(desc_data, dict):
-            plain_text = desc_data.get("plain", "")
-        else:
-            plain_text = desc_data
-
-        config["Panel Config"]["metrics_description"][metric_name] = plain_text
-        print(f"Modified description: {metric_name}")
+        value = desc_data if isinstance(desc_data, dict) else desc_data
+        md[metric_name] = value
+        print(f"Added description: {metric_name}")
 
 
-def apply_changes(config, changes, category):
+def apply_changes(config: dict, changes: list[dict], category: str) -> None:
     """Apply delta changes to configuration."""
     for change in changes:
-        # Handle metric tables
         for mt_wrapper in change.get("metric_tables", []):
-            mt = mt_wrapper.get("metric_table", {})
+            mt = mt_wrapper.get("metric_table", mt_wrapper)
             table_id = mt.get("id")
 
             if category == "Addition":
@@ -195,7 +164,6 @@ def apply_changes(config, changes, category):
                 if "metrics" in mt:
                     modify_metrics(config, table_id, mt["metrics"])
 
-        # Handle metric descriptions
         descriptions = change.get("metric_descriptions", {})
         if descriptions:
             if category == "Addition":
@@ -206,26 +174,21 @@ def apply_changes(config, changes, category):
                 modify_descriptions(config, descriptions)
 
 
-def apply_delta(base_dir, delta_file, output_dir):
+def apply_delta(base_dir: PathLike, delta_file: PathLike, output_dir: PathLike) -> None:
     """Apply delta YAML to all files in base directory."""
     delta = load_yaml(delta_file)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Group changes by panel ID
-    changes_by_panel = {}
-    for category in ["Addition", "Deletion", "Modification"]:
+    changes_by_panel: dict[Any, dict[str, list[dict]]] = {}
+    for category in ("Addition", "Deletion", "Modification"):
         for change in delta.get(category, []):
-            panel_id = change.get("panel_config", {}).get("id")
-            if panel_id not in changes_by_panel:
-                changes_by_panel[panel_id] = {
-                    "Addition": [],
-                    "Deletion": [],
-                    "Modification": [],
-                }
-            changes_by_panel[panel_id][category].append(change)
+            panel_id = change.get("Panel Config", {}).get("id")
+            panel_bucket = changes_by_panel.setdefault(
+                panel_id, {"Addition": [], "Deletion": [], "Modification": []}
+            )
+            panel_bucket[category].append(change)
 
-    # Process each YAML file
     base_path = Path(base_dir)
     for yaml_file in base_path.glob("*.yaml"):
         config = load_yaml(yaml_file)
@@ -233,7 +196,8 @@ def apply_delta(base_dir, delta_file, output_dir):
 
         if panel_id in changes_by_panel:
             print(f"\nApplying deltas to {yaml_file.name} (Panel ID: {panel_id})")
-            for category in ["Deletion", "Modification", "Addition"]:
+            # Process in safe order: deletions -> modifications -> additions
+            for category in ("Deletion", "Modification", "Addition"):
                 if changes_by_panel[panel_id][category]:
                     apply_changes(
                         config, changes_by_panel[panel_id][category], category
@@ -245,11 +209,10 @@ def apply_delta(base_dir, delta_file, output_dir):
             shutil.copy(yaml_file, output_path / yaml_file.name)
 
 
-def main():
+def main() -> None:
     if len(sys.argv) != 4:
         print(
-            "Usage: python apply_config_deltas.py "
-            "<base_arch_dir> <delta_yaml> <output_dir>"
+            "Usage: python apply_config_deltas.py <base_arch_dir> <delta_yaml> <output_dir>"
         )
         sys.exit(1)
 

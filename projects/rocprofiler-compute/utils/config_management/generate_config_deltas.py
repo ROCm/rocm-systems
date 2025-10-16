@@ -1,34 +1,11 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
-
 """
 Analysis Config Differentiation Script
 Generates differences from curr arch directory to prev arch directory.
 Output shows what needs to change in prev arch to match curr arch.
 """
+
+from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -36,37 +13,39 @@ from pathlib import Path
 import yaml
 
 
-def load_yaml(filepath):
+def load_yaml(filepath: Path) -> dict:
     with open(filepath) as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
-def get_metric_tables(data):
+def get_metric_tables(data: dict) -> list[dict]:
     """Extract all metric tables from data source."""
-    tables = []
+    tables: list[dict] = []
     for item in data.get("Panel Config", {}).get("data source", []):
-        if "metric_table" in item:
-            tables.append(item["metric_table"])
+        mt = item.get("metric_table")
+        if isinstance(mt, dict):
+            tables.append(mt)
     return tables
 
 
-def get_metric_descriptions(data):
+def get_metric_descriptions(data: dict) -> dict:
     """Extract metric descriptions from panel config."""
-    return data.get("Panel Config", {}).get("metrics_description", {})
+    return data.get("Panel Config", {}).get("metrics_description", {}) or {}
 
 
-def compare_metrics(prev_metrics, curr_metrics):
-    """Compare metrics and return additions, deletions, and modifications."""
+def compare_metrics(
+    prev_metrics: dict, curr_metrics: dict
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Compare metrics and return (additions, deletions, modifications)."""
     prev_keys = set(prev_metrics.keys())
     curr_keys = set(curr_metrics.keys())
 
-    additions = [{name: curr_metrics[name]} for name in curr_keys - prev_keys]
-    deletions = [{name: prev_metrics[name]} for name in prev_keys - curr_keys]
+    additions = [{name: curr_metrics[name]} for name in sorted(curr_keys - prev_keys)]
+    deletions = [{name: prev_metrics[name]} for name in sorted(prev_keys - curr_keys)]
 
-    modifications = []
-    for name in prev_keys & curr_keys:
+    modifications: list[dict] = []
+    for name in sorted(prev_keys & curr_keys):
         if prev_metrics[name] != curr_metrics[name]:
-            # Find modified fields
             all_fields = set(prev_metrics[name].keys()) | set(curr_metrics[name].keys())
             modified_fields = {
                 field: curr_metrics[name].get(field)
@@ -79,40 +58,36 @@ def compare_metrics(prev_metrics, curr_metrics):
     return additions, deletions, modifications
 
 
-def compare_descriptions(prev_descriptions, curr_descriptions):
+def compare_descriptions(
+    prev_descriptions: dict, curr_descriptions: dict
+) -> tuple[dict, dict, dict]:
     """
-    Compare metric descriptions and return additions, deletions, and modifications.
-    Returns dict with 'plain' and 'rst' (if different from plain).
+    Compare metric descriptions and return (additions, deletions, modifications).
+    Values are dicts with 'plain' and 'rst'.
     """
     prev_keys = set(prev_descriptions.keys())
     curr_keys = set(curr_descriptions.keys())
 
-    additions = {}
-    deletions = {}
-    modifications = {}
+    additions: dict = {}
+    deletions: dict = {}
+    modifications: dict = {}
 
-    # Additions
-    for name in curr_keys - prev_keys:
+    for name in sorted(curr_keys - prev_keys):
         desc = curr_descriptions[name]
-        if isinstance(desc, dict):
-            additions[name] = desc
-        else:
-            additions[name] = {"plain": desc, "rst": desc}
+        additions[name] = (
+            desc if isinstance(desc, dict) else {"plain": desc, "rst": desc}
+        )
 
-    # Deletions
-    for name in prev_keys - curr_keys:
+    for name in sorted(prev_keys - curr_keys):
         desc = prev_descriptions[name]
-        if isinstance(desc, dict):
-            deletions[name] = desc
-        else:
-            deletions[name] = {"plain": desc, "rst": desc}
+        deletions[name] = (
+            desc if isinstance(desc, dict) else {"plain": desc, "rst": desc}
+        )
 
-    # Modifications
-    for name in prev_keys & curr_keys:
+    for name in sorted(prev_keys & curr_keys):
         prev_desc = prev_descriptions[name]
         curr_desc = curr_descriptions[name]
 
-        # Normalize to dict format
         prev_plain = (
             prev_desc if isinstance(prev_desc, str) else prev_desc.get("plain", "")
         )
@@ -132,36 +107,31 @@ def compare_descriptions(prev_descriptions, curr_descriptions):
         )
 
         if prev_plain != curr_plain or prev_rst != curr_rst:
-            mod_entry = {"plain": curr_plain}
-            if curr_rst != curr_plain:
-                mod_entry["rst"] = curr_rst
-            else:
-                mod_entry["rst"] = curr_plain
-            modifications[name] = mod_entry
+            modifications[name] = {"plain": curr_plain, "rst": curr_rst}
 
     return additions, deletions, modifications
 
 
-def compare_tables(prev_tables, curr_tables):
-    """Compare tables and return differences."""
+def compare_tables(
+    prev_tables: list[dict], curr_tables: list[dict]
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Compare tables and return (additions, deletions, modifications)."""
     prev_dict = {t["id"]: t for t in prev_tables}
     curr_dict = {t["id"]: t for t in curr_tables}
 
     prev_ids = set(prev_dict.keys())
     curr_ids = set(curr_dict.keys())
 
-    additions = []
-    deletions = []
-    modifications = []
+    additions: list[dict] = []
+    deletions: list[dict] = []
+    modifications: list[dict] = []
 
-    # Table-level additions and deletions
-    additions.extend(curr_dict[tid] for tid in curr_ids - prev_ids)
-    deletions.extend(prev_dict[tid] for tid in prev_ids - curr_ids)
+    additions.extend(curr_dict[tid] for tid in sorted(curr_ids - prev_ids))
+    deletions.extend(prev_dict[tid] for tid in sorted(prev_ids - curr_ids))
 
-    # Compare common tables
-    for tid in prev_ids & curr_ids:
-        prev_metrics = prev_dict[tid].get("metric", {})
-        curr_metrics = curr_dict[tid].get("metric", {})
+    for tid in sorted(prev_ids & curr_ids):
+        prev_metrics = prev_dict[tid].get("metric", {}) or {}
+        curr_metrics = curr_dict[tid].get("metric", {}) or {}
 
         metric_adds, metric_dels, metric_mods = compare_metrics(
             prev_metrics, curr_metrics
@@ -173,14 +143,12 @@ def compare_tables(prev_tables, curr_tables):
                 "title": curr_dict[tid].get("title"),
                 "metrics": metric_adds,
             })
-
         if metric_dels:
             deletions.append({
                 "id": tid,
                 "title": prev_dict[tid].get("title"),
                 "metrics": metric_dels,
             })
-
         if metric_mods:
             modifications.append({
                 "id": tid,
@@ -191,9 +159,9 @@ def compare_tables(prev_tables, curr_tables):
     return additions, deletions, modifications
 
 
-def format_metric_fields(metric_data):
+def format_metric_fields(metric_data: dict) -> list[str]:
     """Format metric fields as YAML lines."""
-    lines = []
+    lines: list[str] = []
     for field_name, field_value in metric_data.items():
         if isinstance(field_value, str) and (
             "\n" in field_value or len(field_value) > 80
@@ -207,9 +175,9 @@ def format_metric_fields(metric_data):
     return lines
 
 
-def format_description_fields(desc_data):
+def format_description_fields(desc_data: dict) -> list[str]:
     """Format description fields as YAML lines."""
-    lines = []
+    lines: list[str] = []
     for field_name, field_value in desc_data.items():
         if isinstance(field_value, str) and (
             "\n" in field_value or len(field_value) > 80
@@ -221,13 +189,11 @@ def format_description_fields(desc_data):
     return lines
 
 
-def format_output(combined_diff):
-    """Format the diff dictionary into YAML string."""
-    lines = []
-
-    for category in ["Addition", "Deletion", "Modification"]:
+def format_output(combined_diff: dict) -> str:
+    """Format the diff dictionary into a YAML string."""
+    lines: list[str] = []
+    for category in ("Addition", "Deletion", "Modification"):
         lines.append(f"{category}:")
-
         if not combined_diff.get(category):
             lines.append("  []")
             lines.append("")
@@ -241,7 +207,6 @@ def format_output(combined_diff):
                 f"      title: {pc['title']}",
             ])
 
-            # Add metric tables if present
             if panel_item.get("metric_tables"):
                 lines.append("    metric_tables:")
                 for mt in panel_item["metric_tables"]:
@@ -251,18 +216,14 @@ def format_output(combined_diff):
                         f"          title: {mt['title']}",
                         "          metrics:",
                     ])
-
-                    # Handle metric-level changes or full table
                     metrics_to_format = mt.get("metrics") or [
-                        {name: data} for name, data in mt.get("metric", {}).items()
+                        {name: data} for name, data in (mt.get("metric") or {}).items()
                     ]
-
                     for metric in metrics_to_format:
                         for metric_name, metric_data in metric.items():
                             lines.append(f"            - {metric_name}:")
                             lines.extend(format_metric_fields(metric_data))
 
-            # Add metric descriptions if present
             if panel_item.get("metric_descriptions"):
                 lines.append("    metric_descriptions:")
                 for metric_name, desc_data in panel_item["metric_descriptions"].items():
@@ -270,11 +231,10 @@ def format_output(combined_diff):
                     lines.extend(format_description_fields(desc_data))
 
         lines.append("")
-
     return "\n".join(lines)
 
 
-def main():
+def main() -> None:
     if len(sys.argv) != 3:
         print("Usage: python generate_config_deltas.py <curr_arch_dir> <prev_arch_dir>")
         sys.exit(1)
@@ -286,7 +246,6 @@ def main():
         print("Error: Both arguments must be directories")
         sys.exit(1)
 
-    # Get common YAML files
     curr_files = {f.name for f in curr_arch_dir.glob("*.yaml")}
     prev_files = {f.name for f in prev_arch_dir.glob("*.yaml")}
     common_files = curr_files & prev_files
@@ -297,16 +256,14 @@ def main():
 
     print(f"Comparing {len(common_files)} files...")
 
-    # Combined diff results
     combined_diff = {"Addition": [], "Deletion": [], "Modification": []}
 
-    # Compare each file
     for filename in sorted(common_files):
         curr_data = load_yaml(curr_arch_dir / filename)
         prev_data = load_yaml(prev_arch_dir / filename)
 
-        curr_pc = curr_data.get("Panel Config", {})
-        prev_pc = prev_data.get("Panel Config", {})
+        curr_pc = curr_data.get("Panel Config", {}) or {}
+        prev_pc = prev_data.get("Panel Config", {}) or {}
 
         curr_tables = get_metric_tables(curr_data)
         prev_tables = get_metric_tables(prev_data)
@@ -314,55 +271,41 @@ def main():
         curr_descriptions = get_metric_descriptions(curr_data)
         prev_descriptions = get_metric_descriptions(prev_data)
 
-        # Compare tables
         table_adds, table_dels, table_mods = compare_tables(prev_tables, curr_tables)
-
-        # Compare descriptions
         desc_adds, desc_dels, desc_mods = compare_descriptions(
             prev_descriptions, curr_descriptions
         )
 
-        # Add to combined diff
         if table_adds or desc_adds:
-            addition_entry = {
-                "panel_config": {
-                    "id": curr_pc.get("id"),
-                    "title": curr_pc.get("title"),
-                }
+            entry = {
+                "panel_config": {"id": curr_pc.get("id"), "title": curr_pc.get("title")}
             }
             if table_adds:
-                addition_entry["metric_tables"] = table_adds
+                entry["metric_tables"] = table_adds
             if desc_adds:
-                addition_entry["metric_descriptions"] = desc_adds
-            combined_diff["Addition"].append(addition_entry)
+                entry["metric_descriptions"] = desc_adds
+            combined_diff["Addition"].append(entry)
 
         if table_dels or desc_dels:
-            deletion_entry = {
-                "panel_config": {
-                    "id": prev_pc.get("id"),
-                    "title": prev_pc.get("title"),
-                }
+            entry = {
+                "panel_config": {"id": prev_pc.get("id"), "title": prev_pc.get("title")}
             }
             if table_dels:
-                deletion_entry["metric_tables"] = table_dels
+                entry["metric_tables"] = table_dels
             if desc_dels:
-                deletion_entry["metric_descriptions"] = desc_dels
-            combined_diff["Deletion"].append(deletion_entry)
+                entry["metric_descriptions"] = desc_dels
+            combined_diff["Deletion"].append(entry)
 
         if table_mods or desc_mods:
-            modification_entry = {
-                "panel_config": {
-                    "id": curr_pc.get("id"),
-                    "title": curr_pc.get("title"),
-                }
+            entry = {
+                "panel_config": {"id": curr_pc.get("id"), "title": curr_pc.get("title")}
             }
             if table_mods:
-                modification_entry["metric_tables"] = table_mods
+                entry["metric_tables"] = table_mods
             if desc_mods:
-                modification_entry["metric_descriptions"] = desc_mods
-            combined_diff["Modification"].append(modification_entry)
+                entry["metric_descriptions"] = desc_mods
+            combined_diff["Modification"].append(entry)
 
-    # Format and save output
     output = format_output(combined_diff)
 
     print("\n" + "=" * 80)
@@ -370,11 +313,9 @@ def main():
     print("=" * 80)
     print(output)
 
-    # Write to file
     output_dir = prev_arch_dir / "config_delta"
     output_dir.mkdir(exist_ok=True)
     output_file = output_dir / f"{curr_arch_dir.name}_diff.yaml"
-
     with open(output_file, "w") as f:
         f.write(output)
 

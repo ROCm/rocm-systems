@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-
 """
 Master workflow script for managing architecture configurations.
-Handles detection, validation, and application of config changes.
+- Detects changes
+- Handles direct edits and delta files
+- Supports promoting a NEW arch from:
+    (A) direct edits to latest, or
+    (B) a delta YAML targeting latest
+- Validates, syncs metric descriptions, and updates hashes
+
 """
+
+from __future__ import annotations
 
 import argparse
 import shutil
@@ -11,19 +18,19 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-# Import our utilities
-import hash_manager
-import metric_description_manager
+from . import hash_manager
+from . import metric_description_manager
 import yaml
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+# =============================================================================
+# CONFIG
+# =============================================================================
 
 CONFIG_FILE = "config_workflow.yaml"
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict = {
     "paths": {
         "template": "utils/config_management/analysis_config_template.yaml",
         "configs_root": "src/rocprof_compute_soc/analysis_configs",
@@ -36,365 +43,778 @@ DEFAULT_CONFIG = {
     "behavior": {"require_confirmation": True},
 }
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
+
+# =============================================================================
+# UTILITIES
+# =============================================================================
 
 
-def load_config():
-    """Load configuration from file or use defaults."""
-    config_path = Path(CONFIG_FILE)
-    if config_path.exists():
-        with open(config_path) as f:
-            user_config = yaml.safe_load(f)
-        # Merge with defaults
-        config = DEFAULT_CONFIG.copy()
-        for key in user_config:
-            if isinstance(user_config[key], dict):
-                config[key].update(user_config[key])
-            else:
-                config[key] = user_config[key]
-        return config
-    return DEFAULT_CONFIG
+def load_config() -> dict:
+    """Load config from CONFIG_FILE with a shallow merge onto DEFAULT_CONFIG."""
+    p = Path(CONFIG_FILE)
+    if not p.exists():
+        return DEFAULT_CONFIG
+    with open(p) as f:
+        user = yaml.safe_load(f) or {}
+    merged = DEFAULT_CONFIG.copy()
+    for k, v in user.items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    return merged
 
 
-def create_backup(source_paths, backup_dir):
-    """Create single timestamped backup of given paths."""
+def create_backup(source_paths: list[str], backup_dir: str) -> Path:
+    """Create a timestamped backup of the provided paths."""
     backup_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = Path(backup_dir) / backup_id
     backup_path.mkdir(parents=True, exist_ok=True)
-
     print(f"Creating backup: {backup_path}")
-
-    for source in source_paths:
-        source_path = Path(source)
-        if source_path.is_dir():
-            dest = backup_path / source_path.name
-            shutil.copytree(source_path, dest)
-        elif source_path.is_file():
-            dest = backup_path / source_path.name
-            shutil.copy2(source_path, dest)
-
+    for s in source_paths:
+        sp = Path(s)
+        dst = backup_path / sp.name
+        if sp.is_dir():
+            shutil.copytree(sp, dst)
+        elif sp.is_file():
+            shutil.copy2(sp, dst)
     return backup_path
 
 
-def restore_backup(backup_path, target_paths):
-    """Restore from backup."""
+def restore_backup(backup_path: Path, target_paths: list[str]) -> None:
+    """Restore files/dirs from a given backup path."""
     print(f"Restoring from backup: {backup_path}")
-
-    backup_path = Path(backup_path)
-    for target in target_paths:
-        target_path = Path(target)
-        backup_item = backup_path / target_path.name
-
-        if not backup_item.exists():
+    for t in target_paths:
+        tp = Path(t)
+        bp = backup_path / tp.name
+        if not bp.exists():
             continue
-
-        # Remove current target
-        if target_path.is_dir():
-            shutil.rmtree(target_path, ignore_errors=True)
-        elif target_path.exists():
-            target_path.unlink()
-
-        # Restore from backup
-        if backup_item.is_dir():
-            shutil.copytree(backup_item, target_path)
+        if tp.is_dir():
+            shutil.rmtree(tp, ignore_errors=True)
+        elif tp.exists():
+            tp.unlink()
+        if bp.is_dir():
+            shutil.copytree(bp, tp)
         else:
-            shutil.copy2(backup_item, target_path)
-
+            shutil.copy2(bp, tp)
     print("Backup restored")
 
 
-def cleanup_old_backups(backup_dir):
-    """Keep only the most recent backup, remove all others."""
-    backup_path = Path(backup_dir)
-    if not backup_path.exists():
+def cleanup_old_backups(backup_dir: str) -> None:
+    """Keep latest backup, remove older ones."""
+    b = Path(backup_dir)
+    if not b.exists():
         return
-
-    backups = sorted([d for d in backup_path.iterdir() if d.is_dir()])
-
-    # Keep only the most recent
-    if len(backups) > 1:
-        for old_backup in backups[:-1]:
-            shutil.rmtree(old_backup)
-            print(f"Removed old backup: {old_backup.name}")
+    dirs = sorted([d for d in b.iterdir() if d.is_dir()])
+    for old in dirs[:-1]:
+        shutil.rmtree(old, ignore_errors=True)
+        print(f"Removed old backup: {old.name}")
 
 
-def prompt_yes_no(question, default=None):
-    """Interactive yes/no prompt."""
+def prompt_yes_no(question: str, default: Optional[bool] = None) -> bool:
+    """Ask a yes/no question in the terminal."""
     if default is None:
         prompt = f"{question} (y/n): "
     elif default:
         prompt = f"{question} [Y/n]: "
     else:
         prompt = f"{question} [y/N]: "
-
     while True:
-        response = input(prompt).strip().lower()
-
-        if not response:
-            if default is not None:
-                return default
-            continue
-
-        if response in ("y", "yes"):
+        ans = input(prompt).strip().lower()
+        if not ans and default is not None:
+            return default
+        if ans in ("y", "yes"):
             return True
-        elif response in ("n", "no"):
+        if ans in ("n", "no"):
             return False
+        print("Please answer 'y' or 'n'.")
 
-        print("Please answer 'y' or 'n'")
 
-
-def run_script(script_name, args, capture_output=True):
-    """Run one of the existing scripts and return result."""
-    result = subprocess.run(
+def run_script(
+    script_name: str, args: list[str], capture_output: bool = True
+) -> subprocess.CompletedProcess:
+    """Run a Python helper script and return CompletedProcess."""
+    return subprocess.run(
         [sys.executable, script_name] + args, capture_output=capture_output, text=True
     )
-    return result
 
 
-def validate_delta_structure(delta_file):
-    """Ensure delta YAML has required structure."""
-    with open(delta_file) as f:
-        data = yaml.safe_load(f)
-
-    required_keys = {"Addition", "Deletion", "Modification"}
-    if not isinstance(data, dict) or not required_keys.issubset(data.keys()):
-        return False, "Delta must have Addition, Deletion, Modification keys"
-
-    return True, ""
-
-
-def get_latest_arch(template_file):
-    """Read latest_arch from template."""
-    with open(template_file) as f:
-        data = yaml.safe_load(f)
-
-    if isinstance(data, dict) and "latest_arch" in data:
-        return data["latest_arch"]
-
-    # If no metadata, return None
-    return None
-
-
-def set_latest_arch(template_file, arch_name):
-    """Update latest_arch in template."""
-    with open(template_file) as f:
-        data = yaml.safe_load(f)
-
-    # Ensure data is dict with metadata
-    if not isinstance(data, dict) or "panels" not in data:
-        # Old format - convert to new format
-        data = {
-            "latest_arch": arch_name,
-            "panels": data if isinstance(data, list) else [],
-        }
-    else:
-        data["latest_arch"] = arch_name
-
-    with open(template_file, "w") as f:
-        yaml.dump(data, f, sort_keys=False, allow_unicode=True)
-
-
-def get_all_archs(configs_dir):
-    """Get list of all architecture directories."""
-    configs_path = Path(configs_dir)
+def get_all_archs(configs_dir: str) -> list[str]:
+    """Return sorted list of gfx* directories."""
+    root = Path(configs_dir)
     return sorted([
-        d.name
-        for d in configs_path.iterdir()
-        if d.is_dir() and d.name.startswith("gfx")
+        d.name for d in root.iterdir() if d.is_dir() and d.name.startswith("gfx")
     ])
 
 
-# ============================================================================
+def get_latest_arch(template_file: str) -> Optional[str]:
+    """Read 'latest_arch' from template YAML."""
+    p = Path(template_file)
+    if not p.is_file():
+        return None
+    with open(p) as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("latest_arch")
+
+
+def validate_delta_structure(delta_file: str) -> tuple[bool, str]:
+    """Ensure delta YAML contains Addition/Deletion/Modification keys."""
+    with open(delta_file) as f:
+        data = yaml.safe_load(f) or {}
+    required = {"Addition", "Deletion", "Modification"}
+    if not isinstance(data, dict) or not required.issubset(data.keys()):
+        return False, "Delta must have Addition, Deletion, Modification keys"
+    return True, ""
+
+
+# =============================================================================
+# VALIDATION / SYNC
+# =============================================================================
+
+
+def validate_all_archs(config: dict) -> tuple[bool, str]:
+    """Validate all archs against the template."""
+    print("Validating all architectures against template...")
+    res = run_script(
+        "utils/config_management/verify_against_config_template.py",
+        [config["paths"]["configs_root"], config["paths"]["template"]],
+        capture_output=True,
+    )
+    if res.stdout:
+        print(res.stdout)
+    if res.returncode != 0:
+        if res.stderr:
+            print(res.stderr)
+        return False, "Validation failed"
+    return True, "Validation passed"
+
+
+def validate_arch_against_template(arch_name: str, config: dict) -> tuple[bool, str]:
+    """Validate one arch (best-effort: rely on script output mentioning arch)."""
+    print(f"Validating {arch_name} against template...")
+    res = run_script(
+        "utils/config_management/verify_against_config_template.py",
+        [config["paths"]["configs_root"], config["paths"]["template"]],
+        capture_output=True,
+    )
+    if res.returncode != 0 and arch_name in (res.stdout or ""):
+        print(res.stdout)
+        return False, f"Validation failed for {arch_name}"
+    return True, f"Validation passed for {arch_name}"
+
+
+# =============================================================================
 # CHANGE DETECTION
-# ============================================================================
+# =============================================================================
 
 
-def detect_changes(config):
-    """
-    Use hash_manager to detect what changed.
-    Returns dict with change information.
-    """
+def detect_changes(config: dict) -> dict:
     print("Detecting changes...")
-
-    changes = hash_manager.detect_changes(
+    return hash_manager.detect_changes(
         config["paths"]["configs_root"], config["paths"]["hashes"]
     )
 
-    return changes
 
-
-def display_change_summary(changes):
-    """Display summary of detected changes."""
+def display_change_summary(changes: dict) -> bool:
     print("\n" + "=" * 80)
     print("CHANGE SUMMARY")
     print("=" * 80)
 
-    has_changes = False
+    has_changes = any([
+        changes.get("new_archs"),
+        changes.get("modified_archs"),
+        changes.get("delta_files"),
+        changes.get("deleted_archs"),
+    ])
 
-    if changes["new_archs"]:
-        has_changes = True
+    if changes.get("new_archs"):
         print("\nNew Architecture Directories:")
-        for arch in changes["new_archs"]:
-            print(f"   • {arch}")
+        for a in changes["new_archs"]:
+            print(f"   • {a}")
 
-    if changes["modified_archs"]:
-        has_changes = True
+    if changes.get("modified_archs"):
         print("\nModified Architectures:")
-        for arch, files in changes["modified_archs"].items():
-            print(f"   • {arch}:")
-            for f in files[:5]:  # Show first 5 files
+        for a, files in changes["modified_archs"].items():
+            print(f"   • {a}:")
+            for f in files[:5]:
                 print(f"      - {f}")
-            if len(files) > 5:
-                print(f"      ... and {len(files) - 5} more files")
+            extra = len(files) - 5
+            if extra > 0:
+                print(f"      ... and {extra} more files")
 
-    if changes["delta_files"]:
-        has_changes = True
+    if changes.get("delta_files"):
         print("\nDelta Files Detected:")
-        for arch, delta_file in changes["delta_files"].items():
-            print(f"   • {arch}: {Path(delta_file).name}")
+        for a, d in changes["delta_files"].items():
+            print(f"   • {a}: {Path(d).name}")
 
-    if changes["deleted_archs"]:
-        has_changes = True
+    if changes.get("deleted_archs"):
         print("\nDeleted Architectures:")
-        for arch in changes["deleted_archs"]:
-            print(f"   • {arch}")
+        for a in changes["deleted_archs"]:
+            print(f"   • {a}")
 
     if not has_changes:
         print("\nNo changes detected")
 
     print("=" * 80 + "\n")
-
     return has_changes
 
 
-# ============================================================================
-# VALIDATION
-# ============================================================================
+# =============================================================================
+# CORE WORKFLOW OPS
+# =============================================================================
 
 
-def validate_all_archs(config):
-    """Run verify_against_config_template.py on all archs."""
-    print("Validating all architectures against template...")
+def promote_to_latest(new_arch: str, config: dict) -> bool:
+    """
+    Original 'promote' that assumes new_arch dir already exists & populated.
+    (Kept for backward compatibility.)
+    """
+    print(f"\nPROMOTING {new_arch} TO LATEST ARCHITECTURE...")
+    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
+    backup_path = create_backup(backup_paths, config["paths"]["backups"])
 
-    result = run_script(
-        "utils/config_management/verify_against_config_template.py",
-        [config["paths"]["configs_root"], config["paths"]["template"]],
-        capture_output=True,
-    )
+    try:
+        root = Path(config["paths"]["configs_root"])
+        new_dir = root / new_arch
+        if not new_dir.is_dir():
+            raise Exception(f"New arch directory not found: {new_dir}")
 
-    # Print output
-    if result.stdout:
-        print(result.stdout)
+        all_archs = get_all_archs(config["paths"]["configs_root"])
+        prev_archs = [a for a in all_archs if a != new_arch]
 
-    if result.returncode != 0:
-        if result.stderr:
-            print(result.stderr)
-        return False, "Validation failed"
+        print(f"\n1. Updating template with new latest arch: {new_arch}")
+        res = run_script(
+            "utils/config_management/parse_config_template.py",
+            [str(new_dir), config["paths"]["template"], "--latest-arch", new_arch],
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise Exception(f"Failed to update template: {res.stderr}")
 
-    return True, "Validation passed"
+        print(f"\n2. Generating deltas for {len(prev_archs)} previous architectures")
+        for p in prev_archs:
+            prev_dir = root / p
+            gen = run_script(
+                "utils/config_management/generate_config_deltas.py",
+                [str(new_dir), str(prev_dir)],
+                capture_output=True,
+            )
+            if gen.returncode != 0:
+                raise Exception(f"Failed to generate delta for {p}: {gen.stderr}")
 
+        print("\n3. Validating all architectures")
+        ok, msg = validate_all_archs(config)
+        if not ok:
+            raise Exception(msg)
 
-def validate_arch_against_template(arch_name, config):
-    """Validate a single architecture against template."""
-    print(f"Validating {arch_name} against template...")
+        print("\n4. Syncing metric descriptions")
+        ok = metric_description_manager.sync_arch(
+            new_arch,
+            config["paths"]["configs_root"],
+            config["paths"]["per_arch_metrics"],
+            config["paths"]["docs_metrics"],
+            is_latest=True,
+        )
+        if not ok:
+            raise Exception("Failed to sync metric descriptions")
 
-    # Note: The existing script validates all archs, so we run it
-    # but focus on this arch's output
-    result = run_script(
-        "utils/config_management/verify_against_config_template.py",
-        [config["paths"]["configs_root"], config["paths"]["template"]],
-        capture_output=True,
-    )
+        print("\n5. Updating hashes")
+        hash_manager.update_hashes(
+            new_arch, config["paths"]["configs_root"], config["paths"]["hashes"]
+        )
 
-    if result.returncode != 0:
-        # Check if errors are related to this arch
-        if arch_name in result.stdout:
-            print(result.stdout)
-            return False, f"Validation failed for {arch_name}"
-
-    return True, f"Validation passed for {arch_name}"
-
-
-# ============================================================================
-# SCENARIO HANDLERS
-# ============================================================================
-
-
-def handle_new_arch(arch_name, config, dry_run=False):
-    """Handle new architecture directory (Scenario C.1.2)."""
-    print(f"\n{'=' * 80}")
-    print(f"NEW ARCHITECTURE DETECTED: {arch_name}")
-    print("=" * 80)
-
-    if not prompt_yes_no(f"Is {arch_name} the new latest architecture?"):
-        print("ERROR: New arch detected but not marked as latest.")
-        print("   Only the latest arch should be added as a new directory.")
-        return False
-
-    if dry_run:
-        print("[DRY RUN] Would promote {arch_name} to latest")
+        print(f"\nSuccessfully promoted {new_arch} to latest architecture!")
         return True
 
-    # Proceed with promotion
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, backup_paths)
+        return False
+
+
+def update_latest_arch_from_delta(
+    delta_file: str, arch_name: str, config: dict
+) -> bool:
+    """Apply a delta in-place to the latest arch (legacy flow)."""
+    print(f"\nUPDATING LATEST ARCH {arch_name} FROM DELTA...")
+    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
+    backup_path = create_backup(backup_paths, config["paths"]["backups"])
+
+    try:
+        root = Path(config["paths"]["configs_root"])
+        arch_dir = root / arch_name
+        tmp = root / f"{arch_name}_tmp"
+
+        print(f"\n1. Applying delta to {arch_name}")
+        res = run_script(
+            "utils/config_management/apply_config_deltas.py",
+            [str(arch_dir), delta_file, str(tmp)],
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise Exception(f"Failed to apply delta: {res.stderr}")
+
+        shutil.rmtree(arch_dir)
+        shutil.move(str(tmp), str(arch_dir))
+
+        print("\n2. Updating template")
+        res = run_script(
+            "utils/config_management/parse_config_template.py",
+            [str(arch_dir), config["paths"]["template"], "--latest-arch", arch_name],
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise Exception(f"Failed to update template: {res.stderr}")
+
+        print("\n3. Regenerating deltas for previous architectures")
+        all_archs = get_all_archs(config["paths"]["configs_root"])
+        for prev in [a for a in all_archs if a != arch_name]:
+            prev_dir = root / prev
+            gen = run_script(
+                "utils/config_management/generate_config_deltas.py",
+                [str(arch_dir), str(prev_dir)],
+                capture_output=True,
+            )
+            if gen.returncode != 0:
+                raise Exception(f"Failed to generate delta for {prev}")
+
+        print("\n4. Validating all architectures")
+        ok, msg = validate_all_archs(config)
+        if not ok:
+            raise Exception(msg)
+
+        print("\n5. Syncing metric descriptions")
+        ok = metric_description_manager.sync_arch(
+            arch_name,
+            config["paths"]["configs_root"],
+            config["paths"]["per_arch_metrics"],
+            config["paths"]["docs_metrics"],
+            is_latest=True,
+        )
+        if not ok:
+            raise Exception("Failed to sync metric descriptions")
+
+        print("\n6. Updating hashes")
+        hash_manager.update_hashes(
+            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
+        )
+
+        print(f"\nSuccessfully updated latest arch {arch_name}!")
+        return True
+
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, backup_paths)
+        return False
+
+
+def update_older_arch_from_delta(delta_file: str, arch_name: str, config: dict) -> bool:
+    """Apply a delta in-place to an older arch (legacy flow)."""
+    print(f"\nUPDATING OLDER ARCH {arch_name} FROM DELTA...")
+    root = Path(config["paths"]["configs_root"])
+    arch_dir = root / arch_name
+    backup_path = create_backup([str(arch_dir)], config["paths"]["backups"])
+
+    try:
+        tmp = root / f"{arch_name}_tmp"
+
+        print(f"\n1. Applying delta to {arch_name}")
+        res = run_script(
+            "utils/config_management/apply_config_deltas.py",
+            [str(arch_dir), delta_file, str(tmp)],
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise Exception(f"Failed to apply delta: {res.stderr}")
+
+        shutil.rmtree(arch_dir)
+        shutil.move(str(tmp), str(arch_dir))
+
+        print("\n2. Validating against template")
+        ok, msg = validate_arch_against_template(arch_name, config)
+        if not ok:
+            raise Exception(msg)
+
+        print("\n3. Syncing metric descriptions")
+        ok = metric_description_manager.sync_arch(
+            arch_name,
+            config["paths"]["configs_root"],
+            config["paths"]["per_arch_metrics"],
+            config["paths"]["docs_metrics"],
+            is_latest=False,
+        )
+        if not ok:
+            raise Exception("Failed to sync metric descriptions")
+
+        print("\n4. Updating hashes")
+        hash_manager.update_hashes(
+            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
+        )
+
+        print(f"\nSuccessfully updated older arch {arch_name}!")
+        return True
+
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, [str(arch_dir)])
+        return False
+
+
+def update_latest_arch_from_edits(arch_name: str, config: dict) -> bool:
+    """Re-derive template/deltas from direct edits to latest (legacy in-place)."""
+    print(f"\nUPDATING LATEST ARCH {arch_name} FROM DIRECT EDITS...")
+    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
+    backup_path = create_backup(backup_paths, config["paths"]["backups"])
+
+    try:
+        root = Path(config["paths"]["configs_root"])
+        arch_dir = root / arch_name
+
+        print("\n1. Updating template")
+        res = run_script(
+            "utils/config_management/parse_config_template.py",
+            [str(arch_dir), config["paths"]["template"], "--latest-arch", arch_name],
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise Exception(f"Failed to update template: {res.stderr}")
+
+        print("\n2. Regenerating deltas for previous architectures")
+        for prev in [
+            a for a in get_all_archs(config["paths"]["configs_root"]) if a != arch_name
+        ]:
+            prev_dir = root / prev
+            gen = run_script(
+                "utils/config_management/generate_config_deltas.py",
+                [str(arch_dir), str(prev_dir)],
+                capture_output=True,
+            )
+            if gen.returncode != 0:
+                raise Exception(f"Failed to generate delta for {prev}")
+
+        print("\n3. Validating all architectures")
+        ok, msg = validate_all_archs(config)
+        if not ok:
+            raise Exception(msg)
+
+        print("\n4. Syncing metric descriptions")
+        ok = metric_description_manager.sync_arch(
+            arch_name,
+            config["paths"]["configs_root"],
+            config["paths"]["per_arch_metrics"],
+            config["paths"]["docs_metrics"],
+            is_latest=True,
+        )
+        if not ok:
+            raise Exception("Failed to sync metric descriptions")
+
+        print("\n5. Updating hashes")
+        hash_manager.update_hashes(
+            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
+        )
+
+        print(f"\nSuccessfully updated latest arch {arch_name}!")
+        return True
+
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, backup_paths)
+        return False
+
+
+def update_older_arch_from_edits(arch_name: str, config: dict) -> bool:
+    """Re-validate/sync/hash older arch after direct edits (legacy in-place)."""
+    print(f"\nUPDATING OLDER ARCH {arch_name} FROM DIRECT EDITS...")
+    root = Path(config["paths"]["configs_root"])
+    arch_dir = root / arch_name
+    backup_path = create_backup([str(arch_dir)], config["paths"]["backups"])
+
+    try:
+        print("\n1. Validating against template")
+        ok, msg = validate_arch_against_template(arch_name, config)
+        if not ok:
+            raise Exception(msg)
+
+        print("\n2. Syncing metric descriptions")
+        ok = metric_description_manager.sync_arch(
+            arch_name,
+            config["paths"]["configs_root"],
+            config["paths"]["per_arch_metrics"],
+            config["paths"]["docs_metrics"],
+            is_latest=False,
+        )
+        if not ok:
+            raise Exception("Failed to sync metric descriptions")
+
+        print("\n3. Updating hashes")
+        hash_manager.update_hashes(
+            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
+        )
+
+        print(f"\nSuccessfully updated older arch {arch_name}!")
+        return True
+
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, [str(arch_dir)])
+        return False
+
+
+# =============================================================================
+# NEW: PROMOTE NEW ARCH FROM (A) EDITS or (B) DELTA
+# =============================================================================
+
+
+def _git_restore_pristine(path: Path) -> None:
+    """
+    Best-effort restore of a directory to HEAD using Git.
+    No-op if not in a Git repo. Raises on checkout failure when in a repo.
+    """
+    chk = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True
+    )
+    if chk.returncode != 0 or chk.stdout.strip() != "true":
+        return
+    res = subprocess.run(
+        ["git", "checkout", "--", str(path)], capture_output=True, text=True
+    )
+    if res.returncode != 0:
+        raise Exception(f"Failed to restore pristine state from Git for {path}")
+
+
+def promote_new_arch_from_latest_edits(
+    latest_arch: str, new_arch: str, config: dict
+) -> bool:
+    """
+    Flow (A): Direct edits were made to the current latest arch.
+      1) Snapshot edited latest to temp
+      2) Restore pristine latest (via Git)
+      3) Copy pristine latest → new arch
+      4) Generate delta (edited_tmp vs pristine_latest) → write under latest/config_delta/
+      5) Apply delta to new arch
+      6) Update template latest=new_arch, regen deltas, validate, sync, hash
+    """
+    print(f"\nPROMOTING {new_arch} FROM EDITS IN {latest_arch}...")
+    root = Path(config["paths"]["configs_root"])
+    latest_dir = root / latest_arch
+    new_dir = root / new_arch
+    edited_tmp = root / f"_{latest_arch}_edited_tmp"
+    new_tmp = root / f"_{new_arch}_tmp"
+
+    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
+    backup_path = create_backup(backup_paths, config["paths"]["backups"])
+
+    try:
+        # 1) Snapshot edited latest
+        if edited_tmp.exists():
+            shutil.rmtree(edited_tmp)
+        shutil.copytree(latest_dir, edited_tmp)
+
+        # 2) Restore pristine latest
+        _git_restore_pristine(latest_dir)
+
+        # 3) Copy pristine latest → new arch
+        if new_dir.exists():
+            raise Exception(f"Target new arch directory already exists: {new_dir}")
+        shutil.copytree(latest_dir, new_dir)
+
+        # 4) Generate delta: edited (curr) vs pristine latest (prev)
+        print("\nGenerating delta (edited latest → pristine latest)")
+        gen = run_script(
+            "utils/config_management/generate_config_deltas.py",
+            [str(edited_tmp), str(latest_dir)],
+            capture_output=True,
+        )
+        if gen.returncode != 0:
+            raise Exception(f"Failed to generate delta: {gen.stderr}")
+
+        delta_dir = latest_dir / "config_delta"
+        # Prefer the file named for edited_tmp; otherwise take the latest *_diff.yaml
+        candidates = sorted(delta_dir.glob(f"{edited_tmp.name}_diff.yaml")) or sorted(
+            delta_dir.glob("*_diff.yaml")
+        )
+        if not candidates:
+            raise Exception("Delta file not found after generation.")
+        delta_file = candidates[-1]
+
+        # 5) Apply delta onto new arch
+        if new_tmp.exists():
+            shutil.rmtree(new_tmp)
+        print(f"\nApplying delta to {new_arch}: {delta_file.name}")
+        app = run_script(
+            "utils/config_management/apply_config_deltas.py",
+            [str(new_dir), str(delta_file), str(new_tmp)],
+            capture_output=True,
+        )
+        if app.returncode != 0:
+            raise Exception(f"Failed to apply delta: {app.stderr}")
+        shutil.rmtree(new_dir)
+        shutil.move(str(new_tmp), str(new_dir))
+
+        # 6) Promote to latest, regen deltas, validate, sync, hash
+        return promote_to_latest(new_arch, config)
+
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, backup_paths)
+        return False
+    finally:
+        if edited_tmp.exists():
+            shutil.rmtree(edited_tmp, ignore_errors=True)
+        if new_tmp.exists():
+            shutil.rmtree(new_tmp, ignore_errors=True)
+
+
+def promote_new_arch_from_delta(
+    latest_arch: str, new_arch: str, delta_file: str, config: dict
+) -> bool:
+    """
+    Flow (B): Developer added a delta YAML targeting the latest arch.
+      1) Copy pristine latest → new arch
+      2) Apply the provided delta to new arch
+      3) Promote to latest, regen deltas, validate, sync, hash
+    """
+    print(f"\nPROMOTING {new_arch} FROM DELTA ON {latest_arch}...")
+    root = Path(config["paths"]["configs_root"])
+    latest_dir = root / latest_arch
+    new_dir = root / new_arch
+    new_tmp = root / f"_{new_arch}_tmp"
+
+    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
+    backup_path = create_backup(backup_paths, config["paths"]["backups"])
+
+    try:
+        if not Path(delta_file).is_file():
+            raise Exception(f"Delta file does not exist: {delta_file}")
+        if not latest_dir.is_dir():
+            raise Exception(f"Latest arch not found: {latest_dir}")
+        if new_dir.exists():
+            raise Exception(f"Target new arch directory already exists: {new_dir}")
+
+        # Start from pristine latest
+        _git_restore_pristine(latest_dir)
+
+        # 1) Copy pristine latest → new arch
+        shutil.copytree(latest_dir, new_dir)
+
+        # 2) Apply delta onto the new arch
+        if new_tmp.exists():
+            shutil.rmtree(new_tmp)
+        print(f"\nApplying delta to {new_arch}: {Path(delta_file).name}")
+        app = run_script(
+            "utils/config_management/apply_config_deltas.py",
+            [str(new_dir), str(delta_file), str(new_tmp)],
+            capture_output=True,
+        )
+        if app.returncode != 0:
+            raise Exception(f"Failed to apply delta: {app.stderr}")
+        shutil.rmtree(new_dir)
+        shutil.move(str(new_tmp), str(new_dir))
+
+        # 3) Promote to latest, regen deltas, validate, sync, hash
+        return promote_to_latest(new_arch, config)
+
+    except Exception as e:
+        print(f"\nERROR: {e}\nRestoring from backup...")
+        restore_backup(backup_path, backup_paths)
+        return False
+    finally:
+        if new_tmp.exists():
+            shutil.rmtree(new_tmp, ignore_errors=True)
+
+
+# =============================================================================
+# USER-FACING SCENARIO HANDLERS
+# =============================================================================
+
+
+def handle_new_arch(arch_name: str, config: dict, dry_run: bool = False) -> bool:
+    print(f"\n{'=' * 80}\nNEW ARCHITECTURE DETECTED: {arch_name}\n{'=' * 80}")
+    if not prompt_yes_no(f"Is {arch_name} the new latest architecture?"):
+        print(
+            "ERROR: New arch detected but not marked as latest.\n   Only the latest arch should be added as a new directory."
+        )
+        return False
+    if dry_run:
+        print(f"[DRY RUN] Would promote {arch_name} to latest")
+        return True
     return promote_to_latest(arch_name, config)
 
 
-def handle_delta_file(delta_file, arch_name, config, dry_run=False):
-    """Handle delta YAML file detected."""
-    print(f"\n{'=' * 80}")
-    print(f"DELTA FILE DETECTED: {Path(delta_file).name}")
-    print(f"   Target architecture: {arch_name}")
-    print("=" * 80)
+def handle_delta_file(
+    delta_file: str, arch_name: str, config: dict, dry_run: bool = False
+) -> bool:
+    print(
+        f"\n{'=' * 80}\nDELTA FILE DETECTED: {Path(delta_file).name}\n   Target architecture: {arch_name}\n{'=' * 80}"
+    )
 
-    # Validate delta structure
-    valid, error = validate_delta_structure(delta_file)
+    valid, err = validate_delta_structure(delta_file)
     if not valid:
-        print(f"ERROR: Invalid delta structure - {error}")
+        print(f"ERROR: Invalid delta structure - {err}")
         return False
 
-    # Determine if this is for latest arch
-    latest = get_latest_arch(config["paths"]["template"])
-
-    if not latest:
-        print("WARNING: No latest arch defined in template")
-        latest = get_all_archs(config["paths"]["configs_root"])[-1]
-        print(f"   Assuming latest arch is: {latest}")
+    latest = (
+        get_latest_arch(config["paths"]["template"])
+        or (get_all_archs(config["paths"]["configs_root"]) or [None])[-1]
+    )
 
     if arch_name == latest:
-        if not prompt_yes_no(f"Apply delta to latest arch ({latest})?"):
-            return False
+        print(f"\nDelta targets the current latest arch: {latest}")
+        print("Choose how to apply this delta:")
+        print("  1. Update the existing latest arch in-place")
+        print(
+            "  2. Create a NEW architecture from latest and apply the delta there (promote to latest)"
+        )
 
-        if dry_run:
-            print(f"[DRY RUN] Would update latest arch {latest} from delta")
-            return True
-
-        return update_latest_arch_from_delta(delta_file, latest, config)
+        while True:
+            choice = input("Enter choice (1 or 2): ").strip()
+            if choice == "1":
+                if dry_run:
+                    print(f"[DRY RUN] Would update latest arch {latest} from delta")
+                    return True
+                return update_latest_arch_from_delta(delta_file, latest, config)
+            if choice == "2":
+                new_arch_name = input(
+                    "Enter new architecture name (e.g., gfx955): "
+                ).strip()
+                if not new_arch_name:
+                    print("New architecture name cannot be empty.")
+                    continue
+                if not prompt_yes_no(
+                    f"Promote {new_arch_name} to new latest architecture?"
+                ):
+                    print("Operation cancelled.")
+                    return False
+                if dry_run:
+                    print(
+                        f"[DRY RUN] Would create {new_arch_name} from {latest} and apply delta"
+                    )
+                    return True
+                return promote_new_arch_from_delta(
+                    latest, new_arch_name, delta_file, config
+                )
+            print("Invalid choice. Please enter 1 or 2.")
     else:
-        if not prompt_yes_no(f"Apply delta to older arch ({arch_name})?"):
+        if not prompt_yes_no(f"Apply delta to older arch ({arch_name}) in-place?"):
             return False
-
         if dry_run:
             print(f"[DRY RUN] Would update older arch {arch_name} from delta")
             return True
-
         return update_older_arch_from_delta(delta_file, arch_name, config)
 
 
-def handle_direct_edits(arch_name, modified_files, config, dry_run=False):
-    """Handle direct YAML edits."""
-    print(f"\n{'=' * 80}")
-    print(f"DIRECT EDITS DETECTED: {arch_name}")
-    print("=" * 80)
+def handle_direct_edits(
+    arch_name: str, modified_files: list[str], config: dict, dry_run: bool = False
+) -> bool:
+    print(f"\n{'=' * 80}\nDIRECT EDITS DETECTED: {arch_name}\n{'=' * 80}")
     print("Modified files:")
     for f in modified_files:
         print(f"   • {f}")
 
-    latest = get_latest_arch(config["paths"]["template"])
-
-    if not latest:
-        latest = get_all_archs(config["paths"]["configs_root"])[-1]
+    latest = (
+        get_latest_arch(config["paths"]["template"])
+        or (get_all_archs(config["paths"]["configs_root"]) or [None])[-1]
+    )
 
     if arch_name == latest:
         print(f"\nThis is the current latest architecture ({latest}).")
@@ -405,412 +825,50 @@ def handle_direct_edits(arch_name, modified_files, config, dry_run=False):
         while True:
             choice = input("Enter choice (1 or 2): ").strip()
             if choice == "1":
-                # Update existing latest arch
                 if dry_run:
-                    print(f"[DRY RUN] Would update latest arch {latest} from direct edits")
+                    print(
+                        f"[DRY RUN] Would update latest arch {latest} from direct edits"
+                    )
                     return True
                 return update_latest_arch_from_edits(arch_name, config)
-            elif choice == "2":
-                # This is actually a new arch
-                new_arch_name = input(f"Enter new architecture name (currently detected as {arch_name}): ").strip()
-                if not new_arch_name:
-                    new_arch_name = arch_name
-
-                # Verify this is intentional
-                if not prompt_yes_no(f"Promote {new_arch_name} to new latest architecture?"):
+            if choice == "2":
+                new_arch_name = (
+                    input(
+                        f"Enter new architecture name (currently detected as {arch_name}): "
+                    ).strip()
+                    or arch_name
+                )
+                if not prompt_yes_no(
+                    f"Promote {new_arch_name} to new latest architecture?"
+                ):
                     print("Operation cancelled.")
                     return False
-
                 if dry_run:
-                    print(f"[DRY RUN] Would promote {new_arch_name} to latest")
+                    print(
+                        f"[DRY RUN] Would promote {new_arch_name} from edits in {arch_name}"
+                    )
                     return True
-
-                return promote_to_latest(new_arch_name, config)
-            else:
-                print("Invalid choice. Please enter 1 or 2.")
+                return promote_new_arch_from_latest_edits(
+                    arch_name, new_arch_name, config
+                )
+            print("Invalid choice. Please enter 1 or 2.")
     else:
-        if not prompt_yes_no(f"These are edits to older arch ({arch_name}). Continue?"):
+        if not prompt_yes_no(
+            f"These are edits to older arch ({arch_name}). Continue (in-place)?"
+        ):
             return False
-
         if dry_run:
             print(f"[DRY RUN] Would update older arch {arch_name} from direct edits")
             return True
-
         return update_older_arch_from_edits(arch_name, config)
 
 
-# ============================================================================
-# WORKFLOW OPERATIONS
-# ============================================================================
+# =============================================================================
+# MAIN
+# =============================================================================
 
 
-def promote_to_latest(new_arch, config):
-    """Scenario C: Promote new arch to latest."""
-    print(f"\nPROMOTING {new_arch} TO LATEST ARCHITECTURE...")
-
-    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
-    backup_path = create_backup(backup_paths, config["paths"]["backups"])
-
-    try:
-        # Get all previous archs
-        all_archs = get_all_archs(config["paths"]["configs_root"])
-        previous_archs = [a for a in all_archs if a != new_arch]
-
-        print(f"\n1. Updating template with new latest arch: {new_arch}")
-
-        # Update template using parse_config_template
-        new_arch_dir = Path(config["paths"]["configs_root"]) / new_arch
-        result = run_script(
-            "utils/config_management/parse_config_template.py",
-            [str(new_arch_dir), config["paths"]["template"], "--latest-arch", new_arch],
-            capture_output=True,
-        )
-
-        if result.returncode != 0:
-            raise Exception(f"Failed to update template: {result.stderr}")
-
-        # Update latest_arch in hash db
-        hash_db = hash_manager.load_hash_db(config["paths"]["hashes"])
-        hash_manager.save_hash_db(config["paths"]["hashes"], hash_db)
-
-        print(
-            f"\n2. Generating deltas for {len(previous_archs)} previous architectures"
-        )
-
-        # Generate deltas for each previous arch
-        for prev_arch in previous_archs:
-            print(f"   Generating delta: {new_arch} → {prev_arch}")
-            prev_arch_dir = Path(config["paths"]["configs_root"]) / prev_arch
-
-            result = run_script(
-                "utils/config_management/generate_config_deltas.py",
-                [str(new_arch_dir), str(prev_arch_dir)],
-                capture_output=True,
-            )
-
-            if result.returncode != 0:
-                raise Exception(
-                    f"Failed to generate delta for {prev_arch}: {result.stderr}"
-                )
-
-        print("\n3. Validating all architectures against new template")
-
-        # Validate all archs
-        valid, msg = validate_all_archs(config)
-        if not valid:
-            raise Exception(msg)
-
-        print("\n4. Syncing metric descriptions")
-
-        # Sync metric descriptions for new latest arch
-        success = metric_description_manager.sync_arch(
-            new_arch,
-            config["paths"]["configs_root"],
-            config["paths"]["per_arch_metrics"],
-            config["paths"]["docs_metrics"],
-            is_latest=True,
-        )
-
-        if not success:
-            raise Exception("Failed to sync metric descriptions")
-
-        print("\n5. Updating hashes")
-
-        # Update hashes for new arch
-        hash_manager.update_hashes(
-            new_arch, config["paths"]["configs_root"], config["paths"]["hashes"]
-        )
-
-        print(f"\nSuccessfully promoted {new_arch} to latest architecture!")
-        return True
-
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        print("Restoring from backup...")
-        restore_backup(backup_path, backup_paths)
-        return False
-
-
-def update_latest_arch_from_delta(delta_file, arch_name, config):
-    """Scenario A/C.1.1: Update latest arch using delta."""
-    print(f"\nUPDATING LATEST ARCH {arch_name} FROM DELTA...")
-
-    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
-    backup_path = create_backup(backup_paths, config["paths"]["backups"])
-
-    try:
-        arch_dir = Path(config["paths"]["configs_root"]) / arch_name
-        temp_output = arch_dir.parent / f"{arch_name}_temp"
-
-        print(f"\n1. Applying delta to {arch_name}")
-
-        # Apply delta
-        result = run_script(
-            "utils/config_management/apply_config_deltas.py",
-            [str(arch_dir), delta_file, str(temp_output)],
-            capture_output=True,
-        )
-
-        if result.returncode != 0:
-            raise Exception(f"Failed to apply delta: {result.stderr}")
-
-        # Replace original with temp
-        shutil.rmtree(arch_dir)
-        shutil.move(str(temp_output), str(arch_dir))
-
-        print("\n2. Updating template")
-
-        # Update template
-        result = run_script(
-            "utils/config_management/parse_config_template.py",
-            [str(arch_dir), config["paths"]["template"], "--latest-arch", arch_name],
-            capture_output=True,
-        )
-
-        if result.returncode != 0:
-            raise Exception(f"Failed to update template: {result.stderr}")
-
-        print("\n3. Regenerating deltas for previous architectures")
-
-        # Regenerate deltas for all previous archs
-        all_archs = get_all_archs(config["paths"]["configs_root"])
-        previous_archs = [a for a in all_archs if a != arch_name]
-
-        for prev_arch in previous_archs:
-            print(f"   Generating delta: {arch_name} → {prev_arch}")
-            prev_arch_dir = Path(config["paths"]["configs_root"]) / prev_arch
-
-            result = run_script(
-                "utils/config_management/generate_config_deltas.py",
-                [str(arch_dir), str(prev_arch_dir)],
-                capture_output=True,
-            )
-
-            if result.returncode != 0:
-                raise Exception(f"Failed to generate delta for {prev_arch}")
-
-        print("\n4. Validating all architectures")
-
-        valid, msg = validate_all_archs(config)
-        if not valid:
-            raise Exception(msg)
-
-        print("\n5. Syncing metric descriptions")
-
-        success = metric_description_manager.sync_arch(
-            arch_name,
-            config["paths"]["configs_root"],
-            config["paths"]["per_arch_metrics"],
-            config["paths"]["docs_metrics"],
-            is_latest=True,
-        )
-
-        if not success:
-            raise Exception("Failed to sync metric descriptions")
-
-        print("\n6. Updating hashes")
-
-        hash_manager.update_hashes(
-            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
-        )
-
-        print(f"\nSuccessfully updated latest arch {arch_name}!")
-        return True
-
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        print("Restoring from backup...")
-        restore_backup(backup_path, backup_paths)
-        return False
-
-
-def update_older_arch_from_delta(delta_file, arch_name, config):
-    """Scenario B: Update older arch using delta."""
-    print(f"\nUPDATING OLDER ARCH {arch_name} FROM DELTA...")
-
-    arch_dir = Path(config["paths"]["configs_root"]) / arch_name
-    backup_paths = [arch_dir]
-    backup_path = create_backup(backup_paths, config["paths"]["backups"])
-
-    try:
-        temp_output = arch_dir.parent / f"{arch_name}_temp"
-
-        print(f"\n1. Applying delta to {arch_name}")
-
-        # Apply delta
-        result = run_script(
-            "utils/config_management/apply_config_deltas.py",
-            [str(arch_dir), delta_file, str(temp_output)],
-            capture_output=True,
-        )
-
-        if result.returncode != 0:
-            raise Exception(f"Failed to apply delta: {result.stderr}")
-
-        # Replace original with temp
-        shutil.rmtree(arch_dir)
-        shutil.move(str(temp_output), str(arch_dir))
-
-        print("\n2. Validating against template")
-
-        valid, msg = validate_arch_against_template(arch_name, config)
-        if not valid:
-            raise Exception(msg)
-
-        print("\n3. Syncing metric descriptions")
-
-        success = metric_description_manager.sync_arch(
-            arch_name,
-            config["paths"]["configs_root"],
-            config["paths"]["per_arch_metrics"],
-            config["paths"]["docs_metrics"],
-            is_latest=False,
-        )
-
-        if not success:
-            raise Exception("Failed to sync metric descriptions")
-
-        print("\n4. Updating hashes")
-
-        hash_manager.update_hashes(
-            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
-        )
-
-        print(f"\nSuccessfully updated older arch {arch_name}!")
-        return True
-
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        print("Restoring from backup...")
-        restore_backup(backup_path, backup_paths)
-        return False
-
-
-def update_latest_arch_from_edits(arch_name, config):
-    """Update latest arch from direct edits."""
-    print(f"\nUPDATING LATEST ARCH {arch_name} FROM DIRECT EDITS...")
-
-    backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
-    backup_path = create_backup(backup_paths, config["paths"]["backups"])
-
-    try:
-        arch_dir = Path(config["paths"]["configs_root"]) / arch_name
-
-        print("\n1. Updating template")
-
-        result = run_script(
-            "utils/config_management/parse_config_template.py",
-            [str(arch_dir), config["paths"]["template"], "--latest-arch", arch_name],
-            capture_output=True,
-        )
-
-        if result.returncode != 0:
-            raise Exception(f"Failed to update template: {result.stderr}")
-
-        print("\n2. Regenerating deltas for previous architectures")
-
-        all_archs = get_all_archs(config["paths"]["configs_root"])
-        previous_archs = [a for a in all_archs if a != arch_name]
-
-        for prev_arch in previous_archs:
-            print(f"   Generating delta: {arch_name} → {prev_arch}")
-            prev_arch_dir = Path(config["paths"]["configs_root"]) / prev_arch
-
-            result = run_script(
-                "utils/config_management/generate_config_deltas.py",
-                [str(arch_dir), str(prev_arch_dir)],
-                capture_output=True,
-            )
-
-            if result.returncode != 0:
-                raise Exception(f"Failed to generate delta for {prev_arch}")
-
-        print("\n3. Validating all architectures")
-
-        valid, msg = validate_all_archs(config)
-        if not valid:
-            raise Exception(msg)
-
-        print("\n4. Syncing metric descriptions")
-
-        success = metric_description_manager.sync_arch(
-            arch_name,
-            config["paths"]["configs_root"],
-            config["paths"]["per_arch_metrics"],
-            config["paths"]["docs_metrics"],
-            is_latest=True,
-        )
-
-        if not success:
-            raise Exception("Failed to sync metric descriptions")
-
-        print("\n5. Updating hashes")
-
-        hash_manager.update_hashes(
-            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
-        )
-
-        print(f"\nSuccessfully updated latest arch {arch_name}!")
-        return True
-
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        print("Restoring from backup...")
-        restore_backup(backup_path, backup_paths)
-        return False
-
-
-def update_older_arch_from_edits(arch_name, config):
-    """Update older arch from direct edits."""
-    print(f"\nUPDATING OLDER ARCH {arch_name} FROM DIRECT EDITS...")
-
-    arch_dir = Path(config["paths"]["configs_root"]) / arch_name
-    backup_paths = [arch_dir]
-    backup_path = create_backup(backup_paths, config["paths"]["backups"])
-
-    try:
-        print("\n1. Validating against template")
-
-        valid, msg = validate_arch_against_template(arch_name, config)
-        if not valid:
-            raise Exception(msg)
-
-        print("\n2. Syncing metric descriptions")
-
-        success = metric_description_manager.sync_arch(
-            arch_name,
-            config["paths"]["configs_root"],
-            config["paths"]["per_arch_metrics"],
-            config["paths"]["docs_metrics"],
-            is_latest=False,
-        )
-
-        if not success:
-            raise Exception("Failed to sync metric descriptions")
-
-        print("\n3. Updating hashes")
-
-        hash_manager.update_hashes(
-            arch_name, config["paths"]["configs_root"], config["paths"]["hashes"]
-        )
-
-        print(f"\nSuccessfully updated older arch {arch_name}!")
-        return True
-
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        print("Restoring from backup...")
-        restore_backup(backup_path, backup_paths)
-        return False
-
-
-# ============================================================================
-# MAIN WORKFLOW
-# ============================================================================
-
-
-def main():
-    """Main workflow orchestration."""
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Master workflow for managing architecture configurations"
     )
@@ -819,96 +877,67 @@ def main():
         action="store_true",
         help="Show what would be done without making changes",
     )
-
     args = parser.parse_args()
 
     print("=" * 80)
     print("ARCHITECTURE CONFIG WORKFLOW")
     print("=" * 80)
 
-    # Load configuration
     config = load_config()
 
     if args.dry_run:
         print("\nDRY RUN MODE - No changes will be made\n")
 
-    # Detect changes
     changes = detect_changes(config)
     has_changes = display_change_summary(changes)
-
     if not has_changes:
         return 0
 
-    # Process changes
-    success = True
+    latest_arch = (
+        get_latest_arch(config["paths"]["template"])
+        or (get_all_archs(config["paths"]["configs_root"]) or [None])[-1]
+    )
+    latest_has_edits = latest_arch in (changes.get("modified_archs") or {})
 
-    # Determine latest arch
-    latest_arch = get_latest_arch(config["paths"]["template"])
-    if not latest_arch:
-        latest_arch = get_all_archs(config["paths"]["configs_root"])[-1]
-
-    latest_arch_has_edits = latest_arch in changes.get("modified_archs", {})
-
-    # Handle new archs
+    # New arch directories that appeared on disk
     for new_arch in changes.get("new_archs", []):
         if not handle_new_arch(new_arch, config, args.dry_run):
-            success = False
-            break
-
-    if not success:
-        return 1
-
-    # Handle direct edits to latest arch FIRST (if any)
-    if latest_arch_has_edits:
-        modified_files = changes["modified_archs"][latest_arch]
-        if not handle_direct_edits(latest_arch, modified_files, config, args.dry_run):
-            success = False
             return 1
 
-        # Skip delta files for older archs since they'll be regenerated
+    # If latest was directly edited, prioritize resolving that path (user will choose in-place vs new arch)
+    if latest_has_edits:
+        if not handle_direct_edits(
+            latest_arch, changes["modified_archs"][latest_arch], config, args.dry_run
+        ):
+            return 1
         print("\nNote: Delta files for older archs will be regenerated automatically.")
         print("Skipping delta file processing for older architectures.\n")
     else:
-        # Only process delta files if latest arch
-        # Handle delta files
+        # Process delta files
         for arch, delta_file in changes.get("delta_files", {}).items():
             if not handle_delta_file(delta_file, arch, config, args.dry_run):
-                success = False
-                break
+                return 1
 
-        if not success:
+    # Remaining direct edits (excluding latest if already processed)
+    for arch, files in (changes.get("modified_archs") or {}).items():
+        if arch == latest_arch and latest_has_edits:
+            continue
+        if arch in (changes.get("delta_files") or {}):
+            continue
+        if not handle_direct_edits(arch, files, config, args.dry_run):
             return 1
 
-    # Handle direct edits
-    for arch, modified_files in changes.get("modified_archs", {}).items():
-        # Skip if already handled (latest arch with direct edits)
-        if arch == latest_arch and latest_arch_has_edits:
-            continue
-
-        # Skip if already handled via delta
-        if arch in changes.get("delta_files", {}):
-            continue
-
-        if not handle_direct_edits(arch, modified_files, config, args.dry_run):
-            success = False
-            break
-
-    if success and not args.dry_run:
+    if not args.dry_run:
         cleanup_old_backups(config["paths"]["backups"])
         print("\n" + "=" * 80)
         print("ALL OPERATIONS COMPLETED SUCCESSFULLY!")
         print("=" * 80)
-        return 0
-    elif args.dry_run:
+    else:
         print("\n" + "=" * 80)
         print("DRY RUN COMPLETE")
         print("=" * 80)
-        return 0
-    else:
-        print("\n" + "=" * 80)
-        print("OPERATIONS FAILED - CHANGES REVERTED")
-        print("=" * 80)
-        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
