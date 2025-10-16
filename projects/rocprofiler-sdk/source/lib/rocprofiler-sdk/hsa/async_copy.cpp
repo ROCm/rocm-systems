@@ -142,8 +142,6 @@ context_filter(const context::context* ctx)
     return (has_buffered || has_callback);
 }
 
-constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
-
 struct async_copy_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
@@ -153,8 +151,8 @@ struct async_copy_data
     hsa_signal_t                        orig_signal    = {};
     hsa_signal_t                        rocp_signal    = {};
     rocprofiler_thread_id_t             tid            = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent      = null_rocp_agent_id;
-    rocprofiler_agent_id_t              src_agent      = null_rocp_agent_id;
+    rocprofiler_agent_id_t              dst_agent      = agent::null_agent_id;
+    rocprofiler_agent_id_t              src_agent      = agent::null_agent_id;
     rocprofiler_address_t               dst_address    = {.value = 0};
     rocprofiler_address_t               src_address    = {.value = 0};
     rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;

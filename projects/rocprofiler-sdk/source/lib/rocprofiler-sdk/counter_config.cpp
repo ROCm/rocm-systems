@@ -62,7 +62,9 @@ rocprofiler_create_counter_config(rocprofiler_agent_id_t           agent_id,
     {
         auto& counter_id = counters_list[i];
 
-        const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
+        // Extract base metric ID from counter_id (handles agent-encoded counter IDs)
+        auto base_metric_id    = rocprofiler::counters::get_base_metric_from_counter_id(counter_id);
+        const auto* metric_ptr = rocprofiler::common::get_val(id_map, base_metric_id);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
         // Don't add duplicates
         if(!already_added.emplace(metric_ptr->id()).second) continue;
