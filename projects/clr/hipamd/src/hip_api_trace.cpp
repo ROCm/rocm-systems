@@ -107,6 +107,9 @@ hipError_t hipDestroyTextureObject(hipTextureObject_t textureObject);
 hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId);
 hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device);
 hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, 
+           const hipAtomicOperation** operations,
+           unsigned int count, int srcDevice, int dstDevice);
 hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags);
 hipError_t hipDeviceGet(hipDevice_t* device, int ordinal);
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceId);
@@ -938,6 +941,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipDeviceCanAccessPeer_fn = hip::hipDeviceCanAccessPeer;
   ptrDispatchTable->hipDeviceComputeCapability_fn = hip::hipDeviceComputeCapability;
   ptrDispatchTable->hipDeviceDisablePeerAccess_fn = hip::hipDeviceDisablePeerAccess;
+  ptrDispatchTable->hipDeviceGetP2PAtomicCapabilities_fn = hip::hipDeviceGetP2PAtomicCapabilities;
   ptrDispatchTable->hipDeviceEnablePeerAccess_fn = hip::hipDeviceEnablePeerAccess;
   ptrDispatchTable->hipDeviceGet_fn = hip::hipDeviceGet;
   ptrDispatchTable->hipDeviceGetAttribute_fn = hip::hipDeviceGetAttribute;
@@ -2088,13 +2092,14 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernel_fn, 499);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 16
 HIP_ENFORCE_ABI(HipDispatchTable, hipStreamCopyAttributes_fn, 501);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetP2PAtomicCapabilities_fn, 502)
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 502)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 503)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 16,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "

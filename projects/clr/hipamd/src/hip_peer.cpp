@@ -169,6 +169,24 @@ hipError_t hipDeviceDisablePeerAccess(int peerDeviceId) {
   HIP_RETURN(hip::getCurrentDevice()->DisablePeerAccess(peerDeviceId));
 }
 
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, 
+           const hipAtomicOperation** operations,
+           unsigned int  count, int srcDevice, int dstDevice) {
+  HIP_INIT_API(hipDeviceGetP2PAtomicCapabilities, capabilities, operations, count, srcDevice, dstDevice);
+
+  if ((capabilities == nullptr) || (operations == nullptr) || (count == 0)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (srcDevice == dstDevice || srcDevice >= static_cast<int>(g_devices.size()) ||
+      dstDevice >= static_cast<int>(g_devices.size())) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags) {
   HIP_INIT_API(hipDeviceEnablePeerAccess, peerDeviceId, flags);
   int deviceId = hip::getCurrentDevice()->deviceId();

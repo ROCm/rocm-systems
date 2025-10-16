@@ -485,6 +485,7 @@ typedef CUjit_option hipJitOption;
 typedef CUlibraryOption hipLibraryOption;
 typedef CUdevice hipDevice_t;
 typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
+typedef enum cudaAtomicOperation hipAtomicOperation;
 #define hipDevP2PAttrPerformanceRank cudaDevP2PAttrPerformanceRank
 #define hipDevP2PAttrAccessSupported cudaDevP2PAttrAccessSupported
 #define hipDevP2PAttrNativeAtomicSupported cudaDevP2PAttrNativeAtomicSupported
@@ -3524,6 +3525,12 @@ inline static hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
   return hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice));
+}
+
+inline static hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, 
+           const hipAtomicOperation** operations,
+           unsigned int  count, int srcDevice, int dstDevice) {
+  return hipCUDAErrorTohipError(cudaDeviceGetP2PAtomicCapabilities(capabilities, operations, count, srcDevice, dstDevice));
 }
 
 inline static hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, hipDevice_t device) {

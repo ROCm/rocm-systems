@@ -200,6 +200,11 @@ hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device
 hipError_t hipDeviceDisablePeerAccess(int peerDeviceId) {
   return hip::GetHipDispatchTable()->hipDeviceDisablePeerAccess_fn(peerDeviceId);
 }
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, 
+           const hipAtomicOperation** operations,
+           unsigned int count, int srcDevice, int dstDevice) {
+  return hip::GetHipDispatchTable()->hipDeviceGetP2PAtomicCapabilities_fn(capabilities, operations, count, srcDevice, dstDevice);
+}
 hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags) {
   return hip::GetHipDispatchTable()->hipDeviceEnablePeerAccess_fn(peerDeviceId, flags);
 }

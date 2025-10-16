@@ -2012,6 +2012,39 @@ typedef enum hipMemRangeFlags {
   hipMemRangeFlagsMax = 0x7fffffff
 } hipMemRangeFlags;
 
+/**
+ * Atomic Operation values.
+ */
+typedef enum hipAtomicOperation {
+  hipAtomicOperationIntegerAdd = 0,
+  hipAtomicOperationIntegerMin = 1,
+  hipAtomicOperationIntegerMax = 2,
+  hipAtomicOperationIntegerIncrement = 3,
+  hipAtomicOperationIntegerDecrement = 4,
+  hipAtomicOperationAnd  = 5,
+  hipAtomicOperationOr  = 6,
+  hipAtomicOperationXOR  = 7,
+  hipAtomicOperationExchange = 8,
+  hipAtomicOperationCAS = 9,
+  hipAtomicOperationFloatAdd = 10, 
+  hipAtomicOperationFloatMin = 11,
+  hipAtomicOperationFloatMax = 12
+} hipAtomicOperation;
+
+/**
+ * Atomic Operation values.
+ */
+typedef enum hipAtomicOperationCapability {
+  hipAtomicCapabilitySigned  = 1u<<0,
+  cudaAtomicCapabilityUnsigned  = 1u<<1,
+  cudaAtomicCapabilityReduction  = 1u<<2,
+  cudaAtomicCapabilityScalar32  = 1u<<3,
+  cudaAtomicCapabilityScalar64  = 1u<<4,
+  cudaAtomicCapabilityScalar128   = 1u<<5,
+  cudaAtomicCapabilityVector32x4   = 1u<<6,
+} hipAtomicOperationCapability;
+
+
 // Doxygen end group GlobalDefs
 /**
  * @}
@@ -5870,6 +5903,23 @@ hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags);
  * @returns #hipSuccess, #hipErrorPeerAccessNotEnabled
  */
 hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
+
+/**
+ * @brief Queries details about atomic operations supported between two devices.
+ *
+ *
+ * @param [out] capabilities  Returned capability details of each requested operation
+ * @param [in] operations  Requested operations
+ * @param [in] count  Count of requested operations and size of capabilities
+ * @param [in] srcDevice  The source device of the target link
+ * @param [in] dstDevice  The destination device of the target link
+ *
+ * @returns #hipSuccess, #hipInvalidValue , #hipInvalidDevice
+ */
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, 
+           const hipAtomicOperation** operations,
+           unsigned int count, int srcDevice, int dstDevice);
+
 
 /**
  * @brief Copies memory between two peer accessible devices.

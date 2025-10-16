@@ -639,6 +639,7 @@ global:
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
     hipStreamCopyAttributes;
+    hipDeviceGetP2PAtomicCapabilities;
 local:
     *;
 } hip_7.1;

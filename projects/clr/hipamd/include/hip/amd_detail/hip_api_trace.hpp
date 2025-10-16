@@ -146,6 +146,10 @@ typedef hipError_t (*t_hipDestroyTextureObject)(hipTextureObject_t textureObject
 typedef hipError_t (*t_hipDeviceCanAccessPeer)(int* canAccessPeer, int deviceId, int peerDeviceId);
 typedef hipError_t (*t_hipDeviceComputeCapability)(int* major, int* minor, hipDevice_t device);
 typedef hipError_t (*t_hipDeviceDisablePeerAccess)(int peerDeviceId);
+typedef hipError_t (*t_hipDeviceGetP2PAtomicCapabilities)(unsigned int* capabilities, 
+                                                   const hipAtomicOperation** operations,
+                                                   unsigned int  count,
+                                                   int srcDevice, int dstDevice);
 typedef hipError_t (*t_hipDeviceEnablePeerAccess)(int peerDeviceId, unsigned int flags);
 typedef hipError_t (*t_hipDeviceGet)(hipDevice_t* device, int ordinal);
 typedef hipError_t (*t_hipDeviceGetAttribute)(int* pi, hipDeviceAttribute_t attr, int deviceId);
@@ -1682,6 +1686,7 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
   t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
+  t_hipDeviceGetP2PAtomicCapabilities hipDeviceGetP2PAtomicCapabilities_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17
