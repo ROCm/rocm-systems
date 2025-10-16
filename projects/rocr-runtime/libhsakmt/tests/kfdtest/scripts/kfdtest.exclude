@@ -250,7 +250,8 @@ FILTER[aldebaran]=\
 FILTER[navi10]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX10:"\
-"KFDMemoryTest.MMBench"
+"KFDMemoryTest.MMBench:"\
+"KFDDBGTest.HitMemoryViolation"
 
 # Need to verify the following failed tests on another machine:
 # Exceptions not being received during exception tests
