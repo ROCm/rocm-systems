@@ -186,6 +186,46 @@ PAPI components from different namespaces:
    installed with the prefix ``rocprof-sys-`` with
    underscores replaced with hyphens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
 
+There are two distinct approaches for collecting PAPI-based hardware counters, each with different characteristics and use cases.
+
+1. Instrumentation-based collection: Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
+
+.. code-block:: shell   
+   
+   # Enable profiling mode (required)
+   export ROCPROFSYS_PROFILE=ON
+
+   # Specify PAPI components in the timemory component list
+   export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_array"
+
+   # Specify which PAPI events to collect
+   export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+
+
+.. code-block:: shell 
+   
+   # Include papi_vector for dynamic event lists
+   export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_vector"
+
+   # Alternative: Use perf event names
+   export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
+   ```
+
+2. Sampling-based collection: Periodically interrupts program execution to capture hardware counters along with call stack information. This works with sampling mode.
+
+.. code-block:: shell 
+   # Enable sampling mode (required)
+   export ROCPROFSYS_USE_SAMPLING=ON
+
+   # Specify PAPI events for sampling
+   export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+
+You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``: 
+
+.. code-block:: shell
+
+   export ROCPROFSYS_SAMPLING_OVERFLOW_EVENT="perf::PERF_COUNT_HW_CACHE_REFERENCES"
+
 ROCPROFSYS_ROCM_EVENTS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

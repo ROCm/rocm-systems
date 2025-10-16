@@ -145,3 +145,116 @@ Statistical sampling of the Fibonacci function
 
 .. image:: ../data/fibonacci-sampling.png
    :alt: Visualization of the output of a statistical sample of the Fibonacci function
+
+Overview of Profiling Modes
+----------------------------
+
+ROCm Systems Profiler provides several complementary profiling approaches that can be used independently or in combination. The default mode is **tracing**. Profiling modes are controlled via the ``ROCPROFSYS_MODE`` environment variable, which determines the active backends and features.
+
+Available values for ``ROCPROFSYS_MODE``: `trace, sampling, causal, coverage`
+
+Primary Collection Modes
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - **Mode**
+     - **Purpose**
+   * - **Trace Mode**
+     - Event tracing
+   * - **Profile Mode**
+     - High-level summary profiles
+   * - **Sampling Mode**
+     - Statistical call-stack sampling
+   * - **Causal Mode**
+     - Performance impact analysis
+   * - **Coverage Mode**
+     - Code coverage analysis
+
+Trace Mode (Default)
+--------------------
+
+Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This is the default mode but can also be enabled via ``ROCPROFSYS_TRACE=true`` or with ``ROCPROFSYS_MODE``.
+
+Additional configuration options to control the tracing behavior include:
+
+- ``ROCPROFSYS_TRACE_DELAY`` (``--trace-wait``): Delay before starting trace collection (in seconds).
+- ``ROCPROFSYS_TRACE_DURATION`` (``--trace-duration``): Duration of trace collection (in seconds).
+- ``ROCPROFSYS_TRACE_PERIODS`` (``--trace-periods``): Specify multiple delay/duration periods in the format ``<DELAY>:<DURATION>``, ``<DELAY>:<DURATION>:<REPEAT>``, or ``<DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>``.
+- ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing (``realtime``, ``monotonic``, ``cputime``, etc.).
+
+Profiling Mode
+--------------
+
+Profiling mode generates high-level summary profiles with statistical aggregations (mean, min, max, stddev). This mode  can be enable via ``ROCPROFSYS_PROFILE=true``. This mode uses the **Timemory** backend. When tracing is enabled profiling is turned off by default and vice versa. However both modes can be turned on at the same time.
+
+By default, only wall-clock timing is collected. Additional metrics can be configured via ``ROCPROFSYS_TIMEMORY_COMPONENTS`` which can enables hardware counters (via PAPI), CPU, memory, and system metrics. View available components with: ``rocprof-sys-avail --components --description``.
+
+Profile types:
+
+- **Flat Profile** (``--flat-profile``): Aggregated metrics per function across all contexts.
+- **Hierarchical Profile** (``--profile``): Metrics organized by call-stack context.
+
+**Tip**: Start with a flat profile to identify high-impact functions, then use a hierarchical profile to analyze critical paths.
+
+Sampling Mode
+-------------
+
+Sampling uses statistical call-stack sampling via periodic software interrupts per thread as described in `Sampling the call stack <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/sampling-call-stack.rst>`_.
+
+Sampling Types:
+
+1. **CPU-Time Sampling** (default)
+   - Enabled via ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled via:
+     - ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
+     - ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
+     - ``ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL``
+
+2. **Real-Time Sampling**
+   - Enabled via ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled via:
+     - ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
+     - ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``
+     - ``ROCPROFSYS_SAMPLING_REALTIME_SIGNAL``
+
+3. **Overflow Sampling**
+   - Enabled via ``ROCPROFSYS_SAMPLING_OVERFLOW=ON`` or ``--sample-overflow`` (rocprof-sys-run). It Requires Linux ``perf`` support (``/proc/sys/kernel/perf_event_paranoid <= 2``) as described `here <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/configuring-runtime-options.rst#rocprofsys_papi_events>`_.
+   The sampling can be controlled via:
+     - ``ROCPROFSYS_SAMPLING_OVERFLOW_FREQ``
+     - ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``
+     - ``ROCPROFSYS_SAMPLING_OVERFLOW_SIGNAL``
+     - ``ROCPROFSYS_SAMPLING_OVERFLOW_TIDS``
+
+4. **Process Sampling**
+   - Enabled via ``ROCPROFSYS_USE_PROCESS_SAMPLING=ON`` (default ON). The sampling can be controlled via:
+     - ``ROCPROFSYS_PROCESS_SAMPLING_FREQ``
+     - ``ROCPROFSYS_SAMPLING_CPUS``
+     - ``ROCPROFSYS_SAMPLING_GPUS``
+
+**Note**: If sampling is enabled but no specific type is selected, CPU-time sampling is used by default.
+
+Enabling Sampling:
+
+1. Use ``rocprof-sys-sample`` (auto-enables sampling).
+2. Set ``ROCPROFSYS_USE_SAMPLING=ON``.
+3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``.
+4. Set ``ROCPROFSYS_MODE=sampling``.
+
+Causal Mode
+-----------
+
+Causal profiling quantifies the potential impact of optimizations in parallel code and predicts where efforts should be focused as descibed in `Performing causal profiling <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/performing-causal-profiling.rst>`_.
+This mode can also be enabled via: ``ROCPROFSYS_USE_CAUSAL=true`` or ``ROCPROFSYS_MODE=causal``.
+
+Coverage Mode
+-------------
+
+Coverage mode tracks which parts of your code are executed during a run. It uses binary instrumentation to record function and/or basic block execution. This mode can be enabled via ``rocprof-sys-instrument -M coverage``.
+
+Granularity options:
+
+- Function-level: ``--coverage=function`` (``CODECOV_FUNCTION``)
+- Basic block-level: ``--coverage=basic_block`` (``CODECOV_BASIC_BLOCK``)
+
+**Note**: Coverage mode disables several other features and all other modes to reduce overhead.
