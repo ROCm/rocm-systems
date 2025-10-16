@@ -244,17 +244,15 @@ struct sqtt_buffer_status_t
     hsa_ext_amd_aql_pm4_packet_t packet;
 };
 
-class SQTTBufferingPackets
+struct SQTTBufferingPackets
 {
-public:
     SQTTBufferingPackets(aqlprofile_handle_t handle);
 
     hsa_ext_amd_aql_pm4_packet_t query_status{};
     std::optional<sqtt_buffer_status_t> query_buffer_status();
 
-private:
     const aqlprofile_handle_t handle;
-
+    uint64_t header{0};
     size_t current_buffer{0};
     std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
 };
