@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "library/rocprofiler-sdk/counters.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
 #include <memory>
@@ -30,6 +32,39 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+namespace
+{
+void
+metadata_initialize_counter_category()
+{
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::rocm_counter_collection>::value);
+}
+
+void
+metadata_initialize_counter_track(const char* name)
+{
+    trace_cache::get_metadata_registry().add_track({ name, std::nullopt, "{}" });
+}
+
+void
+metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
+                                 const std::string& metric_description)
+{
+    const size_t EVENT_CODE       = 0;
+    const size_t INSTANCE_ID      = 0;
+    const char*  LONG_DESCRIPTION = "";
+    const char*  COMPONENT        = "";
+    const char*  BLOCK            = "";
+    const char*  EXPRESSION       = "";
+    const auto*  TARGET_ARCH      = "GPU";
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name.c_str(),
+          name.c_str(), metric_description.c_str(), LONG_DESCRIPTION, COMPONENT,
+          "Unit Count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+}
+}  // namespace
 namespace
 {
 std::string
@@ -49,7 +84,8 @@ get_counter_description(const client_data* tool_data, std::string_view _v)
 
 void
 counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack* _track,
-                          timing_interval _timing, scope::config _scope) const
+                          const std::string& track_name, timing_interval _timing,
+                          scope::config _scope) const
 {
     if(!record.dispatch_data) return;
 
@@ -71,6 +107,21 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                       _timing.start, record.record_counter.counter_value);
         TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *_track,
                       _timing.end, 0);
+
+        const std::string event_metadata  = "{}";
+        const size_t      stack_id        = 0;
+        const size_t      parent_stack_id = 0;
+        const size_t      correlation_id  = 0;
+        const std::string call_stack      = "{}";
+        const std::string line_info       = "{}";
+        const size_t      agent_handle    = record.record_counter.agent_id.handle;
+        const size_t      value           = record.record_counter.counter_value;
+
+        trace_cache::get_buffer_storage().store(
+            trace_cache::entry_type::pmc_event_with_sample, track_name.c_str(),
+            _timing.start, event_metadata.c_str(), stack_id, parent_stack_id,
+            correlation_id, call_stack.c_str(), line_info.c_str(), agent_handle,
+            track_name.c_str(), value);
     }
 }
 
@@ -94,11 +145,17 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
             if(storage_ptr)
                 counter_storage::write(storage_ptr, metric_name, metric_description);
         });
+
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
         track_name = JOIN(" ", "GPU", _metric_name, JOIN("", '[', device_id, ']'));
         track      = std::make_unique<counter_track_type>(
             ::perfetto::StaticString(track_name.c_str()));
+
+        metadata_initialize_counter_category();
+        metadata_initialize_counters_pmc(device_id, track_name.c_str(),
+                                         metric_description);
+        metadata_initialize_counter_track(track_name.c_str());
         track->set_is_incremental(false);
         track->set_unit(_unit);
         track->set_unit_multiplier(1);
@@ -110,7 +167,7 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
                             scope::config _scope) const
 {
     operation::set_storage<counter_data_tracker>{}(storage.get());
-    _event(tool_data, track.get(), _timing, _scope);
+    _event(tool_data, track.get(), track_name, _timing, _scope);
 }
 
 void
