@@ -1699,6 +1699,31 @@ class AMDSMIHelpers():
 
         return ranges
 
+    def build_xcp_dict(self, key, violation_status, num_partition):
+        if not isinstance(violation_status[key], list):
+            if "active_" in key:
+               if violation_status[key] != "N/A":
+                   if violation_status[key] is True:
+                       violation_status[key] = "ACTIVE"
+                   elif violation_status[key] is False:
+                       violation_status[key] = "NOT ACTIVE"
+            ret = violation_status[key]
+        elif isinstance(violation_status[key], list):
+            for row in violation_status[key]:
+                for element in row:
+                    if element != "N/A":
+                        if "active_" in key:
+                            if element is True:
+                                row[row.index(element)] = "ACTIVE"
+                            elif element is False:
+                                row[row.index(element)] = "NOT ACTIVE"
+                        elif ("per_" in key) or ("acc_" in key):
+                            row[row.index(element)] = element
+                    else:
+                        continue
+            ret = {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
+        return ret
+
     @staticmethod
     def average_flattened_ints(data, context="data"):
         """Calculate the average of flattened integers from a list or tuple
