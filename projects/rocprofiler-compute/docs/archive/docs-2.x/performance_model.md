@@ -147,7 +147,7 @@ The latter issue is discussed in more detail in our ['internal' IPC](Internal_ip
 CDNA accelerators, such as the MI100 and [MI2XX](2xxnote), contain specialized hardware to accelerate matrix-matrix multiplications, also known as Matrix Fused Multiply-Add (MFMA) operations.
 The exact operation types and supported formats may vary by accelerator.
 The reader is referred to the [AMD matrix cores](https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme/) blog post on GPUOpen for a general discussion of these hardware units.
-In addition, to explore the available MFMA instructions in-depth on various AMD accelerators (including the CDNA line), we recommend the [AMD Matrix Instruction Calculator](https://github.com/RadeonOpenCompute/amd_matrix_instruction_calculator).
+In addition, to explore the available MFMA instructions in-depth on various AMD accelerators (including the CDNA line), we recommend the [AMD Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator).
 
 ```{code-block} shell-session
 :name: matrix_calc_ex
@@ -185,7 +185,7 @@ The exact details of VALU and MFMA operation co-execution vary by instruction, a
   - 'Can co-execute with VALU'
   - 'VALU co-execution cycles possible'
 
-fields in the [AMD Matrix Instruction Calculator](https://github.com/RadeonOpenCompute/amd_matrix_instruction_calculator#example-of-querying-instruction-information)'s detailed instruction information.
+fields in the [AMD Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator#example-of-querying-instruction-information)'s detailed instruction information.
 ```
 
 #### Non-pipeline resources
@@ -210,7 +210,7 @@ AGPRs are not available on all AMD Instinct(tm) accelerators.
 GCN GPUs, such as the AMD Instinct(tm) MI50 had a 256 KiB VGPR file.
 The AMD Instinct(tm) MI100 (CDNA) has a 2x256 KiB register file, where one half is available as general-purpose VGPRs, and the other half is for matrix math accumulation VGPRs (AGPRs).
 The AMD Instinct(tm) [MI2XX](2xxnote) (CDNA2) has a 512 KiB VGPR file per CU, where each wave can dynamically request up to 256 KiB of VGPRs and an additional 256 KiB of AGPRs.
-For more detail, the reader is referred to the [following comment](https://github.com/RadeonOpenCompute/ROCm/issues/1689#issuecomment-1553751913).
+For more detail, the reader is referred to the [following comment](https://github.com/ROCm/ROCm/issues/1689#issuecomment-1553751913).
 
 (ERM)=
 ### Pipeline Metrics
@@ -562,7 +562,7 @@ The reader is referred to the [Instructions per-cycle and Utilizations](IPC_exam
   - Indicates what percent of the kernel's duration the [MFMA](mfma) unit was busy executing instructions.  Computed as the ratio of the total number of cycles spent by the [MFMA](salu) was busy over the [total CU cycles](TotalCUCycles).
   - Percent
 * - MFMA Instruction Cycles
-  - The average duration of [MFMA](mfma) instructions in this kernel in cycles.  Computed as the ratio of the total number of cycles the [MFMA](mfma) unit was busy over the total number of [MFMA](mfma) instructions.  Compare to e.g., the [AMD Matrix Instruction Calculator](https://github.com/RadeonOpenCompute/amd_matrix_instruction_calculator).
+  - The average duration of [MFMA](mfma) instructions in this kernel in cycles.  Computed as the ratio of the total number of cycles the [MFMA](mfma) unit was busy over the total number of [MFMA](mfma) instructions.  Compare to e.g., the [AMD Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator).
   - Cycles per instruction
 * - VMEM Latency
   - The average number of round-trip cycles (i.e., from issue to data-return / acknowledgment) required for a VMEM instruction to complete.
@@ -3522,7 +3522,7 @@ The MFMA assembly operations used in this example are inherently unportable to o
 ```
 
 Unlike the simple quad-cycle `v_mov_b32` operation discussed in our [previous example](VALU_ipc), some operations take many quad-cycles to execute.
-For example, using the [AMD Matrix Instruction Calculator](https://github.com/RadeonOpenCompute/amd_matrix_instruction_calculator#example-of-querying-instruction-information) we can see that some [MFMA](mfma) operations take 64 cycles, e.g.:
+For example, using the [AMD Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator#example-of-querying-instruction-information) we can see that some [MFMA](mfma) operations take 64 cycles, e.g.:
 
 ```shell-session
 $ ./matrix_calculator.py --arch CDNA2 --detail-instruction --instruction v_mfma_f32_32x32x8bf16_1k

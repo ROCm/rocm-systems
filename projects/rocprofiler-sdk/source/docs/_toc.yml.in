@@ -9,6 +9,10 @@ subtrees:
   - caption: Install
     entries:
     - file: install/installation
+  - caption: Quick Reference
+    entries:
+    - file: quick_guide
+      title: ROCprofiler-SDK Quick Reference Guide
   - caption: How to
     entries:
     - file: how-to/samples
