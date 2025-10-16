@@ -729,6 +729,8 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
       address dst = hostDst + copyOffset;
       status = rocrCopyBuffer(dst, dstAgent, stagingBuffer, srcAgent, copysize, copyMetadata);
       if (!status) {
+        // Release Pinned Memory back to pool if any
+        releaseBuffer(outBuffer);
         break;
       }
     } else {  // D2H Path
@@ -745,6 +747,8 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
           memcpy(hostDst + copyOffset, stagingBuffer, copysize);
         }
       } else {
+        // Release Pinned Memory back to pool if any
+        releaseBuffer(outBuffer);
         break;
       }
     }

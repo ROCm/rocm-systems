@@ -65,12 +65,12 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap((void*)ptrA, size_mem, 0, handle, 0));
   // Test hipMemRetainAllocationHandle
   hipMemGenericAllocationHandle_t gethandle;
   // Check beginning of VMM ptr
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
     REQUIRE(hipMemRetainAllocationHandle(&gethandle, nullptr) == hipErrorInvalidValue);
   }
   SECTION("not mapped address") {
-    hipDeviceptr_t ptrB;
+    void* ptrB;
     HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, 0, 0));
     REQUIRE(hipMemRetainAllocationHandle(&gethandle, reinterpret_cast<void*>(ptrB)) ==
             hipErrorInvalidValue);

@@ -2138,6 +2138,27 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   return true;
 }
 
+// PAL Device file I/O stubs: PAL doesn't implement AIS file I/O yet.
+// Provide definitions so the vtable and linker are satisfied.
+// Replace with a real implementation if/when PAL supports file I/O.
+bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                      uint64_t* size_copied, int32_t* status) {
+  if (size_copied) {
+    *size_copied = 0;
+  }
+  LogError("PAL Device: amdFileRead not supported on this backend");
+  return false;
+}
+
+bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) {
+  if (size_copied) {
+    *size_copied = 0;
+  }
+  LogError("PAL Device: amdFileWrite not supported on this backend");
+  return false;
+}
+
 amd::Memory* Device::findMapTarget(size_t size) const {
   // Must be serialised for access
   amd::ScopedLock lk(mapCacheOps_);
@@ -2804,19 +2825,19 @@ bool Device::createBlitProgram() {
       std::string opt = "-cl-internal-kernel ";
       if (auto retval =
               asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::KERN,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
                  "Build failed for trap handler with error code: %d\n", retval);
         asm_program->release();
       } else {
         if (asm_program->load()) {
           trap_handler_ = asm_program;
         } else {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::KERN, "Could not load the trap handler \n");
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Could not load the trap handler \n");
           asm_program->release();
         }
       }
     } else {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::KERN, "Trap handler creation failed\n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Trap handler creation failed\n");
     }
   }
 

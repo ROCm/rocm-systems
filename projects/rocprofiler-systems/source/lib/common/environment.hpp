@@ -24,6 +24,7 @@
 
 #include "common/defines.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <timemory/utility/filepath.hpp>
 #include <type_traits>
 #include <unistd.h>
 
@@ -177,5 +179,55 @@ struct ROCPROFSYS_INTERNAL_API env_config
         return setenv(env_name.c_str(), env_value.c_str(), override);
     }
 };
+
+inline std::string
+discover_llvm_libdir_for_ompt(bool verbose = false)
+{
+    auto strip = [](std::string s) {
+        if(!s.empty() && s.back() == '/') s.pop_back();
+        return s;
+    };
+
+    // Common ROCm envs
+    const auto rocm_dir  = strip(get_env<std::string>("ROCM_PATH", "/opt/rocm"));
+    const auto rocmv_dir = strip(get_env<std::string>("ROCmVersion_DIR", ""));
+
+    std::vector<std::string> candidates;
+    candidates.reserve(6);
+
+    auto push_unique = [&](const std::string& p) {
+        if(p.empty()) return;
+        if(std::find(candidates.begin(), candidates.end(), p) == candidates.end())
+            candidates.emplace_back(p);
+    };
+
+    if(!rocmv_dir.empty())
+    {
+        push_unique(rocmv_dir + "/llvm/lib");
+        push_unique(rocmv_dir + "/lib");
+    }
+    push_unique(rocm_dir + "/llvm/lib");
+    push_unique(rocm_dir + "/lib/llvm/lib");
+    push_unique("/opt/rocm/llvm/lib");
+    push_unique("/opt/rocm/lib/llvm/lib");
+
+    auto has_libomptarget = [](const std::string& dir) {
+        const std::string so = dir + "/libomptarget.so";
+        return ::tim::filepath::exists(so);
+    };
+
+    // Pick the first candidate that contains libomptarget.so
+    auto it = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
+    if(it != candidates.end())
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "Using LLVM libdir: %s\n", it->c_str());
+        return *it;
+    }
+
+    ROCPROFSYS_ENVIRON_LOG(verbose,
+                           "libomptarget.so not found in candidate LLVM libdirs\n");
+    return {};
+}
+
 }  // namespace common
 }  // namespace rocprofsys

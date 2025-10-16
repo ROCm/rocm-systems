@@ -62,6 +62,7 @@
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #include "suites/performance/memory_async_copy_numa.h"
+#include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
@@ -525,6 +526,12 @@ TEST(rocrtstPerf, Memory_Async_Copy) {
   // another gpu
   RunGenericTest(&mac);
 }
+
+TEST(rocrtstPerf, Memory_Async_Copy_On_Engine) {
+  MemoryAsyncCopyOnEngine mac;
+  RunGenericTest(&mac);
+}
+
 #endif  // ROCRTST_EMULATOR_BUILD
 
 TEST(rocrtstPerf, ENQUEUE_LATENCY) {
