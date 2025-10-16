@@ -942,7 +942,6 @@ Main function detection issues
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If ROCm Systems Profiler fails to detect or instrument your program's main function, you can explicitly specify it using the ``--main-function`` (or ``-m``) option.
-the ``--main-function`` (or ``-m``) option.
 
 .. code-block:: shell
 
