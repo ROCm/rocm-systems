@@ -4,6 +4,12 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.3.0 for ROCm 7.2.0
+
+### Changed
+
+- Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
+
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added
@@ -17,7 +23,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Changed
 
 - Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
-- Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
 - Updated PAPI module to v7.2.0b2.
 - ROCprofiler-SDK is now used for tracing OMPT API calls.
 
