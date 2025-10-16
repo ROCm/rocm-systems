@@ -6,6 +6,8 @@
 ROCm Compute Profiler documentation
 ***********************************
 
+(test content)
+
 This documentation provides a comprehensive overview of the ROCm Compute
 Profiler tool. In addition to a full deployment guide with installation
 instructions, this documentation also explains the ideas motivating the design
