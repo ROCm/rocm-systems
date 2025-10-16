@@ -1295,38 +1295,37 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         uint8_t packetType =
             extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (packetType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Graph shader name : %s",
-                  (*kernelNames)[packetIndex].c_str());
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Graph shader name : %s, device id : %u",
+                  (*kernelNames)[packetIndex].c_str(), dev().index());
 
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-                  "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
-                  "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-                  "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
-                  "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
-                  "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
-                  "rptr=%u, wptr=%u",
-                  gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
-                  extractAqlBits(header, HSA_PACKET_HEADER_BARRIER,
-                                HSA_PACKET_HEADER_WIDTH_BARRIER),
-                  extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                                HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-                  extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                                HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-                  packet->setup,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_x,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_y,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_z,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_x,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_y,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_z,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->private_segment_size,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->group_segment_size,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernel_object,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
-                  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
-                  Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
-            }
+          ClPrint(
+              amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
+              "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
+              "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+              "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
+              "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
+              "kernarg_address=0x%zx, completion_signal=0x%zx, correlation_id=%zu, "
+              "rptr=%u, wptr=%u",
+              gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header, packetType,
+              extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
+              extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                             HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+              extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                             HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+              packet->setup, reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_x,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_y,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->grid_size_z,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_x,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_y,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->workgroup_size_z,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->private_segment_size,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->group_segment_size,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernel_object,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
+              Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
+        }
       }
     }
 
@@ -1632,6 +1631,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   profiling_ = profiling;
   cooperative_ = cooperative;
 
+  // Initialize barrier and barrier value packets
+  barrier_packet_.header = kInvalidAql;
+  barrier_value_packet_.header.header = kInvalidAql;
+
   constexpr uint16_t kernelDispatchHBits =
       (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
   constexpr uint16_t barrierHBits = (1 << HSA_PACKET_HEADER_BARRIER);
@@ -1730,11 +1733,6 @@ bool VirtualGPU::create() {
     LogError("Could not create BlitManager!");
     return false;
   }
-
-  // Initialize barrier and barrier value packets
-  memset(&barrier_packet_, 0, sizeof(barrier_packet_));
-  barrier_packet_.header = kInvalidAql;
-  barrier_value_packet_.header.header = kInvalidAql;
 
   // Create a object of PrintfDbg
   printfdbg_ = new PrintfDbg(roc_device_);

@@ -594,6 +594,7 @@ hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback
                                 unsigned int flags);
 hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t length,
                                    unsigned int flags);
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode);
 hipError_t hipStreamCreate(hipStream_t* stream);
 hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
@@ -1264,6 +1265,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipStreamAddCallback_fn = hip::hipStreamAddCallback;
   ptrDispatchTable->hipStreamAttachMemAsync_fn = hip::hipStreamAttachMemAsync;
   ptrDispatchTable->hipStreamBeginCapture_fn = hip::hipStreamBeginCapture;
+  ptrDispatchTable->hipStreamCopyAttributes_fn = hip::hipStreamCopyAttributes;
   ptrDispatchTable->hipStreamCreate_fn = hip::hipStreamCreate;
   ptrDispatchTable->hipStreamCreateWithFlags_fn = hip::hipStreamCreateWithFlags;
   ptrDispatchTable->hipStreamCreateWithPriority_fn = hip::hipStreamCreateWithPriority;
@@ -2084,15 +2086,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadFromFile_fn, 497);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryUnload_fn, 498);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernel_fn, 499);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 16
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamCopyAttributes_fn, 501);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 501)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 502)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 15,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 16,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
