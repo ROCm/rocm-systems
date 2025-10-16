@@ -155,12 +155,10 @@ main(int /*argc*/, char** /*argv*/)
     kernels.push_back(looping_lds_kernel);
     kernels.push_back(fifo_kernel);
 
-    for(size_t i = 0; i < streams.size() * kernels.size(); i++)
-    {
-        // Warmup then start
-        if(i == streams.size())
-            roctxProfilerResume(0);
+    roctxProfilerResume(0);
 
+    for(size_t i = 0; i < streams.size() * kernels.size() * 400; i++)
+    {
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());
 
