@@ -517,3 +517,5 @@ hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
 hipStreamCopyAttributes
+hipLibraryGetGlobal
+hipLibraryGetManaged

@@ -638,6 +638,8 @@ global:
     hipLibraryUnload;
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
+    hipLibraryGetGlobal;
+    hipLibraryGetManaged;
     hipStreamCopyAttributes;
 local:
     *;

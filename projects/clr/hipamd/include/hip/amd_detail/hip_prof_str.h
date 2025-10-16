@@ -463,7 +463,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryGetKernelCount = 443,
   HIP_API_ID_hipMemGetHandleForAddressRange = 444,
   HIP_API_ID_hipStreamCopyAttributes = 445,
-  HIP_API_ID_LAST = 445,
+  HIP_API_ID_RESERVED_446 = 446,
+  HIP_API_ID_RESERVED_447 = 447,
+  HIP_API_ID_LAST = 447,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),

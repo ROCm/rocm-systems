@@ -2,6 +2,7 @@ set(TEST_SRC
     loadlib_rtc.cc
     loadlib_co.cc
     library_negative.cc
+    get_varaibles.cc
 )
 
 add_custom_target(library_code_load.code

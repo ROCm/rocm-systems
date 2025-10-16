@@ -51,12 +51,12 @@ TEST_CASE("Unit_hip_library_load_co") {
     hipKernel_t function;
 
     HIP_CHECK(
-        hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+        hipLibraryLoadFromFile(&library, lib_co.c_str(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "add_kernel"));
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 9);  // Update if you change module
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -84,7 +84,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 9); // Update if you change kernel count
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -112,7 +112,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 9); // Update if you change kernel count
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 

@@ -6425,6 +6425,28 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 
 /**
+ * @brief Get pointer to the global variable defined in kernel
+ *
+ * @param [out] dptr pointer to global variable
+ * @param [out] bytes size of the variable
+ * @param [in] library Input created hip library
+ * @param [in] name name of the global variable
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
+
+/**
+ * @brief Get pointer to the managed variable defined in kernel
+ *
+ * @param [out] dptr pointer to managed variable
+ * @param [out] bytes size of the variable
+ * @param [in] library Input created hip library
+ * @param [in] name name of the managed variable
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
+
+/**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
  * @param [out] attr  Attributes of funtion

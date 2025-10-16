@@ -29,17 +29,36 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
 
+#include "hip_global.hpp"
 #include "hip_code_object.hpp"
 #include "hip_fatbin.hpp"
 
 namespace hip {
+struct DeviceVaraible {
+  amd::Memory* memory_{nullptr};
+  void* address_{nullptr};
+  size_t size_{0};
+  DeviceVaraible() = default;
+  DeviceVaraible(amd::Memory* memory, void* address, size_t size)
+      : memory_(memory), address_(address), size_(size) {}
+};
+
+struct ManagedVaraible {
+  void* address_{nullptr};
+  void* maddress_{nullptr};
+  size_t size_{0};
+  ManagedVaraible() = default;
+  ManagedVaraible(void* address, void* maddress, size_t size)
+      : address_(address), maddress_(maddress), size_(size) {}
+};
+
 // An abstract Library container
 class LibraryContainer {
  public:
   // Create from pointer
-  explicit LibraryContainer(const char* code_object);  // from pointer
+  explicit LibraryContainer(const char* codeObject);  // from pointer
   // Create from file
-  explicit LibraryContainer(const std::string file_name);  // deep copy from file
+  explicit LibraryContainer(const std::string fileName);  // deep copy from file
   ~LibraryContainer();
 
   // Load and build the library
@@ -57,6 +76,12 @@ class LibraryContainer {
   // Register the kernel function, make an entry in global state
   void Register(std::string name, int device, hipKernel_t k);
 
+  // Get Global Varaible ptr
+  hipError_t GVaraible(const std::string& name, void** ptr, size_t* size);
+
+  // Get Managed Varaible ptr
+  hipError_t MVaraible(const std::string& name, void** ptr, size_t* size);
+
  private:
   LibraryContainer() = delete;
   LibraryContainer(const LibraryContainer&) = delete;
@@ -64,11 +89,17 @@ class LibraryContainer {
   LibraryContainer& operator=(const LibraryContainer&) = delete;
   LibraryContainer& operator=(const LibraryContainer&&) = delete;
 
-  std::mutex lib_mutex_;
+  std::mutex libMutex_;
   std::atomic_bool built_ = false;
   std::shared_ptr<FatBinaryInfo> fatbin_;
   std::map<std::string, std::shared_ptr<hip::Function>> functions_;
   // Store already looked up kernels for certain devices
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;
+
+  // Global varaibles
+  std::map<std::string, std::shared_ptr<DeviceVaraible>> globalVariables_;
+
+  // Managed variables
+  std::map<std::string, std::shared_ptr<ManagedVaraible>> managedVariables_;
 };
 }  // namespace hip

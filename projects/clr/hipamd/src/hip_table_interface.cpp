@@ -2041,3 +2041,9 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
 }
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  return hip::GetHipDispatchTable()->hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+}
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
+}
