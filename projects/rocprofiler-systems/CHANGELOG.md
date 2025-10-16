@@ -4,16 +4,27 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.2.0 for ROCm 7.1
+## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added
 
 - ``ROCPROFSYS_ROCM_GROUP_BY_QUEUE`` configuration setting to allow grouping of events by hardware queue, instead of the default grouping.
-- Support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
+- Support for `rocpd` database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
+- Support for profiling PyTorch workloads using the `rocpd` output database.
+- Support for tracing OpenMP API in Fortran applications.
+- An error warning that is triggered if the profiler application fails due to SELinux enforcement being enabled. The warning includes steps to disable SELinux enforcement.
 
-## Changed
+### Changed
 
 - Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
+- Updated PAPI module to v7.2.0b2.
+- ROCprofiler-SDK is now used for tracing OMPT API calls.
+
+## ROCm Systems Profiler 1.1.1 for ROCm 7.0.2
+
+### Resolved issues
+
+- Fixed an issue where ROC-TX ranges were displayed as two separate events instead of a single spanning event.
 
 ## ROCm Systems Profiler 1.1.0 for ROCm 7.0
 
