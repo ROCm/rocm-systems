@@ -217,7 +217,9 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        _group_in_groups = self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
@@ -246,7 +248,7 @@ class AMDSMICommands():
             node_id = kfd_info['node_id']
             partition_id = kfd_info['current_partition_id']
         except amdsmi_exception.AmdSmiLibraryException as e:
-            kfd_id = node_id = "N/A"
+            kfd_id = node_id = partition_id = "N/A"
             logging.debug("Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info())
 
         # CSV format is intentionally aligned with Host
@@ -273,9 +275,6 @@ class AMDSMICommands():
                     "hip_uuid":   "N/A",
                 }
 
-            # __Override__ hip_uuid if the group check failed
-            if not _group_in_groups:
-               enumeration_info["hip_uuid"] = "N/A"
             # now store all the fields exactly once:
             if enumeration_info['drm_render'] == "N/A":
                 self.logger.store_output(args.gpu, 'render', enumeration_info['drm_render'])
@@ -455,7 +454,7 @@ class AMDSMICommands():
             current_platform_values += [args.partition]
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
@@ -1586,7 +1585,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # Handle watch logic, will only enter this block once
@@ -3641,7 +3640,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(12)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         p2p_status_cache = {}
@@ -4534,6 +4533,10 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
+
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.set_gpu)
         if handled_multiple_gpus:
@@ -5072,10 +5075,6 @@ class AMDSMICommands():
         if core:
             args.core = core
 
-        if not self.group_check_printed:
-            self.helpers.check_required_groups()
-            self.group_check_printed = True
-
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
@@ -5282,7 +5281,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # Handle multiple GPUs
@@ -5652,7 +5651,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # If all arguments are False, the print all values
@@ -6414,7 +6413,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(7)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # Populate the possible gpus and their bdfs
@@ -6753,7 +6752,7 @@ class AMDSMICommands():
             args.accelerator = accelerator
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         ###########################################
@@ -7118,7 +7117,7 @@ class AMDSMICommands():
                                                     message)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=True)
             self.group_check_printed = True
 
         if not args.cper:
@@ -7174,7 +7173,7 @@ class AMDSMICommands():
 
         # check groups first
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         processors = amdsmi_interface.amdsmi_get_processor_handles()
@@ -7381,6 +7380,11 @@ class AMDSMICommands():
         if len(devices) == 0:
             print("No GPUs on machine")
             return
+
+        # Check that KFD permissions are available
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
 
         device = devices[i]
         listener = amdsmi_interface.AmdSmiEventReader(device,

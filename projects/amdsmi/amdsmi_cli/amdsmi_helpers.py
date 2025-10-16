@@ -1171,29 +1171,36 @@ class AMDSMIHelpers():
         except OSError as e:
             return False, e.errno, e.strerror
 
-    # Check kfd and dri for EACCES/EPERM
-    def check_required_groups(self):
+    def check_required_groups(self, check_render=True, check_video=True):
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
+        
+        Args:
+            check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
+            check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
+        
+        Returns:
+            bool: True if all checked devices are accessible, False if any permission errors found
         """
 
         # Skip check if running as root.
         if os.geteuid() == 0:
-            return
+            return True
 
         paths_to_check = []
-        if os.path.exists("/dev/kfd"):
+        
+        # Only add paths for device types that are flagged for checking
+        if check_render and os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
-
-        # Render group correspond to /dev/dri/renderD*
-        paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
+            paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
 
         # Video group corresponds to /dev/dri/card*
-        paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
+        if check_video:
+            paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
 
         if not paths_to_check:
-            return
+            return True
 
         denied = []
 
@@ -1206,27 +1213,100 @@ class AMDSMIHelpers():
                 denied.append((path, err, msg, self._stat_info(path)))
 
         if denied:
+            # Collect unique group info from denied devices
+            required_groups = {"kfd": [], "renderD": [], "card": []}
+            device_types = {"kfd": [], "renderD": [], "card": []}
+
+            for path, err, msg, si in denied:
+                if "error" not in si:
+                    # Categorize devices and collect unique group info
+                    if "/dev/kfd" in path:
+                        device_types["kfd"].append(path)
+                        required_groups["kfd"].append(si)
+                    elif "/dev/dri/renderD" in path:
+                        device_types["renderD"].append(path)
+                        required_groups["renderD"].append(si)
+                    elif "/dev/dri/card" in path:
+                        device_types["card"].append(path)
+                        required_groups["card"].append(si)
+
+            # Deduplicate group info by converting to tuple for hashing
+            for device_type in required_groups:
+                unique_groups = list(dict.fromkeys(
+                    tuple(sorted(d.items())) for d in required_groups[device_type]
+                ))
+                required_groups[device_type] = [dict(item) for item in unique_groups]
+
             lines = []
             lines.append("Permission needed to access required GPU device node(s):")
-            for path, err, msg, si in denied:
-                if "error" in si:
-                    lines.append(f"  - {path}: {os.strerror(err)}; stat failed: {si['error']}")
+
+            # Collect all unique groups for usermod command
+            all_groups = set()
+
+            # Show summary of denied devices by type with ownership info
+            if device_types["kfd"]:
+                lines.append("  • /dev/kfd: Permission denied")
+                if len(required_groups["kfd"]) > 1:
+                    lines.append("    - Required group(s):")
                 else:
+                    lines.append("    - Required group:")
+                for group_info in required_groups["kfd"]:
                     lines.append(
-                        "  - {p}: {err}; owner={user}({uid}):{group}({gid});".format(
-                            p=path,
-                            err=os.strerror(err),
-                            user=si["user"],
-                            uid=si["uid"],
-                            group=si["group"],
-                            gid=si["gid"],
+                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
+                            user=group_info["user"],
+                            uid=group_info["uid"],
+                            group=group_info["group"],
+                            gid=group_info["gid"],
                         )
                     )
+                    all_groups.add(group_info["group"])
 
-            lines.append("")
-            lines.append("You can try:")
-            lines.append("  • Add your user to the group that owns these devices:")
-            lines.append("      sudo usermod -aG <group> \"$USER\"\n")
+            if device_types["renderD"]:
+                lines.append(f"  • /dev/dri/renderD*: {len(device_types['renderD'])} device(s) denied")
+                if len(required_groups["renderD"]) > 1:
+                    lines.append("    - Required group(s):")
+                else:
+                    lines.append("    - Required group:")
+                for group_info in required_groups["renderD"]:
+                    lines.append(
+                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
+                            user=group_info["user"],
+                            uid=group_info["uid"],
+                            group=group_info["group"],
+                            gid=group_info["gid"],
+                        )
+                    )
+                    all_groups.add(group_info["group"])
+
+            if device_types["card"]:
+                lines.append(f"  • /dev/dri/card*: {len(device_types['card'])} device(s) denied")
+                if len(required_groups["card"]) > 1:
+                    lines.append("    - Required group(s):")
+                else:
+                    lines.append("    - Required group:")
+                for group_info in required_groups["card"]:
+                    lines.append(
+                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
+                            user=group_info["user"],
+                            uid=group_info["uid"],
+                            group=group_info["group"],
+                            gid=group_info["gid"],
+                        )
+                    )
+                    all_groups.add(group_info["group"])
+
+            # Generate usermod command with all unique groups
+            groups_for_usermod = ",".join(sorted(all_groups))
+
+            lines.extend([
+                "",
+                "To resolve this issue, try the following:",
+                "  • Add your user to the required group(s):",
+            f"      sudo usermod -aG {groups_for_usermod} \"$USER\"",
+                "  • Log out and log back in for the group changes to take effect",
+                "  • Alternatively, run this command with sudo/admin privileges",
+                ""
+            ])
             print("\n".join(lines))
             return False
 
