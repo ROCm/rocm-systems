@@ -38,7 +38,7 @@ Only a subset of the OMPT callbacks are processed:
   | ompt_callback_sync_region        | omp_sync_region           |
   | ompt_callback_sync_region_wait   | omp_sync_region_wait      |
   | ompt_callback_target_data_op     | omp_target_data_op        |
-  | ompt_callback_target_t           | omp_target_emi            |
+  | ompt_callback_target             | omp_target                |
   | ompt_callback_target_submit      | omp_target_submit         |
   | ompt_callback_task_create        | omp_task_create           |
   | ompt_callback_task_dependence    | omp_task_dependence       |
@@ -52,15 +52,38 @@ Only a subset of the OMPT callbacks are processed:
 Configuration
 =============
 
-To enable capturing of OMPT callbacks, the following settings are required:
+To enable capturing of OMPT callbacks, the following parameter settings are required:
 
 .. code-block:: shell
 
-  export ROCPROFSYS_USE_ROCM=ON
-  export ROCPROFSYS_USE_OMPT=ON
+  ROCPROFSYS_USE_ROCM=ON
+  ROCPROFSYS_USE_OMPT=ON
 
 .. note::
    OMPT callbacks will not be traced if the system does not have a GPU.
+
+These settings can be set as environment variables using ``export`` or can be saved in a configuration file. Here is an example of a complete configuration file, ``rocprofsys.cfg``:
+
+.. code-block:: shell
+
+  ROCPROFSYS_VERBOSE=1
+  ROCPROFSYS_DL_VERBOSE=1
+  ROCPROFSYS_USE_ROCM=1
+  ROCPROFSYS_USE_OMPT=1
+  ROCPROFSYS_OUTPUT_PREFIX=foo/
+  ROCPROFSYS_FILE_OUTPUT=ON
+  ROCPROFSYS_TIME_OUTPUT=OFF
+
+To specify the configuration file, use the `ROCPROFSYS_CONFIG_FILE` setting:
+
+.. code-block:: shell
+
+  ROCPROFSYS_CONFIG_FILE=/path/to/rocprofsys.cfg
+
+This setting defines the location of the ROCm Systems Profiler configuration file.
+
+If you are tracing an OMPT program that offloads to the GPU, ensure that the required OpenMP target library is in your path. For example, with ``amdflang``,
+``libomptarget.so`` is required. With ROCm installed, it can be found in ``/opt/rocm/lib/llvm/lib``.
 
 Instrumenting and running a program
 ===================================
@@ -71,6 +94,9 @@ To generate a trace of this program, first compile:
 .. code-block:: shell
 
   make FC=amdflang
+
+.. note::
+   This program offloads to the GPU. Ensure that the OpenMP target library is present in your library path.
 
 To generate the instrumented binary, we use `rocprof-sys-instrument`. An example command is:
 
