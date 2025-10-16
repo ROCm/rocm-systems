@@ -39,7 +39,8 @@ project(
     LANGUAGES C
     DESCRIPTION
         "A kernel-level profiling tool for machine learning/HPC workloads running on AMD MI GPUs"
-    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-compute"
+    HOMEPAGE_URL
+        "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
 )
 
 set(PACKAGE_NAME "rocprofiler-compute")
@@ -671,7 +672,9 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-compute")
+set(CPACK_PACKAGE_CONTACT
+    "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
+)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "ROCm Compute Profiler: tool for GPU performance profiling"
 )
