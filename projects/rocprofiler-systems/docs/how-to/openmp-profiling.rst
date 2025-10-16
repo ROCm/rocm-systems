@@ -82,7 +82,7 @@ To specify the configuration file, use the `ROCPROFSYS_CONFIG_FILE` setting:
 
 This setting defines the location of the ROCm Systems Profiler configuration file.
 
-If you are tracing an OMPT program that offloads to the GPU, ensure that the required OpenMP target library is in your path. For example, with ``amdflang``,
+If you are tracing an OpenMP program that offloads to the GPU, ensure that the required OpenMP target library is in your path. For example, with ``amdflang``,
 ``libomptarget.so`` is required. With ROCm installed, it can be found in ``/opt/rocm/lib/llvm/lib``.
 
 Instrumenting and running a program
