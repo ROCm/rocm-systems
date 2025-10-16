@@ -27,7 +27,7 @@ The workflow system manages changes to architecture configurations located in `s
 
 ## Quick Start
 
-### Initial Setup
+### Initial Setup (not needed following first commit)
 
 1. Create the hash database:
 ```bash
@@ -80,7 +80,7 @@ python master_config_workflow_script.py --dry-run
 
 **Method 2: Using Delta**
 
-1. Create `src/rocprof_compute_soc/analysis_configs/gfx950/config_delta/gfx950_diff.yaml`:
+1. Create `src/rocprof_compute_soc/analysis_configs/gfx950/config_delta/gfx955_diff.yaml`:
 ```yaml
 Addition:
   - Panel Config:
@@ -137,11 +137,11 @@ Modification:
 - Metric descriptions synced to `utils/per_arch_metric_definitions/gfx940_metrics_description.yaml`
 - Hashes updated for gfx940 only
 
-### Scenario C: Add New Architecture (gfx951)
+### Scenario C: Add New Architecture (gfx955)
 
 **Method 1: Create Directory with YAMLs**
 
-1. Create `src/rocprof_compute_soc/analysis_configs/gfx951/`
+1. Create `src/rocprof_compute_soc/analysis_configs/gfx955/`
 2. Copy/create YAML files
 3. Run: `python master_config_workflow_script.py`
 4. Confirm this is the new latest arch
@@ -149,14 +149,14 @@ Modification:
 **Method 2: Using Delta from Latest**
 
 1. Create delta showing differences from gfx950
-2. Place in `src/rocprof_compute_soc/analysis_configs/gfx951/config_delta/gfx951_diff.yaml`
+2. Place in `src/rocprof_compute_soc/analysis_configs/gfx955/config_delta/gfx955_diff.yaml`
 3. Run: `python master_config_workflow_script.py`
 4. Confirm this is the new latest arch
 
 **What Happens:**
-- gfx951 becomes new latest arch
-- Template updated with gfx951 as source
-- Deltas generated: gfx951 → gfx950, gfx951 → gfx940, etc.
+- gfx955 becomes new latest arch
+- Template updated with gfx955 as source
+- Deltas generated: gfx955 → gfx950, gfx955 → gfx940, etc.
 - All archs validated
 - Metric descriptions synced
 - Hashes updated
@@ -450,18 +450,3 @@ If you need to modify the workflow behavior:
 2. Edit `master_config_workflow_script.py` for workflow logic changes
 3. Test with `--dry-run` extensively
 4. Update this README
-
-## Summary
-
-The master workflow provides:
-
-✅ Automatic change detection
-✅ Sequential prompts for multiple changes
-✅ Automatic backup/restore on failure
-✅ Complete validation
-✅ Metric description sync
-✅ Delta generation
-✅ Template updates
-✅ Hash tracking
-
-Simply make your changes and run `python master_config_workflow_script.py` - the system handles the rest!

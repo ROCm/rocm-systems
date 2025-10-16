@@ -20,8 +20,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from . import hash_manager
-from . import metric_description_manager
+try:
+    from . import hash_manager, metric_description_manager
+except Exception:
+    import hash_manager
+    import metric_description_manager
+
 import yaml
 
 # =============================================================================
@@ -67,9 +71,17 @@ def load_config() -> dict:
 
 def create_backup(source_paths: list[str], backup_dir: str) -> Path:
     """Create a timestamped backup of the provided paths."""
-    backup_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = Path(backup_dir) / backup_id
-    backup_path.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")  # add microseconds
+    base = Path(backup_dir)
+    base.mkdir(parents=True, exist_ok=True)
+    backup_path = base / ts
+
+    # Fallback suffix if somehow collides
+    i = 1
+    while backup_path.exists():
+        backup_path = base / f"{ts}_{i}"
+        i += 1
+
     print(f"Creating backup: {backup_path}")
     for s in source_paths:
         sp = Path(s)
@@ -77,6 +89,7 @@ def create_backup(source_paths: list[str], backup_dir: str) -> Path:
         if sp.is_dir():
             shutil.copytree(sp, dst)
         elif sp.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(sp, dst)
     return backup_path
 
@@ -264,14 +277,14 @@ def display_change_summary(changes: dict) -> bool:
 # =============================================================================
 
 
-def promote_to_latest(new_arch: str, config: dict) -> bool:
+def promote_to_latest(new_arch: str, config: dict, reuse_backup: Optional[Path] = None) -> bool:
     """
     Original 'promote' that assumes new_arch dir already exists & populated.
     (Kept for backward compatibility.)
     """
     print(f"\nPROMOTING {new_arch} TO LATEST ARCHITECTURE...")
     backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
-    backup_path = create_backup(backup_paths, config["paths"]["backups"])
+    backup_path = reuse_backup or create_backup(backup_paths, config["paths"]["backups"])
 
     try:
         root = Path(config["paths"]["configs_root"])
@@ -301,6 +314,12 @@ def promote_to_latest(new_arch: str, config: dict) -> bool:
             )
             if gen.returncode != 0:
                 raise Exception(f"Failed to generate delta for {p}: {gen.stderr}")
+
+        print("\n\tUpdating hashes for previous architectures (delta files)")
+        for p in prev_archs:
+            hash_manager.update_hashes(
+                p, config["paths"]["configs_root"], config["paths"]["hashes"]
+            )
 
         print("\n3. Validating all architectures")
         ok, msg = validate_all_archs(config)
@@ -377,6 +396,11 @@ def update_latest_arch_from_delta(
             )
             if gen.returncode != 0:
                 raise Exception(f"Failed to generate delta for {prev}")
+
+        for prev in [a for a in all_archs if a != arch_name]:
+            hash_manager.update_hashes(
+                prev, config["paths"]["configs_root"], config["paths"]["hashes"]
+            )
 
         print("\n4. Validating all architectures")
         ok, msg = validate_all_archs(config)
@@ -491,6 +515,13 @@ def update_latest_arch_from_edits(arch_name: str, config: dict) -> bool:
             )
             if gen.returncode != 0:
                 raise Exception(f"Failed to generate delta for {prev}")
+
+        for prev in [
+            a for a in get_all_archs(config["paths"]["configs_root"]) if a != arch_name
+        ]:
+            hash_manager.update_hashes(
+                prev, config["paths"]["configs_root"], config["paths"]["hashes"]
+            )
 
         print("\n3. Validating all architectures")
         ok, msg = validate_all_archs(config)
@@ -652,7 +683,7 @@ def promote_new_arch_from_latest_edits(
         shutil.move(str(new_tmp), str(new_dir))
 
         # 6) Promote to latest, regen deltas, validate, sync, hash
-        return promote_to_latest(new_arch, config)
+        return promote_to_latest(new_arch, config, reuse_backup=backup_path)
 
     except Exception as e:
         print(f"\nERROR: {e}\nRestoring from backup...")
@@ -712,7 +743,7 @@ def promote_new_arch_from_delta(
         shutil.move(str(new_tmp), str(new_dir))
 
         # 3) Promote to latest, regen deltas, validate, sync, hash
-        return promote_to_latest(new_arch, config)
+        return promote_to_latest(new_arch, config, reuse_backup=backup_path)
 
     except Exception as e:
         print(f"\nERROR: {e}\nRestoring from backup...")

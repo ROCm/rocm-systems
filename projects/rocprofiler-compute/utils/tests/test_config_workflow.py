@@ -297,12 +297,17 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
         self.assertTrue(delta_dir.is_dir(), "config_delta directory not created")
         deltas = sorted(delta_dir.glob("*_diff.yaml"))
 
-        delta_text = (self.gfx_prev / "config_delta" / sorted((self.gfx_prev / "config_delta").glob("*_diff.yaml"))[-1].name).read_text(encoding="utf-8")
-        assert "AVG(A_new)" in delta_text, f"Delta is missing the expected modification:\n{delta_text}"
+        delta_text = (
+            self.gfx_prev
+            / "config_delta"
+            / sorted((self.gfx_prev / "config_delta").glob("*_diff.yaml"))[-1].name
+        ).read_text(encoding="utf-8")
+        assert "AVG(A_new)" in delta_text, (
+            f"Delta is missing the expected modification:\n{delta_text}"
+        )
 
         self.assertTrue(deltas, "No delta file created")
         delta_file = deltas[-1]
-
 
         # Apply delta to a clone of prev -> expect to match curr
         out_clone = self.tmpdir / "out_clone"
