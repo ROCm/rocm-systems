@@ -53,6 +53,7 @@
 #include <climits>
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
+#include "common/common.h"
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -62,15 +63,9 @@
   } \
 }
 
-#ifndef ROCRTST_EMULATOR_BUILD
-static const uint32_t kBinarySearchLength = 512;
-static const uint32_t kBinarySearchFindMe = 108;
-static const uint32_t kWorkGroupSize = 256;
-#else
-static const uint32_t kBinarySearchLength = 16;
-static const uint32_t kBinarySearchFindMe = 6;
-static const uint32_t kWorkGroupSize = 8;
-#endif
+static const uint32_t kBinarySearchLength = isEmuModeEnabled() ? 16 : 512;
+static const uint32_t kBinarySearchFindMe = isEmuModeEnabled() ? 6 : 108;
+static const uint32_t kWorkGroupSize = isEmuModeEnabled() ? 8 : 256;
 
 // Hold all the info specific to binary search
 typedef struct BinarySearch {

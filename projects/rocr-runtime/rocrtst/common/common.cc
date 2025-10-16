@@ -64,6 +64,25 @@ namespace rocrtst {
 
 size_t pool_size_limit = 0;
 
+bool isEmuModeEnabled() {
+  const char* path = "/sys/module/amdgpu/parameters/emu_mode";
+  FILE* file = fopen(path, "r");
+  if (!file) {
+    std::cout << "Failed to open file." << std::endl;
+    return false;
+  }
+
+  int emu_mode = 0;
+  if (fscanf(file, "%d", &emu_mode) != 1) {
+    std::cout << "Failed to parse as a decimal." << std::endl;
+    fclose(file);
+    return false;
+  }
+
+  fclose(file);
+  return emu_mode != 0;
+}
+
 static hsa_status_t FindAgent(hsa_agent_t agent, void* data,
                                                 hsa_device_type_t dev_type) {
   assert(data != nullptr);
@@ -402,22 +421,23 @@ hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
                                                           &pool_i->size);
   RET_IF_HSA_COMMON_ERR(err);
 
-#ifdef ROCRTST_EMULATOR_BUILD
-  // Limit pool sizes to 2 GB on emulator
-  const size_t max_pool_size = 2*1024*1024*1024UL;
-  pool_i->size = std::min(pool_i->size, max_pool_size);
-#endif
-  pool_size_limit = 0;
-  char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
-  if (pool_size_limit_str) {
-    char *end;
-    pool_size_limit = strtoul(pool_size_limit_str, &end, 10);
-    if (pool_size_limit > pool_i->size) {
-      std::cout << "Warning: Pool size override > than reported size (override:"
-        << pool_size_limit << " reported:" << pool_i->size << ")" << std::endl;
-    }
-    pool_i->size = pool_size_limit;
+  if (isEmuModeEnabled()) {
+    // Limit pool sizes to 2 GB on emulator
+    const size_t max_pool_size = 2*1024*1024*1024UL;
+    pool_i->size = std::min(pool_i->size, max_pool_size);
+  } else {
+    pool_size_limit = 0;
+    char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
+    if (pool_size_limit_str) {
+      char *end;
+      pool_size_limit = strtoul(pool_size_limit_str, &end, 10);
+      if (pool_size_limit > pool_i->size) {
+        std::cout << "Warning: Pool size override > than reported size (override:"
+          << pool_size_limit << " reported:" << pool_i->size << ")" << std::endl;
+      }
+      pool_i->size = pool_size_limit;
   }
+}
 
   err = hsa_amd_memory_pool_get_info(pool,
              HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,

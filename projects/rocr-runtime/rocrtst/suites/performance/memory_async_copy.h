@@ -197,25 +197,16 @@ class MemoryAsyncCopy : public TestBase {
 
  protected:
   void PrintTransactionType(Transaction *t);
-#if ROCRTST_EMULATOR_BUILD
-  static const int kNumGranularity = 1;
-  static constexpr const char* Str[kNumGranularity] = {"1k"};
+  static const int kNumGranularity;
+  static const std::vector<const char*> Str;
+  static const std::vector<size_t> Size;
+  static const int kMaxCopySize;
 
-  static constexpr const size_t Size[kNumGranularity] = {1024};
-#else
+  // @Brief: Helper function to initialize Str and Size based on emulator mode
+  static std::vector<const char*> initStr();
 
-  static const int kNumGranularity = 20;
-  static constexpr const char* Str[kNumGranularity] = {
-      "1k", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
-      "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M"};
-
-  static constexpr const size_t Size[kNumGranularity] = {
-      1024, 2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024,
-      256*1024, 512*1024, 1024*1024, 2048*1024, 4096*1024, 8*1024*1024,
-      16*1024*1024, 32*1024*1024, 64*1024*1024, 128*1024*1024, 256*1024*1024,
-      512*1024*1024};
-#endif
-  static constexpr const int kMaxCopySize = Size[kNumGranularity - 1];
+  // @Brief: Helper function to initialize Size based on emulator mode
+  static std::vector<size_t> initSize();
 
   // @Brief: Get real iteration number
   virtual size_t RealIterationNum(void);

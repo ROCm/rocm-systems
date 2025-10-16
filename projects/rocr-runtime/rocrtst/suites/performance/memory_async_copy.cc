@@ -72,14 +72,37 @@
 /* PCIE BDF ID: 0xC81407 is specific to DTIF platform */
 static const uint32_t kDtifBdfId = 0xC81407;
 
-constexpr const size_t MemoryAsyncCopy::Size[kNumGranularity];
-constexpr const char* MemoryAsyncCopy::Str[kNumGranularity];
-constexpr const int MemoryAsyncCopy::kMaxCopySize;
+std::vector<const char*> MemoryAsyncCopy::initStr() {
+  if (rocrtst::isEmuModeEnabled()) {
+    return {"1k"};
+  } else {
+    return {"1k", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
+      "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M"};
+  }
+}
+
+std::vector<size_t> MemoryAsyncCopy::initSize() {
+  if (rocrtst::isEmuModeEnabled()) {
+    return {1024};
+  } else {
+    return {1024, 2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024,
+      256*1024, 512*1024, 1024*1024, 2048*1024, 4096*1024, 8*1024*1024,
+      16*1024*1024, 32*1024*1024, 64*1024*1024, 128*1024*1024, 256*1024*1024,
+      512*1024*1024};
+  }
+}
+
+const int MemoryAsyncCopy::kNumGranularity = rocrtst::isEmuModeEnabled() ? 1 : 20;
+const std::vector<const char*> MemoryAsyncCopy::Str = MemoryAsyncCopy::initStr();
+const std::vector<size_t> MemoryAsyncCopy::Size = MemoryAsyncCopy::initSize();
+const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Size.back();
 
 MemoryAsyncCopy::MemoryAsyncCopy(void) :
     TestBase() {
-  static_assert(sizeof(Size)/sizeof(size_t) == kNumGranularity,
-      "kNumGranularity does not match size of arrays");
+  
+  if (Size.size() != kNumGranularity) {
+    throw std::runtime_error("kNumGranularity does not match size of arrays");
+  }
 
   cpu_agent_.handle = 0;  // Ignore any previous initialization
   gpu_local_agent1_.handle = 0;
