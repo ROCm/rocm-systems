@@ -14,4 +14,4 @@ matrix:
     version: "8.10"
   # RHEL9
   - distro: "rhel"
-    version: "9.4"
+    version: "9"
