@@ -155,20 +155,20 @@ ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
 , agent_id(cache)
 {
     ROCP_TRACE << "Constructing ATT instance for agent " << agent_id.handle;
-    auto* core = hsa::get_core_table();
-    auto* ext  = hsa::get_amd_ext_table();
+    auto* core = CHECK_NOTNULL(hsa::get_core_table());
+    auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
+    auto* agent_cache = CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
-        *rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)),
+        *agent_cache,
         this->params,
         *core,
         *ext);
     control_packet = factory->construct_control_packet();
 
-    auto hsa_agent = rocprofiler::agent::get_hsa_agent(agent_id);
-    CHECK(hsa_agent.has_value());
+    auto hsa_agent = *rocprofiler::agent::get_hsa_agent(agent_id);
 
-    auto status = core->hsa_queue_create_fn(*hsa_agent,
+    auto status = core->hsa_queue_create_fn(hsa_agent,
                                             QUEUE_SIZE,
                                             HSA_QUEUE_TYPE_SINGLE,
                                             nullptr,
@@ -189,6 +189,15 @@ ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
         [this](uint64_t codeobj_id) { this->unload_codeobj(codeobj_id); });
 
     codeobj_reg->IterateLoaded();
+
+    if (_params.triple_buffering)
+    {
+        for (auto& memory : double_buffer_memory)
+        {
+            CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(agent_cache->cpu_pool(), _params.buffer_size, 0, &memory), "failed to allocate contiguous memory");
+            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, memory), "failed to allow access");
+        }
+    }
 }
 
 ThreadTracerQueue::~ThreadTracerQueue()
@@ -210,6 +219,11 @@ ThreadTracerQueue::~ThreadTracerQueue()
 
     for(auto& after_packet : control_packet->after_krn_pkt)
         wait_idx.emplace_back(Submit(&after_packet, true));
+
+    wait_idx.clear();
+
+    for (auto memory : double_buffer_memory)
+        hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
 }
 
 /**
@@ -281,63 +295,71 @@ ThreadTracerQueue::unload_codeobj(code_object_id_t id)
     Submit(&packet->packet, true)->WaitOn();
 }
 
-rocprofiler_status_t worker_loop(
-    rocprofiler::hsa::SQTTBufferingPackets packet,
+std::unique_ptr<Signal> worker_loop(
+    rocprofiler::hsa::SQTTBufferingPackets buffer_packet,
     ThreadTracerQueue* queue,
-    std::shared_ptr<std::atomic<bool>> flag
+    std::shared_ptr<std::atomic<bool>> running_flag
 ) {
-    auto parameters = queue->params;
+    size_t buffer_size = queue->params.buffer_size;
+    auto callback = queue->params.shader_cb_fn;
+    auto userdata = queue->params.callback_userdata;
 
-    std::vector<char> buffer{};
-    buffer.resize(parameters.buffer_size);
+    auto copy_fn = CHECK_NOTNULL(hsa::get_core_table())->hsa_memory_copy_fn;
+    auto buffer = queue->get_double_buffer_memory();
+    size_t buffer_index = 0;
 
-    ROCP_WARNING << "Worker initialized";
-    
-    auto execute = [&]()
+    constexpr double SQTT_BW = 64E9f;
+    const int interval_microseconds = 1E6 * buffer_size / SQTT_BW;
+    bool do_sleep = false;
+
+    while (running_flag->load())
     {
-        queue->Submit(&packet.query_status, true);
+        if (do_sleep) std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
 
-        if (auto status = packet.query_buffer_status())
+        queue->Submit(&buffer_packet.query_status, true);
+
+        if (auto status = buffer_packet.query_buffer_status())
         {
-            ROCP_WARNING << "Swapping buffer!";
             queue->Submit(&status->packet, false);
-            if (status->size > buffer.size()) return true;
+            ROCP_FATAL_IF(status->size > buffer_size) << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
-            auto err = hsa::get_core_table()->hsa_memory_copy_fn(buffer.data(), status->data, status->size);
-            if (err != HSA_STATUS_SUCCESS) return true;
+            auto t0 = std::chrono::system_clock::now();
 
-            parameters.shader_cb_fn(queue->agent_id, 0, buffer.data(), status->size, parameters.callback_userdata);
+            auto* copy = buffer.at((buffer_index++)%buffer.size());
+            auto err = copy_fn(copy, status->data, status->size);
+            ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy returned error " << err;
+
+            callback(queue->agent_id, 0, copy, status->size, userdata);
+
+            auto duration = (std::chrono::system_clock::now() - t0).count();
+            ROCP_WARNING << "Swap time taken: " << duration*1E-6f << "ms. BW: " << status->size * 1.0f / duration << " Gb/s";
+            do_sleep = false;
         }
-        else
-        {
-            ROCP_WARNING << "No swap";
-        }
-        return false;
-    };
-
-    while (flag->load())
-    {
-        std::this_thread::sleep_for(std::chrono::microseconds(50));
-        if (execute()) return ROCPROFILER_STATUS_ERROR;
+        do_sleep = true;
     }
-    execute();
+
+    auto control_packet = queue->get_control(false);
+    control_packet->clear();
+    control_packet->populate_after();
 
     ROCP_WARNING << "Worker returning";
-    return ROCPROFILER_STATUS_SUCCESS;
+    return queue->SubmitAndSignalLast(control_packet->after_krn_pkt);
 }
 
 void ThreadTracerQueue::start_worker(std::shared_ptr<std::atomic<bool>> flag)
 {
     ROCP_WARNING << "Starting worker";
     auto packets = rocprofiler::hsa::SQTTBufferingPackets(control_packet->GetHandle());
+    if (packets.header) 
+        params.shader_cb_fn(agent_id, 0, &packets.header, sizeof(packets.header), params.callback_userdata);
 
     worked_thread = std::async(std::launch::async, worker_loop, std::move(packets), this, std::move(flag));
 }
 
-rocprofiler_status_t ThreadTracerQueue::stop_worker()
+std::unique_ptr<Signal> ThreadTracerQueue::stop_worker()
 {
     ROCP_WARNING << "Stopping worker";
-    return worked_thread.get();
+    return worked_thread.get();    
 }
 
 void
@@ -552,7 +574,7 @@ DeviceThreadTracer::start_context()
 void
 DeviceThreadTracer::stop_context()
 {
-    using wait_t = std::tuple<ThreadTracerQueue*, aqlprofile_handle_t, std::unique_ptr<Signal>>;
+    using wait_t = std::pair<ThreadTracerQueue*, std::unique_ptr<Signal>>;
     std::unique_lock<std::mutex> lk(agent_mut);
 
     if(agents.empty())
@@ -568,22 +590,14 @@ DeviceThreadTracer::stop_context()
     worker_flag->store(false);
     for(auto& [_, tracer] : agents)
     {
-        ROCP_WARNING << "Waiting on worker";
-        if(auto status = tracer->stop_worker())
-            ROCP_CI_LOG(ERROR) << "Thread trace worked returned error " << status;
-
-        auto packet = tracer->get_control(false);
-        packet->clear();
-        packet->populate_after();
-
-        auto signal = tracer->SubmitAndSignalLast(packet->after_krn_pkt);
-        if(signal) wait_list.emplace_back(tracer.get(), packet->GetHandle(), std::move(signal));
+        auto signal = tracer->stop_worker();
+        wait_list.emplace_back(tracer.get(), std::move(signal));
     }
 
-    for(auto& [tracer, handle, signal] : wait_list)
+    for(auto& [tracer, signal] : wait_list)
     {
         signal->WaitOn();
-        tracer->iterate_data(handle, tracer->params.callback_userdata);
+        tracer->iterate_data(tracer->get_control(false)->GetHandle(), tracer->params.callback_userdata);
     }
 }
 

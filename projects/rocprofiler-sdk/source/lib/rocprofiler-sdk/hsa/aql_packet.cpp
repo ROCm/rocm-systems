@@ -215,7 +215,6 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
 
 SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle): handle(_handle)
 {
-    uint64_t header{0};
     uint64_t num_buffers{6};
     buffer_swap.resize(num_buffers);
 

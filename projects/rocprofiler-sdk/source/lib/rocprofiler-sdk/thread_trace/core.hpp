@@ -116,8 +116,9 @@ public:
     }
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
-    void start_worker(std::shared_ptr<std::atomic<bool>> flag);
-    rocprofiler_status_t stop_worker();
+    void start_worker(std::shared_ptr<std::atomic<bool>> running_flag);
+    std::unique_ptr<Signal> stop_worker();
+    std::array<void*, 2> get_double_buffer_memory() const { return double_buffer_memory; }
 
 private:
     hsa_queue_t*     queue{nullptr};
@@ -127,7 +128,8 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::future<rocprofiler_status_t> worked_thread{};
+    std::future<std::unique_ptr<Signal>> worked_thread{};
+    std::array<void*, 2> double_buffer_memory{};
 };
 
 class DispatchThreadTracer
