@@ -65,18 +65,26 @@ TEST_CASE("Unit_hipMemSetMemPool_Negative") {
                     hipErrorInvalidValue);
 
     // Pool device and location device do not match
-    hipMemPool_t mem_pool2;
-    prop.allocType = hipMemAllocationTypePinned;
-    prop.location.id = dev + 1;
-    prop.location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool2, &prop));
-    HIP_CHECK_ERROR(hipMemSetMemPool(&location, hipMemAllocationTypePinned, mem_pool2),
-                    hipErrorInvalidValue);
-    HIP_CHECK(hipMemPoolDestroy(mem_pool2));
+    int dev_cnt = 0;
+    HIP_CHECK(hipGetDeviceCount(&dev_cnt));
+    if (dev_cnt > 1) {
+      hipMemPool_t mem_pool2;
+      prop.allocType = hipMemAllocationTypePinned;
+      prop.location.id = dev + 1;
+      prop.location.type = hipMemLocationTypeDevice;
+      HIP_CHECK(hipMemPoolCreate(&mem_pool2, &prop));
+      HIP_CHECK_ERROR(hipMemSetMemPool(&location, hipMemAllocationTypePinned, mem_pool2),
+                      hipErrorInvalidValue);
+      HIP_CHECK(hipMemPoolDestroy(mem_pool2));
+    }
   }
 
   SECTION("Invalid allocation type") {
     HIP_CHECK_ERROR(hipMemSetMemPool(&location, hipMemAllocationTypeInvalid, mem_pool),
+                    hipErrorInvalidValue);
+
+    // Different than the one pool got created for
+    HIP_CHECK_ERROR(hipMemSetMemPool(&location, hipMemAllocationTypeManaged, mem_pool),
                     hipErrorInvalidValue);
   }
 
@@ -87,13 +95,15 @@ TEST_CASE("Unit_hipMemSetMemPool_Basic") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
+  auto alloc_type = GENERATE(hipMemAllocationTypePinned, hipMemAllocationTypeManaged);
+
   for (int dev = 0; dev < num_devices; dev++) {
     checkMempoolSupported(dev);
     HIP_CHECK(hipSetDevice(dev));
 
     hipMemPool_t mem_pool, curr_mem_pool;
     hipMemPoolProps prop{};
-    prop.allocType = hipMemAllocationTypePinned;
+    prop.allocType = alloc_type;
     prop.location.id = dev;
     prop.location.type = hipMemLocationTypeDevice;
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop));
@@ -101,9 +111,9 @@ TEST_CASE("Unit_hipMemSetMemPool_Basic") {
     hipMemLocation location{};
     location.id = dev;
     location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemSetMemPool(&location, hipMemAllocationTypePinned, mem_pool));
+    HIP_CHECK(hipMemSetMemPool(&location, alloc_type, mem_pool));
 
-    HIP_CHECK(hipDeviceGetMemPool(&curr_mem_pool, dev));
+    HIP_CHECK(hipMemGetMemPool(&curr_mem_pool, &location, alloc_type));
     REQUIRE(curr_mem_pool == mem_pool);
 
     HIP_CHECK(hipMemPoolDestroy(mem_pool));
