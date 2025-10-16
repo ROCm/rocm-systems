@@ -64,6 +64,13 @@ target_link_libraries(
 # Check if PC sampling is disabled and whether we should disable the test
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
+# Temporary disable the test until the SWDEV-548078 is fixed
+rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
+if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS AND NOT IS_PC_SAMPLING_STOCHASTIC_DISABLED)
+    # Disabling only if the underlying architecture support stochastic PC sampling
+    set(IS_PC_SAMPLING_DISABLED ON)
+endif()
+
 add_test(NAME pc-sampling-integration-test
          COMMAND $<TARGET_FILE:pc-sampling-integration-test>)
 

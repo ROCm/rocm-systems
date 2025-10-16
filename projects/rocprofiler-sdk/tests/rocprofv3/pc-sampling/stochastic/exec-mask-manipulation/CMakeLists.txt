@@ -35,6 +35,11 @@ find_package(rocprofiler-sdk REQUIRED)
 # Checking whether stochastic PC sampling is disabled. If so, skip the tests.
 rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
 
+# Temporary disable tests until the SWDEV-548078 is fixed
+if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
+    set(IS_PC_SAMPLING_STOCHASTIC_DISABLED ON)
+endif()
+
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
                                                           input.json input.yml)
 
