@@ -173,6 +173,42 @@ __global__ void kernel_cg_group_partition_dynamic(unsigned int tile_size, int* r
   return;
 }
 
+__global__ void kernel_cg_group_partition_nested(unsigned int outer_tile_size,
+                                                 unsigned int inner_tile_size, int* result,
+                                                 bool is_global_mem, int* global_mem) {
+  cg::thread_block thread_block_CG_ty = cg::this_thread_block();
+
+  int* workspace = nullptr;
+  if (is_global_mem) {
+    workspace = global_mem;
+  } else {
+    extern __shared__ int shared_mem[];
+    workspace = shared_mem;
+  }
+
+  int input = thread_block_CG_ty.thread_rank();
+
+  // outer and inner partitions at runtime
+  cg::thread_group outer_tile = cg::tiled_partition(thread_block_CG_ty, outer_tile_size);
+  cg::thread_group inner_tile = cg::tiled_partition(outer_tile, inner_tile_size);
+
+  int workspace_offset = thread_block_CG_ty.thread_rank() - inner_tile.thread_rank();
+  int subtotal = reduction_kernel(inner_tile, workspace + workspace_offset, input);
+
+  if (inner_tile.thread_rank() == 0) {
+    int outer_id = thread_block_CG_ty.thread_rank() / outer_tile_size;
+    int inner_id_within_outer = (outer_tile.thread_rank() / inner_tile_size);
+
+    int subtiles_per_outer = outer_tile_size / inner_tile_size;
+    int subtile_global_id = outer_id * subtiles_per_outer + inner_id_within_outer;
+
+    result[subtile_global_id] = subtotal;
+
+    printf("Outer tile %d (size=%u), inner subtile %d (size=%u) subtotal = %d\n",
+           outer_id, outer_tile_size, inner_id_within_outer, inner_tile_size, subtotal);
+  }
+}
+
 template <typename F> static void common_group_partition(F kernel_func, unsigned int tile_size,
                                                          void** params, size_t num_params,
                                                          bool use_global_mem) {
@@ -250,6 +286,58 @@ static void test_group_partition(unsigned int tile_size, bool use_global_mem) {
                          use_global_mem);
 }
 
+static void test_group_partition_nested(unsigned int outer_tile_size,
+                                        unsigned int inner_tile_size,
+                                        bool use_global_mem) {
+  int block_size = 1;
+  int threads_per_blk = 64;
+
+  // number of inner subtiles per block
+  int num_subtiles = (threads_per_blk / outer_tile_size) * (outer_tile_size / inner_tile_size);
+
+  // expected results, calculated on the host
+  std::vector<int> expected_sum(num_subtiles);
+  for (int s = 0; s < num_subtiles; s++) {
+    int start = s * inner_tile_size;
+    int end = start + inner_tile_size;
+    int subtotal = (end - 1) * end / 2 - ((start - 1) >= 0 ? ((start - 1) * start) / 2 : 0);
+    expected_sum[s] = subtotal;
+  }
+
+  int* result_dev = nullptr;
+  HIP_CHECK(hipMalloc(&result_dev, num_subtiles * sizeof(int)));
+
+  int* global_mem = nullptr;
+  if (use_global_mem) {
+    HIP_CHECK(hipMalloc(&global_mem, threads_per_blk * sizeof(int)));
+  }
+
+  int* result_host = nullptr;
+  HIP_CHECK(hipHostMalloc(&result_host, num_subtiles * sizeof(int), hipHostMallocDefault));
+  memset(result_host, 0, num_subtiles * sizeof(int));
+
+  void* params[] = {&outer_tile_size, &inner_tile_size,
+                    &result_dev, &use_global_mem, &global_mem};
+
+  size_t shared_mem_bytes = use_global_mem ? 0 : threads_per_blk * sizeof(int);
+
+  HIP_CHECK(hipLaunchCooperativeKernel(
+      (void*)kernel_cg_group_partition_nested,
+      block_size, threads_per_blk, params, shared_mem_bytes, 0));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipMemcpy(result_host, result_dev, num_subtiles * sizeof(int),
+                      hipMemcpyDeviceToHost));
+
+  verifyResults(expected_sum.data(), result_host, num_subtiles);
+
+  HIP_CHECK(hipFree(result_dev));
+  HIP_CHECK(hipHostFree(result_host));
+  if (use_global_mem) {
+    HIP_CHECK(hipFree(global_mem));
+  }
+}
+
 TEST_CASE("Unit_hipCGThreadBlockTileType") {
   // Use default device for validating the test
   int device;
@@ -275,5 +363,11 @@ TEST_CASE("Unit_hipCGThreadBlockTileType") {
   SECTION("Dynamic tile partition") {
     unsigned int tile_size = GENERATE(2, 4, 8, 16, 32);
     test_group_partition(tile_size, use_global_mem);
+  }
+
+  SECTION("Nested tile partition") {
+    unsigned int outer_tile_size = 64;  // fixed outer tile size
+    unsigned int inner_tile_size = GENERATE(2, 4, 8, 16, 32);
+    test_group_partition_nested(outer_tile_size, inner_tile_size, use_global_mem);
   }
 }
