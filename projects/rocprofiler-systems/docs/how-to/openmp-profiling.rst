@@ -37,9 +37,9 @@ Only a subset of the OMPT callbacks are processed:
   | ompt_callback_reduction          | omp_reduction             |
   | ompt_callback_sync_region        | omp_sync_region           |
   | ompt_callback_sync_region_wait   | omp_sync_region_wait      |
-  | ompt_callback_target_data_op     | omp_target_data_op        |
-  | ompt_callback_target             | omp_target                |
-  | ompt_callback_target_submit      | omp_target_submit         |
+  | ompt_callback_target_data_op_emi | omp_target_data_op_emi    |
+  | ompt_callback_target_emi         | omp_target_emi            |
+  | ompt_callback_target_submit_emi  | omp_target_submit_emi     |
   | ompt_callback_task_create        | omp_task_create           |
   | ompt_callback_task_dependence    | omp_task_dependence       |
   | ompt_callback_task_schedule      | omp_task_schedule         |
