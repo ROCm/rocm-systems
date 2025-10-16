@@ -25,6 +25,8 @@
 #include "timestamps.hpp"
 
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -309,7 +311,11 @@ write_perfetto(
 
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
+    {
+        // Counter records now contain agent-encoded IDs (reconstructed in tool.cpp),
+        // so we use the full agent-encoded ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
+    }
 
     // Map: correlation_id -> map<counter_id, value>
     auto dispatch_counter_id_value =
@@ -837,7 +843,6 @@ write_perfetto(
         }
 
         // memory allocation counter track
-        constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
         struct free_memory_information
         {
             rocprofiler_timestamp_t start_timestamp = 0;
@@ -874,7 +879,7 @@ write_perfetto(
                 if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
                    itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
                 {
-                    LOG_IF(FATAL, itr.agent_id == null_rocp_agent_id)
+                    LOG_IF(FATAL, itr.agent_id == agent::null_agent_id)
                         << "Missing agent id for memory allocation trace";
                     mem_alloc_endpoints[itr.agent_id].emplace(
                         itr.start_timestamp,

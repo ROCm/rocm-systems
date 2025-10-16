@@ -123,5 +123,9 @@ construct_agent_cache(::HsaApiTable* table);
 
 void
 internal_refresh_topology();  // only for internal testing
+
+// Null/invalid agent ID constant
+constexpr rocprofiler_agent_id_t null_agent_id = rocprofiler_agent_id_t{.handle = 0};
+
 }  // namespace agent
 }  // namespace rocprofiler
