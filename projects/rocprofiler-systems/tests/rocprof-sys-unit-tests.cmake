@@ -20,19 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(smi_sources
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
-)
-
-set(smi_headers
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_driver.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/common.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/processor.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/service.hpp
-)
-
-target_sources(
-    rocprofiler-systems-object-library
-    PRIVATE ${smi_sources} ${smi_headers}
+add_test(
+    NAME rocprof-sys-unit-tests
+    COMMAND rocprof-sys-unit-tests
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )

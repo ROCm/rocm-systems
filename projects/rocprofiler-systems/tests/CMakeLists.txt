@@ -28,6 +28,7 @@ include_guard(GLOBAL)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
 # test groups
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unit-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)

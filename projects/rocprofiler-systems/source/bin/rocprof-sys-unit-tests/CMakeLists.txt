@@ -20,19 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(smi_sources
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+find_package(GTest REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+add_executable(rocprof-sys-unit-tests 
+    $<TARGET_OBJECTS:rocprof::unit-tests::sys>
 )
 
-set(smi_headers
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_driver.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/common.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/processor.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/service.hpp
-)
-
-target_sources(
-    rocprofiler-systems-object-library
-    PRIVATE ${smi_sources} ${smi_headers}
+target_link_libraries(rocprof-sys-unit-tests
+    rocprof::unit-tests::sys
+    GTest::gtest 
+    GTest::gtest_main 
+    GTest::gmock
 )
