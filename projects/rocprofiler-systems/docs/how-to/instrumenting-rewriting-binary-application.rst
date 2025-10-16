@@ -941,7 +941,7 @@ or library to ``/home/user``, which is where the instrumented libraries are loca
 Main function detection issues
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you encounter issues with ROCm Systems Profiler not properly detecting or instrumenting
+If ROCm Systems Profiler fails to detect or instrument your program's main function, you can explicitly specify it using the ``--main-function`` (or ``-m``) option.
 your program's main function, you can explicitly specify the main function using
 the ``--main-function`` (or ``-m``) option.
 
