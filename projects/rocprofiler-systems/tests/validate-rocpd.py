@@ -152,7 +152,9 @@ def validate_table(cursor, rule, tables) -> bool:
         if rule.name:
             print(f"❌ ERROR: Required table '{rule.name}' not found in database")
         elif rule.name_prefix:
-            print(f"❌ ERROR: No tables found with prefix '{rule.name_prefix}' in database")
+            print(
+                f"❌ ERROR: No tables found with prefix '{rule.name_prefix}' in database"
+            )
         return False
 
     all_tables_passed = True
@@ -175,7 +177,9 @@ def validate_table(cursor, rule, tables) -> bool:
                 all_tables_passed = False
                 continue
             else:
-                print(f"✅ All required columns present in '{table_name}': {rule.required_columns}")
+                print(
+                    f"✅ All required columns present in '{table_name}': {rule.required_columns}"
+                )
 
             cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
             row_count = cursor.fetchone()["count"]
@@ -204,16 +208,22 @@ def validate_table(cursor, rule, tables) -> bool:
                         actual_result = result[0] if result else None
 
                     if not validation_query.validate_query(actual_result):
-                        print(f"❌ ERROR: {validation_query.error_message} (Table: '{table_name}')")
+                        print(
+                            f"❌ ERROR: {validation_query.error_message} (Table: '{table_name}')"
+                        )
                         print(
                             f"   Expected: {validation_query.comparison} {validation_query.expected_result}, Got: {actual_result}"
                         )
                         all_queries_passed = False
                     else:
-                        print(f"✅ Validation query passed for '{table_name}': {validation_query.description}")
+                        print(
+                            f"✅ Validation query passed for '{table_name}': {validation_query.description}"
+                        )
 
                 except sqlite3.Error as e:
-                    print(f"❌ ERROR: Failed to execute validation query on '{table_name}': {e}")
+                    print(
+                        f"❌ ERROR: Failed to execute validation query on '{table_name}': {e}"
+                    )
                     print(f"Query: {validation_query.query}")
                     all_queries_passed = False
 
