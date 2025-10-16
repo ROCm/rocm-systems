@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipMemsetD2D8_NegTsts") {
     std::unique_ptr<char[]> hostPtr;
     hostPtr.reset(new char[numH * width]);
     B_d = reinterpret_cast<hipDeviceptr_t>( hostPtr.get() );
-    HIP_CHECK_ERROR(hipMemsetD2D8(reinterpret_cast<hipDeviceptr_t>(B_d), devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(B_d, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("Invalid Pitch") {
     size_t inValidPitch = 1;
