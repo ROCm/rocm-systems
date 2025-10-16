@@ -79,3 +79,7 @@
 [submodule "projects/rocprofiler-systems/examples/openmp/external/ompvv"]
 	path = projects/rocprofiler-systems/examples/openmp/external/ompvv
 	url = https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
+[submodule "projects/rocprofiler-systems/external/spdlog"]
+	path = projects/rocprofiler-systems/external/spdlog
+	url = https://github.com/gabime/spdlog.git
+	branch = v1.x
