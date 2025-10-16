@@ -46,14 +46,14 @@ std::unordered_map<uint32_t, track_description> perfetto_tracks{
     { jpeg_activity_value, { "JPEG Activity", "%" } },
 };
 
-struct amd_smi_sample
+struct perfetto_amd_smi_sample
 {
     size_t      timestamp;
     smi_metrics metrics;
 };
 
 // TODO: we are keeping this just to support the old perfetto way
-std::map<size_t, std::unique_ptr<std::vector<amd_smi_sample>>> g_perfetto_bundle;
+std::map<size_t, std::unique_ptr<std::vector<perfetto_amd_smi_sample>>> g_perfetto_bundle;
 
 }  // namespace
 
@@ -133,7 +133,7 @@ struct perfetto
     static void init_storage(size_t device_index)
     {
         g_perfetto_bundle.insert(
-            { device_index, std::make_unique<std::vector<amd_smi_sample>>() });
+            { device_index, std::make_unique<std::vector<perfetto_amd_smi_sample>>() });
     };
 
     static void store_sample(size_t device_index, const smi_metrics& _smi_metrics,
@@ -142,7 +142,7 @@ struct perfetto
         if(get_use_perfetto())
         {
             g_perfetto_bundle[device_index]->emplace_back(
-                amd_smi_sample{ _timestamp, _smi_metrics });
+                perfetto_amd_smi_sample{ _timestamp, _smi_metrics });
         }
     };
 

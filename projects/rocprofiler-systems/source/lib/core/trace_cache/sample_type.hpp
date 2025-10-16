@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #pragma once
+#include "library/amd_smi/common.hpp"
 #include <cstdint>
 #include <stdint.h>
 #include <string>
@@ -187,26 +188,10 @@ struct pmc_event_with_sample : in_time_sample
 
 struct amd_smi_sample : storage_parsed_type_base
 {
-    enum class settings_positions : uint8_t
-    {
-        busy = 0,
-        temp,
-        power,
-        mem_usage,
-        vcn_activity,
-        jpeg_activity
-    };
-
-    uint64_t             settings;  // bitfield
-    uint32_t             device_id;
-    size_t               timestamp;
-    uint32_t             gfx_activity;
-    uint32_t             umc_activity;
-    uint32_t             mm_activity;
-    uint32_t             power;
-    int32_t              temperature;
-    size_t               mem_usage;
-    std::vector<uint8_t> xcp_activity;
+    uint32_t                    device_id;
+    size_t                      timestamp;
+    amd_smi::smi_metric_options enabled_metrics;
+    amd_smi::smi_metrics        metrics;
 };
 
 struct cpu_freq_sample : storage_parsed_type_base

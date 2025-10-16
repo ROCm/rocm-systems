@@ -4,9 +4,14 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cache_utility.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
+#include "library/amd_smi/common.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <optional>
+#include <ostream>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -57,7 +62,7 @@ struct rocpd
         };
 
         auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-            for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+            for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENGINES; ++clk)
             {
                 auto name = trace_cache::info::annotate_with_device_id<
                     category::amd_smi_jpeg_activity>(gpu_id, xcp_idx, clk);
@@ -174,7 +179,7 @@ struct rocpd
         };
 
         auto add_jpeg_pmc = [&](std::optional<int> xcp_idx) {
-            for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+            for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENGINES; ++clk)
             {
                 std::stringstream name_ss;
                 name_ss << trait::name<category::amd_smi_jpeg_activity>::value;
@@ -240,86 +245,18 @@ struct rocpd
             return;
         }
 
-        auto _power = _supported_metrics.bits.current_socket_power
-                          ? _smi_metrics.current_socket_power
-                          : _smi_metrics.average_socket_power;
-        auto _temp  = _supported_metrics.bits.hotspot_temperature
-                          ? static_cast<int32_t>(_smi_metrics.hotspot_temperature)
-                          : static_cast<int32_t>(_smi_metrics.edge_temperature);
-
         trace_cache::get_buffer_storage().store(
-            trace_cache::entry_type::amd_smi_sample,
-            static_cast<size_t>(_enabled_metrics.value), _device_id, _timestamp,
-            _smi_metrics.gfx_activity, _smi_metrics.umc_activity,
-            _smi_metrics.mm_activity, _power, _temp, _smi_metrics.memory_usage,
-            std::vector<uint8_t>(40));
+            trace_cache::entry_type::amd_smi_sample, _device_id, _timestamp,
+            _enabled_metrics.value & _supported_metrics.value,
+            serialize_smi_metrics(_smi_metrics));
     };
 
 private:
-    static std::vector<uint8_t> serialize_xcp_metrics(
-        const bool& use_vcn_activity, const bool& use_jpeg_activity,
-        const amdsmi_gpu_metrics_t& gpu_metrics)
+    static std::vector<uint8_t> serialize_smi_metrics(const smi_metrics& gpu_metrics)
     {
-        // Chunk:
-        // <vcn_data_0>..<vcn_data_[vcn_count]> // lower and higher byte
-        // <jpeg_data_0>..<jpeg_data_[jpeg_count]> // lower and higher byte
-
-        // Serialized:
-        // <is_vcn_supported>
-        // <is_jpeg_supported>
-        // <xcp_count>
-        // <vcn_count>
-        // <jpeg_count>
-        // Chunk_0
-        // ...
-        // Chunk_[xcp_count]
-
-        constexpr uint8_t vcn_count          = AMDSMI_MAX_NUM_VCN;
-        constexpr uint8_t jpeg_count         = AMDSMI_MAX_NUM_JPEG;
-        constexpr uint8_t xcp_count          = AMDSMI_MAX_NUM_XCP;
-        constexpr size_t  elem_size          = sizeof(uint16_t) / sizeof(uint8_t);
-        constexpr uint8_t vector_size_header = sizeof(uint8_t);
-        constexpr uint8_t serialized_data_headers =
-            5 * vector_size_header;  // is_vcn_supported + is_jpeg_supported + xcp_count +
-                                     // vcn_count + jpeg_count
-        constexpr size_t chunk_size = ((vcn_count + jpeg_count) * elem_size);
-
-        auto serialize_uint16_array = [](std::vector<uint8_t>& data, const uint16_t* arr,
-                                         int array_size) {
-            for(int i = 0; i < array_size; ++i)
-            {
-                data.push_back(static_cast<uint8_t>(arr[i] & 0xFF));
-                data.push_back(static_cast<uint8_t>((arr[i] >> 8) & 0xFF));
-            }
-        };
-
-        std::vector<uint8_t> result;
-
-        const bool   is_vcn_jpeg_supported = (use_vcn_activity || use_jpeg_activity);
-        const size_t chunk_count           = is_vcn_jpeg_supported ? 1 : xcp_count;
-        const size_t total_size = serialized_data_headers + (chunk_count * chunk_size);
-
-        result.reserve(total_size);
-
-        result.push_back((uint8_t) use_vcn_activity);
-        result.push_back((uint8_t) use_jpeg_activity);
-        result.push_back(chunk_count);
-        result.push_back(vcn_count);
-        result.push_back(jpeg_count);
-
-        for(size_t count = 0; count < chunk_count; ++count)
-        {
-            const auto* vcn_data =
-                (is_vcn_jpeg_supported ? gpu_metrics.vcn_activity
-                                       : gpu_metrics.xcp_stats[count].vcn_busy);
-            const auto* jpeg_data =
-                (is_vcn_jpeg_supported ? gpu_metrics.jpeg_activity
-                                       : gpu_metrics.xcp_stats[count].jpeg_busy);
-
-            serialize_uint16_array(result, vcn_data, vcn_count);
-            serialize_uint16_array(result, jpeg_data, jpeg_count);
-        }
-
+        auto                 metric_size = sizeof(gpu_metrics);
+        std::vector<uint8_t> result(metric_size);
+        std::memcpy(result.data(), &gpu_metrics, metric_size);
         return result;
     }
 };
