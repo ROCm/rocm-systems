@@ -188,21 +188,21 @@ main(int argc, char** argv)
 
     std::cout << "After first call " << getpid() << std::endl;
 
-    auto                     _threads = std::vector<std::thread>{};
-    std::vector<hipStream_t> _streams(nstreams);
+    auto _threads = std::vector<std::thread>{};
+    auto _streams = std::vector<hipStream_t>(nstreams);
     _threads.reserve(nthreads);
 
-    for(size_t i = 0; i < nstreams; ++i)
-        HIP_ASSERT(hipStreamCreate(&_streams[i]));
+    for(auto& itr : _streams)
+        HIP_ASSERT(hipStreamCreate(&itr));
     for(size_t i = 0; i < nthreads; ++i)
         _threads.emplace_back(
-            execute_kernels, i, _streams[i % nstreams], i % nstreams, i % ndevices);
+            execute_kernels, i, _streams.at(i % nstreams), i % nstreams, i % ndevices);
     for(auto& itr : _threads)
         itr.join();
 
     // Destroy streams
-    for(size_t i = 0; i < nstreams; ++i)
-        HIP_ASSERT(hipStreamDestroy(_streams[i]));
+    for(auto itr : _streams)
+        HIP_ASSERT(hipStreamDestroy(itr));
 
     std::cout << "Attachment test app finished" << std::endl;
 

@@ -134,8 +134,8 @@ get_stream_id(hipStream_t stream)
     auto stream_id = get_stream_map()->rlock(
         [](const stream_map_t& _data,
            hipStream_t         _stream) -> std::optional<rocprofiler_stream_id_t> {
-            ROCP_WARNING_IF(_data.count(_stream) == 0 &&
-                            !rocprofiler::registration::get_attach_status()->has_attach_table)
+            ROCP_INFO_IF(_data.count(_stream) == 0 &&
+                         !rocprofiler::registration::supports_attachment())
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
@@ -147,9 +147,8 @@ get_stream_id(hipStream_t stream)
     // Stream ID already exists
     if(stream_id) return *stream_id;
 
-    ROCP_CI_LOG_IF(WARNING, !rocprofiler::registration::get_attach_status()->has_attach_table)
-        << fmt::format("Stream ID is not present in {} when attach feature is not being used",
-                       __FUNCTION__);
+    ROCP_CI_LOG_IF(WARNING, !rocprofiler::registration::supports_attachment()) << fmt::format(
+        "Stream ID is not present in {} when attach feature is not being used", __FUNCTION__);
     return add_stream(stream, false);
 }
 
