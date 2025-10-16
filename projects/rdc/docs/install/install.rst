@@ -15,7 +15,7 @@ Prerequisites
 
 To install RDC from source, ensure that your system meets the following requirements:
 
-- **Supported platforms:** AMD ROCm-supported platform. See the `list of supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
+- **Supported platforms:** See the `list of ROCm-supported operating systems and GPUs <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
 
 - **Dependencies:**
 
@@ -155,7 +155,7 @@ RDC is packaged as part of the ROCm software repository. To install RDC using pr
             # or, to install a specific version
             $ sudo apt-get install rdc<x.y.z>
 
-    .. tab-item:: SLES 15 Service Pack 3
+    .. tab-item:: SLES
         :sync: sles-tab
 
         .. code-block:: shell

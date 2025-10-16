@@ -32,6 +32,13 @@ try:
 except Exception:
     pass
 
+try:
+    import sqlite3
+
+    sqlite3.connect(":memory:")  # Test if sqlite3 is available
+except Exception:
+    pass
+
 from . import libpyrocpd
 from .importer import RocpdImportData
 

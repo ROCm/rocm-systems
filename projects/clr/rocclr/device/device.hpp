@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -715,7 +715,7 @@ class Settings : public amd::HeapObject {
 
   //! Virtual destructor as this class is used as a base class and is also used
   //! to delete the derived classes.
-  virtual ~Settings() {};
+  virtual ~Settings(){};
 
   //! Check the specified extension
   bool checkExtension(uint name) const {
@@ -810,7 +810,7 @@ class Memory : public amd::HeapObject {
   };
 
   //! Default destructor for the device memory object
-  virtual ~Memory() {};
+  virtual ~Memory(){};
 
   //! Releases virtual objects associated with this memory
   void releaseVirtual();
@@ -1009,7 +1009,7 @@ class Sampler : public amd::HeapObject {
   Sampler() : hwSrd_(0), hwState_(nullptr) {}
 
   //! Default destructor for the device memory object
-  virtual ~Sampler() {};
+  virtual ~Sampler(){};
 
   //! Returns device specific HW state for the sampler
   uint64_t hwSrd() const { return hwSrd_; }
@@ -1351,10 +1351,11 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool isFenceDirty() const = 0;
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
-  //! Dispatch captured AQL packet
-  virtual bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                 amd::AccumulateCommand* vcmd = nullptr) = 0;
 
+  //! Dispatches multiple AQL packets in a single batch operation
+  virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                                      const std::vector<std::string>& kernelNames,
+                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1396,7 +1397,8 @@ class MemObjMap : public AllStatic {
     size_t psize;                              ///< Total size of the device memory allocation
     size_t poffset;                            ///< Offset within the allocation
     int owners_process_id;                     ///< ID of the process that owns the allocation
-    char reserved[LP64_SWITCH(20, 12)];        ///< Reserved for future extensions
+    int owners_device_id;                      ///< ID of the device that owns the allocation
+    char reserved[LP64_SWITCH(16, 8)];        ///< Reserved for future extensions
 
     bool operator<(const IpcMemHandle& h) const {
       int cmp = std::memcmp(ipc_handle, h.ipc_handle, AMD_IPC_MEM_HANDLE_SIZE);
@@ -1603,7 +1605,7 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
-}; // class Isa
+};  // class Isa
 
 /*! \addtogroup Runtime
  *  @{
@@ -1803,6 +1805,30 @@ class Device : public RuntimeObject {
   //! Gets free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory  //!< Free memory information on a GPU device
   ) const = 0;
+
+  /**
+   * @brief Read data from a file to device memory.
+   * @param[IN] handle: file descriptor of the file to read.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of read.
+   * @param[IN] file_offset: offset into fd where data has to be read.
+   * @param[IN/OUT] size_copied: actual size read.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) = 0;
+
+  /**
+   * Write data from device memory to a file.
+   * @param[IN] handle: file descriptor of the file to write.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of write.
+   * @param[IN] file_offset: offset into fd where data has to written.
+   * @param[IN/OUT] size_copied: actual size copied.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) = 0;
 
   virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
                                   amd::ExternalSemaphoreHandleType sem_handle_type) = 0;

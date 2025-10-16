@@ -61,6 +61,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Sets the desired log level. |br| |br| |br|
        | Specifies the path to a YAML file consisting of extra counter definitions.
 
+   * - Process attachment
+     - | ``-p`` PID \| ``--pid`` PID \| ``--attach`` PID
+     - | Attaches to a running process by process ID and profiles it dynamically. This enables profiling of applications that are already running without needing to restart them from the profiler. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration.
+
    * - Aggregate tracing
      - | ``-r`` [BOOL] \| ``--runtime-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
        | ``-s`` [BOOL] \| ``--sys-trace`` [BOOL]
@@ -589,6 +593,15 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :file: /data/rocjpeg_api_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
+
+Process Attachment
++++++++++++++++++++
+
+``rocprofv3`` supports attaching to already running processes to profile them dynamically without requiring application restart. This is particularly useful for long-running applications, services, or when you need to profile an application that is already in a specific state.
+
+Process attachment uses the ``-p``, ``--pid``, or ``--attach`` options (all equivalent) followed by the target process ID. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration.
+
+Read in detail about process attachment in :ref:`using-rocprofv3-process-attachment`.
 
 Post-processing tracing options
 ++++++++++++++++++++++++++++++++

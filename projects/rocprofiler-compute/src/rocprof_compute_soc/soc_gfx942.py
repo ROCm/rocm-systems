@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
 import argparse
 from typing import Any, Optional
 
@@ -36,8 +37,6 @@ class gfx942_soc(OmniSoC_Base):
         super().__init__(args, mspec)
         self.set_arch("gfx942")
         self.set_compatible_profilers([
-            "rocprofv1",
-            "rocprofv2",
             "rocprofv3",
             "rocprofiler-sdk",
         ])

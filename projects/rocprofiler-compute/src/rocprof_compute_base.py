@@ -113,11 +113,7 @@ class RocProfCompute:
 
     def detect_profiler(self) -> None:
         profiler_mode = detect_rocprof(self.__args)
-        if str(profiler_mode).endswith("rocprof"):
-            self.__profiler_mode = "rocprofv1"
-        elif str(profiler_mode).endswith("rocprofv2"):
-            self.__profiler_mode = "rocprofv2"
-        elif str(profiler_mode).endswith("rocprofv3"):
+        if str(profiler_mode).endswith("rocprofv3"):
             self.__profiler_mode = "rocprofv3"
         elif str(profiler_mode) == "rocprofiler-sdk":
             self.__profiler_mode = "rocprofiler-sdk"
@@ -214,25 +210,11 @@ class RocProfCompute:
             self.handle_analyze_args()
 
     def handle_profile_args(self) -> None:
-        # Add --name to workload path if --path is not given
-        if self.__args.path == str(Path.cwd() / "workloads"):
-            if not hasattr(self.__args, "name") or not self.__args.name:
-                console_error("-n/--name is required")
-            self.__args.path = str(Path(self.__args.path) / self.__args.name)
-        # Add node name to workload path
-        if self.__args.subpath == "node_name":
-            self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-        # Or, add gpu model name to workload path
-        elif self.__args.subpath == "gpu_model":
-            self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
-
-        # Create workload directory if it does not exist
-        p = Path(self.__args.path)
-        if not p.exists():
-            try:
-                p.mkdir(parents=True, exist_ok=False)
-            except FileExistsError:
-                console_error("Directory already exists.")
+        # Handle list operations first - these are independent and exit immediately
+        if getattr(self.__args, "list_sets", False):
+            return
+        if getattr(self.__args, "list_available_metrics", False):
+            return
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
@@ -245,14 +227,7 @@ class RocProfCompute:
 
     @demarcate
     def list_metrics(self) -> None:
-        self.load_soc_specs()
-
-        for_current_arch = False
-        if (
-            hasattr(self.__args, "list_available_metrics")
-            and self.__args.list_available_metrics
-        ):
-            for_current_arch = True
+        for_current_arch = getattr(self.__args, "list_available_metrics", False)
 
         arch = (
             self.__mspec.gpu_arch
@@ -262,21 +237,15 @@ class RocProfCompute:
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
             ac.panel_configs = file_io.load_panel_configs([
-                Path(self.__args.config_dir) / arch
+                str(Path(self.__args.config_dir) / arch)
             ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
             parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
-                prefix = ""
-                if "." not in str(key):
-                    prefix = ""
-                elif str(key).count(".") == 1:
-                    prefix = "\t"
-                else:
-                    prefix = "\t\t"
-                print(prefix + key, "->", value)
+                prefix = "\t" * min(key.count("."), 2)
+                print(f"{prefix}{key} -> {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -330,16 +299,32 @@ class RocProfCompute:
 
         sys.exit(0)
 
+        profiler_classes = {
+            "rocprofv3": (
+                "rocprof_compute_profile.profiler_rocprof_v3",
+                "rocprof_v3_profiler",
+            ),
+            "rocprofiler-sdk": (
+                "rocprof_compute_profile.profiler_rocprofiler_sdk",
+                "rocprofiler_sdk_profiler",
+            ),
+        }
+
+        if self.__profiler_mode not in profiler_classes:
+            console_error("Unsupported profiler")
+
+        module_name, class_name = profiler_classes[self.__profiler_mode]
+        module = importlib.import_module(module_name)
+        profiler_class = getattr(module, class_name)
+
+        return profiler_class(
+            self.__args,
+            self.__profiler_mode,
+            self.__soc[self.__mspec.gpu_arch],
+        )
+
     def create_profiler(self) -> object:
         profiler_classes = {
-            "rocprofv1": (
-                "rocprof_compute_profile.profiler_rocprof_v1",
-                "rocprof_v1_profiler",
-            ),
-            "rocprofv2": (
-                "rocprof_compute_profile.profiler_rocprof_v2",
-                "rocprof_v2_profiler",
-            ),
             "rocprofv3": (
                 "rocprof_compute_profile.profiler_rocprof_v3",
                 "rocprof_v3_profiler",
@@ -380,11 +365,27 @@ class RocProfCompute:
 
         # instantiate desired profiler
         profiler = self.create_profiler()
-
-        # -----------------------
-        # run profiling workflow
-        # -----------------------
         profiler.sanitize()
+
+        # Add --name to workload path if --path is not given
+        if self.__args.path == str(Path.cwd() / "workloads"):
+            if not hasattr(self.__args, "name") or not self.__args.name:
+                console_error("-n/--name is required")
+            self.__args.path = str(Path(self.__args.path) / self.__args.name)
+            # Add node name to workload path
+            if self.__args.subpath == "node_name":
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add gpu model name to workload path
+            elif self.__args.subpath == "gpu_model":
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+
+        # Create workload directory if it does not exist
+        p = Path(self.__args.path)
+        if not p.exists():
+            try:
+                p.mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                console_error("Directory already exists.")
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)
@@ -465,18 +466,23 @@ class RocProfCompute:
         analyzer.sanitize()
 
         # Load required SoC(s) from input
-        for d in analyzer.get_args().path:
-            sysinfo_path = (
-                Path(d[0])
-                if analyzer.get_args().nodes is None
-                and not analyzer.get_args().spatial_multiplexing
-                else file_io.find_1st_sub_dir(d[0])
-            )
-            sys_info = file_io.load_sys_info(sysinfo_path / "sysinfo.csv")
+        for path_list in analyzer.get_args().path:
+            base_path = path_list[0] if isinstance(path_list, list) else path_list
 
-            sys_info = sys_info.to_dict("list")
-            sys_info = {key: value[0] for key, value in sys_info.items()}
-            self.load_soc_specs(sys_info)
+            # Determine sysinfo path
+            if (
+                analyzer.get_args().nodes is None
+                and not analyzer.get_args().spatial_multiplexing
+            ):
+                sysinfo_path = base_path
+            else:
+                sysinfo_path = file_io.find_1st_sub_dir(base_path)
+
+            sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+            sys_info_dict = {
+                key: value[0] for key, value in sys_info.to_dict("list").items()
+            }
+            self.load_soc_specs(sys_info_dict)
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()

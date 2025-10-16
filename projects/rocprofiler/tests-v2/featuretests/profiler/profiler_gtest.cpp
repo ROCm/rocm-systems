@@ -519,8 +519,7 @@ TEST_F(LoadUnloadTest, WhenLoadingFirstTimeThenToolLoadsUnloadsSuccessfully) {
         std::string agentname;
         agentname.resize(64);
         hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agentname.data());
-        if ((agentname.find("gfx11") != std::string::npos) ||
-            (agentname.find("gfx12") != std::string::npos))
+        if ((agentname.find("gfx11") != std::string::npos))
           bSkipCounterNoneZeroCheck = true;
 
         hsa_device_type_t type;

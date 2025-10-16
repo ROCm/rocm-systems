@@ -32,7 +32,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -109,7 +108,7 @@ class RocProfCompute_Base:
                     "Please verify."
                 )
             args.remaining = " ".join(args.remaining)
-        else:
+        elif not args.attach_pid:
             console_error(
                 "Profiling command required. Pass application executable after -- "
                 "at the end of options.\n"
@@ -147,7 +146,10 @@ class RocProfCompute_Base:
             for file in result_files:
                 Path(file).unlink()
                 console_debug(f"Deleted file: {file}")
-            return
+            return None
+
+        # Collect files to process - normalize to Path objects
+        files: list[Path] = []
 
         # Set default output directory if not specified
         if isinstance(args.path, str):
@@ -168,7 +170,7 @@ class RocProfCompute_Base:
                     f for f in files if not f.name.endswith("_marker_api_trace.csv")
                 ]
         elif isinstance(args.path, list):
-            files = args.path
+            files = [Path(path) for path in args.path]
         else:
             console_error(f"Invalid workload directory. Cannot resolve {args.path}")
 
@@ -176,6 +178,11 @@ class RocProfCompute_Base:
         df = None
         for i, file in enumerate(files):
             current_df = pd.read_csv(file)
+
+            if current_df.empty:
+                console_warning("join_prof", f"Empty dataframe from {file}")
+                continue
+
             if args.join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
                 current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
@@ -190,7 +197,8 @@ class RocProfCompute_Base:
                 )
             else:
                 console_error(
-                    f"{args.join_type} is an unrecognized option for --join-type"
+                    "join_prof",
+                    f"{args.join_type} is an unrecognized option for --join-type",
                 )
 
             if df is None:
@@ -202,7 +210,8 @@ class RocProfCompute_Base:
                 )
 
         if df is None or df.empty:
-            return
+            console_warning("join_prof", "No data available after processing all files")
+            return None
 
         # TODO: check for any mismatch in joins
         duplicate_cols = {
@@ -238,10 +247,11 @@ class RocProfCompute_Base:
             current_df = df[cols]
             if not test_df_column_equality(current_df):
                 console_warning(
-                    f"Detected differing {key} values while joining pmc_perf.csv"
+                    "join_prof",
+                    f"Detected differing {key} values while joining pmc_perf.csv",
                 )
             else:
-                console_debug(f"Successfully joined {key} in pmc_perf.csv")
+                console_debug("join_prof", f"Successfully joined {key} in pmc_perf.csv")
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
@@ -321,7 +331,8 @@ class RocProfCompute_Base:
             df["End_Timestamp"] = mean_end
 
         # finally, join the drop key
-        df = df.drop(columns=["key"])
+        if "key" in df.columns:
+            df = df.drop(columns=["key"])
 
         # save to file and delete old file(s)
         # skip if we're being called outside of rocprof-compute
@@ -330,8 +341,8 @@ class RocProfCompute_Base:
             if not args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
-                    if "SQ_" not in file or "SQC_" not in file:
-                        Path(file).unlink()
+                    if "SQ_" not in file.name or "SQC_" not in file.name:
+                        file.unlink()
             return None
         else:
             return df
@@ -344,6 +355,9 @@ class RocProfCompute_Base:
         """Perform any pre-processing steps prior to profiling."""
         args = self.get_args()
         console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
+
+        if args.attach_pid:
+            args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
 
@@ -451,15 +465,23 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             console_log("profiling", f"Current input file: {fname}")
-
-            if self.__profiler in (
-                "rocprofv1",
-                "rocprofv2",
-                "rocprofv3",
-                "rocprofiler-sdk",
-            ):
-                options = self.get_profiler_options(str(fname), self._soc)
-                start_time = time.time()
+            options = self.get_profiler_options(str(fname), self._soc)
+            start_time = time.time()
+            if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
+                # Only 1-run case is permitted for attach/detach
+                if (isinstance(options, list) and "--pid" in options) or (
+                    isinstance(options, dict)
+                    and (options.get("ROCPROF_ATTACH_PID") is not None)
+                ):
+                    if total_runs > 1:
+                        console_error(
+                            f"Cannot attach process for profiling as the requested "
+                            f"performance counters exceed the collection capacity of "
+                            f"single pass counter collection. The current setup of "
+                            f"requested counter blocks needs {total_runs} number of "
+                            f'passes. Please use "--block" or "--set" '
+                            f"to adjust or reduce the requested performance metrics!"
+                        )
                 run_prof(
                     fname=str(fname),
                     profiler_options=options,
@@ -519,5 +541,5 @@ class RocProfCompute_Base:
         self._soc.post_profiling()
 
 
-def test_df_column_equality(df: pd.DataFrame) -> np.bool:
+def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()

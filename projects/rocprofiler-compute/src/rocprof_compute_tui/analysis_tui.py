@@ -42,10 +42,10 @@ from utils.logger import console_error, demarcate
 
 class tui_analysis(OmniAnalyze_Base):
     def __init__(
-        self, args: argparse.Namespace, supported_archs: dict[str, str], path: Path
+        self, args: argparse.Namespace, supported_archs: dict[str, str], path: str
     ) -> None:
         super().__init__(args, supported_archs)
-        self.path = str(path)
+        self.path = path
         self.args = self.get_args()
         self.raw_dfs: dict[str, dict] = {}
 
@@ -88,7 +88,7 @@ class tui_analysis(OmniAnalyze_Base):
 
         # 1. load top kernel
         parser.load_non_mertrics_table(
-            workload=self._runs[self.path], dir=self.path, args=self.args
+            workload=self._runs[self.path], dir_path=self.path, args=self.args
         )
 
         # 2. Generate kernel-specific dataframes

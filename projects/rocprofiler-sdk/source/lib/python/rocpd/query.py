@@ -42,6 +42,7 @@ def export_sqlite_query(
     export_format: Optional[str] = None,
     export_path: Optional[str] = None,
     dashboard_template_path: Optional[str] = None,
+    **kwargs: Optional[dict],
 ) -> Optional[str]:
     """
     Execute a SQLite query and print it to console.
@@ -99,7 +100,21 @@ def export_sqlite_query(
 
         # 3) Export based on format
         if export_format == "csv":
-            df.to_csv(export_path, index=False)
+            import csv
+
+            cols = [f"{itr}" for itr in df.columns.tolist()]
+            col_names = (
+                [f"{itr}".title() for itr in cols]
+                if kwargs.get("title_columns", True)
+                else cols[:]
+            )
+            df.to_csv(
+                export_path,
+                index=False,
+                columns=cols,
+                header=col_names,
+                quoting=csv.QUOTE_NONNUMERIC,
+            )
 
         elif export_format == "html":
             write_export(df.to_html(index=False))

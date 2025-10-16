@@ -350,6 +350,16 @@ function(ROCPROFILER_ADD_INTERFACE_LIBRARY _TARGET _DESCRIPT)
     endif()
 endfunction()
 
+# ----------------------------------------------------------------------------------------#
+# macro to add an interface lib for nolink targets
+#
+function(ROCPROFILER_ADD_NOLINK_INTERFACE_LIBRARY _TARGET _DESCRIPT)
+    rocprofiler_add_interface_library(${_TARGET} "${_DESCRIPT}" ${ARGN})
+    # this is a nolink target so it's include dirs, etc. should propagate to the headers
+    # target
+    target_link_libraries(rocprofiler-sdk-headers INTERFACE $<BUILD_INTERFACE:${_TARGET}>)
+endfunction()
+
 # -----------------------------------------------------------------------
 # function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is
 # specified by the existence of the variable <NAME>, to the list of enabled/disabled

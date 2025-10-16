@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # Note:
 # * This script should reside in the artifacts directory
 #   when executed.

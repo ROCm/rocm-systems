@@ -473,8 +473,10 @@ impl(Args... args)
                     found_agent = true;
                 }
             });
-
-        ROCP_FATAL_IF(!found_agent) << fmt::format(
+        // Changed to debug due to rocprofiler attachment feature. In some cases, the queue map for
+        // the iterate queues function is empty since the rocprofiler wasn't present when the queue
+        // data was gathered
+        ROCP_DFATAL_IF(!found_agent) << fmt::format(
             "Scratch memory tracing: Could not find a valid agent for queue id {}", hsa_queue->id);
         return _agent_id;
     };

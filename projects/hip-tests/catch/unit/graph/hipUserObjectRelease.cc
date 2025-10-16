@@ -45,4 +45,5 @@ TEST_CASE("Unit_hipUserObjectRelease_Negative") {
     HIP_CHECK_ERROR(hipUserObjectRelease(hObject, 0), hipErrorInvalidValue);
   }
   SECTION("Pass initialRefcount as INT_MAX") { HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX)); }
+  HIP_CHECK(hipUserObjectRelease(hObject, 1));
 }
