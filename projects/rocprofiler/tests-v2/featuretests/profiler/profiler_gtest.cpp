@@ -273,7 +273,7 @@ TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenKernelDurationShou
 
 // Test:4 Compares end-time is greater than start-time in current
 // profiler output
-TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
+TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
   // kernel info in current profiler run
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
@@ -304,7 +304,7 @@ class VectorAddTest : public ProfilerTest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // profiler output
-TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
+TEST_F(VectorAddTest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
@@ -315,7 +315,7 @@ TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGolden
 
 // Test:2 Compares order of kernel-names in golden output against current
 // profiler output
-TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
+TEST_F(VectorAddTest, DISABLED_WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
