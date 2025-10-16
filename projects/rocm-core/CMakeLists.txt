@@ -149,24 +149,22 @@ if(BUILD_SHARED_LIBS)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT CORE_RUNTIME )
 
-  # Install rdhc folder
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/
-          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
-          COMPONENT CORE_RUNTIME
-          FILES_MATCHING
-          PATTERN "*.txt"
-          PATTERN "*.md"
-          PATTERN "__pycache__" EXCLUDE)
+  # Install rdhc files
+  install ( FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/README.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/requirements.txt
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+            COMPONENT CORE_RUNTIME)
 
   install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocm-core
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}
             COMPONENT CORE_RUNTIME )
 
   # Create symlink for rdhc in bin directory
   add_custom_target ( rdhc_symlink_lib ALL
                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                      COMMAND ${CMAKE_COMMAND} -E create_symlink
-                     ../${CMAKE_INSTALL_LIBEXECDIR}/rocm-core/rdhc.py
+                     ../${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}/rdhc.py
                      rdhc-link )
 
   install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link
@@ -195,24 +193,22 @@ else()
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT ${STATIC_COMP_TYPE} )
 
-  # Install rdhc folder
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/
-          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
-          COMPONENT ${STATIC_COMP_TYPE}
-          FILES_MATCHING
-          PATTERN "*.txt"
-          PATTERN "*.md"
-          PATTERN "__pycache__" EXCLUDE)
+  # Install rdhc files
+  install ( FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/README.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/requirements.txt
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+            COMPONENT ${STATIC_COMP_TYPE})
 
-          install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocm-core
+  install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}
             COMPONENT ${STATIC_COMP_TYPE} )
 
   # Create symlink for rdhc in bin directory
   add_custom_target ( rdhc_symlink_static ALL
                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                      COMMAND ${CMAKE_COMMAND} -E create_symlink
-                     ../${CMAKE_INSTALL_LIBEXECDIR}/rocm-core/rdhc.py
+                     ../${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}/rdhc.py
                      rdhc-link-static )
 
   install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link-static
