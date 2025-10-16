@@ -28,6 +28,8 @@
 #include "utility.hpp"
 
 #include <chrono>
+#include <ratio>
+using namespace std::chrono_literals;
 
 namespace rocprofsys
 {
@@ -93,6 +95,9 @@ setup()
                              itr.c_str());
         track_event_cfg.add_disabled_categories(itr);
     }
+
+    cfg.set_flush_period_ms(
+        std::chrono::duration_cast<std::chrono::milliseconds>(10s).count());
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");  // this MUST be track_event
