@@ -1160,21 +1160,72 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rccl_api = static_cast<rcclApiFuncTable*>(tables[0]);
 
-        // any internal modifications to the rcclApiFuncTable need to be done before we make the
-        // copy or else those modifications will be lost when RCCL API tracing is enabled
-        // because the RCCL API tracing invokes the function pointers from the copy below
-        rocprofiler::rccl::copy_table(rccl_api, lib_instance);
+        auto is_valid_rccl_dispatch_table = (rccl_api != nullptr);
 
-        // install rocprofiler API wrappers
-        rocprofiler::rccl::update_table(rccl_api);
+        // Runtime ABI validation for RCCL API dispatch table.
+        //
+        // NOTE: These checks are necessary because rocprofiler-sdk enforces ABI
+        // compatibility at compile time. If RCCL is rebuilt afterwards with an
+        // incorrect or mismatched dispatch table, compile-time checks are bypassed.
+#if ROCPROFILER_SDK_COMPUTE_VERSION(RCCL_API_TRACE_VERSION_MAJOR,                                  \
+                                    0,                                                             \
+                                    RCCL_API_TRACE_VERSION_PATCH) >= 1
+        // 1. For RCCL_API_TRACE_VERSION_PATCH = 1, ncclAllReduceWithBias_fn is expected
+        //    to be the last entry (38th function) in the dispatch table. Its offset is
+        //    therefore used as the canonical end of the table for patch 1.
+        //
+        //    Problem: Some intermediate RCCL commits introduced new APIs *before*
+        //    ncclAllReduceWithBias_fn without bumping the ABI patch version. That
+        //    breaks the ABI contract with rocprofiler-sdk, because the table layout no
+        //    longer matches what the SDK was compiled against.
+        //
+        // 2. This check prevents such mismatches at runtime:
+        //    a. NCCL_VERSION_CODE < 22703 → indicates the first RCCL build was taken
+        //       before the broken commits.
+        //    b. rccl_api->size > offsetof(..., ncclAllReduceWithBias_fn) + sizeof(void*)
+        //       → indicates the current RCCL dispatch table is larger than expected,
+        //       meaning newer (broken) entries were inserted before the known last API.
+        //
+        //    If both conditions are true, the dispatch table is invalid and tracing is
+        //    disabled to avoid corrupt output.
+        if(is_valid_rccl_dispatch_table && NCCL_VERSION_CODE < 22703 &&
+           rccl_api->size > offsetof(rcclApiFuncTable, ncclAllReduceWithBias_fn) + sizeof(void*))
+        {
+            is_valid_rccl_dispatch_table = false;
 
-        // Tracing notifications the runtime has initialized
-        rocprofiler::runtime_init::initialize(
-            ROCPROFILER_RUNTIME_INITIALIZATION_RCCL, lib_version, lib_instance);
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "Invalid RCCL dispatch table: layout does not match the expected "
+                "rocprofiler-SDK ABI (RCCL API Trace v{}.{}.{}). "
+                "Tracing is disabled to prevent corrupted data. "
+                "Use a compatible RCCL version.",
+                RCCL_API_TRACE_VERSION_MAJOR,
+                0,
+                RCCL_API_TRACE_VERSION_PATCH);
+        }
+#endif
+        if(is_valid_rccl_dispatch_table)
+        {
+            // any internal modifications to the rcclApiFuncTable need to be done before we make
+            // the copy or else those modifications will be lost when RCCL API tracing is
+            // enabled because the RCCL API tracing invokes the function pointers from the copy
+            // below
+            rocprofiler::rccl::copy_table(rccl_api, lib_instance);
 
-        // allow tools to install API wrappers
-        rocprofiler::intercept_table::notify_intercept_table_registration(
-            ROCPROFILER_RCCL_TABLE, lib_version, lib_instance, std::make_tuple(rccl_api));
+            // install rocprofiler API wrappers
+            rocprofiler::rccl::update_table(rccl_api);
+
+            // Tracing notifications the runtime has initialized
+            rocprofiler::runtime_init::initialize(
+                ROCPROFILER_RUNTIME_INITIALIZATION_RCCL, lib_version, lib_instance);
+
+            // allow tools to install API wrappers
+            rocprofiler::intercept_table::notify_intercept_table_registration(
+                ROCPROFILER_RCCL_TABLE, lib_version, lib_instance, std::make_tuple(rccl_api));
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << "RCCL API tracing is disabled: dispatch table is invalid.";
+        }
     }
     else if(std::string_view{name} == "rocdecode")
     {

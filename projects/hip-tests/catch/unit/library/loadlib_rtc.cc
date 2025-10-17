@@ -29,7 +29,11 @@ THE SOFTWARE.
 static std::vector<char> compile_using_hiprtc(const std::string& code, std::string gpu_arch) {
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code.c_str(), "code.cu", 0, NULL, NULL));
-  std::string offload_arch = "--offload-arch=" + gpu_arch;
+  #ifdef __HIP_PLATFORM_AMD__
+    std::string offload_arch = "--offload-arch=" + gpu_arch;
+  #else
+    std::string offload_arch = "--fmad=false";
+  #endif
   const char* opts[] = {offload_arch.c_str()};
   HIPRTC_CHECK(hiprtcCompileProgram(prog, 1, opts));
   size_t size;
