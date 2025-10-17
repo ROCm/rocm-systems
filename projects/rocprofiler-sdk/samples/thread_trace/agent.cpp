@@ -119,11 +119,12 @@ gen_output_stream()
 
     std::vector<Element> sorted(latencies->begin(), latencies->end());
     std::stable_sort(sorted.begin(), sorted.end(), [](const Element& a, const Element& b) {
-        return a.second.latency > b.second.latency;
+        //return a.second.latency > b.second.latency;
+        return a.first.address < b.first.address;
     });
 
     output << "Top 50 hotspots for trace (cycles):\n";
-    for(size_t i = 0; i < sorted.size() && i < 50; i++)
+    for(size_t i = 0; i < sorted.size() /* && i < 50 */; i++)
     {
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
@@ -194,11 +195,13 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-std::vector<char> output(1<<30);
+std::vector<char> output_buffer(1ul<<30);
 std::atomic<size_t> output_size{0};
 
 void parse_output()
 {
+    //std::ofstream("result.att", std::ios::binary).write(output_buffer.data(), output_size);
+
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
                     uint64_t                                       num_events,
@@ -221,6 +224,12 @@ void parse_output()
                 }
             }
         }
+        else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO)
+        {
+            auto* infos = (rocprofiler_thread_trace_decoder_info_t*) events;
+            for(size_t i = 0; i < num_events; i++)
+                std::cerr << rocprofiler_thread_trace_decoder_info_string(decoder, infos[i]) << std::endl;
+        }
 
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
@@ -237,9 +246,12 @@ void parse_output()
         }
     };
 
-    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, output.data(), output_size, nullptr));
+    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, output_buffer.data(), output_size, nullptr));
     output_size = 0;
 };
+
+// std::ofstream file("result.att", std::ios::binary);
+// int fd = open("output.bin", O_WRONLY | O_CREAT | O_DIRECT, S_IRUSR | S_IWUSR);
 
 void
 shader_data_callback(rocprofiler_agent_id_t /* agent */,
@@ -250,23 +262,28 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
 {
     CHECK_NOTNULL(Results::latencies);
 
+    //file.write((char*)se_data, data_size); return;
+    // Ensure buffer is page-aligned and page-sized for O_DIRECT
+    //write(fd, se_data, data_size); return;
+
     size_t location = output_size.fetch_add(data_size);
+    void* output = output_buffer.data();
 
     auto is_ptr_mod8 = [](void* data) { return (reinterpret_cast<std::uintptr_t>(data)%8) == 0; };
     auto is_int_mod8 = [](size_t data) { return (data%8) == 0; };
 
-    void* output_data = output.data();
-
-    if (is_int_mod8(location) && is_int_mod8(data_size) && is_ptr_mod8(se_data) && is_ptr_mod8(output_data))
+    if (is_int_mod8(location) && is_int_mod8(data_size) && is_ptr_mod8(se_data) && is_ptr_mod8(output))
     {
         for (size_t j=0; j<data_size/8; j++)
-            static_cast<uint64_t*>(output_data)[j+location/8] = static_cast<uint64_t*>(se_data)[j];
+            static_cast<uint64_t*>(output)[j+location/8] = static_cast<uint64_t*>(se_data)[j];
     }
     else
     {
         for (size_t j=0; j<data_size; j++)
-            output[j+location] = static_cast<char*>(se_data)[j];
+            static_cast<char*>(output)[j+location] = static_cast<char*>(se_data)[j];
     }
+
+    std::cout << "Size: " << data_size << std::endl;
 }
 
 }  // namespace Decoder

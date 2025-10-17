@@ -144,7 +144,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       sample_data_ptr += gfx9_header_size;
       sample_size_plus_header = sample_size + gfx9_header_size;
     }
-
+  
     memorymgr->CopyMemory((void*)sample_data_ptr, sample_ptr, sample_size);
     callback(se_index, (void*)cpu_sample.data(), sample_size_plus_header, userdata);
   }
@@ -260,6 +260,9 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
       }
     }
   }
+
+  for (int64_t i=0; i<buffer_num; i++)
+    std::cout << i << " Buffer data: " << std::hex << reinterpret_cast<uint64_t>(trace_config.buffer_data.at(i)) << std::dec << std::endl;
 
   MemoryManager::RegisterManager(memorymgr);
 
