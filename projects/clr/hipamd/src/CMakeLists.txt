@@ -54,7 +54,6 @@ option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../cmake")
 
 if(BUILD_SHARED_LIBS)
   add_library(amdhip64 SHARED)
@@ -158,13 +157,6 @@ target_include_directories(amdhip64
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
-
-find_package(SIMDe REQUIRED)
-
-if(SIMDE_FOUND)
-    target_link_libraries(amdhip64 PRIVATE ${SIMDE_TARGET})
-endif()
-
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)

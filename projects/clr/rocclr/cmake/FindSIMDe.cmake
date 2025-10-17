@@ -27,7 +27,7 @@ endif()
 
 if(PkgConfig_FOUND AND simde_FOUND)
     message(STATUS "Found SIMDe via pkg-config")
-    set(SIMDE_TARGET PkgConfig::SIMDE)
+    set(SIMDE_TARGET PkgConfig::simde)
 else()
     message(STATUS "SIMDe not found via pkg-config. Falling back to find_path...")
 
@@ -35,8 +35,8 @@ else()
         find_path(SIMDE_INCLUDE_DIR
             NAMES simde/simde-common.h
             PATHS
-                "C:/simde"
-            ENV INCLUDE
+                "$ENV{DK_ROOT}/simde"
+            NO_DEFAULT_PATH
     )
     elseif(UNIX)
         find_path(SIMDE_INCLUDE_DIR
@@ -56,6 +56,7 @@ else()
             add_library(SIMDE INTERFACE)
             target_include_directories(SIMDE INTERFACE ${SIMDE_INCLUDE_DIR})
         endif()
+        set(SIMDE_TARGET SIMDE)
     else()
         message(WARNING "could not find simde")
     endif()

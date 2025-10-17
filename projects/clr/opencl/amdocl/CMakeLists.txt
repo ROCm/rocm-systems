@@ -42,7 +42,6 @@ if(ADDRESS_SANITIZER)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../cmake")
 
 if(BUILD_SHARED_LIBS)
   add_library(amdocl SHARED)
@@ -126,11 +125,6 @@ if(WIN32)
 endif()
 
 target_link_libraries(amdocl PUBLIC rocclr)
-
-find_package(SIMDe REQUIRED)
-if(SIMDE_FOUND)
-    target_link_libraries(amdocl PRIVATE ${SIMDE_TARGET})
-endif()
 
 INSTALL(TARGETS amdocl
   COMPONENT MAIN
