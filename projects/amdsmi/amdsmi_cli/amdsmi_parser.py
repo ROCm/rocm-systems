@@ -1057,6 +1057,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-T', '--throttle', dest='throttle', action='store_true', required=False, help=argparse.SUPPRESS)
 
             # Options to only display to Hypervisors
+            # Need to resolve the -G for guard, but technically should never intersect since it's VF only
             if self.helpers.is_hypervisor():
                 metric_parser.add_argument('-s', '--schedule', action='store_true', required=False, help=schedule_help)
                 metric_parser.add_argument('-G', '--guard', action='store_true', required=False, help=guard_help)
@@ -1466,6 +1467,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only on Guest and BM platforms
         metrics_help = "Metric XGMI information"
+        xgmi_source_status_help = "Source GPU XGMI Link information"
         xgmi_link_status_help = "XGMI Link Status information"
 
         # Create xgmi subparser
@@ -1476,6 +1478,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional Args
         xgmi_parser.add_argument('-m', '--metric', action='store_true', required=False, help=metrics_help)
+        xgmi_parser.add_argument('-s', '--source-status', action='store_true', required=False, help=xgmi_source_status_help)
         xgmi_parser.add_argument('-l', '--link-status', action='store_true', required=False, help=xgmi_link_status_help)
 
         # Add Universal Arguments
