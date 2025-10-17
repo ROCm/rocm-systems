@@ -141,6 +141,8 @@ struct agent : public base_class<tool::agent_info>
     guid_t      guid           = {};
     uint64_t    nid            = 0;
     uint64_t    absolute_index = 0;
+    uint32_t    logical_index  = 0;
+    uint32_t    type_index     = 0;
     std::string type           = {};
     std::string user_name      = {};
     std::string extdata        = {};
@@ -474,17 +476,6 @@ struct stats_node
     double      std_dev        = 0.0;
 };
 
-struct rocpd_pmc_event
-{
-    std::string name     = {};
-    uint64_t    id       = 0;
-    guid_t      guid     = {};
-    uint64_t    event_id = 0;
-    uint64_t    pmc_id   = 0;
-    double      value    = 0.0;
-    std::string extdata  = {};
-};
-
 // Add this struct after the existing type definitions
 
 struct pmc_event
@@ -493,7 +484,11 @@ struct pmc_event
     guid_t      guid     = {};
     uint64_t    event_id = 0;
     uint64_t    pmc_id   = 0;
+    std::string category = {};
+    std::string name     = {};
     double      value    = 0;
+    std::string units    = {};
+    uint32_t    agent_abs_index = 0;
     std::string extdata  = {};
 
     bool has_extdata() const { return (extdata.length() > 2); }
@@ -649,6 +644,8 @@ load(ArchiveT& ar, rocpd::types::agent& data)
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(absolute_index);
+    LOAD_DATA_FIELD(logical_index);
+    LOAD_DATA_FIELD(type_index);
     LOAD_DATA_FIELD(type);
     LOAD_DATA_FIELD(user_name);
     LOAD_DATA_FIELD(extdata);
@@ -1015,19 +1012,6 @@ load(ArchiveT& ar, rocpd::types::stats_node& data)
     LOAD_DATA_NAMED("STD_DEV", std_dev);
 }
 
-template <typename ArchiveT>
-void
-load(ArchiveT& ar, rocpd::types::rocpd_pmc_event& data)
-{
-    LOAD_DATA_FIELD(name);
-    LOAD_DATA_FIELD(id);
-    LOAD_DATA_FIELD(guid);
-    LOAD_DATA_FIELD(event_id);
-    LOAD_DATA_FIELD(pmc_id);
-    LOAD_DATA_FIELD(value);
-    LOAD_DATA_FIELD(extdata);
-}
-
 // Add this inside the cereal namespace, after the existing load functions
 
 template <typename ArchiveT>
@@ -1038,7 +1022,11 @@ load(ArchiveT& ar, rocpd::types::pmc_event& data)
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(pmc_id);
+    LOAD_DATA_FIELD(category);
+    LOAD_DATA_FIELD(name);
     LOAD_DATA_FIELD(value);
+    LOAD_DATA_FIELD(units);
+    LOAD_DATA_FIELD(agent_abs_index);
     LOAD_DATA_FIELD(extdata);
 }
 
