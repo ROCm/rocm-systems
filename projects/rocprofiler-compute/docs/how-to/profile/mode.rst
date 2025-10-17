@@ -527,7 +527,6 @@ successfully.
 .. note::
 
    * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the PDF outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same PDF. To generate results in separate PDFs for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
-   * Roofline feature is currently not enabled on AMD Instinct MI350.
 
 The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
 plot.
