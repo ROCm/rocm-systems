@@ -24,19 +24,19 @@ THE SOFTWARE.
  * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
  * Copies data between host and device.
  */
-
+#include <unistd.h>
 #include <numaif.h>
 #include <numa.h>
 #include <hip_test_common.hh>
 // #define ENABLE_DEBUG 1
 // To run it correctly, we must not export HIP_VISIBLE_DEVICES.
 // And we must explicitly link libnuma because of numa api move_pages().
-#define NUM_PAGES 4
+#define NUM_PAGES 100
 char* h = nullptr;
 char* d_h = nullptr;
 char* m = nullptr;
 char* d_m = nullptr;
-int page_size = 1024;
+int page_size = 0;
 
 const int mode[] = {MPOL_DEFAULT, MPOL_BIND, MPOL_PREFERRED, MPOL_INTERLEAVE};
 const char* modeStr[] = {"MPOL_DEFAULT", "MPOL_BIND", "MPOL_PREFERRED", "MPOL_INTERLEAVE"};
@@ -147,7 +147,8 @@ TEST_CASE("Perf_hipPerfHostNumaAlloc_test") {
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   int cpuCount = numa_max_node() + 1; // number of numa nodes
-  CONSOLE_PRINT("Cpu count %d, Gpu count %d\n", cpuCount, gpuCount);
+  page_size = getpagesize();
+  CONSOLE_PRINT("Cpu count %d, Gpu count %d, page_size %d\n", cpuCount, gpuCount, page_size);
 
   if (cpuCount < 0 || gpuCount < 0) {
     SUCCEED(

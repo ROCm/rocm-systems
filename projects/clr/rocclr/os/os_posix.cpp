@@ -23,8 +23,6 @@
 #include <sys/syscall.h>
 #include "os/os.hpp"
 #include "thread/thread.hpp"
-#include "utils/util.hpp"
-#include "utils/flags.hpp"
 
 #include <iostream>
 #include <stdarg.h>
@@ -322,17 +320,6 @@ void Os::currentStackInfo(address* base, size_t* size) {
 }
 
 void Os::setCurrentThreadName(const char* name) { ::prctl(PR_SET_NAME, name); }
-
-void Os::setPreferredNumaNode(uint32_t node) {
-  if (AMD_CPU_AFFINITY) {
-    numa::NumaNode numaNode(node);
-    if (!numaNode.SchedSetAffinity()) {
-      ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
-              "numaNode(%u).schedSetAffinity() failed! Ignored!",
-              node);
-    }
-  }
-}
 
 void* Thread::entry(Thread* thread) {
   sigset_t set;
@@ -974,16 +961,18 @@ void Os::CxaDemangle(const std::string& name, std::string* result) {
 
 namespace numa {
 
-NumaPolicy::NumaPolicy(const unsigned int numa_node_count) :
-  node_map_((numa_node_count + kBitsPerULong - 1) / kBitsPerULong, 0) { }
+// ================================================================================================
+NumaPolicy::NumaPolicy(const uint32_t numa_node_count) :
+  node_map_((numa_node_count + kBitsPerUInt64 - 1) / kBitsPerUInt64, 0) { }
 
+// ================================================================================================
 bool NumaPolicy::GetMemPolicy() {
   int policy = 0;
   if (syscall(__NR_get_mempolicy, &policy, node_map_.data(),
-      node_map_.size() * kBitsPerULong, nullptr, 0) < 0) {
+      node_map_.size() * kBitsPerUInt64, nullptr, 0) < 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
         "syscall(__NR_get_mempolicy, size=%zu) failed to query policy",
-        node_map_.size() * kBitsPerULong);
+        node_map_.size() * kBitsPerUInt64);
     return false;
   }
   if (policy < static_cast<int>(Policy::kDefault) || policy > static_cast<int>(Policy::kMax)) {
@@ -995,17 +984,27 @@ bool NumaPolicy::GetMemPolicy() {
   return true;
 }
 
-bool NumaPolicy::IsPolicySetAt(const unsigned int node_index) {
-  const unsigned int i = node_index / kBitsPerULong;
-  if (i < node_map_.size())
-    return ((node_map_[i] >> (node_index % kBitsPerULong)) & 1) ?
+// ================================================================================================
+bool NumaPolicy::IsPolicySetAt(uint32_t node_index) const {
+  const uint32_t i = node_index / kBitsPerUInt64;
+  if (i < node_map_.size()) {
+    return ((node_map_[i] >> (node_index % kBitsPerUInt64)) & 1) ?
         true: false;
-  else
+  } else {
     return false;
+  }
 }
 
+// ================================================================================================
+NumaNode::~NumaNode() {
+  if (affinity_) {
+    delete static_cast<std::vector<uint64_t> *>(affinity_);
+    affinity_ = nullptr;
+  }
+}
+
+// ================================================================================================
 bool NumaNode::GetAffinity() {
-  // To-Do: + Cache and lock for better performance
   const std::string path = "/sys/devices/system/node/node" + std::to_string(node_index_) +
       "/cpumap";
   std::ifstream file(path);
@@ -1017,42 +1016,40 @@ bool NumaNode::GetAffinity() {
   std::string line;
   std::getline(file, line);
   file.close();
-  // To remove commas and whitespace
-  std::string cleaned;
-  cleaned.reserve(line.size() + 1);
-  for (char c : line) {
-    if (c != ',' && !isspace(c)) {
-      cleaned += c;
-    }
-  }
-  constexpr size_t kHexsPerULong = 2 * sizeof(unsigned long);
-  cpu_map_.reserve((cleaned.size() + kHexsPerULong - 1) / kHexsPerULong);
-  // To parse from the end (little-endian layout)
-  for (int i = cleaned.size(); i > 0; i -= kHexsPerULong) {
-    size_t start = (i >= kHexsPerULong) ? i - kHexsPerULong : 0;
-    size_t len = (i >= kHexsPerULong) ? kHexsPerULong : i;
 
-    std::string chunk = cleaned.substr(start, len);
-    unsigned long value = std::stoul(chunk, nullptr, 16);
-    cpu_map_.push_back(value);
-    if (len == kHexsPerULong) {
-      size_ += kBitsPerULong;
+  // To remove commas and whitespace
+  line.erase(std::remove_if(line.begin(), line.end(),
+             [](unsigned char x) { return std::isspace(x) || x == ','; }), line.end());
+
+  constexpr uint32_t kHexsPerUInt64 = 2 * sizeof(uint64_t);
+  auto affinity = new std::vector<uint64_t>((line.size() + kHexsPerUInt64 - 1) / kHexsPerUInt64);
+  auto iter = affinity->begin();
+  // To parse from the end (little-endian layout)
+  for (int i = line.size(); i > 0; i -= kHexsPerUInt64) {
+    uint32_t start = (i >= kHexsPerUInt64) ? i - kHexsPerUInt64 : 0;
+    uint32_t len = (i >= kHexsPerUInt64) ? kHexsPerUInt64 : i;
+
+    const std::string chunk = line.substr(start, len);
+    const uint64_t value = std::stoul(chunk, nullptr, 16);
+    *(iter++) = value;
+    if (len == kHexsPerUInt64) {
+      size_ += kBitsPerUInt64;
     } else {
       // Last one
-      size_ = kBitsPerULong - __builtin_clzl(value);
+      size_ = kBitsPerUInt64 - __builtin_clzl(value);
     }
   }
+  affinity_ = affinity;
   return true;
 }
 
+// ================================================================================================
 bool NumaNode::SchedSetAffinity() {
-  if (!GetAffinity() || cpu_map_.size() == 0 || size_ == 0) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
-            "getCpuMap() failed with node_index= %u, cpu_map_.size()=%zu, size=%u",
-            node_index_, cpu_map_.size(), size_);
+  if (!GetAffinity()) {
     return false;
   }
-  if (syscall(__NR_sched_setaffinity, 0, size_, cpu_map_.data()) < 0) {
+  if (syscall(__NR_sched_setaffinity, 0, size_,
+              static_cast<std::vector<uint64_t>*>(affinity_)->data()) < 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
             "syscall(__NR_sched_setaffinity, size=%u) failed", size_);
     return false;

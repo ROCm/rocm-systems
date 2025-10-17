@@ -2040,7 +2040,7 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
-  virtual const uint32_t getPreferredNumaNode() const {
+  virtual uint32_t getPreferredNumaNode() const {
     return static_cast<uint32_t>(-1); //!< PAL doesn't support it
   }
 

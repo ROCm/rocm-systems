@@ -22,7 +22,6 @@
 
 #include "os/os.hpp"
 #include "thread/thread.hpp"
-#include "utils/flags.hpp"
 #include <windows.h>
 #include <process.h>
 #include <tchar.h>
@@ -240,17 +239,6 @@ static void SetThreadName(DWORD threadId, const char* name) {
 }
 
 void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThreadId(), name); }
-
-void Os::setPreferredNumaNode(uint32_t node) {
-  if (AMD_CPU_AFFINITY) {
-    numa::NumaNode numaNode(node);
-    if (!numaNode.SchedSetAffinity()) {
-      ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
-              "numaNode(%u).schedSetAffinity() failed! Ignored!",
-              node);
-    }
-  }
-};
 
 static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
   DWORD code = ep->ExceptionRecord->ExceptionCode;
@@ -761,34 +749,51 @@ void Os::CxaDemangle(const std::string& name, std::string* result) { *result = n
 
 namespace numa {
 
-NumaPolicy::NumaPolicy(const unsigned int numa_node_count) {
+// ================================================================================================
+NumaPolicy::NumaPolicy(const uint32_t numa_node_count) {
 }
 
+// ================================================================================================
 bool NumaPolicy::GetMemPolicy() {
   // Dummy as Windows doesn't support numa policy
   return false;
 }
 
-bool NumaPolicy::IsPolicySetAt(const unsigned int node_index) {
+// ================================================================================================
+bool NumaPolicy::IsPolicySetAt(uint32_t node_index) const {
   // Dummy as Windows doesn't support numa policy
   return false;
 }
 
+// ================================================================================================
+NumaNode::~NumaNode() {
+  if (affinity_) {
+    delete static_cast<GROUP_AFFINITY*>(affinity_);
+    affinity_ = nullptr;
+  }
+}
+
+// ================================================================================================
 bool NumaNode::GetAffinity() {
-  if (!GetNumaNodeProcessorMaskEx(node_index_, &affinity_)) {
+  GROUP_AFFINITY *affinity = new GROUP_AFFINITY();
+  if (!GetNumaNodeProcessorMaskEx(node_index_, affinity)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_RESOURCE,
         "Failed getting numa node(%u) affinity with error %d",
         node_index_, GetLastError());
+    delete affinity;
     return false;
   }
+  affinity_ = affinity;
   return true;
 }
 
+// ================================================================================================
 bool NumaNode::SchedSetAffinity() {
   if (!GetAffinity()) {
     return false;
   }
-  if (!SetThreadGroupAffinity(GetCurrentThread(), &affinity_, nullptr)) {
+  if (!SetThreadGroupAffinity(GetCurrentThread(),
+                              static_cast<GROUP_AFFINITY*>(affinity_), nullptr)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_RESOURCE,
         "Failed setting numa node(%u) affinity onto thread with error %d",
         node_index_, GetLastError());
@@ -796,7 +801,9 @@ bool NumaNode::SchedSetAffinity() {
   }
   return true;
 }
+
 }  // namespace numa
+
 }  // namespace amd
 
 #endif  // _WIN32 || __CYGWIN__
