@@ -66,6 +66,6 @@ write_perfetto(
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen,
-    const tool::generator<types::rocpd_pmc_event>&   pmc_event_gen);
+    const tool::generator<types::pmc_event>&         pmc_event_gen);
 }  // namespace output
 }  // namespace rocpd

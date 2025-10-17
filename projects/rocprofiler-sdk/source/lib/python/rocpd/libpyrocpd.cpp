@@ -399,12 +399,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         [](rocpd::RocpdImportData& data, const tool::output_config& output_cfg) -> bool {
             auto _create_agent_index =
                 [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
-                auto ret_index = tool::create_agent_index(
-                    output_cfg.agent_index_value,
-                    _agent.node_id,                                      // absolute index
-                    static_cast<uint32_t>(_agent.logical_node_id),       // relative index
-                    static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
-                    std::string_view(_agent.type));
+                auto ret_index = tool::create_agent_index(output_cfg.agent_index_value,
+                                                          _agent.node_id,        // absolute index
+                                                          _agent.logical_index,  // relative index
+                                                          _agent.type_index,  // type-relative index
+                                                          std::string_view(_agent.type));
                 return ret_index;
             };
             // ORDER BY expression for kernel dispatches
@@ -469,20 +468,142 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto regions = rocpd::sql_generator<rocpd::types::region>{
                             conn, select_guid_nid_pid("regions"), region_order_by};
 
+                        const std::string create_samples_view =
+                            "CREATE TEMP VIEW "
+                            "    `samples_temp` AS "
+                            "SELECT "
+                            "    R.id, "
+                            "    R.guid, "
+                            "    ( "
+                            "        SELECT "
+                            "            string "
+                            "        FROM "
+                            "            `rocpd_string` RS "
+                            "        WHERE "
+                            "            RS.id = E.category_id "
+                            "            AND RS.guid = E.guid "
+                            "    ) AS category, "
+                            "    ( "
+                            "        SELECT "
+                            "            string "
+                            "        FROM "
+                            "            `rocpd_string` RS "
+                            "        WHERE "
+                            "            RS.id = T.name_id "
+                            "            AND RS.guid = T.guid "
+                            "    ) AS name, "
+                            "    T.nid, "
+                            "    P.pid, "
+                            "    T.tid,"
+                            "    0 AS tid, "
+                            "    R.timestamp, "
+                            "    R.event_id, "
+                            "    E.stack_id AS stack_id, "
+                            "    E.parent_stack_id AS parent_stack_id, "
+                            "    E.correlation_id AS corr_id, "
+                            "    E.extdata AS extdata, "
+                            "    E.call_stack AS call_stack, "
+                            "    E.line_info AS line_info "
+                            "FROM "
+                            "    `rocpd_sample` R "
+                            "    INNER JOIN `rocpd_track` T ON T.id = R.track_id "
+                            "    AND T.guid = R.guid "
+                            "    INNER JOIN `rocpd_event` E ON E.id = R.event_id "
+                            "    AND E.guid = R.guid "
+                            "    INNER JOIN `rocpd_info_process` P ON P.id = T.pid "
+                            "    AND P.guid = T.guid "
+                            "    LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid; ";
+
+                        sqlite3_stmt* _stmt_samples_temp;
+                        uint64_t      prepare_samples_status = sqlite3_prepare_v2(
+                            conn, create_samples_view.c_str(), -1, &_stmt_samples_temp, nullptr);
+                        uint64_t step_samples_status = sqlite3_step(_stmt_samples_temp);
+
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
-                            conn, select_guid_nid_pid("samples"), sample_order_by};
+                            conn, select_guid_nid_pid("samples_temp"), sample_order_by};
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
                             conn, select_guid_nid_pid("threads")};
 
-                        auto pmc_events = rocpd::sql_generator<rocpd::types::rocpd_pmc_event>{
-                            conn,
-                            fmt::format("SELECT rocpd_info_pmc.name AS name, "
-                                        "rocpd_pmc_event.* FROM rocpd_pmc_event "
-                                        "INNER JOIN rocpd_info_pmc ON rocpd_info_pmc.id = "
-                                        "rocpd_pmc_event.pmc_id "
-                                        "WHERE rocpd_pmc_event.guid = '{}'",
-                                        pitr.guid)};
+                        auto pmc_info = rocpd::sql_generator<rocpd::types::pmc_info>{
+                            conn, select_guid_nid_pid("pmc_info")};
+
+                        const std::string create_events_view = "CREATE TEMP VIEW "
+                                                               "    `events_temp` AS "
+                                                               "SELECT "
+                                                               "    E.id, "
+                                                               "    E.guid, "
+                                                               "    E.category_id, "
+                                                               "    ( "
+                                                               "        SELECT "
+                                                               "            string "
+                                                               "        FROM "
+                                                               "            `rocpd_string` RS "
+                                                               "        WHERE "
+                                                               "            RS.id = E.category_id "
+                                                               "            AND RS.guid = E.guid "
+                                                               "    ) AS category, "
+                                                               "    E.stack_id, "
+                                                               "    E.parent_stack_id, "
+                                                               "    E.correlation_id, "
+                                                               "    E.extdata "
+                                                               "FROM "
+                                                               "    `rocpd_event` E; ";
+
+                        sqlite3_stmt* _stmt_events_temp;
+                        uint64_t      prepare_events_status = sqlite3_prepare_v2(
+                            conn, create_events_view.c_str(), -1, &_stmt_events_temp, nullptr);
+                        uint64_t step_events_status = sqlite3_step(_stmt_events_temp);
+
+                        const std::string create_pmc_event_view =
+                            "CREATE TEMP VIEW "
+                            "    `pmc_events_temp` AS "
+                            "SELECT "
+                            "    PMC_E.id, "
+                            "    PMC_E.guid, "
+                            "    PMC_I.nid, "
+                            "    PMC_I.pid, "
+                            "    PMC_E.pmc_id, "
+                            "    PMC_E.event_id, "
+                            "    E.category_id, "
+                            "    E.category, "
+                            "    PMC_I.name, "
+                            "    PMC_I.symbol, "
+                            "    PMC_E.value AS counter_value, "
+                            "    A.absolute_index AS agent_abs_index,"
+                            "    PMC_I.target_arch, "
+                            "    PMC_I.event_code, "
+                            "    PMC_I.instance_id, "
+                            "    PMC_I.component, "
+                            "    PMC_I.units, "
+                            "    PMC_I.value_type, "
+                            "    PMC_I.block, "
+                            "    PMC_I.expression, "
+                            "    PMC_I.is_constant, "
+                            "    PMC_I.is_derived, "
+                            "    PMC_I.description, "
+                            "    PMC_I.long_description, "
+                            "    PMC_I.extdata AS pmc_info_extdata, "
+                            "    PMC_E.extdata AS pmc_event_extdata "
+                            "FROM "
+                            "    `rocpd_pmc_event` PMC_E "
+                            "    INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id "
+                            "    AND PMC_I.guid = PMC_E.guid "
+                            "    INNER JOIN `events_temp` E ON E.id = PMC_E.event_id "
+                            "    AND E.guid = PMC_E.guid "
+                            "    INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id;";
+
+                        sqlite3_stmt* _stmt_pmc_event_temp;
+                        uint64_t      prepare_pmc_event_status =
+                            sqlite3_prepare_v2(conn,
+                                               create_pmc_event_view.c_str(),
+                                               -1,
+                                               &_stmt_pmc_event_temp,
+                                               nullptr);
+                        uint64_t step_pmc_event_status = sqlite3_step(_stmt_pmc_event_temp);
+
+                        auto pmc_events = rocpd::sql_generator<rocpd::types::pmc_event>{
+                            conn, select_guid_nid_pid("pmc_events_temp")};
 
                         // absolute_index |-> (agent, agent_index)
                         auto agents_map =

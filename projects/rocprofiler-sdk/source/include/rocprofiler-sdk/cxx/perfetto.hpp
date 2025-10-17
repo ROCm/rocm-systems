@@ -107,6 +107,20 @@ ROCPROFILER_DEFINE_CATEGORY(category, thread_context_switch, "Thread Context Swi
 ROCPROFILER_DEFINE_CATEGORY(category, thread_cpu_time, "Thread CPU Time")
 ROCPROFILER_DEFINE_CATEGORY(category, thread_page_fault, "Thread Page Fault")
 ROCPROFILER_DEFINE_CATEGORY(category, thread_peak_memory, "Thread Peak Memory Usage")
+ROCPROFILER_DEFINE_CATEGORY(category, amd_smi_device_busy_gfx, "GPU GFX Busy")
+ROCPROFILER_DEFINE_CATEGORY(category, amd_smi_device_busy_mm, "GPU MM Busy")
+ROCPROFILER_DEFINE_CATEGORY(category, amd_smi_device_busy_umc, "GPU UMC Busy")
+ROCPROFILER_DEFINE_CATEGORY(category, amd_smi_device_memory_usage, "GPU Memory Usage")
+ROCPROFILER_DEFINE_CATEGORY(category, amd_smi_device_power, "GPU Current Power")
+ROCPROFILER_DEFINE_CATEGORY(category, amd_smi_device_temp, "GPU Temperature")
+ROCPROFILER_DEFINE_CATEGORY(category, cpu_frequency_process_context_switch, "CPU Context Switches")
+ROCPROFILER_DEFINE_CATEGORY(category, cpu_frequency_process_kernel_cpu_time, "CPU Kernel Time")
+ROCPROFILER_DEFINE_CATEGORY(category, cpu_frequency_process_memory_hwm, "CPU Memory Usage")
+ROCPROFILER_DEFINE_CATEGORY(category, cpu_frequency_process_page_fault, "CPU Page Faults")
+ROCPROFILER_DEFINE_CATEGORY(category, cpu_frequency_process_user_cpu_time, "CPU User Time")
+ROCPROFILER_DEFINE_CATEGORY(category,
+                            cpu_frequency_process_virtual_memory,
+                            "CPU Virtual Memory Usage")
 
 ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
 
@@ -127,6 +141,18 @@ ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
         ROCPROFILER_PERFETTO_CATEGORY(category::thread_cpu_time),                                  \
         ROCPROFILER_PERFETTO_CATEGORY(category::thread_page_fault),                                \
         ROCPROFILER_PERFETTO_CATEGORY(category::thread_peak_memory),                               \
+        ROCPROFILER_PERFETTO_CATEGORY(category::amd_smi_device_busy_gfx),                          \
+        ROCPROFILER_PERFETTO_CATEGORY(category::amd_smi_device_busy_mm),                           \
+        ROCPROFILER_PERFETTO_CATEGORY(category::amd_smi_device_busy_umc),                          \
+        ROCPROFILER_PERFETTO_CATEGORY(category::amd_smi_device_memory_usage),                      \
+        ROCPROFILER_PERFETTO_CATEGORY(category::amd_smi_device_power),                             \
+        ROCPROFILER_PERFETTO_CATEGORY(category::amd_smi_device_temp),                              \
+        ROCPROFILER_PERFETTO_CATEGORY(category::cpu_frequency_process_context_switch),             \
+        ROCPROFILER_PERFETTO_CATEGORY(category::cpu_frequency_process_kernel_cpu_time),            \
+        ROCPROFILER_PERFETTO_CATEGORY(category::cpu_frequency_process_memory_hwm),                 \
+        ROCPROFILER_PERFETTO_CATEGORY(category::cpu_frequency_process_page_fault),                 \
+        ROCPROFILER_PERFETTO_CATEGORY(category::cpu_frequency_process_user_cpu_time),              \
+        ROCPROFILER_PERFETTO_CATEGORY(category::cpu_frequency_process_virtual_memory),             \
         ROCPROFILER_PERFETTO_CATEGORY(category::none)
 
 #include <perfetto.h>
