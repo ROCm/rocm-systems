@@ -4,6 +4,12 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.3.0 for ROCm 7.2.0
+
+### Added
+
+- Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
+
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added
