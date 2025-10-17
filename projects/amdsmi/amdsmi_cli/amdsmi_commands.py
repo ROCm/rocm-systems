@@ -1486,7 +1486,7 @@ class AMDSMICommands():
                     if bad_page["status"] == amdsmi_interface.AmdSmiMemoryPageStatus.PENDING:
                         bad_page_info_entry = {}
                         # Format page address and size based on --hex flag
-                        if hasattr(args, 'hex') and args.hex:
+                        if args.hex:
                             bad_page_info_entry["page_address"] = f"0x{bad_page['page_address']:x}"
                             bad_page_info_entry["page_size"] = f"0x{bad_page['page_size']:x}"
                         else:
