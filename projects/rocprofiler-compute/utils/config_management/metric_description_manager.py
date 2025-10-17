@@ -18,6 +18,18 @@ from typing import Union
 
 import yaml
 
+try:
+    from . import utils as cm_utils
+except Exception:
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    try:
+        import utils.config_management.utils as cm_utils  # type: ignore
+    except Exception:
+        # last resort if there's a top-level utils.py
+        import utils as cm_utils  # type: ignore
+
 # Section to panel ID mapping for organizing descriptions
 SECTION_PANEL_MAP: dict[str, int] = {
     "Wavefront launch stats": 701,
@@ -59,16 +71,6 @@ SECTION_PANEL_MAP: dict[str, int] = {
 PANEL_ID_TO_SECTION: dict[int, str] = {v: k for k, v in SECTION_PANEL_MAP.items()}
 
 
-def str_representer(dumper, data: str):  # type: ignore[override]
-    """Custom YAML representer for multi-line strings."""
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
-
-
-yaml.add_representer(str, str_representer)
-
-
 def merge_docs_rst_as_default(descs: dict, docs_file: Path) -> dict:
     """
     For each metric that does NOT explicitly carry an 'rst' in panel YAMLs,
@@ -91,6 +93,39 @@ def merge_docs_rst_as_default(descs: dict, docs_file: Path) -> dict:
     return descs
 
 
+def merge_units_as_default(descs: dict, docs_file: Path, per_arch_file: Path) -> dict:
+    """
+    Fill 'unit' ONLY when missing from panel extraction:
+      1) take from existing per-arch file if present,
+      2) else from docs file,
+      3) else leave as-is (missing).
+    """
+    per_arch: dict = {}
+    if per_arch_file.exists():
+        with open(per_arch_file, "r", encoding="utf-8") as f:
+            per_arch = yaml.safe_load(f) or {}
+
+    docs: dict = {}
+    if docs_file.exists():
+        with open(docs_file, "r", encoding="utf-8") as f:
+            docs = yaml.safe_load(f) or {}
+
+    for section, metrics in descs.items():
+        psec = per_arch.get(section) or {}
+        dsec = docs.get(section) or {}
+        for metric, data in metrics.items():
+            # Only fill if panel did NOT explicitly set unit
+            if "unit" not in data or data["unit"] is None:
+                unit = None
+                if metric in psec and isinstance(psec[metric], dict):
+                    unit = psec[metric].get("unit")
+                if unit is None and metric in dsec and isinstance(dsec[metric], dict):
+                    unit = dsec[metric].get("unit")
+                if unit is not None:
+                    data["unit"] = unit
+    return descs
+
+
 def panel_rst_override_keys(descs: dict) -> set:
     """
     Return {(section, metric)} for metrics that explicitly
@@ -101,6 +136,15 @@ def panel_rst_override_keys(descs: dict) -> set:
         for metric_name, d in metrics.items():
             if "rst" in d and d["rst"]:
                 keys.add((section, metric_name))
+    return keys
+
+
+def panel_unit_override_keys(descs: dict) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for section, metrics in descs.items():
+        for metric, d in metrics.items():
+            if "unit" in d and d["unit"] is not None:
+                keys.add((section, metric))
     return keys
 
 
@@ -148,8 +192,7 @@ def extract_descriptions_from_arch(
     descriptions_by_section: dict[str, dict[str, dict]] = {}
 
     for yaml_file in sorted(arch_path.glob("*.yaml")):
-        with open(yaml_file) as f:
-            data = yaml.safe_load(f) or {}
+        data = cm_utils.load_yaml(yaml_file)
 
         panel_config = data.get("Panel Config")
         if not isinstance(panel_config, dict):
@@ -174,21 +217,27 @@ def extract_descriptions_from_arch(
                             }
 
         for metric_name, description in panel_descriptions.items():
-            if metric_name in metrics_with_units:
-                section_name = metrics_with_units[metric_name]["section"]
-                descriptions_by_section.setdefault(section_name, {})
-                desc_data = {
-                    "plain": description
-                    if isinstance(description, str)
-                    else description.get("plain", ""),
-                    "rst": description.get("rst", description)
-                    if isinstance(description, dict)
-                    else description,
-                }
-                unit = metrics_with_units[metric_name].get("unit")
-                if unit:
-                    desc_data["unit"] = unit
-                descriptions_by_section[section_name][metric_name] = desc_data
+            section_name = (
+                metrics_with_units[metric_name]["section"]
+                if metric_name in metrics_with_units
+                else "General"
+            )
+
+            if isinstance(description, dict):
+                plain = description.get("plain", "")
+                rst = description.get("rst", "")
+                unit = description.get("unit", None)
+            else:
+                plain = description
+                rst = ""
+                unit = None
+
+            desc_data = {"plain": plain, "rst": rst}
+            if unit is not None:
+                desc_data["unit"] = unit
+
+            descriptions_by_section.setdefault(section_name, {})
+            descriptions_by_section[section_name][metric_name] = desc_data
 
     return descriptions_by_section
 
@@ -209,14 +258,15 @@ def update_per_arch_metrics_file(
                 entry["unit"] = desc_data["unit"]
             rst_descriptions[section][metric_name] = entry
 
-    with open(output_path, "w") as f:
-        yaml.dump(rst_descriptions, f, sort_keys=False, allow_unicode=True)
-
+    cm_utils.save_yaml(rst_descriptions, output_path)
     print(f"Updated: {output_path}")
 
 
 def update_docs_metrics_file(
-    descriptions: dict, docs_file: str, panel_rst_overrides: set
+    descriptions: dict,
+    docs_file: str,
+    panel_rst_overrides: set,
+    panel_unit_overrides: set,
 ) -> bool:
     docs_path = Path(docs_file)
     existing: dict = {}
@@ -232,12 +282,12 @@ def update_docs_metrics_file(
             if (section, metric_name) in panel_rst_overrides and desc_data.get("rst"):
                 existing[section][metric_name]["rst"] = desc_data["rst"]
             # Always keep unit if provided (optional)
-            if "unit" in desc_data and desc_data["unit"] is not None:
+            if (section, metric_name) in panel_unit_overrides and "unit" in desc_data:
                 existing[section][metric_name]["unit"] = desc_data["unit"]
 
     docs_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(docs_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(existing, f, sort_keys=False, allow_unicode=True)
+
+    cm_utils.save_yaml(existing, docs_path)
     return True
 
 
@@ -296,6 +346,9 @@ def sync_arch(
 ) -> bool:
     """Sync descriptions for a single architecture."""
     arch_dir = Path(configs_dir) / arch_name
+    docs_file = Path(docs_metrics_file)
+    per_arch_file = Path(per_arch_metrics_dir) / f"{arch_name}_metrics_description.yaml"
+
     if not arch_dir.is_dir():
         print(f"Error: {arch_dir} is not a directory")
         return False
@@ -311,21 +364,23 @@ def sync_arch(
 
     # 2) Capture which metrics had explicit panel RST (BEFORE merging docs)
     panel_rst_overrides = panel_rst_override_keys(descriptions)
+    panel_unit_overrides = panel_unit_override_keys(descriptions)
 
     # 3) Merge docs' RST as the default (unless panel overrides)
-    descriptions = merge_docs_rst_as_default(descriptions, Path(docs_metrics_file))
+    descriptions = merge_docs_rst_as_default(descriptions, docs_file)
+    descriptions = merge_units_as_default(descriptions, docs_file, per_arch_file)
 
     # 4) Write per-arch file (plain from panel; rst = panel override or docs default)
-    ok = update_per_arch_metrics_file(arch_name, descriptions, per_arch_metrics_dir)
-    if not ok:
-        return False
+    update_per_arch_metrics_file(arch_name, descriptions, per_arch_metrics_dir)
 
     # 5) Only when latest: update docs, but overwrite 'rst' only for overrides
     if is_latest:
-        ok = update_docs_metrics_file(
-            descriptions, docs_metrics_file, panel_rst_overrides
-        )
-        if not ok:
+        if not update_docs_metrics_file(
+            descriptions,
+            docs_metrics_file,
+            panel_rst_overrides,
+            panel_unit_overrides,
+        ):
             return False
 
     return True
