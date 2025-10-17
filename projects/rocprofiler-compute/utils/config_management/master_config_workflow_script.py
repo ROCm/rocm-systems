@@ -277,14 +277,18 @@ def display_change_summary(changes: dict) -> bool:
 # =============================================================================
 
 
-def promote_to_latest(new_arch: str, config: dict, reuse_backup: Optional[Path] = None) -> bool:
+def promote_to_latest(
+    new_arch: str, config: dict, reuse_backup: Optional[Path] = None
+) -> bool:
     """
     Original 'promote' that assumes new_arch dir already exists & populated.
     (Kept for backward compatibility.)
     """
     print(f"\nPROMOTING {new_arch} TO LATEST ARCHITECTURE...")
     backup_paths = [config["paths"]["configs_root"], config["paths"]["template"]]
-    backup_path = reuse_backup or create_backup(backup_paths, config["paths"]["backups"])
+    backup_path = reuse_backup or create_backup(
+        backup_paths, config["paths"]["backups"]
+    )
 
     try:
         root = Path(config["paths"]["configs_root"])

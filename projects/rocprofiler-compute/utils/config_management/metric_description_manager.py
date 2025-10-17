@@ -69,6 +69,41 @@ def str_representer(dumper, data: str):  # type: ignore[override]
 yaml.add_representer(str, str_representer)
 
 
+def merge_docs_rst_as_default(descs: dict, docs_file: Path) -> dict:
+    """
+    For each metric that does NOT explicitly carry an 'rst' in panel YAMLs,
+    fill 'rst' from docs/data/metrics_description.yaml if present.
+    This makes docs the default RST source unless the panel overrides it.
+    """
+    docs: dict = {}
+    if docs_file.exists():
+        with open(docs_file, "r", encoding="utf-8") as f:
+            docs = yaml.safe_load(f) or {}
+
+    for section, metrics in descs.items():
+        docs_section = docs.get(section) or {}
+        for metric_name, d in metrics.items():
+            # If panel didn't explicitly provide rst, inherit from docs
+            if not d.get("rst"):
+                doc_entry = docs_section.get(metric_name) or {}
+                if doc_entry.get("rst"):
+                    d["rst"] = doc_entry["rst"]
+    return descs
+
+
+def panel_rst_override_keys(descs: dict) -> set:
+    """
+    Return {(section, metric)} for metrics that explicitly included 'rst' in panel YAMLs.
+    """
+    keys = set()
+    for section, metrics in descs.items():
+        for metric_name, d in metrics.items():
+            # Only count as override if 'rst' exists and is non-empty in the extracted panel YAMLs
+            if "rst" in d and d["rst"]:
+                keys.add((section, metric_name))
+    return keys
+
+
 def validate_rst_syntax(text: str) -> tuple[bool, str]:
     """Basic RST syntax validation."""
     if not text:
@@ -180,27 +215,30 @@ def update_per_arch_metrics_file(
     print(f"Updated: {output_path}")
 
 
-def update_docs_metrics_file(descriptions: dict, docs_file: Union[str, Path]) -> None:
-    """Merge descriptions into docs/data/metrics_description.yaml."""
+def update_docs_metrics_file(
+    descriptions: dict, docs_file: str, panel_rst_overrides: set
+) -> bool:
     docs_path = Path(docs_file)
     existing: dict = {}
     if docs_path.exists():
-        with open(docs_path) as f:
+        with open(docs_path, "r", encoding="utf-8") as f:
             existing = yaml.safe_load(f) or {}
 
     for section, metrics in descriptions.items():
         existing.setdefault(section, {})
         for metric_name, desc_data in metrics.items():
-            entry = {"rst": desc_data["rst"]}
-            if "unit" in desc_data:
-                entry["unit"] = desc_data["unit"]
-            existing[section][metric_name] = entry
+            existing[section].setdefault(metric_name, {})
+            # Only overwrite rst if panel provided an explicit override
+            if (section, metric_name) in panel_rst_overrides and desc_data.get("rst"):
+                existing[section][metric_name]["rst"] = desc_data["rst"]
+            # Always keep unit if provided (optional)
+            if "unit" in desc_data and desc_data["unit"] is not None:
+                existing[section][metric_name]["unit"] = desc_data["unit"]
 
     docs_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(docs_path, "w") as f:
-        yaml.dump(existing, f, sort_keys=False, allow_unicode=True)
-
-    print(f"Updated: {docs_path}")
+    with open(docs_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(existing, f, sort_keys=False, allow_unicode=True)
+    return True
 
 
 def validate_descriptions(
@@ -250,9 +288,9 @@ def validate_descriptions(
 
 def sync_arch(
     arch_name: str,
-    configs_dir: Union[str, Path],
-    per_arch_output_dir: Union[str, Path],
-    docs_file: Union[str, Path],
+    configs_dir: str,
+    per_arch_metrics_dir: str,
+    docs_metrics_file: str,
     is_latest: bool,
 ) -> bool:
     """Sync descriptions for a single architecture."""
@@ -264,27 +302,31 @@ def sync_arch(
     print(f"Syncing descriptions for {arch_name}...")
     is_valid, warnings, errors = validate_descriptions(arch_dir)
 
-    if warnings:
-        print("\nWarnings:")
-        for w in warnings:
-            print(f"   {w}")
-
-    if errors:
-        print("\nErrors:")
-        for e in errors:
-            print(f"   {e}")
-        return False
-
+    # 1) Extract descriptions from panel YAMLs (source for 'plain', optional 'rst')
     descriptions = extract_descriptions_from_arch(arch_dir)
     if not descriptions:
         print(f"No descriptions found in {arch_name}")
         return True
 
-    update_per_arch_metrics_file(arch_name, descriptions, per_arch_output_dir)
-    if is_latest:
-        update_docs_metrics_file(descriptions, docs_file)
+    # 2) Capture which metrics had explicit panel RST (BEFORE merging docs)
+    panel_rst_overrides = panel_rst_override_keys(descriptions)
 
-    print(f"Successfully synced {arch_name}")
+    # 3) Merge docs' RST as the default (unless panel overrides)
+    descriptions = merge_docs_rst_as_default(descriptions, Path(docs_metrics_file))
+
+    # 4) Write per-arch file (plain from panel; rst = panel override or docs default)
+    ok = update_per_arch_metrics_file(arch_name, descriptions, per_arch_metrics_dir)
+    if not ok:
+        return False
+
+    # 5) Only when latest: update docs, but overwrite 'rst' only for overrides
+    if is_latest:
+        ok = update_docs_metrics_file(
+            descriptions, docs_metrics_file, panel_rst_overrides
+        )
+        if not ok:
+            return False
+
     return True
 
 
