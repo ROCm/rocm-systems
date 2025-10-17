@@ -5,10 +5,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## Unreleased
 
 ### Added
-* Add support for multi-kernel applications' pc sampling.
-  * PC Sampling's outputs' instructions are displayed with the name of the kernel that individual instruction belongs to.
-  * Single kernel selection is supported so that the pc samples of selected kernel can be displayed.  
-
 * Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
 * Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
 
@@ -19,13 +15,39 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Removed
 
 ### Optimized
-* Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
 
 ### Known issues
 
 ### Upcoming changes
+
+## ROCm Compute Profiler 3.3.1 for ROCm 7.1.1
+
+### Added
+
+* Improved standalone Roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
+  * Fixed the peak MFMA/VALU lines being cut off.
+  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
+  * Added AI points chart with respective values, cache level, and compute/memory bound status.
+  * Added full kernel names to symbol chart.
+
+* Add support for multi-kernel applications' pc sampling.
+  * PC Sampling's outputs' instructions are displayed with the name of the kernel that individual instruction belongs to.
+  * Single kernel selection is supported so that the pc samples of selected kernel can be displayed.
+
+
+### Changed
+
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
+
+### Optimized
+
+* Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
+
+### Resolved issues
+
+* Bugfixes for stability
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
 
@@ -105,8 +127,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Changed the basic (default) view of TUI from aggregated analysis data to individual kernel analysis data.
 
-* Updated Roofline plots to handle and apply kernel filtering.
-
 * Update `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
   * Theoretical Bandwidth (section 1202)
   * L1I-L2 Bandwidth (section 1303)
@@ -176,7 +196,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series accelerators.
 * Update metric names for better alignment between analysis configuration and documentation
 * Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100.
-* Updated Roofline plots to handle and apply kernel filtering.
+* Fixed an issue of kernel filtering not working in the roofline chart
 
 ### Known issues
 
