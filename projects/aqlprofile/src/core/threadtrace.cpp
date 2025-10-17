@@ -169,7 +169,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       sample_data_ptr += sizeof(att_header_packet_t);
       sample_size_plus_header = sample_size + sizeof(att_header_packet_t);
     }
-
+  
     memorymgr->CopyMemory((void*)sample_data_ptr, sample_ptr, sample_size);
     callback(se_index, (void*)cpu_sample.data(), sample_size_plus_header, userdata);
   }
@@ -264,6 +264,9 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
     // First == Last buf for ring
     trace_config.buffer_data.emplace_back(memorymgr->GetOutputBuf());
   }
+
+  for (int64_t i=0; i<buffer_num; i++)
+    std::cout << i << " Buffer data: " << std::hex << reinterpret_cast<uint64_t>(trace_config.buffer_data.at(i)) << std::dec << std::endl;
 
   MemoryManager::RegisterManager(memorymgr);
 
@@ -375,11 +378,14 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
 
   volatile auto& control = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
   uint32_t status        = control.status_double_buffer;
+  uint32_t wptr          = 2*(control.wptr_double_buffer >> 30);
   
   out->_size       = sizeof(aqlprofile_att_buffer_status_v0_t);
   out->is_too_late = false;
   out->needs_swap  = status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask();
-  std::cout << out->needs_swap << " Status: " << std::hex << status << std::dec << std::endl;
+
+  if(out->needs_swap)
+    std::cout << out->needs_swap << " Status: " << std::hex << status << " - wptr 0x" << wptr << std::dec << std::endl;
 
   if (out->needs_swap)
   {
@@ -426,16 +432,16 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   for (size_t i=0; i<buffers.size(); i++)
   {
     pm4_builder::CmdBuffer commands;
-    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at(i), shader_engine_id);
+    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()), shader_engine_id);
 
     void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
     memcpy(cmdbuffer, commands.Data(), commands.Size());
     aql_profile::PopulateAql(cmdbuffer, commands.Size(), cmd_writer, buffer_swap[i]);
   }
-  
+
   pm4_builder::CmdBuffer commands;
-  uint32_t& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id].status_double_buffer;
-  sqttbuilder->GetStatusPacket(&commands, &manager->config, &status, shader_engine_id);
+  auto& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
+  sqttbuilder->GetStatusPacket(&commands, &manager->config, status, shader_engine_id);
 
   void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
   memcpy(cmdbuffer, commands.Data(), commands.Size());
