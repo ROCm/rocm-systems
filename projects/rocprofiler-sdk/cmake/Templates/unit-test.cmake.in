@@ -19,7 +19,7 @@ set(_PREFIX "@RAUT_TEST_PREFIX@")
 # test sources are in a subfolder
 set(_TEST_SOURCES)
 foreach(_FILE ${_SOURCES})
-    list(APPEND _TEST_SOURCES ${_NAME}/${_FILE})
+    list(APPEND _TEST_SOURCES "${CMAKE_CURRENT_LIST_DIR}/${_NAME}/${_FILE}")
 endforeach()
 
 gtest_add_tests(
@@ -27,7 +27,7 @@ gtest_add_tests(
     SOURCES ${_TEST_SOURCES}
     TEST_LIST @RAUT_TARGET@_TESTS
     TEST_PREFIX ${_PREFIX}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 
 set_tests_properties(
     ${@RAUT_TARGET@_TESTS}

@@ -38,6 +38,11 @@ endforeach()
 
 add_custom_target(agent_hasco_targets DEPENDS ${HSACO_TARGET_LIST})
 
+install(
+    FILES ${HSACO_TARGET_LIST}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+    COMPONENT tests)
+
 add_library(counter_test_constants OBJECT)
 add_library(rocprofiler-sdk::counter-test-constants ALIAS counter_test_constants)
 set(ROCPROFILER_LIB_COUNTER_TEST_CONSTANTS_SOURCES hsa_tables.cpp)
@@ -76,10 +81,14 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main)
 
+set(_ROCPROFILER_SHARE_DIR
+    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+
 rocprofiler_add_unit_test(
     TARGET counter-tests
     SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
     TIMEOUT 45
+    ENVIRONMENT "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"

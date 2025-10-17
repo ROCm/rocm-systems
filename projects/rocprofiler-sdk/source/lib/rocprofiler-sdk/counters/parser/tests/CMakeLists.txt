@@ -14,9 +14,13 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
+set(_ROCPROFILER_SHARE_DIR
+    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+
 rocprofiler_add_unit_test(
     TARGET parser-test
     SOURCES ${ROCPROFILER_LIB_PARSER_TEST_SOURCES}
     TIMEOUT 45
-    LABELS "unittests"
+    LABELS unittests
+    ENVIRONMENT "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
