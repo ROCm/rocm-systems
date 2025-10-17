@@ -931,6 +931,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         pending_help = "Displays all pending retired pages"
         retired_help = "Displays retired pages"
         un_res_help = "Displays unreservable pages"
+        hex_help = "Displays page addresses and sizes in hexadecimal format"
 
         # Create bad_pages subparser
         bad_pages_parser = subparsers.add_parser('bad-pages', help=bad_pages_help, description=bad_pages_subcommand_help)
@@ -942,7 +943,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         bad_pages_parser.add_argument('-p', '--pending', action='store_true', required=False, help=pending_help)
         bad_pages_parser.add_argument('-r', '--retired', action='store_true', required=False, help=retired_help)
         bad_pages_parser.add_argument('-u', '--un-res', action='store_true', required=False, help=un_res_help)
-        hex_help = "Display page addresses and sizes in hexadecimal format"
         bad_pages_parser.add_argument('--hex', action='store_true', required=False, help=hex_help)
 
         # Add Universal Arguments
@@ -1057,7 +1057,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-T', '--throttle', dest='throttle', action='store_true', required=False, help=argparse.SUPPRESS)
 
             # Options to only display to Hypervisors
-            # Need to resolve the -G for guard, but technically should never intersect since it's VF only
             if self.helpers.is_hypervisor():
                 metric_parser.add_argument('-s', '--schedule', action='store_true', required=False, help=schedule_help)
                 metric_parser.add_argument('-G', '--guard', action='store_true', required=False, help=guard_help)
@@ -1467,7 +1466,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only on Guest and BM platforms
         metrics_help = "Metric XGMI information"
-        xgmi_source_status_help = "Source GPU XGMI Link information"
         xgmi_link_status_help = "XGMI Link Status information"
 
         # Create xgmi subparser
@@ -1478,7 +1476,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional Args
         xgmi_parser.add_argument('-m', '--metric', action='store_true', required=False, help=metrics_help)
-        xgmi_parser.add_argument('-s', '--source-status', action='store_true', required=False, help=xgmi_source_status_help)
         xgmi_parser.add_argument('-l', '--link-status', action='store_true', required=False, help=xgmi_link_status_help)
 
         # Add Universal Arguments
