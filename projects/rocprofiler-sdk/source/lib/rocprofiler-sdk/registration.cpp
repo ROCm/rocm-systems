@@ -753,7 +753,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 bool
 supports_attachment()
 {
-    return get_attach_status()->has_attach_table;
+    return (get_attach_status()) ? get_attach_status()->has_attach_table : false;
 }
 
 void
