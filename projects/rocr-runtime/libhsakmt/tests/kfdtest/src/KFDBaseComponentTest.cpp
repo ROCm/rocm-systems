@@ -427,13 +427,58 @@ err_out:
    return r;
 }
 
+HSAKMT_STATUS KFDBaseComponentTest::KFDTestMultiGPUStd(
+                                            std::function<void(int)> test_func, 
+                                            const std::vector<int>& gpuNodes,
+                                            unsigned int gpu_num) {
+    HSAKMT_STATUS r = HSAKMT_STATUS_SUCCESS;
+    std::vector<std::thread> threads;
+    threads.reserve(gpu_num);
+
+    if (gpuNodes.empty()) return HSAKMT_STATUS_SUCCESS;
+
+    for (int i = 0; i < gpu_num; i++) {
+        int gpu_node = gpuNodes.at(i);
+
+        try {
+            threads.emplace_back([test_func, gpu_node]() {
+                try {
+                    test_func(gpu_node);
+                } catch (...) {
+                    LOG() << "test failed at gpu" << gpu_node << std::endl;
+                }
+            });
+        } catch (const std::system_error& e) {
+            std::cout << "Thread creation for gpu node failed : " << gpu_node
+                      << " " << e.what() << std::endl;
+            r = HSAKMT_STATUS_ERROR;
+            break;
+        }
+    }
+
+    // Wait for all threads to complete
+    for (auto& thread : threads) {
+        try {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        } catch (const std::system_error& e) {
+            std::cout << "thread join failed: " << e.what() << std::endl;
+            r = HSAKMT_STATUS_ERROR;
+        }
+    }
+
+    return r;
+}
+
+
 HSAKMT_STATUS KFDBaseComponentTest::KFDTest_Launch(Test_Function test_function) {
 
     /* test on default GPU only */
     if (g_TestNodeId >= 0) {
         int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
         if (defaultGPUNode < 0) {
-            LOG() << "defaultGPUNode is invalid." << defaultGPUNode <<std::endl;
+            LOG() << "defaultGPUNode is invalid." << defaultGPUNode << std::endl;
             return HSAKMT_STATUS_INVALID_PARAMETER;
         }
 
@@ -452,6 +497,32 @@ HSAKMT_STATUS KFDBaseComponentTest::KFDTest_Launch(Test_Function test_function) 
     /* run test_function on all selected GPUs */
     HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
     err = KFDTestMultiGPU(test_function, g_SelectedNodes, g_TestGPUsNum);
+
+    return err;
+}
+
+HSAKMT_STATUS KFDBaseComponentTest::KFDTestLaunchStd(std::function<void(int)> test_func) {
+    /* test on default GPU only */
+    if (g_TestNodeId >= 0) {
+        int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+        if (defaultGPUNode < 0) {
+            LOG() << "defaultGPUNode is invalid." << defaultGPUNode << std::endl;
+            return HSAKMT_STATUS_INVALID_PARAMETER;
+        }
+
+        try {
+            test_func(defaultGPUNode);
+        } catch (...) {
+            LOG() << "test failed at gpu" << defaultGPUNode << std::endl;
+            return HSAKMT_STATUS_ERROR;
+        }
+
+        return HSAKMT_STATUS_SUCCESS;
+    }
+
+    /* run test_function on all selected GPUs */
+    HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
+    err = KFDTestMultiGPUStd(test_func, g_SelectedNodes, g_TestGPUsNum);
 
     return err;
 }
