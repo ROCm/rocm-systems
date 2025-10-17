@@ -112,7 +112,6 @@ struct agent_pools_t{
 
 extern size_t pool_size_limit;
 
-bool isEmuModeEnabled();
 extern bool g_isEmuMode;
 
 /// Fill in the pool_info_t structure for the provided pool.

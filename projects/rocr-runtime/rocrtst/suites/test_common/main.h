@@ -45,6 +45,8 @@
 #ifndef ROCRTST_SUITES_TEST_COMMON_MAIN_H_
 #define ROCRTST_SUITES_TEST_COMMON_MAIN_H_
 
+bool isEmuModeEnabled();
+
 #define RUN_IF_NOT_EMU_MODE(test)                                                                  \
   {                                                                                                \
     if (rocrtst::g_isEmuMode) {                                                             \
