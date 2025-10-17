@@ -146,7 +146,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
   * Use ROCPROF=rocprofv3 to use rocprofv3 interface
 
-* Changed default behavior to run roofline on GPU 0 instead of all GPUs
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
 
 ### Removed
 
