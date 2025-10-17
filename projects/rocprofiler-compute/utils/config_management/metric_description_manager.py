@@ -93,12 +93,12 @@ def merge_docs_rst_as_default(descs: dict, docs_file: Path) -> dict:
 
 def panel_rst_override_keys(descs: dict) -> set:
     """
-    Return {(section, metric)} for metrics that explicitly included 'rst' in panel YAMLs.
+    Return {(section, metric)} for metrics that explicitly
+    included 'rst' in panel YAMLs.
     """
     keys = set()
     for section, metrics in descs.items():
         for metric_name, d in metrics.items():
-            # Only count as override if 'rst' exists and is non-empty in the extracted panel YAMLs
             if "rst" in d and d["rst"]:
                 keys.add((section, metric_name))
     return keys
@@ -268,7 +268,8 @@ def validate_descriptions(
         missing = sorted(all_metrics - set(panel_descriptions.keys()))
         if missing:
             warnings.append(
-                f"{yaml_file.name}: Missing descriptions for metrics: {', '.join(missing)}"
+                f"{yaml_file.name}: Missing descriptions "
+                f"for metrics: {', '.join(missing)}"
             )
 
         for metric_name, description in panel_descriptions.items():

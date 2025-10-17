@@ -214,7 +214,7 @@ There are three high-level GPU analysis views:
       │ 2.1.28  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
       ╘═════════╧═══════════════════════════╧═══════════════════════╧══════════════════╧════════════════════╧════════════════════════╛
 
-   Alternatively, use the option ``-b`` (or ``--block``) with panel alias(es).
+   Alternatively, use the option ``-b`` (or ``--block``) with block alias(es).
    The following snippet shows how to generate a report containing only metric 2 with the alias equivalent of ``sol``
 
    .. code-block:: shell-session
@@ -329,7 +329,7 @@ List metrics
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
 
-List blocks
+List IP blocks
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-blocks gfx90a

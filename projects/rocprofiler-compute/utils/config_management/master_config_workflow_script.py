@@ -622,12 +622,12 @@ def promote_new_arch_from_latest_edits(
 ) -> bool:
     """
     Flow (A): Direct edits were made to the current latest arch.
-      1) Snapshot edited latest to temp
-      2) Restore pristine latest (via Git)
-      3) Copy pristine latest → new arch
-      4) Generate delta (edited_tmp vs pristine_latest) → write under latest/config_delta/
-      5) Apply delta to new arch
-      6) Update template latest=new_arch, regen deltas, validate, sync, hash
+    1) Snapshot edited latest to temp
+    2) Restore pristine latest (via Git)
+    3) Copy pristine latest → new arch
+    4) Generate delta (edited_tmp vs pristine_latest) → write under latest/config_delta/
+    5) Apply delta to new arch
+    6) Update template latest=new_arch, regen deltas, validate, sync, hash
     """
     print(f"\nPROMOTING {new_arch} FROM EDITS IN {latest_arch}...")
     root = Path(config["paths"]["configs_root"])
@@ -705,9 +705,9 @@ def promote_new_arch_from_delta(
 ) -> bool:
     """
     Flow (B): Developer added a delta YAML targeting the latest arch.
-      1) Copy pristine latest → new arch
-      2) Apply the provided delta to new arch
-      3) Promote to latest, regen deltas, validate, sync, hash
+    1) Copy pristine latest → new arch
+    2) Apply the provided delta to new arch
+    3) Promote to latest, regen deltas, validate, sync, hash
     """
     print(f"\nPROMOTING {new_arch} FROM DELTA ON {latest_arch}...")
     root = Path(config["paths"]["configs_root"])
@@ -767,7 +767,8 @@ def handle_new_arch(arch_name: str, config: dict, dry_run: bool = False) -> bool
     print(f"\n{'=' * 80}\nNEW ARCHITECTURE DETECTED: {arch_name}\n{'=' * 80}")
     if not prompt_yes_no(f"Is {arch_name} the new latest architecture?"):
         print(
-            "ERROR: New arch detected but not marked as latest.\n   Only the latest arch should be added as a new directory."
+            "ERROR: New arch detected but not marked as latest.\n   "
+            "Only the latest arch should be added as a new directory."
         )
         return False
     if dry_run:
@@ -780,7 +781,8 @@ def handle_delta_file(
     delta_file: str, arch_name: str, config: dict, dry_run: bool = False
 ) -> bool:
     print(
-        f"\n{'=' * 80}\nDELTA FILE DETECTED: {Path(delta_file).name}\n   Target architecture: {arch_name}\n{'=' * 80}"
+        f"\n{'=' * 80}\nDELTA FILE DETECTED: {Path(delta_file).name}\n   "
+        f"Target architecture: {arch_name}\n{'=' * 80}"
     )
 
     valid, err = validate_delta_structure(delta_file)
@@ -798,7 +800,8 @@ def handle_delta_file(
         print("Choose how to apply this delta:")
         print("  1. Update the existing latest arch in-place")
         print(
-            "  2. Create a NEW architecture from latest and apply the delta there (promote to latest)"
+            "  2. Create a NEW architecture from latest and apply "
+            "the delta there (promote to latest)"
         )
 
         while True:
@@ -822,7 +825,8 @@ def handle_delta_file(
                     return False
                 if dry_run:
                     print(
-                        f"[DRY RUN] Would create {new_arch_name} from {latest} and apply delta"
+                        "[DRY RUN] Would create "
+                        f"{new_arch_name} from {latest} and apply delta"
                     )
                     return True
                 return promote_new_arch_from_delta(
@@ -869,7 +873,8 @@ def handle_direct_edits(
             if choice == "2":
                 new_arch_name = (
                     input(
-                        f"Enter new architecture name (currently detected as {arch_name}): "
+                        "Enter new architecture name "
+                        f"(currently detected as {arch_name}): "
                     ).strip()
                     or arch_name
                 )
@@ -880,7 +885,8 @@ def handle_direct_edits(
                     return False
                 if dry_run:
                     print(
-                        f"[DRY RUN] Would promote {new_arch_name} from edits in {arch_name}"
+                        "[DRY RUN] Would promote "
+                        f"{new_arch_name} from edits in {arch_name}"
                     )
                     return True
                 return promote_new_arch_from_latest_edits(
@@ -939,7 +945,8 @@ def main() -> int:
         if not handle_new_arch(new_arch, config, args.dry_run):
             return 1
 
-    # If latest was directly edited, prioritize resolving that path (user will choose in-place vs new arch)
+    # If latest was directly edited, prioritize resolving that path
+    # (user will choose in-place vs new arch)
     if latest_has_edits:
         if not handle_direct_edits(
             latest_arch, changes["modified_archs"][latest_arch], config, args.dry_run

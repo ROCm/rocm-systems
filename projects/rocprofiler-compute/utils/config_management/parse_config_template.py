@@ -2,7 +2,7 @@
 """
 Parse panel configuration based on YAML files for an architecture.
 Usage:
-    python parse_config_template.py <directory_path> [output_file.yaml] [--latest-arch ARCH]
+    python parse_config_template.py <dir_path> [output_file.yaml] [--latest-arch ARCH]
 """
 
 from __future__ import annotations

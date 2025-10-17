@@ -13,7 +13,6 @@ from typing import Any, Optional, Union
 
 import yaml
 
-
 PathLike = Union[str, Path]
 
 
@@ -212,7 +211,8 @@ def apply_delta(base_dir: PathLike, delta_file: PathLike, output_dir: PathLike) 
 def main() -> None:
     if len(sys.argv) != 4:
         print(
-            "Usage: python apply_config_deltas.py <base_arch_dir> <delta_yaml> <output_dir>"
+            "Usage: python apply_config_deltas.py "
+            "<base_arch_dir> <delta_yaml> <output_dir>"
         )
         sys.exit(1)
 

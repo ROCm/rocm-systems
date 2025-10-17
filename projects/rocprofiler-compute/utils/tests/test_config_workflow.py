@@ -1,9 +1,7 @@
-import os
 import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,14 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import utils.config_management.master_config_workflow_script as mws
-
-
-# -----------------------------
-# Small helpers for YAML writing
-# -----------------------------
-def write_yaml(path: Path, text: str) -> None:
-    path.write_text(textwrap.dedent(text).lstrip(), encoding="utf-8")
+import utils.config_management.master_config_workflow_script as mws  # noqa
 
 
 def build_panel_dict(
@@ -280,7 +271,6 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
         """
         # Run generator
         # (call the script's main via subprocess to mimic actual behavior)
-        env = os.environ.copy()
         cmd = [
             sys.executable,
             str(

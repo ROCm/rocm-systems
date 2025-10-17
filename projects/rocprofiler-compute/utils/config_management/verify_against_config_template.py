@@ -89,12 +89,14 @@ def validate_panel(
 
     if panel_info["panel_title"] != expected["panel_title"]:
         errors.append(
-            f"Panel title mismatch: expected '{expected['panel_title']}', got '{panel_info['panel_title']}'"
+            f"Panel title mismatch: expected '{expected['panel_title']}', "
+            f"got '{panel_info['panel_title']}'"
         )
 
     if len(panel_info["data_sources"]) != len(expected["data_sources"]):
         errors.append(
-            f"Data source count mismatch: expected {len(expected['data_sources'])}, got {len(panel_info['data_sources'])}"
+            f"Data source count mismatch: expected {len(expected['data_sources'])}, "
+            f"got {len(panel_info['data_sources'])}"
         )
 
     for i, actual_ds in enumerate(panel_info["data_sources"]):
@@ -115,7 +117,8 @@ def validate_panel(
             )
         elif matching_idx != i:
             warnings.append(
-                f"Data source {i + 1}: Order mismatch - appears at position {i + 1} but expected at position {matching_idx + 1}"
+                f"Data source {i + 1}: Order mismatch - appears at position {i + 1} "
+                f"but expected at position {matching_idx + 1}"
             )
 
     if errors:
@@ -138,7 +141,8 @@ def validate_panel(
 def main() -> None:
     if len(sys.argv) != 3:
         print(
-            "Usage: python verify_against_config_template.py <analysis_configs_dir> <template_yaml>"
+            "Usage: python verify_against_config_template.py "
+            "<analysis_configs_dir> <template_yaml>"
         )
         sys.exit(1)
 
