@@ -62,7 +62,6 @@
 #include <algorithm>
 #include <mutex>
 #include <fstream>
-#define PRINT_LOG
 
 namespace amd {
 
@@ -987,11 +986,6 @@ bool NumaPolicy::GetMemPolicy() {
         node_map_.size() * kBitsPerULong);
     return false;
   }
-#ifdef PRINT_LOG
-  ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
-      "syscall(__NR_get_mempolicy, size=%zu) succeeded to query policy %d, mask[0]=0x%016llx",
-      node_map_.size() * kBitsPerULong, policy, node_map_[0]);
-#endif // PRINT_LOG
   if (policy < static_cast<int>(Policy::kDefault) || policy > static_cast<int>(Policy::kMax)) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
             "syscall(__NR_get_mempolicy) returned wrong policy %d", policy);
@@ -1048,13 +1042,6 @@ bool NumaNode::GetAffinity() {
       size_ = kBitsPerULong - __builtin_clzl(value);
     }
   }
-#ifdef PRINT_LOG
-  fprintf(stderr, "%s has been opened as follows,\n", path.c_str());
-  for (int i = 0; i < cpu_map_.size(); i++) {
-    fprintf(stderr, "0x%016lx, ", cpu_map_[i]);
-  }
-  fprintf(stderr, "\nsize = %u \n", size_);
-#endif
   return true;
 }
 
@@ -1072,7 +1059,9 @@ bool NumaNode::SchedSetAffinity() {
   }
   return true;
 }
+
 }  // namespace numa
+
 }  // namespace amd
 
 #endif  // !defined(_WIN32) && !defined(__CYGWIN__)
