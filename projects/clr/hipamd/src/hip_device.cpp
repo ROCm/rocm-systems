@@ -265,9 +265,9 @@ void Device::destroyAllStreams() {
 void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // Make a local copy to avoid stalls for GPU finish with multiple threads
   std::vector<hip::Stream*> streams;
-  streams.reserve(streamSet.size());
   {
     std::shared_lock lock(streamSetLock);
+    streams.reserve(streamSet.size());
     if (wait_blocking_streams_only) {
       auto null_stream = GetNullStream();
       for (auto it : streamSet) {
