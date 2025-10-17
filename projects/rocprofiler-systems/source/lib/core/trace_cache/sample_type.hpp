@@ -188,7 +188,7 @@ struct pmc_event_with_sample : in_time_sample
 
 struct amd_smi_sample : storage_parsed_type_base
 {
-    uint32_t                    device_id;
+    size_t                      device_id;
     size_t                      timestamp;
     amd_smi::smi_metric_options enabled_metrics;
     amd_smi::smi_metrics        metrics;

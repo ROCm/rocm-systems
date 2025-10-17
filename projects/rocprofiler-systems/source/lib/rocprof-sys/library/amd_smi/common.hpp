@@ -29,7 +29,6 @@
 #pragma once
 
 #include <amd_smi/amdsmi.h>
-#include <fmt/format.h>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -76,7 +75,6 @@ check_status(const amdsmi_status_t& status, const char* error_message)
         std::stringstream ss;
         ss << error_message << " Error: " << status;
         throw std::runtime_error(ss.str());
-        // throw std::runtime_error(fmt::format("{} Error: {}", error_message, status));
     }
 };
 

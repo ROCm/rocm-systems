@@ -28,6 +28,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -204,10 +205,13 @@ storage_parser::consume_storage()
             }
             case entry_type::amd_smi_sample:
             {
-                amd_smi_sample _amd_smi_sample;
-                parse_data(sample.data(), _amd_smi_sample, _amd_smi_sample.device_id,
+                amd_smi_sample       _amd_smi_sample;
+                std::vector<uint8_t> metircs;
+                parse_data(sample.data(), _amd_smi_sample.device_id,
                            _amd_smi_sample.timestamp, _amd_smi_sample.enabled_metrics,
-                           _amd_smi_sample.metrics);
+                           metircs);
+
+                std::memcpy(&_amd_smi_sample.metrics, metircs.data(), metircs.size());
                 invoke_callbacks(header.type, _amd_smi_sample);
                 break;
             }

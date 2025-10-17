@@ -1,6 +1,5 @@
 #pragma once
 #include "core/config.hpp"
-#include "core/gpu.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cache_utility.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -71,28 +70,14 @@ struct rocpd
             }
         };
 
-        if(gpu::is_vcn_activity_supported(gpu_id))
+        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
-            add_vcn_track(std::nullopt);
-        }
-        else
-        {
-            for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
-            {
-                add_vcn_track(xcp);
-            }
+            add_vcn_track(xcp);
         }
 
-        if(gpu::is_jpeg_activity_supported(gpu_id))
+        for(auto xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
-            add_jpeg_track(std::nullopt);
-        }
-        else
-        {
-            for(auto xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
-            {
-                add_jpeg_track(xcp);
-            }
+            add_jpeg_track(xcp);
         }
     }
 
@@ -200,28 +185,10 @@ struct rocpd
             }
         };
 
-        if(gpu::is_vcn_activity_supported(gpu_id))
+        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
-            add_vcn_pmc(std::nullopt);
-        }
-        else
-        {
-            for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
-            {
-                add_vcn_pmc(xcp);
-            }
-        }
-
-        if(gpu::is_jpeg_activity_supported(gpu_id))
-        {
-            add_jpeg_pmc(std::nullopt);
-        }
-        else
-        {
-            for(auto xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
-            {
-                add_jpeg_pmc(xcp);
-            }
+            add_vcn_pmc(xcp);
+            add_jpeg_pmc(xcp);
         }
     }
 
@@ -247,7 +214,7 @@ struct rocpd
 
         trace_cache::get_buffer_storage().store(
             trace_cache::entry_type::amd_smi_sample, _device_id, _timestamp,
-            _enabled_metrics.value & _supported_metrics.value,
+            (uint32_t) (_enabled_metrics.value & _supported_metrics.value),
             serialize_smi_metrics(_smi_metrics));
     };
 
