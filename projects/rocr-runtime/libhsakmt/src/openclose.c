@@ -266,6 +266,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
 		if (--hsakmt_kfd_open_count == 0) {
 			hsakmt_destroy_counter_props();
 			hsakmt_destroy_device_debugging_memory();
+			hsakmt_fmm_clear_all_aperture();
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;

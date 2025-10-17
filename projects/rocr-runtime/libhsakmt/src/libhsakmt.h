@@ -241,6 +241,7 @@ extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
 
 void hsakmt_clear_events_page(void);
 void hsakmt_fmm_clear_all_mem(void);
+void hsakmt_fmm_clear_all_aperture(void);
 void hsakmt_clear_process_doorbells(void);
 uint32_t hsakmt_get_num_sysfs_nodes(void);
 

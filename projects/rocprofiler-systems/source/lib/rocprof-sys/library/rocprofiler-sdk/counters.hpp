@@ -73,7 +73,8 @@ struct counter_event
     {}
 
     void operator()(const client_data* tool_data, counter_track_type*,
-                    timing_interval _timing, scope::config _scope) const;
+                    const std::string& track_name, timing_interval _timing,
+                    scope::config _scope) const;
 
     counter_dispatch_record record = {};
 };

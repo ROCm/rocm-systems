@@ -5,8 +5,23 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## Unreleased
 
 ### Added
-* Add `--list-blocks <arch>` option to general options to list available blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
+* Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
 
+### Changed
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Known issues
+
+### Upcoming changes
+
+## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
+
+### Added
 * Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
   * Use '--attach-pid' to specify the target process ID.
   * Use '--attach-duration-msec' to specify time duration.
