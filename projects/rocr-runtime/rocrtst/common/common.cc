@@ -421,7 +421,7 @@ hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
                                                           &pool_i->size);
   RET_IF_HSA_COMMON_ERR(err);
 
-  if (isEmuModeEnabled()) {
+  if (g_isEmuMode) {
     // Limit pool sizes to 2 GB on emulator
     const size_t max_pool_size = 2*1024*1024*1024UL;
     pool_i->size = std::min(pool_i->size, max_pool_size);

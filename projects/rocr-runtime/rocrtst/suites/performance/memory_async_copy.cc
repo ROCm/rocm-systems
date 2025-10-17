@@ -73,7 +73,7 @@
 static const uint32_t kDtifBdfId = 0xC81407;
 
 std::vector<const char*> MemoryAsyncCopy::initStr() {
-  if (rocrtst::isEmuModeEnabled()) {
+  if (rocrtst::g_isEmuMode) {
     return {"1k"};
   } else {
     return {"1k", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
@@ -82,7 +82,7 @@ std::vector<const char*> MemoryAsyncCopy::initStr() {
 }
 
 std::vector<size_t> MemoryAsyncCopy::initSize() {
-  if (rocrtst::isEmuModeEnabled()) {
+  if (rocrtst::g_isEmuMode) {
     return {1024};
   } else {
     return {1024, 2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024,
@@ -92,7 +92,7 @@ std::vector<size_t> MemoryAsyncCopy::initSize() {
   }
 }
 
-const int MemoryAsyncCopy::kNumGranularity = rocrtst::isEmuModeEnabled() ? 1 : 20;
+const int MemoryAsyncCopy::kNumGranularity = rocrtst::g_isEmuMode ? 1 : 20;
 const std::vector<const char*> MemoryAsyncCopy::Str = MemoryAsyncCopy::initStr();
 const std::vector<size_t> MemoryAsyncCopy::Size = MemoryAsyncCopy::initSize();
 const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Size.back();

@@ -47,7 +47,7 @@
 
 #define RUN_IF_NOT_EMU_MODE(test)                                                                  \
   {                                                                                                \
-    if (rocrtst::isEmuModeEnabled()) {                                                             \
+    if (rocrtst::g_isEmuMode) {                                                             \
       std::cout << "Skipping test in Emulator mode." << std::endl;                                 \
       return;                                                                                      \
     }                                                                                              \

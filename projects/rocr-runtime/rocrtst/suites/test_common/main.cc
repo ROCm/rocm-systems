@@ -83,6 +83,7 @@
 #include "common/common.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
+bool rocrtst::g_isEmuMode = false;
 
 static void SetFlags(TestBase *test) {
   assert(sRocrtstGlvalues != nullptr);
@@ -651,6 +652,7 @@ int main(int argc, char** argv) {
 
   if (rocrtst::isEmuModeEnabled()) {
     std::cout << "--- Emulation build ---" << std::endl;
+    rocrtst::g_isEmuMode = true;
   }
 
   RocrTstGlobals settings;

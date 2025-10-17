@@ -108,7 +108,7 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
-static const uint32_t kNumBufferElements = rocrtst::isEmuModeEnabled() ? 4 : 256;
+static const uint32_t kNumBufferElements = rocrtst::g_isEmuMode ? 4 : 256;
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
