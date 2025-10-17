@@ -47,7 +47,7 @@ Only a subset of the OMPT callbacks are processed:
   |----------------------------------+---------------------------|
 
 .. note::
-   The ``omp_parallel`` track begins with ``ompt_callback_parallel_begin`` and ends when the corresponding ``ompt_callback_parallel_end`` is encountered.
+   ``omp_parallel`` tracks begin with ``ompt_callback_parallel_begin`` and end when their corresponding ``ompt_callback_parallel_end`` is encountered.
 
 Configuration
 =============
@@ -82,9 +82,6 @@ To specify the configuration file, use the `ROCPROFSYS_CONFIG_FILE` setting:
 
 This setting defines the location of the ROCm Systems Profiler configuration file.
 
-If you are tracing an OpenMP program that offloads to the GPU, ensure that the required OpenMP target library is in your path. For example, with ``amdflang``,
-``libomptarget.so`` is required. With ROCm installed, it can be found in ``/opt/rocm/lib/llvm/lib``.
-
 Instrumenting and running a program
 ===================================
 
@@ -95,10 +92,7 @@ To generate a trace of this program, first compile:
 
   make FC=amdflang
 
-.. note::
-   This program offloads to the GPU. Ensure that the OpenMP target library is present in your library path.
-
-To generate the instrumented binary, we use `rocprof-sys-instrument`. An example command is:
+To generate the instrumented binary, use `rocprof-sys-instrument`. An example command is:
 
 .. code-block:: shell
 
