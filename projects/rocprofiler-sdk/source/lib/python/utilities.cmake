@@ -31,12 +31,24 @@ endmacro()
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
+    # Sanitizers need Development (full) to get Python3_LIBRARIES for linking Otherwise
+    # use Development.Module for manylinux compatibility (CMake 3.18+)
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-        find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
-                     COMPONENTS Interpreter Development.Module)
+        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+            find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
+                         COMPONENTS Interpreter Development)
+        else()
+            find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
+                         COMPONENTS Interpreter Development.Module)
+        endif()
     elseif("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
-        find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
-                     COMPONENTS Interpreter Development.Module)
+        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+            find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
+                         COMPONENTS Interpreter Development)
+        else()
+            find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
+                         COMPONENTS Interpreter Development.Module)
+        endif()
     else()
         message(
             FATAL_ERROR
@@ -56,8 +68,12 @@ function(get_default_python_versions _VAR)
     set(_PYTHON_FOUND_VERSIONS)
 
     foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
-        find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter
-                                                            Development.Module)
+        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+            find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter Development)
+        else()
+            find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter
+                                                                Development.Module)
+        endif()
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
@@ -66,7 +82,11 @@ function(get_default_python_versions _VAR)
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
-        find_package(Python3 3.6 COMPONENTS Interpreter Development.Module)
+        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+            find_package(Python3 3.6 COMPONENTS Interpreter Development)
+        else()
+            find_package(Python3 3.6 COMPONENTS Interpreter Development.Module)
+        endif()
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
@@ -114,6 +134,14 @@ function(rocprofiler_roctx_python_bindings _VERSION)
         rocprofiler-sdk-roctx-python-bindings-${_VERSION}
         PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
                 rocprofiler-sdk::rocprofiler-sdk-pybind11)
+
+    # Sanitizers require explicit linking to libpython because they need all symbols
+    # resolved at link time. For normal builds, we avoid linking to allow manylinux
+    # compatibility.
+    if(ROCPROFILER_MEMCHECK)
+        target_link_libraries(rocprofiler-sdk-roctx-python-bindings-${_VERSION}
+                              PRIVATE ${Python3_LIBRARIES})
+    endif()
 
     set_target_properties(
         rocprofiler-sdk-roctx-python-bindings-${_VERSION}
@@ -192,6 +220,14 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 rocprofiler-sdk::rocprofiler-sdk-dw
                 rocprofiler-sdk::rocprofiler-sdk-static-library
                 rocprofiler-sdk::rocprofiler-sdk-rocpd-library)
+
+    # Sanitizers require explicit linking to libpython because they need all symbols
+    # resolved at link time. For normal builds, we avoid linking to allow manylinux
+    # compatibility.
+    if(ROCPROFILER_MEMCHECK)
+        target_link_libraries(rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
+                              PRIVATE ${Python3_LIBRARIES})
+    endif()
 
     set_target_properties(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
