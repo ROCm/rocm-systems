@@ -4468,11 +4468,14 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     }
 
     int power_limit = 0;
-    status = smi_amdgpu_get_power_cap(gpu_device, &power_limit);
-    if (status == AMDSMI_STATUS_SUCCESS) {
+    amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, &power_limit);
+    if (status2 == AMDSMI_STATUS_SUCCESS) {
         info->power_limit = power_limit;
     }
 
+    // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
+    // Getting power cap values may not be supported on all virtualized systems and should
+    // not return a failure when the metrics values are ascertainable.
     return status;
 }
 
