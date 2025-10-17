@@ -114,6 +114,7 @@ void TestBase::SetUp(uint64_t init_flags) {
       std::cout << "No monitor devices found on this machine." << std::endl;
       std::cout << "No ROCm SMI tests can be run." << std::endl;
     }
+    return;
   }
 }
 
@@ -126,9 +127,16 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
     std::cout << "\t**Device index: " << dv_ind << std::endl;
   }
   err = rsmi_dev_id_get(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
+  if (err == RSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "	**Device ID:" "N/A" << std::endl;
+    }
+    return;
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
+    }
   }
   err = rsmi_dev_revision_get(dv_ind, &val_ui16);
   if (err == RSMI_STATUS_NOT_SUPPORTED) {
