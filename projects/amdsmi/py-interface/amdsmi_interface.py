@@ -2724,30 +2724,26 @@ def amdsmi_get_gpu_cper_entries(
 
 
 def amdsmi_get_afids_from_cper(
-    cper_afid_data: Union[bytes, bytearray, List[Dict[str, Any]]]
+    cper_afid_data: bytes
 ) -> Tuple[List[int], int]:
     """
-    Extract AFIDs from one or more CPER blobs.
+    Extract AFIDs from a CPER blob.
 
     Args:
-        cper_afid_data: Either
-          - raw bytes or bytearray of a single CPER record, or
-          - a list of dicts each with keys "bytes" (List[int]) and "size" (int).
+        cper_afid_data: raw bytes of a single CPER record.
 
     Returns:
         Tuple[List[int], int]: A tuple containing:
           - A list of extracted AFIDs.
           - The total count of AFIDs.
     """
+    cper_records = []
     # Normalize single blob into a list of records
-    if isinstance(cper_afid_data, (bytes, bytearray)):
+    if isinstance(cper_afid_data, bytes):
         cper_records = [{
             "bytes": list(cper_afid_data),
             "size": len(cper_afid_data)
         }]
-    else:
-        cper_records = cper_afid_data
-
     all_afids: List[int] = []
 
     for record in cper_records:
