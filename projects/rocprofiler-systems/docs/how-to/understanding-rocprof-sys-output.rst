@@ -1,12 +1,12 @@
 .. meta::
    :description: ROCm Systems Profiler system output documentation and reference
-   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, system output, tracking, visualization, tool, Instinct, accelerator, AMD
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, system output, tracking, visualization, tool, Instinct, accelerator, AMD, rocpd, perfetto, timemory
 
 ****************************************************
 Understanding the Systems Profiler output
 ****************************************************
 
-The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is
+The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ is
 ``<OUTPUT_PATH>[/<TIMESTAMP>]/[<PREFIX>]<DATA_NAME>[-<OUTPUT_SUFFIX>].<EXT>``.
 
 For example, starting with the following base configuration:
@@ -158,33 +158,6 @@ Metadata JSON Sample
                   "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
                },
                {
-                  "load_address": "76005b935000",
-                  "last_address": "76005b9aeab8",
-                  "permissions": "r---",
-                  "offset": "135000",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
-               },
-               {
-                  "load_address": "76005b9b0638",
-                  "last_address": "76005bb2d598",
-                  "permissions": "rw--",
-                  "offset": "1af638",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
-               },
-               {
-                  "load_address": "76005bc00000",
-                  "last_address": "76005bc26140",
-                  "permissions": "r---",
-                  "offset": "0",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/librocprofiler-sdk.so.0"
-               },
-               {
                   "... etc. ..."
                }
             ],
@@ -227,18 +200,6 @@ Metadata JSON Sample
             ]
          },
          "environment": [
-            {
-               "key": "GOTCHA_DEBUG",
-               "value": "0"
-            },
-            {
-               "key": "HIP_VISIBLE_DEVICES",
-               "value": ""
-            },
-            {
-               "key": "HOME",
-               "value": "/home/rocm-dev"
-            },
             {
                "key": "LD_LIBRARY_PATH",
                "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
@@ -358,7 +319,56 @@ set ``ROCPROFSYS_OUTPUT_PREFIX="%argt%-"``, and let ROCm Systems Profiler cleanl
    an ``%arg0%`` of ``/usr/bin/foo`` translates to ``usr_bin_foo``. Additionally, any ``%arg<N>%`` keys which
    do not have a command line argument at position ``<N>`` are ignored.
 
-Perfetto output
+.. _rocprof_sys_rocpd_output:
+
+ROCm Profiling Data (rocpd) output
+=========================================
+
+Use the ``ROCPROFSYS_USE_ROCPD`` setting to trigger the ROCm Systems Profiler to output a
+SQLite3 database. The ROCm Profiling Data (or ``rocpd``) database will soon be the default output
+format. To output in `rocpd` format, ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
+
+Features of rocpd format
+-----------------------------------------------
+
+- **Comprehensive Data Model**: Consolidates all profiling artifacts including
+execution traces, performance counters, hardware metrics, and contextual metadata
+within a single SQLite3 database file (`.db` extension).
+- **Standards-Compliant Access**: Supports querying through industry-standard SQL
+interfaces including command-line tools (``sqlite3`` CLI), programming language
+bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management
+applications.
+- **Advanced Analytics Integration**: Facilitates sophisticated post-processing
+workflows through custom analytical scripts, automated reporting systems, and
+integration with third-party visualization and analysis frameworks that provide
+SQLite3 connectivity.
+
+Generating rocpd Output
++++++++++++++++++++++++
+
+To generate profiling data in the rocpd format, add "ROCPROFSYS_USE_ROCPD=ON" to your profiling configuration.
+
+.. code-block:: shell
+
+   export ROCPROFSYS_USE_ROCPD=ON
+   export ROCPROFSYS_USE_TRACE=OFF # disabling default Perfetto output
+   rocprof-sys-sample -- ./your_application
+
+See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
+details on setting up the profiling configuration options.
+
+Converting rocpd to Alternative Formats
++++++++++++++++++++++++++++++++++++++
+
+ROCm provides a Python module to convert the ``rocpd`` database to alternative
+output formats for specialized analysis and visualization workflows. For example,
+(Open Trace Format 2) OTF2, Perfetto Protocol Buffers (PFTrace), and
+Comma-Separated Values (CSV) tables.
+
+See `rocpd tool documentation <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/docs/how-to/using-rocpd-output-format.rst>`_
+for additional information on these conversion tools.
+
+Native Perfetto output
 ========================================
 
 Use the ``ROCPROFSYS_OUTPUT_FILE`` to specify a specific location. If this is an
