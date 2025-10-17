@@ -1543,7 +1543,7 @@ def load_pc_sampling_data(
 
         # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
         merged_df = df.merge(
-            kernel_trace_df,
+            kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
             how="left",
             left_on="Correlation_Id",
             right_on="Dispatch_Id"
@@ -1561,11 +1561,12 @@ def load_pc_sampling_data(
             .reset_index()
             .rename(columns={"Instruction_Comment": "source_line"})
         )
-
         grouped_counts = grouped_counts[["source_line", "instruction", "count", "Kernel_Id", "Kernel_Name"]]
         grouped_counts["source_line"] = grouped_counts["source_line"].apply(
             lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
         )
+        
+        return grouped_counts.sort_values(by="count", ascending=False)
 
     elif len(workload.filter_kernel_ids) > 1:
         console_error(
