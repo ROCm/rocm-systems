@@ -103,6 +103,29 @@ jobs:
           images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}
 
       - name: Build CI GFX Container (Does not Push on PR)
+        id: docker_build
+        continue-on-error: true
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
+            VERSION=${{ matrix.system.version }}
+            TYPE=${{ matrix.gpu }}
+            GPU_TYPE=${{ matrix.gpu }}
+            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
+            NJOBS=2
+            ELFUTILS_DOWNLOAD_VERSION=0.188
+            BOOST_DOWNLOAD_VERSION=1.79.0
+          tags: |
+            ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-systems-ci-${{ matrix.gpu }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # Retry a copy of docker_build if Docker build failed due to intermittent failure
+      - name: Build CI GFX Container Retry (Does not Push on PR)
+        if: steps.docker_build.outcome != 'success'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
