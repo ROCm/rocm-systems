@@ -78,6 +78,7 @@ setup()
     // environment settings
     auto shmem_size_hint = config::get_perfetto_shmem_size_hint();
     auto buffer_size     = config::get_perfetto_buffer_size();
+    auto flush_period    = config::get_perfetto_flush_period();
 
     auto _policy =
         config::get_perfetto_fill_policy() == "discard"
@@ -93,6 +94,8 @@ setup()
                              itr.c_str());
         track_event_cfg.add_disabled_categories(itr);
     }
+
+    cfg.set_flush_period_ms(flush_period);
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");  // this MUST be track_event
