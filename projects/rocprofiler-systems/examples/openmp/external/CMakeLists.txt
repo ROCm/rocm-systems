@@ -70,6 +70,8 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
         rocprofiler_systems_message(FATAL_ERROR "Unknown TEST_TYPE - Only HOST and OFFLOAD supported")
     endif()
 
+    set(LOCAL_TEST_LIST "")
+
     foreach(TEST IN LISTS ${TEST_LIST_VAR})
         get_filename_component(TEST_NAME ${TEST} NAME_WE)
         string(REPLACE "_" "-" TARGET_NAME ${TEST_NAME})
@@ -100,16 +102,7 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
                 ${ROCPROFSYS_OMPVV_SOURCE_DIR}/${OMPVV_MAKEDEF_FILE}
         )
 
-        if(TEST_TYPE STREQUAL "HOST")
-            list(APPEND ROCPROFSYS_OMPVV_HOST_TESTS ${TARGET_NAME})
-            set(ROCPROFSYS_OMPVV_HOST_TESTS "${ROCPROFSYS_OMPVV_HOST_TESTS}" PARENT_SCOPE)
-        else()
-            list(APPEND ROCPROFSYS_OMPVV_OFFLOAD_TESTS ${TARGET_NAME})
-            set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
-                "${ROCPROFSYS_OMPVV_OFFLOAD_TESTS}"
-                PARENT_SCOPE
-            )
-        endif()
+        list(APPEND LOCAL_TEST_LIST ${TARGET_NAME})
 
         add_custom_target(
             "${TARGET_NAME}-build"
@@ -122,6 +115,12 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
             PROPERTIES IMPORTED_LOCATION "${OMPVV_BIN_DEST}/${TARGET_NAME}"
         )
     endforeach()
+
+    if(TEST_TYPE STREQUAL "HOST")
+        set(ROCPROFSYS_OMPVV_HOST_TESTS "${LOCAL_TEST_LIST}" PARENT_SCOPE)
+    else()
+        set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS "${LOCAL_TEST_LIST}" PARENT_SCOPE)
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------------------#
