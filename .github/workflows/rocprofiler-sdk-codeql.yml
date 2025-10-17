@@ -69,15 +69,18 @@ jobs:
         sudo apt update
         sudo apt install -y software-properties-common
         sudo apt-add-repository ppa:git-core/ppa
-        sudo apt-get update
+        sudo apt update
         sudo apt install wget
-        sudo wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb
-        sudo apt-get install -y -o Dpkg::Options::="--force-confnew" /tmp/amdgpu-install_7.0.70000-1_all.deb
-        sudo apt-get update
-        sudo apt-get install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev libva-amdgpu-dev rocdecode-dev rocjpeg-dev
-        git config --global --add safe.directory '*'
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        tee /etc/apt/sources.list.d/rocm.list << EOF
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0.2 jammy main
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.0.2/ubuntu jammy main
+        EOF
+        sudo apt update
+        sudo apt install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev libva-amdgpu-dev rocdecode-dev rocjpeg-dev
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        git config --global --add safe.directory '*'
 
     - uses: actions/checkout@v4
       with:

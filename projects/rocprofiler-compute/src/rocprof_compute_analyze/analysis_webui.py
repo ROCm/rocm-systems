@@ -220,7 +220,7 @@ class webui_analysis(OmniAnalyze_Base):
                             "device_id": 0,
                             "sort_type": "kernels",
                             "mem_level": "ALL",
-                            "include_kernel_names": False,
+                            "include_kernel_names": True,
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             "kernel_filter": False,
