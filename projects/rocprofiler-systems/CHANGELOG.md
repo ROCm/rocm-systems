@@ -4,7 +4,13 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
+## ROCm Systems Profiler 1.2.1 for ROCm 7.1.1
+
+### Resolved issues
+
+- Fixed OMPT events and GPU performance counters not being collected in rocpd output.
+
+## ROCm Systems Profiler 1.2.0 for ROCm 7.1
 
 ### Added
 
