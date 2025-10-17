@@ -36,6 +36,7 @@ import pwd
 from enum import Enum
 from pathlib import Path
 from typing import List, Set, Union
+from functools import lru_cache
 
 # Import amdsmi library
 from amdsmi_init import *
@@ -1136,19 +1137,21 @@ class AMDSMIHelpers():
         for i in self.progressbar(range(timeInSeconds), title, 40, add_newline=add_newline):
             time.sleep(1)
 
-    def _user_name(self, uid: int) -> str:
-        try:
-            return pwd.getpwuid(uid).pw_name
-        except Exception:
-            # In containers, the UID may not resolve to a name
-            return str(uid)
-
-    def _group_name(self, gid: int) -> str:
-        try:
+    @lru_cache(maxsize=128)
+    def _cached_group_name(self, gid: int) -> str:
+        try: 
             return grp.getgrgid(gid).gr_name
-        except Exception:
-            # In containers, the GID may not resolve to a name
+        except Exception: 
+            # In containers, the UID may not resolve to a name
             return str(gid)
+
+    @lru_cache(maxsize=128)
+    def _cached_user_name(self, uid: int) -> str:
+        try: 
+            return pwd.getpwuid(uid).pw_name
+        except Exception: 
+            # In containers, the GID may not resolve to a name
+            return str(uid)
 
     # Attempt to grab file info
     def _stat_info(self, path: str) -> dict:
@@ -1157,8 +1160,8 @@ class AMDSMIHelpers():
             return {
                 "uid": st.st_uid,
                 "gid": st.st_gid,
-                "user": self._user_name(st.st_uid),
-                "group": self._group_name(st.st_gid),
+                "user": self._cached_user_name(st.st_uid),
+                "group": self._cached_group_name(st.st_gid),
             }
         except Exception as e:
             return {"error": str(e)}
