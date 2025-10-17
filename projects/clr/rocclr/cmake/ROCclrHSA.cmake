@@ -87,8 +87,3 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocurilocator.cpp)
 
 target_compile_definitions(rocclr PUBLIC WITH_HSA_DEVICE)
-
-if(UNIX)
-  # Only Linux kernel supports numa policy while WSL and Windows don't
-  target_compile_definitions(rocclr PUBLIC ROCCLR_SUPPORT_NUMA_POLICY)
-endif()

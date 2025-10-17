@@ -2054,21 +2054,17 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
 // ================================================================================================
 void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
   void* ptr = nullptr;
-#ifndef ROCCLR_SUPPORT_NUMA_POLICY
-  // Windows path
-  ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
-#else
-  auto numaCount = cpu_agents_.size(); // count of host numa nodes
-  numa::NumaPolicy np(numaCount);
-  if (!np.getMemPolicy()) {
-    return ptr;
+  auto numa_node_count = cpu_agents_.size(); // count of host numa nodes
+  numa::NumaPolicy np(numa_node_count);
+  if (!np.GetMemPolicy()) {
+    return hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
-  switch (np.policy()) {
-    case numa::NumaPolicy::Policy::Prefered:
-    case numa::NumaPolicy::Policy::Bind:
+  switch (np.GetPolicy()) {
+    case numa::NumaPolicy::Policy::kPrefered:
+    case numa::NumaPolicy::Policy::kBind:
       // We only care about the first CPU node
-      for (unsigned int i = 0; i < numaCount; i++) {
-        if (np.isPolicySetAt(i)) {
+      for (unsigned int i = 0; i < numa_node_count; i++) {
+        if (np.IsPolicySetAt(i)) {
           ptr = hostAlloc(size, alignment, mem_seg, &cpu_agents_[i]);
           break;
         }
@@ -2078,7 +2074,6 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
       //  All other modes fall back to default mode
       ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
   return ptr;
 }
 

@@ -32,8 +32,8 @@
 #endif
 
 #ifdef _WIN32
-#include <Basetsd.h>  // For KAFFINITY
-#endif                // _WIN32
+#include <windows.h>
+#endif  // _WIN32
 
 // Smallest supported VM page size.
 #define MIN_PAGE_SHIFT 12
@@ -453,70 +453,7 @@ inline uint Os::ThreadAffinityMask::getNextSet(uint cpu) const {
   return (uint)-1;
 }
 
-/* Mini numa interface instead of numa lib apis */
-namespace numa {
 
-static constexpr unsigned long bitsPerULong = 8 * sizeof(unsigned long);
-
-class NumaPolicy {
-public:
-  /* Policies extracted from numaif.h*/
-#ifndef MPOL_DEFAULT
-  #define MPOL_DEFAULT     0
-  #define MPOL_PREFERRED   1
-  #define MPOL_BIND        2
-  #define MPOL_INTERLEAVE  3
-  #define MPOL_LOCAL       4
-  #define MPOL_PREFERRED_MANY   5
-  #define MPOL_WEIGHTED_INTERLEAVE   6
-  #define MPOL_MAX         7
-#endif // MPOL_DEFAULT
-  enum class Policy {
-    Default = MPOL_DEFAULT,
-    Prefered = MPOL_PREFERRED,
-    Bind = MPOL_BIND,
-    Interleave = MPOL_INTERLEAVE,
-    Local = MPOL_LOCAL,
-    PreferedMany = MPOL_PREFERRED_MANY,
-    WeightedInterleave = MPOL_WEIGHTED_INTERLEAVE,
-    Max = MPOL_MAX
-  };
-
-  NumaPolicy(const unsigned int n) :
-    nodeMap_((n + bitsPerULong - 1) / bitsPerULong, 0),
-    policy_(Policy::Default) { }
-
-  ~NumaPolicy() { }
-
-  bool getMemPolicy();
-
-  bool isPolicySetAt(const unsigned int nodeIndex) {
-    const unsigned int i = nodeIndex / bitsPerULong;
-    if (i < nodeMap_.size())
-      return ((nodeMap_[i] >> (nodeIndex % bitsPerULong)) & 1) ?
-          true: false;
-    else
-      return false;
-  }
-
-  Policy policy() { return policy_; }
-private:
-  std::vector<unsigned long> nodeMap_; /* Bit mask content will be returned from system call */
-  Policy policy_;
-};
-
-class NumaNode {
-public:
-  NumaNode (unsigned int nodeIndex): nodeIndex_(nodeIndex), cpuMap_(), size_(0) {}
-  ~NumaNode() {}
-  bool schedSetAffinity();
-private:
-  unsigned int nodeIndex_;
-  std::vector<unsigned long> cpuMap_; /* Bit mask of logical CPUs on this node */
-  unsigned int size_; /* Nnumber of valid bits*/
-  bool getAffinity(); /* Get bit mask of logical CPUs on this node */
-};
-} // namespace numa
 
 #else
 
@@ -591,6 +528,64 @@ inline uint Os::ThreadAffinityMask::getNextSet(uint cpu) const {
 
 #endif
 
+/* Mini numa interface instead of numa lib apis */
+namespace numa {
+
+static constexpr unsigned long kBitsPerULong = 8 * sizeof(unsigned long);
+
+/*! \brief Manage Numa policy.
+ *
+ *  \note Works in Linux only, dummy in Windows.
+ */
+class NumaPolicy final {
+public:
+  enum class Policy {
+    kDefault = 0,
+    kPrefered = 1,
+    kBind = 2,
+    kInterleave = 3,
+    kLocal = 4,
+    kPreferedMany = 5,
+    kWeightedInterleave = 6,
+    kMax = 7
+  };
+  NumaPolicy(const unsigned int numa_node_count);
+
+  //! Query memory policy and node bitmask from Linux kernel
+  bool GetMemPolicy();
+
+  //! Check whether node_index is in bitmask for kPrefered and kBind modes
+  bool IsPolicySetAt(const unsigned int node_index);
+
+  //! Return the queried policy
+  const Policy GetPolicy() { return policy_; }
+private:
+  std::vector<unsigned long> node_map_{};  //!< Node bitmask for kPrefered and kBind modes
+  Policy policy_{Policy::kDefault};  //!< The policy
+};
+
+/*! \brief Manage Numa node.
+ *
+ *  \note Works in Linux and Windows.
+ */
+class NumaNode final {
+public:
+  NumaNode (unsigned int node_index): node_index_(node_index) {}
+
+  //! Apply the CPU affinity mask of the node onto the current thread
+  bool SchedSetAffinity();
+private:
+  unsigned int node_index_; //! Index of the Numa node
+#ifdef __linux__
+  std::vector<unsigned long> cpu_map_{};  //!< Affinity mask of logical CPUs on this node in Linux
+  unsigned int size_ = 0;  //!< Number of valid bits
+#else
+  GROUP_AFFINITY affinity_{}; //!< Affinity mask of logical CPUs on this node in Windows
+#endif  // __linux__
+  //! Guery the affinity mask of logical CPUs on this node
+  bool GetAffinity();
+};
+}  // namespace numa
 }  // namespace amd
 
 #endif /*OS_HPP_*/

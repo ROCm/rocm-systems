@@ -62,7 +62,7 @@
 #include <algorithm>
 #include <mutex>
 #include <fstream>
-//#define PRINT_LOG
+#define PRINT_LOG
 
 namespace amd {
 
@@ -325,16 +325,14 @@ void Os::currentStackInfo(address* base, size_t* size) {
 void Os::setCurrentThreadName(const char* name) { ::prctl(PR_SET_NAME, name); }
 
 void Os::setPreferredNumaNode(uint32_t node) {
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
   if (AMD_CPU_AFFINITY) {
     numa::NumaNode numaNode(node);
-    if (!numaNode.schedSetAffinity()) {
-      ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+    if (!numaNode.SchedSetAffinity()) {
+      ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
               "numaNode(%u).schedSetAffinity() failed! Ignored!",
               node);
     }
   }
-#endif // ROCCLR_SUPPORT_NUMA_POLICY
 }
 
 void* Thread::entry(Thread* thread) {
@@ -976,43 +974,55 @@ void Os::CxaDemangle(const std::string& name, std::string* result) {
 }
 
 namespace numa {
-bool NumaPolicy::getMemPolicy() {
+
+NumaPolicy::NumaPolicy(const unsigned int numa_node_count) :
+  node_map_((numa_node_count + kBitsPerULong - 1) / kBitsPerULong, 0) { }
+
+bool NumaPolicy::GetMemPolicy() {
   int policy = 0;
-  if (syscall(__NR_get_mempolicy, &policy, nodeMap_.data(),
-      nodeMap_.size() * bitsPerULong, nullptr, 0) < 0) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_get_mempolicy, size=%zu) failed to query policy",
-        nodeMap_.size() * bitsPerULong);
+  if (syscall(__NR_get_mempolicy, &policy, node_map_.data(),
+      node_map_.size() * kBitsPerULong, nullptr, 0) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+        "syscall(__NR_get_mempolicy, size=%zu) failed to query policy",
+        node_map_.size() * kBitsPerULong);
     return false;
   }
 #ifdef PRINT_LOG
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_get_mempolicy, size=%zu) succeeded to query policy %d, mask[0]=0x%016llx",
-      nodeMap_.size() * bitsPerULong, policy, nodeMap_[0]);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+      "syscall(__NR_get_mempolicy, size=%zu) succeeded to query policy %d, mask[0]=0x%016llx",
+      node_map_.size() * kBitsPerULong, policy, node_map_[0]);
 #endif // PRINT_LOG
-  if (policy < static_cast<int>(Policy::Default) || policy > static_cast<int>(Policy::Max)) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_get_mempolicy) returned wrong policy %d",
-        policy);
+  if (policy < static_cast<int>(Policy::kDefault) || policy > static_cast<int>(Policy::kMax)) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_get_mempolicy) returned wrong policy %d", policy);
     return false;
   }
   policy_ = static_cast<Policy>(policy);
   return true;
 }
 
-bool NumaNode::getAffinity() {
-  // To-Do: + Cache and lock for better performance
-  const std::string path = "/sys/devices/system/node/node" + std::to_string(nodeIndex_) +
-      "/cpumap";
+bool NumaPolicy::IsPolicySetAt(const unsigned int node_index) {
+  const unsigned int i = node_index / kBitsPerULong;
+  if (i < node_map_.size())
+    return ((node_map_[i] >> (node_index % kBitsPerULong)) & 1) ?
+        true: false;
+  else
+    return false;
+}
 
+bool NumaNode::GetAffinity() {
+  // To-Do: + Cache and lock for better performance
+  const std::string path = "/sys/devices/system/node/node" + std::to_string(node_index_) +
+      "/cpumap";
   std::ifstream file(path);
   if (!file) {
     std::cerr << "Failed to open " << path << "\n";
-    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "%s cannot be opened", path);
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "%s cannot be opened", path);
     return false;
   }
-
   std::string line;
   std::getline(file, line);
   file.close();
-
   // To remove commas and whitespace
   std::string cleaned;
   cleaned.reserve(line.size() + 1);
@@ -1021,43 +1031,43 @@ bool NumaNode::getAffinity() {
       cleaned += c;
     }
   }
-
-  constexpr size_t hexsPerULong = 2 * sizeof(unsigned long);
-  cpuMap_.reserve((cleaned.size() + hexsPerULong - 1) / hexsPerULong);
+  constexpr size_t kHexsPerULong = 2 * sizeof(unsigned long);
+  cpu_map_.reserve((cleaned.size() + kHexsPerULong - 1) / kHexsPerULong);
   // To parse from the end (little-endian layout)
-  for (int i = cleaned.size(); i > 0; i -= hexsPerULong) {
-    size_t start = (i >= hexsPerULong) ? i - hexsPerULong : 0;
-    size_t len = (i >= hexsPerULong) ? hexsPerULong : i;
+  for (int i = cleaned.size(); i > 0; i -= kHexsPerULong) {
+    size_t start = (i >= kHexsPerULong) ? i - kHexsPerULong : 0;
+    size_t len = (i >= kHexsPerULong) ? kHexsPerULong : i;
 
     std::string chunk = cleaned.substr(start, len);
     unsigned long value = std::stoul(chunk, nullptr, 16);
-    cpuMap_.push_back(value);
-    if (len == hexsPerULong) {
-      size_ += bitsPerULong;
+    cpu_map_.push_back(value);
+    if (len == kHexsPerULong) {
+      size_ += kBitsPerULong;
     } else {
       // Last one
-      size_ = bitsPerULong - __builtin_clzl(value);
+      size_ = kBitsPerULong - __builtin_clzl(value);
     }
   }
 #ifdef PRINT_LOG
   fprintf(stderr, "%s has been opened as follows,\n", path.c_str());
-  for (int i = 0; i < cpuMap_.size(); i++) {
-    fprintf(stderr, "0x%016lx, ", cpuMap_[i]);
+  for (int i = 0; i < cpu_map_.size(); i++) {
+    fprintf(stderr, "0x%016lx, ", cpu_map_[i]);
   }
   fprintf(stderr, "\nsize = %u \n", size_);
 #endif
   return true;
 }
 
-bool NumaNode::schedSetAffinity() {
-  if (!getAffinity() || cpuMap_.size() == 0 || size_ == 0) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "getCpuMap() failed with nodeIndex= %u, cpuMap_.size()=%zu, size=%u",
-        nodeIndex_, cpuMap_.size(), size_);
+bool NumaNode::SchedSetAffinity() {
+  if (!GetAffinity() || cpu_map_.size() == 0 || size_ == 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "getCpuMap() failed with node_index= %u, cpu_map_.size()=%zu, size=%u",
+            node_index_, cpu_map_.size(), size_);
     return false;
   }
-  if (syscall(__NR_sched_setaffinity, 0, size_, cpuMap_.data()) < 0) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "syscall(__NR_sched_setaffinity, size=%u) failed",
-           size_);
+  if (syscall(__NR_sched_setaffinity, 0, size_, cpu_map_.data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_sched_setaffinity, size=%u) failed", size_);
     return false;
   }
   return true;

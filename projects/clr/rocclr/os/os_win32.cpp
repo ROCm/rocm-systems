@@ -243,31 +243,11 @@ void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThread
 
 void Os::setPreferredNumaNode(uint32_t node) {
   if (AMD_CPU_AFFINITY) {
-    ULONG highestNodeNumber = 0;
-    if (!GetNumaHighestNodeNumber(&highestNodeNumber)) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "GetNumaHighestNodeNumber() failed with error %d",
-          node, GetLastError());
-      return;
-    }
-
-    if (highestNodeNumber < node) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "Wrong values: highestNodeNumber %hu,  node %u",
-          highestNodeNumber, node);
-      return;
-    }
-    GROUP_AFFINITY affinity = {};
-    // Return the primary processor group of the node
-    if (!GetNumaNodeProcessorMaskEx(node, &affinity)) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
-          "Failed getting numa node(%u) affinity with error %d",
-          node, GetLastError());
-      return;
-    }
-    if (!SetThreadGroupAffinity(GetCurrentThread(), &affinity, nullptr)) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
-          "Failed setting numa node(%u) affinity onto thread with error %d",
-          node, GetLastError());
-      return;
+    numa::NumaNode numaNode(node);
+    if (!numaNode.SchedSetAffinity()) {
+      ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
+              "numaNode(%u).schedSetAffinity() failed! Ignored!",
+              node);
     }
   }
 };
@@ -779,6 +759,44 @@ bool Os::DumpCoreFile() { return false; }
 // ================================================================================================
 void Os::CxaDemangle(const std::string& name, std::string* result) { *result = name; }
 
+namespace numa {
+
+NumaPolicy::NumaPolicy(const unsigned int numa_node_count) {
+}
+
+bool NumaPolicy::GetMemPolicy() {
+  // Dummy as Windows doesn't support numa policy
+  return false;
+}
+
+bool NumaPolicy::IsPolicySetAt(const unsigned int node_index) {
+  // Dummy as Windows doesn't support numa policy
+  return false;
+}
+
+bool NumaNode::GetAffinity() {
+  if (!GetNumaNodeProcessorMaskEx(node_index_, &affinity_)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_RESOURCE,
+        "Failed getting numa node(%u) affinity with error %d",
+        node_index_, GetLastError());
+    return false;
+  }
+  return true;
+}
+
+bool NumaNode::SchedSetAffinity() {
+  if (!GetAffinity()) {
+    return false;
+  }
+  if (!SetThreadGroupAffinity(GetCurrentThread(), &affinity_, nullptr)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_RESOURCE,
+        "Failed setting numa node(%u) affinity onto thread with error %d",
+        node_index_, GetLastError());
+    return false;
+  }
+  return true;
+}
+}  // namespace numa
 }  // namespace amd
 
 #endif  // _WIN32 || __CYGWIN__

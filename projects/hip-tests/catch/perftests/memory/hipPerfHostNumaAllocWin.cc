@@ -262,9 +262,9 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
         CloseHandle(hThread);
         continue;
       }
-      std::cout << "thread " << index++ << ": Group: " << ga.Group << ", Mask: "
-          << std::hex << ga.Mask << "; prev: Group: " << std::dec << prev.Group << ", Mask: "
-          << std::hex << prev.Mask << std::dec <<"\n";
+      std::cout << "dev " << dev << ", thread " << index++ << ": Group: " << ga.Group <<
+          ", Mask: " << std::hex << ga.Mask << "; prev: Group: " << std::dec << prev.Group <<
+          ", Mask: " << std::hex << prev.Mask << std::dec <<"\n";
       ResumeThread(hThread);
       threadHandles.push_back(hThread);
       // A single NUMA node can span multiple processor groups on systems with more than 64 processors,
@@ -309,7 +309,7 @@ TEST_CASE("Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU")
     return;
   }
   HIP_CHECK(hipSetDevice(0));
-  // In windows, it is same with / without hipHostMallocNumaUser
+  // In windows, it is the same with / without hipHostMallocNumaUser
   runTestPrefered(nodes,
       MallocType::hiphostMallocType, hipHostMallocDefault | hipHostMallocNumaUser,
       "hiphostMalloc(hipHostMallocDefault | hipHostMallocNumaUser) on preferred numa node");
