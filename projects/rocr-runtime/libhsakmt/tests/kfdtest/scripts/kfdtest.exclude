@@ -42,12 +42,19 @@ FILTER[core]=\
 #
 # The CheckZeroInitializationVram test is no longer expected to pass as KFD no longer
 # clears memory at allocation time.
+#
+# The IPC Dmabuf tests have long delays in them so they can be easily interrupted
+# by CRIU; there's not much reason to run them on their own.
 PERMANENT_BLACKLIST_ALL_ASICS=\
 "-${FILTER[pm]}:"\
 "KFDQMTest.BasicCuMaskingLinear:"\
 "KFDQMTest.BasicCuMaskingEven:"\
 "RDMATest.GPUDirect:"\
-"KFDLocalMemoryTest.CheckZeroInitializationVram"
+"KFDLocalMemoryTest.CheckZeroInitializationVram:"\
+"KFDIPCTest.DmabufTest:"\
+"KFDIPCTest.DmabufFdTest:"\
+"KFDIPCTest.DmabufParentImportTest:"\
+"KFDIPCTest.DmabufMultipleTest"
 
 # This is the temporary blacklist for all ASICs. This is to be used when a test is failing consistently
 # on every ASIC (Kaveri, Carrizo, Hawaii, Tonga, Fiji, Polaris10, Polaris11 and Vega10 .

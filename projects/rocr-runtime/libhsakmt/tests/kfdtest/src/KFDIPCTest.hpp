@@ -122,6 +122,18 @@ class KFDIPCTest :  public KFDBaseComponentTest {
     void BasicTestChildProcess(int defaultGPUNode, int *pipefd, HsaMemFlags mflags);
     void BasicTestParentProcess(int defaultGPUNode, pid_t childPid, int *pipefd, HsaMemFlags mflags);
 
+    void DmabufTestChildProcess(int defaultGPUNode, int *pipefd, int delayPlace);
+    void DmabufTestParentProcess(int defaultGPUNode, pid_t cpid, int *pipefd, int delayPlace);
+
+    void ParentImportTestChildProcess(int defaultGPUNode, int *pipefd);
+    void ParentImportTestParentProcess(int defaultGPUNode, pid_t cpid, int *pipefd);
+
+    void MultipleTestChildProcess(int defaultGPUNode, int *pipefd);
+    void MultipleTestParentProcess(int defaultGPUNode, pid_t cpid, int *pipefd);
+
+    int RecvDmabufFDOverSocket(void);
+    void SendDmabufFDOverSocket(int dmabuf_fd);
+
     /* For CMA testing */
     CMA_TEST_STATUS CrossMemoryAttachChildProcess(int defaultGPUNode, int writePipe,
                                                   int readPipe, CMA_TEST_TYPE testType);
