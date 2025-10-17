@@ -101,8 +101,9 @@ TEST_CASE("Unit_hipMalloc3D_Basic") {
   // available amount returned is the same as the one we got the first time because of
   // other processes running on the system; we consider a success if at least a size
   // equivalent to two of the allocations has become available
-  // This test was too brittle before, when it was expecting avail to be equal to pavail
-  if (avail < pavail - height * width * depth) {
+  // (give or take 4MB, as there is bookkeeping overhead)
+  // This test was too brittle before, when it was expecting 'avail' to be equal to 'pavail'
+  if (avail < pavail - height * width * depth - 4 * 1024 * 1024) {
     WARN("Memory leak of hipMalloc3D API in multithreaded scenario."
          << " Available memory before the hipMalloc3D() call (bytes): " << pavail
          << " Available memory after the call: " << iavail
