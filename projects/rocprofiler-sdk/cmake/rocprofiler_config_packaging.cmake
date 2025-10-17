@@ -160,6 +160,14 @@ set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON) # generate list of shared libs prov
                                              # package
 set(CPACK_DEBIAN_TESTS_PACKAGE_SHLIBDEPS OFF) # disable for tests package
 set(CPACK_DEBIAN_TESTS_PACKAGE_GENERATE_SHLIBS OFF) # disable for tests package
+# Python extension modules are loadable modules, not shared libraries - disable shared
+# library processing
+set(CPACK_DEBIAN_ROCPD_PACKAGE_SHLIBDEPS OFF) # Python modules don't need dependency
+                                              # scanning
+set(CPACK_DEBIAN_ROCPD_PACKAGE_GENERATE_SHLIBS OFF) # Python modules don't need SONAME
+set(CPACK_DEBIAN_ROCTX_PACKAGE_SHLIBDEPS OFF) # Python modules don't need dependency
+                                              # scanning
+set(CPACK_DEBIAN_ROCTX_PACKAGE_GENERATE_SHLIBS OFF) # Python modules don't need SONAME
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS_POLICY ">=")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
@@ -194,6 +202,9 @@ set(CPACK_RPM_PACKAGE_AUTOREQ
 set(CPACK_RPM_PACKAGE_AUTOPROV ON) # generate list of shared libs provided by package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOREQ OFF) # disable for tests package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOPROV OFF) # disable for tests package
+# Python extension modules should not have automatic dependency generation
+set(CPACK_RPM_ROCPD_PACKAGE_AUTOPROV OFF) # Python modules don't provide shared libraries
+set(CPACK_RPM_ROCTX_PACKAGE_AUTOPROV OFF) # Python modules don't provide shared libraries
 if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
     set(CPACK_RPM_PACKAGE_RELEASE
         "$ENV{CPACK_RPM_PACKAGE_RELEASE}"
