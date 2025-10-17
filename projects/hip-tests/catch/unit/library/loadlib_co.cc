@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 TEST_CASE("Unit_hip_library_load_co") {
   constexpr size_t size = 32;
+  constexpr size_t num_kernels = 3;
   std::vector<float> input1, input2;
   input1.reserve(size);
   input2.reserve(size);
@@ -145,12 +146,12 @@ TEST_CASE("Unit_hip_library_load_co") {
 
   SECTION("All Kernels") {
     hipLibrary_t library;
-    hipKernel_t functions[3];
+    hipKernel_t functions[num_kernels];
 
     HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     
-    HIP_CHECK(hipLibraryEnumerateKernels(functions, 3, library));
+    HIP_CHECK(hipLibraryEnumerateKernels(functions, num_kernels, library));
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -168,7 +169,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     
     std::vector<float> out(size, 0);
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < num_kernels; k++) {
       const char* kName = nullptr;
       HIP_CHECK(hipKernelGetName(&kName, functions[k]));
       HIP_CHECK(hipLaunchKernel(functions[k], 1, size, args, 0, stream));

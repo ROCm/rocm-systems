@@ -58,27 +58,25 @@ hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel
 }
 
 hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
-  if (maxKernels == 0 || maxKernels > functions_.size()) {
-    return hipErrorInvalidValue;
-  }
-
+  auto maxCount = (maxKernels > functions_.size()) ? functions_.size() : maxKernels;
   auto device_id = hip::ihipGetDevice();
   auto m = fatbin_->Module(device_id);
-  for (const auto&f : functions_) {
-    // build library only for un-registered kernels
-    if (kernels_.find({f.first, device_id}) == kernels_.end())  {
-      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
-      Register(f.first, device_id, *k);
-    } 
-  }
   auto count = 0;
-  for (const auto& it : kernels_) {
-    if (count < maxKernels) {
-     k[count++] = it.second;
+  for (const auto&f : functions_) {
+    if (count >= maxCount) break;
+    hipKernel_t kern;
+    // build library only for un-registered kernels
+    if (auto ki = kernels_.find(std::make_pair(f.first, device_id)); ki!= kernels_.end()) {
+      kern = ki->second;
+    } else {
+      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
+      Register(f.first, device_id, kern);
     }
+    k[count++] = kern;
   }
   return hipSuccess;
 }
+
 hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
   auto device_id = hip::ihipGetDevice();
   if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
@@ -220,7 +218,7 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
   HIP_INIT_API(hipLibraryEnumerateKernels, kernels, numKernels, library);
-  if (kernels == nullptr || library == nullptr || numKernels == 0) {
+  if (kernels == nullptr || library == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -228,6 +226,10 @@ hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKern
   auto ret = l->BuildIt();
   if (ret != hipSuccess) {
     HIP_RETURN(ret);
+  }
+
+  if (numKernels == 0) {
+    HIP_RETURN(hipSuccess);
   }
 
   ret = l->EnumerateKernels(kernels, numKernels);

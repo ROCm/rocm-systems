@@ -3669,7 +3669,7 @@ inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrar
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
 
-hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+inline static hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
   return hipCUResultTohipError(cuLibraryEnumerateKernels(kernels, numKernels, library));
 }
