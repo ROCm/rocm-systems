@@ -645,6 +645,10 @@ configure_settings(bool _init)
                               "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
                               false, "perfetto", "data", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(uint32_t, "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS",
+                              "Set Perfetto flush period (in ms)", uint32_t{ 10000 },
+                              "perfetto", "data");
+
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_PERFETTO_FILL_POLICY",
         "Behavior when perfetto buffer is full. 'discard' will ignore new entries, "
@@ -1995,6 +1999,13 @@ get_perfetto_buffer_size()
 {
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB");
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
+}
+
+uint32_t
+get_perfetto_flush_period()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS");
+    return static_cast<tim::tsettings<uint32_t>&>(*_v->second).get();
 }
 
 bool
