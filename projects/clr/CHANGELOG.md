@@ -39,9 +39,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
-* New HIP flags
-    - `hipMemLocationTypeHost` enables handling virtual memory management in host memory location, in addition to device memory.
-    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+* Support for the flag `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
 * Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
 
 ### Resolved issues
