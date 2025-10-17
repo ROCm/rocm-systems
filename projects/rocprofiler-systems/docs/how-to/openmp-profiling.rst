@@ -110,7 +110,7 @@ This command generates an instrumented binary ``jacobi.inst``. Then, run it with
 .. note::
    If ``ROCPROFSYS_USE_OMPT=ON`` is not specified, you can append ``-I "ompt"`` to ``rocprof-sys-run`` to capture OMPT callbacks.
 
-To view the generated ``.proto`` file in the browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
+To view the generated ``.proto`` file in a browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
 
 The output should resemble:
 
