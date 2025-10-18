@@ -44,6 +44,19 @@ NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
 
+template<typename T, T value_>
+struct ValueAsType { static constexpr T value = value_; };
+
+// Returns the value zero but the compiler cannot prove that it is zero so it
+// is useful to inhibit compiler optimizations.
+#if __CUDACC__
+template<typename=void>
+NCCL_DEVICE_INLINE int opaqueZero() {
+  __device__ static int zero = 0;
+  return __ldg(&zero);
+}
+#endif
+
 template<typename X, typename Y, typename Z = decltype(X()+Y())>
 NCCL_HOST_DEVICE_INLINE constexpr Z divUp(X x, Y y) {
   return (x+y-1)/y;
@@ -100,6 +113,17 @@ NCCL_HOST_DEVICE_INLINE T add4G(T base, int delta4G) {
 template<typename Int>
 NCCL_HOST_DEVICE_INLINE constexpr bool isPow2(Int x) {
   return (x & (x-1)) == 0;
+}
+
+template<typename Uint>
+NCCL_HOST_DEVICE_INLINE bool rollingLessEq(Uint a, Uint b, int nBits = 8*sizeof(Uint)) {
+  static_assert(Uint(0) < Uint(-1), "Uint must be unsigned.");
+  Uint m = Uint(-1) >> (8*sizeof(Uint) - nBits);
+  return ((b-a) & m) <= m>>1;
+}
+template<typename Uint>
+NCCL_HOST_DEVICE_INLINE bool rollingLessThan(Uint a, Uint b, int nBits = 8*sizeof(Uint)) {
+  return !rollingLessEq(b, a, nBits);
 }
 
 // Produce the reciprocal of x for use in idivByRcp
@@ -217,51 +241,7 @@ NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
 #endif
 
 #if __CUDACC__
-NCCL_DEVICE_INLINE void fenceAcquireGpu() {
-  static __device__ int dummy;
-  int tmp;
-#if __HIP_PLATFORM_AMD__
-  tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
-  __threadfence();
-#else
-  asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
-#endif
-  dummy = tmp;
-}
-NCCL_DEVICE_INLINE void fenceReleaseGpu() {
-#if __HIP_PLATFORM_AMD__
-  __threadfence();
-#else
-  cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
-#endif
-}
-#endif
-
-#if __CUDACC__
-#if __HIP_PLATFORM_AMD__
-NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
-  return ord == std::memory_order_release ? std::memory_order_relaxed :
-         ord == std::memory_order_acq_rel ? std::memory_order_acquire :
-         ord;
-}
-
-NCCL_HOST_DEVICE_INLINE constexpr std::memory_order releaseOrderOf(std::memory_order ord) {
-  return ord == std::memory_order_acquire ? std::memory_order_relaxed :
-         ord == std::memory_order_acq_rel ? std::memory_order_release :
-         ord;
-}
-NCCL_HOST_DEVICE_INLINE constexpr int toAtomicBuiltinOrder(std::memory_order ord) {
-  switch (ord) {
-    case std::memory_order_relaxed: return __ATOMIC_RELAXED;
-    case std::memory_order_acquire: return __ATOMIC_ACQUIRE;
-    case std::memory_order_release: return __ATOMIC_RELEASE;
-    case std::memory_order_acq_rel: return __ATOMIC_ACQ_REL;
-    case std::memory_order_seq_cst: return __ATOMIC_SEQ_CST;
-    default: return __ATOMIC_SEQ_CST;
-  }
-}
-#else
-NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+NCCL_DEVICE_INLINE cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
          ord;
@@ -272,6 +252,44 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
          ord;
 }
 #endif
+#endif
+
+#if __CUDACC__
+template<typename T>
+NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_scope scope) {
+  switch (scope) {
+  case cuda::thread_scope_thread:
+    return cuda::atomic_ref<T, cuda::thread_scope_thread>{*ptr}.load(ord);
+  case cuda::thread_scope_block:
+    return cuda::atomic_ref<T, cuda::thread_scope_block>{*ptr}.load(ord);
+  case cuda::thread_scope_device:
+    return cuda::atomic_ref<T, cuda::thread_scope_device>{*ptr}.load(ord);
+  case cuda::thread_scope_system:
+    return cuda::atomic_ref<T, cuda::thread_scope_system>{*ptr}.load(ord);
+  default: __builtin_unreachable();
+  }
+}
+#endif
+
+#if __CUDACC__
+template<typename T>
+NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda::thread_scope scope) {
+  switch (scope) {
+  case cuda::thread_scope_thread:
+    cuda::atomic_ref<T, cuda::thread_scope_thread>{*ptr}.store(val, ord);
+    break;
+  case cuda::thread_scope_block:
+    cuda::atomic_ref<T, cuda::thread_scope_block>{*ptr}.store(val, ord);
+    break;
+  case cuda::thread_scope_device:
+    cuda::atomic_ref<T, cuda::thread_scope_device>{*ptr}.store(val, ord);
+    break;
+  case cuda::thread_scope_system:
+    cuda::atomic_ref<T, cuda::thread_scope_system>{*ptr}.store(val, ord);
+    break;
+  default: __builtin_unreachable();
+  }
+}
 #endif
 
 #if __CUDACC__
