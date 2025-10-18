@@ -164,6 +164,7 @@ struct ncclTopoNode {
     }gpu;
     struct {
       int dev; // Plugin dev number
+      uint64_t pciId;
       uint64_t asic;
       int port;
       float bw;
@@ -221,6 +222,7 @@ struct ncclTopoSystem {
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;
   bool useRailOptimizedTrees;
+  int inter;
   /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
   int romeTopoModelIdx;
   /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */

@@ -121,6 +121,7 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
 }
 
 NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size_t size, void** handle);
+
 ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
   ncclResult_t ret = ncclSuccess;
 
@@ -137,7 +138,13 @@ end:
 }
 
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
-  NCCLCHECK(ncclRegister(comm, buff, size, true, handle));
+  if (ncclP2pUsesMemcpy()) {
+    *handle = NULL;
+    INFO(NCCL_REG, "Skipping graph registration for buffer %p size %zi (P2pUsesMemcpy=%d)",
+         buff, size, ncclP2pUsesMemcpy());
+  } else {
+    NCCLCHECK(ncclRegister(comm, buff, size, true, handle));
+  }
   return ncclSuccess;
 }
 

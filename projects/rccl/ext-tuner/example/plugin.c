@@ -307,7 +307,7 @@ __hidden ncclResult_t pluginInit(void** context, uint64_t commId, size_t nRanks,
     // Set Ring/Simple base network latency to 280
     constants->hwLatencies[NCCL_HW_NET][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 280.0;
   }
-  
+
   TunerContext* ctx = (TunerContext*)malloc(sizeof(TunerContext));
   if (!ctx) return ncclSystemError;
 
