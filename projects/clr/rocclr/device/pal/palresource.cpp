@@ -2073,6 +2073,10 @@ bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.heaps[2] = Pal::GpuHeapGartUswc;
   createInfo.flags.peerWritable = device_->P2PAccessAllowed();
   createInfo.mallPolicy = static_cast<Pal::GpuMemMallPolicy>(device_->settings().mallPolicy_);
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    // set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if (mem_ref != nullptr) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2117,6 +2121,10 @@ bool FineMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.flags.useReservedGpuVa = (reserved_va != nullptr);
   createInfo.pReservedGpuVaOwner = reserved_va;
   createInfo.mallPolicy = Pal::GpuMemMallPolicy::Never;
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    //set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if ((mem_ref != nullptr) && InitAllocator(mem_ref)) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2137,6 +2145,10 @@ bool FineUncachedMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved
   createInfo.pReservedGpuVaOwner = reserved_va;
   createInfo.flags.gl2Uncached = true;
   createInfo.mallPolicy = Pal::GpuMemMallPolicy::Never;
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    //set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if ((mem_ref != nullptr) && InitAllocator(mem_ref)) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
