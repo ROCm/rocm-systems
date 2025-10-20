@@ -2,7 +2,7 @@
 ////
 //// MIT License
 ////
-//// Copyright (c) 2017 - 2024 Advanced Micro Devices, Inc. All rights Reserved.
+//// Copyright (c) 2017 - 2025 Advanced Micro Devices, Inc. All rights Reserved.
 ////
 //// Permission is hereby granted, free of charge, to any person obtaining a copy
 //// of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 extern "C" {
 #endif  /* __cplusplus */
 
-#if defined(_WIN32) || defined(__CYGWIN__)
+#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
 #define LIB_API_PUBLIC __declspec(dllexport)
 #define ATTRIBUTE_NON_NULL
 #else
