@@ -84,6 +84,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          # TODO: Remove this branch once develop no longer has the amdclang++ issue 
+          ref: users/ggottipa-amd/enable-kokkos-trace
           sparse-checkout: projects/rocprofiler-compute/
 
       - name: Setup Environment
