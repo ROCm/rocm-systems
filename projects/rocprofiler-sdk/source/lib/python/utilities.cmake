@@ -31,10 +31,10 @@ endmacro()
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
-    # Sanitizers need Development (full) to get Python3_LIBRARIES for linking Otherwise
-    # use Development.Module for manylinux compatibility (CMake 3.18+)
+    # Sanitizers need Development (full) to get Python3_LIBRARIES for linking otherwise
+    # use Development.Module for manylinux compatibility
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+        if(ROCPROFILER_MEMCHECK)
             find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
                          COMPONENTS Interpreter Development)
         else()
@@ -42,7 +42,7 @@ macro(rocprofiler_find_python3 _VERSION)
                          COMPONENTS Interpreter Development.Module)
         endif()
     elseif("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
-        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+        if(ROCPROFILER_MEMCHECK)
             find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
                          COMPONENTS Interpreter Development)
         else()
