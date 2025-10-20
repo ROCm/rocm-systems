@@ -264,7 +264,7 @@ configure_settings(bool _init)
         "Data collection mode. Used to set default values for ROCPROFSYS_USE_* options. "
         "Typically set by rocprof-sys binary instrumenter.",
         std::string{ "trace" }, "backend", "advanced", "mode")
-        ->set_choices({ "trace", "sampling", "causal", "coverage" });
+        ->set_choices({ "trace", "sampling", "causal", "coverage", "profiling" });
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_CI",
                               "Enable some runtime validation checks (typically enabled "
@@ -1128,6 +1128,14 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         set_default_setting_value("ROCPROFSYS_USE_SAMPLING", true);
         set_default_setting_value("ROCPROFSYS_USE_PROCESS_SAMPLING", true);
     }
+    else if(get_mode() == Mode::Profiling)
+    {
+        _set("ROCPROFSYS_TRACE", false);
+        _set("ROCPROFSYS_PROFILE", true);
+        _set("ROCPROFSYS_USE_CAUSAL", false);
+        _set("ROCPROFSYS_USE_SAMPLING", false);
+        _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
+    }
 
     if(gpu::device_count() == 0)
     {
@@ -1709,20 +1717,23 @@ get_mode()
     if(!settings_are_configured())
     {
         auto _mode = tim::get_env_choice<std::string>(
-            "ROCPROFSYS_MODE", "trace", { "trace", "sampling", "causal", "coverage" });
+            "ROCPROFSYS_MODE", "trace", { "trace", "sampling", "causal", "coverage", "profiling" });
         if(_mode == "sampling")
             return Mode::Sampling;
         else if(_mode == "causal")
             return Mode::Causal;
         else if(_mode == "coverage")
             return Mode::Coverage;
+        else if(_mode == "profiling")
+            return Mode::Profiling;
         return Mode::Trace;
     }
     static auto _m =
         std::unordered_map<std::string_view, Mode>{ { "trace", Mode::Trace },
                                                     { "causal", Mode::Causal },
                                                     { "sampling", Mode::Sampling },
-                                                    { "coverage", Mode::Coverage } };
+                                                    { "coverage", Mode::Coverage },
+                                                    { "profiling", Mode::Profiling } };
     static auto _v = get_config()->find("ROCPROFSYS_MODE");
     try
     {

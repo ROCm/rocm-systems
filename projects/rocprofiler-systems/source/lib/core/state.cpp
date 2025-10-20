@@ -160,6 +160,7 @@ to_string(rocprofsys::Mode _v)
         case rocprofsys::Mode::Sampling: return "Sampling";
         case rocprofsys::Mode::Causal: return "Causal";
         case rocprofsys::Mode::Coverage: return "Coverage";
+        case rocprofsys::Mode::Profiling: return "Profiling";
     }
     return {};
 }

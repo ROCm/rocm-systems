@@ -360,6 +360,15 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     %{INDENT}%   to consume more resources since, while idle, the real-clock time increases (and therefore triggers taking samples)
     %{INDENT}%   whereas the CPU-clock time does not.)";
 
+    const auto* _overflow_desc =
+        R"(Sample based on an overflow event. Accepts zero or more arguments:
+    %{INDENT}%0. Enables sampling based on overflow.
+    %{INDENT}%1. Overflow metric, e.g. PERF_COUNT_HW_INSTRUCTIONS
+    %{INDENT}%2. Overflow value. E.g., if metric == PERF_COUNT_HW_INSTRUCTIONS, then 10000000 == sample every 10,000,000 instructions.
+    %{INDENT}%3+ Thread IDs to target for sampling, starting at 0 (the main thread).
+    %{INDENT}%   May be specified as index or range, e.g., '0 2-4' will be interpreted as:
+    %{INDENT}%      sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads)";
+
     const auto* _hsa_interrupt_desc =
         R"(Set the value of the HSA_ENABLE_INTERRUPT environment variable.
 %{INDENT}%  ROCm version 5.2 and older have a bug which will cause a deadlock if a sample is taken while waiting for the signal
@@ -743,6 +752,28 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             if(!_v.empty())
             {
                 update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
+                           join(array_config{ "," }, _v));
+            }
+        });
+
+    parser.add_argument({ "--overflow" }, _overflow_desc)
+        .min_count(0)
+        .action([&](parser_t& p) {
+            auto _v = p.get<std::deque<std::string>>("overflow");
+            update_env(_env, "ROCPROFSYS_SAMPLING_OVERFLOW", true);
+            if(!_v.empty())
+            {
+                update_env(_env, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT", _v.front());
+                _v.pop_front();
+            }
+            if(!_v.empty())
+            {
+                update_env(_env, "ROCPROFSYS_SAMPLING_OVERFLOW_FREQ", _v.front());
+                _v.pop_front();
+            }
+            if(!_v.empty())
+            {
+                update_env(_env, "ROCPROFSYS_SAMPLING_OVERFLOW_TIDS",
                            join(array_config{ "," }, _v));
             }
         });
