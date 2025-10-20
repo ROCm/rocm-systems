@@ -2,7 +2,7 @@
 
 paths:
   # Path to analysis config template
-  template: utils/config_management/analysis_config_template.yaml
+  template: tools/config_management/analysis_config_template.yaml
 
   # Root directory containing architecture configs
   configs_root: src/rocprof_compute_soc/analysis_configs
@@ -11,10 +11,10 @@ paths:
   backups: .backups
 
   # Hash database file
-  hashes: utils/config_management/.config_hashes.json
+  hashes: tools/config_management/.config_hashes.json
 
   # Per-arch metric definitions output
-  per_arch_metrics: utils/per_arch_metric_definitions
+  per_arch_metrics: tools/per_arch_metric_definitions
 
   # Docs metrics description file
   docs_metrics: docs/data/metrics_description.yaml

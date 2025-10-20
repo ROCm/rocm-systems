@@ -408,7 +408,7 @@ def main() -> int:
     parser.add_argument("configs_dir", help="Path to analysis_configs directory")
     parser.add_argument(
         "--per-arch-output",
-        default="utils/per_arch_metric_definitions",
+        default="tools/per_arch_metric_definitions",
         help="Output directory for per-arch files",
     )
     parser.add_argument(

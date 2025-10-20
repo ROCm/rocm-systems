@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_HASH_DB = "utils/config_management/.config_hashes.json"
+DEFAULT_HASH_DB = "tools/config_management/.config_hashes.json"
 
 
 def compute_file_hash(filepath: Path) -> str:

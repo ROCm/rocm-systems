@@ -1639,7 +1639,7 @@ def load_yaml(filepath: str) -> dict[str, Any]:
 
 
 def get_panel_alias() -> dict[str, str]:
-    panel_yaml = load_yaml("utils/config_management/gfx9_config_template.yaml")
+    panel_yaml = load_yaml("tools/config_management/gfx9_config_template.yaml")
     return {
         panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
     }

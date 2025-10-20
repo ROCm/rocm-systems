@@ -39,11 +39,11 @@ CONFIG_FILE = "config_workflow.yaml"
 
 DEFAULT_CONFIG: dict = {
     "paths": {
-        "template": "utils/config_management/gfx9_config_template.yaml",
+        "template": "tools/config_management/gfx9_config_template.yaml",
         "configs_root": "src/rocprof_compute_soc/analysis_configs",
         "backups": ".backups",
-        "hashes": "utils/config_management/.config_hashes.json",
-        "per_arch_metrics": "utils/per_arch_metric_definitions",
+        "hashes": "tools/config_management/.config_hashes.json",
+        "per_arch_metrics": "tools/per_arch_metric_definitions",
         "docs_metrics": "docs/data/metrics_description.yaml",
     },
     "validation": {"strict_mode": True, "verify_after_changes": True},
@@ -192,7 +192,7 @@ def validate_all_archs(config: dict) -> tuple[bool, str]:
     """Validate all archs against the template."""
     print("Validating all architectures against template...")
     res = run_script(
-        "utils/config_management/verify_against_config_template.py",
+        "tools/config_management/verify_against_config_template.py",
         [config["paths"]["configs_root"], config["paths"]["template"]],
         capture_output=True,
     )
@@ -209,7 +209,7 @@ def validate_arch_against_template(arch_name: str, config: dict) -> tuple[bool, 
     """Validate one arch (best-effort: rely on script output mentioning arch)."""
     print(f"Validating {arch_name} against template...")
     res = run_script(
-        "utils/config_management/verify_against_config_template.py",
+        "tools/config_management/verify_against_config_template.py",
         [config["paths"]["configs_root"], config["paths"]["template"]],
         capture_output=True,
     )
@@ -304,7 +304,7 @@ def promote_to_latest(
 
         print(f"\n1. Updating template with new latest arch: {new_arch}")
         res = run_script(
-            "utils/config_management/parse_config_template.py",
+            "tools/config_management/parse_config_template.py",
             [str(new_dir), config["paths"]["template"], "--latest-arch", new_arch],
             capture_output=True,
         )
@@ -315,7 +315,7 @@ def promote_to_latest(
         for p in prev_archs:
             prev_dir = root / p
             gen = run_script(
-                "utils/config_management/generate_config_deltas.py",
+                "tools/config_management/generate_config_deltas.py",
                 [str(new_dir), str(prev_dir)],
                 capture_output=True,
             )
@@ -373,7 +373,7 @@ def update_latest_arch_from_delta(
 
         print(f"\n1. Applying delta to {arch_name}")
         res = run_script(
-            "utils/config_management/apply_config_deltas.py",
+            "tools/config_management/apply_config_deltas.py",
             [str(arch_dir), delta_file, str(tmp)],
             capture_output=True,
         )
@@ -385,7 +385,7 @@ def update_latest_arch_from_delta(
 
         print("\n2. Updating template")
         res = run_script(
-            "utils/config_management/parse_config_template.py",
+            "tools/config_management/parse_config_template.py",
             [str(arch_dir), config["paths"]["template"], "--latest-arch", arch_name],
             capture_output=True,
         )
@@ -397,7 +397,7 @@ def update_latest_arch_from_delta(
         for prev in [a for a in all_archs if a != arch_name]:
             prev_dir = root / prev
             gen = run_script(
-                "utils/config_management/generate_config_deltas.py",
+                "tools/config_management/generate_config_deltas.py",
                 [str(arch_dir), str(prev_dir)],
                 capture_output=True,
             )
@@ -451,7 +451,7 @@ def update_older_arch_from_delta(delta_file: str, arch_name: str, config: dict) 
 
         print(f"\n1. Applying delta to {arch_name}")
         res = run_script(
-            "utils/config_management/apply_config_deltas.py",
+            "tools/config_management/apply_config_deltas.py",
             [str(arch_dir), delta_file, str(tmp)],
             capture_output=True,
         )
@@ -503,7 +503,7 @@ def update_latest_arch_from_edits(arch_name: str, config: dict) -> bool:
 
         print("\n1. Updating template")
         res = run_script(
-            "utils/config_management/parse_config_template.py",
+            "tools/config_management/parse_config_template.py",
             [str(arch_dir), config["paths"]["template"], "--latest-arch", arch_name],
             capture_output=True,
         )
@@ -516,7 +516,7 @@ def update_latest_arch_from_edits(arch_name: str, config: dict) -> bool:
         ]:
             prev_dir = root / prev
             gen = run_script(
-                "utils/config_management/generate_config_deltas.py",
+                "tools/config_management/generate_config_deltas.py",
                 [str(arch_dir), str(prev_dir)],
                 capture_output=True,
             )
@@ -659,7 +659,7 @@ def promote_new_arch_from_latest_edits(
         # 4) Generate delta: edited (curr) vs pristine latest (prev)
         print("\nGenerating delta (edited latest → pristine latest)")
         gen = run_script(
-            "utils/config_management/generate_config_deltas.py",
+            "tools/config_management/generate_config_deltas.py",
             [str(edited_tmp), str(latest_dir)],
             capture_output=True,
         )
@@ -680,7 +680,7 @@ def promote_new_arch_from_latest_edits(
             shutil.rmtree(new_tmp)
         print(f"\nApplying delta to {new_arch}: {delta_file.name}")
         app = run_script(
-            "utils/config_management/apply_config_deltas.py",
+            "tools/config_management/apply_config_deltas.py",
             [str(new_dir), str(delta_file), str(new_tmp)],
             capture_output=True,
         )
@@ -740,7 +740,7 @@ def promote_new_arch_from_delta(
             shutil.rmtree(new_tmp)
         print(f"\nApplying delta to {new_arch}: {Path(delta_file).name}")
         app = run_script(
-            "utils/config_management/apply_config_deltas.py",
+            "tools/config_management/apply_config_deltas.py",
             [str(new_dir), str(delta_file), str(new_tmp)],
             capture_output=True,
         )

@@ -1,4 +1,4 @@
-# NOTE: Please run utils/split_config.py after making changes to this file to auto-generate configs
+# NOTE: Please run tools/split_config.py after making changes to this file to auto-generate configs
 panels:
 - id: 0
   title: Top Stats

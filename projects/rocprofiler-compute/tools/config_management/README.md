@@ -114,7 +114,7 @@ Modification:
 - Template updated
 - Deltas regenerated for all previous archs (gfx940, gfx941, etc.)
 - Metric descriptions synced to:
-  - `utils/per_arch_metric_definitions/gfx950_metrics_description.yaml`
+  - `tools/per_arch_metric_definitions/gfx950_metrics_description.yaml`
   - `docs/data/metrics_description.yaml`
 - All archs validated
 - Hashes updated
@@ -135,7 +135,7 @@ Modification:
 **What Happens:**
 - Changes applied to gfx940 only
 - Validated against template (must still match structure)
-- Metric descriptions synced to `utils/per_arch_metric_definitions/gfx940_metrics_description.yaml`
+- Metric descriptions synced to `tools/per_arch_metric_definitions/gfx940_metrics_description.yaml`
 - Hashes updated for gfx940 only
 
 ### Scenario C: Add New Architecture (gfx955)
@@ -175,7 +175,7 @@ metrics_description:
 **What Happens:**
 - Same workflow as metric changes
 - Plain text stored in config YAMLs
-- RST version generated and stored in docs/utils files
+- RST version generated and stored in docs/tools files
 
 ## Delta YAML Structure
 
@@ -277,7 +277,7 @@ python metric_description_manager.py --validate gfx950 src/rocprof_compute_soc/a
 ```bash
 # Generate template with metadata
 python parse_config_template.py src/rocprof_compute_soc/analysis_configs/gfx950 \
-    utils/config_management/analysis_config_template.yaml \
+    tools/config_management/analysis_config_template.yaml \
     --latest-arch gfx950
 ```
 
@@ -306,7 +306,7 @@ python apply_config_deltas.py \
 # Validate all archs
 python verify_against_config_template.py \
     src/rocprof_compute_soc/analysis_configs \
-    utils/config_management/analysis_config_template.yaml
+    tools/config_management/analysis_config_template.yaml
 ```
 
 ## File Structure
@@ -324,7 +324,7 @@ python verify_against_config_template.py \
 │       └── config_delta/
 │           └── gfx950_diff.yaml          # Optional delta for modifications
 │
-├── utils/
+├── tools/
 │   ├── config_management/
 │   │   ├── .config_hashes.json           # Hash database (auto-generated)
 │   │   ├── analysis_config_template.yaml # Template with metadata
@@ -355,11 +355,11 @@ Edit `config_workflow.yaml` to customize paths and behavior:
 
 ```yaml
 paths:
-  template: utils/config_management/analysis_config_template.yaml
+  template: tools/config_management/analysis_config_template.yaml
   configs_root: src/rocprof_compute_soc/analysis_configs
   backups: .backups
-  hashes: utils/config_management/.config_hashes.json
-  per_arch_metrics: utils/per_arch_metric_definitions
+  hashes: tools/config_management/.config_hashes.json
+  per_arch_metrics: tools/per_arch_metric_definitions
   docs_metrics: docs/data/metrics_description.yaml
 
 validation:
@@ -410,7 +410,7 @@ Common issues:
 
 - Check that files were actually modified
 - Ensure you're in the correct directory
-- Verify hash database exists: `utils/config_management/.config_hashes.json`
+- Verify hash database exists: `tools/config_management/.config_hashes.json`
 
 ### "Validation failed"
 
@@ -482,7 +482,7 @@ Our .pre-commit-config.yaml includes a local hook that runs the checker.
   hooks:
     - id: hash-check
       name: Hash consistency check
-      entry: bash -lc 'cd projects/rocprofiler-compute && python3 utils/config_management/hash_checker.py'
+      entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/config_management/hash_checker.py'
       language: system
       pass_filenames: false
       stages: [pre-commit]
@@ -496,5 +496,5 @@ pre-commit run --all-files
 
 # or directly in the subproject
 cd projects/rocprofiler-compute
-python3 utils/config_management/hash_checker.py
+python3 tools/config_management/hash_checker.py
 ```

@@ -9,18 +9,15 @@ Errors (per arch):
 - If an older arch's delta changed but neither latest panels nor this arch's
   panels changed
 
-Works from super-repo root or subproject dir.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import yaml
 
-# --- robust local import of hash_manager (works as module or direct file) ---
 try:
     from . import hash_manager  # type: ignore
 except Exception:
@@ -38,19 +35,14 @@ except Exception:
 # Subproject root: .../projects/rocprofiler-compute
 SUBROOT = Path(__file__).resolve().parents[2]
 
-# Accept both the canonical and legacy folder spelling
-_AC_DIRS: List[Path] = [
-    SUBROOT / "src" / "rocprof_compute_soc" / "analysis_configs",
-]
-CONFIGS_ROOT: Path = next((p for p in _AC_DIRS if p.is_dir()), _AC_DIRS[0])
-
-HASH_FILE: Path = SUBROOT / "utils" / "config_management" / ".config_hashes.json"
+CONFIGS_ROOT: Path = SUBROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
+HASH_FILE: Path = SUBROOT / "tools" / "config_management" / ".config_hashes.json"
 TEMPLATE_FILE: Path = (
-    SUBROOT / "utils" / "config_management" / "analysis_config_template.yaml"
+    SUBROOT / "tools" / "config_management" / "analysis_config_template.yaml"
 )
 
 
-# ---------- helpers that match YOUR hash_manager shape ----------
+# ---------- helpers ----------
 
 
 def _latest_arch(template_file: Path) -> str:
@@ -61,7 +53,7 @@ def _latest_arch(template_file: Path) -> str:
     return str(data.get("latest_arch") or "")
 
 
-def _all_archs(cfg_root: Path) -> List[str]:
+def _all_archs(cfg_root: Path) -> list[str]:
     if not cfg_root.is_dir():
         return []
     return sorted(
@@ -69,7 +61,7 @@ def _all_archs(cfg_root: Path) -> List[str]:
     )
 
 
-def _cur_panels_and_delta(arch_dir: Path) -> Tuple[Dict[str, str], str]:
+def _cur_panels_and_delta(arch_dir: Path) -> tuple[dict[str, str], str]:
     """
     Current (on-disk) hashes using hash_manager.compute_arch_hashes API:
       returns {"files": {...}, "delta_hash": <md5 or None>}
@@ -82,7 +74,7 @@ def _cur_panels_and_delta(arch_dir: Path) -> Tuple[Dict[str, str], str]:
 
 def _prev_panels_and_delta(
     hashes_path: Path, arch_name: str
-) -> Tuple[Dict[str, str], str]:
+) -> tuple[dict[str, str], str]:
     """
     Previous (DB) hashes saved in .config_hashes.json:
       stored as {"files": {...}, "delta_hash": <md5 or None>}
@@ -94,7 +86,7 @@ def _prev_panels_and_delta(
     return panels, str(delta_hash)
 
 
-def _changed_panel_files(cur: Dict[str, str], prev: Dict[str, str]) -> List[str]:
+def _changed_panel_files(cur: dict[str, str], prev: dict[str, str]) -> list[str]:
     """
     Return a small list of changed panel filenames (added/removed/modified).
     """
@@ -126,7 +118,7 @@ def main() -> int:
         changes = hash_manager.detect_changes(CONFIGS_ROOT, HASH_FILE)  # type: ignore[call-arg]
     new_archs: list = changes.get("new_archs") or []
 
-    errors: List[str] = []
+    errors: list[str] = []
 
     # Track whether latest panels changed (used for older-arch delta rule)
     latest_panels_changed = False
@@ -162,11 +154,11 @@ def main() -> int:
                 )
 
         else:
-            # C) Older arch panels changed but its delta did not
+            # C) Arch panels changed but its delta did not
             if panel_changed and not delta_changed:
                 snippet = ", ".join(_changed_panel_files(cur_panels, prev_panels)[:5])
                 errors.append(
-                    f"Panels changed in older arch '{arch}' "
+                    f"Panels changed in arch '{arch}' "
                     "but its delta file did not change.\n"
                     f"Changed panels (sample): {snippet}\n"
                     "Regenerate deltas for this arch (diff vs latest) "
