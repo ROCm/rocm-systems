@@ -49,10 +49,10 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
+    get_panel_alias,
     get_submodules,
     get_version,
     get_version_display,
-    load_yaml,
     parse_sets_yaml,
     set_locale_encoding,
 )
@@ -275,18 +275,11 @@ class RocProfCompute:
             )
             parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 
-            panel_yaml = load_yaml(
-                "utils/config_management/analysis_config_template.yaml"
-            )
-            panel_info = {
-                panel["panel_title"]: panel["panel_alias"] for panel in panel_yaml
-            }
-
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             for key, value in ac.metric_list.items():
                 if key.count(".") > 0:
                     continue
-                print(f"{key:<8} {panel_info[value]:<16} {value}")
+                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")

@@ -48,12 +48,13 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
 from utils.specs import MachineSpecs
 from utils.utils import (
+    METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     detect_rocprof,
+    get_panel_alias,
     get_submodules,
     is_tcc_channel_counter,
-    load_yaml,
     mibench,
     parse_sets_yaml,
 )
@@ -317,15 +318,16 @@ class OmniSoC_Base:
                 with open(filename) as stream:
                     texts.append(stream.read())
 
-        panel_yaml = load_yaml("utils/config_management/analysis_config_template.yaml")
-        panel_info = {
-            panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml
-        }
-
         for block_id in filter_blocks:
-            # Convert block alias to metric id
-            if isinstance(block_id, str):
-                block_id = panel_info.get(block_id, "")
+            if METRIC_ID_RE.match(block_id):
+                block_id = block_id
+            else:
+                alias = block_id
+                panel_alias_dict = get_panel_alias()
+                if alias not in panel_alias_dict:
+                    raise KeyError(f"Unknown panel alias: {alias!r}")
+                block_id = panel_alias_dict[alias]  # int
+                print(f"alias: {alias}, block id: {block_id}")
 
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
@@ -336,6 +338,7 @@ class OmniSoC_Base:
                     f"{config_root_dir}"
                 )
                 continue
+
             with open(config_filename_dict[file_id]) as stream:
                 file_config = yaml.safe_load(stream)
             if panel_id is None:
@@ -721,6 +724,7 @@ class OmniSoC_Base:
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks
+                and "roof" not in self.get_args().filter_blocks
             )
         ):
             console_log("roofline", "Skipping roofline")

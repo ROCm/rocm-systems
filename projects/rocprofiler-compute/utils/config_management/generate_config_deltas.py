@@ -10,12 +10,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import yaml
-
-
-def load_yaml(filepath: Path) -> dict:
-    with open(filepath) as f:
-        return yaml.safe_load(f) or {}
+try:
+    from . import utils as cm_utils
+except Exception:
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    try:
+        import config_management.utils as cm_utils  # type: ignore
+    except Exception:
+        import utils as cm_utils  # type: ignore
 
 
 def get_metric_tables(data: dict) -> list[dict]:
@@ -259,8 +263,8 @@ def main() -> None:
     combined_diff = {"Addition": [], "Deletion": [], "Modification": []}
 
     for filename in sorted(common_files):
-        curr_data = load_yaml(curr_arch_dir / filename)
-        prev_data = load_yaml(prev_arch_dir / filename)
+        curr_data = cm_utils.load_yaml(curr_arch_dir / filename)
+        prev_data = cm_utils.load_yaml(prev_arch_dir / filename)
 
         curr_pc = curr_data.get("Panel Config", {}) or {}
         prev_pc = prev_data.get("Panel Config", {}) or {}

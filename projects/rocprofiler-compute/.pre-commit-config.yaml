@@ -15,7 +15,7 @@ repos:
     rev: v0.12.12
     hooks:
       - id: ruff-check
-        args: [--fix, --exit-non-zero-on-fix]
+        args: [--fix]
       - id: ruff-format
 
   # Local hook: hash consistency check

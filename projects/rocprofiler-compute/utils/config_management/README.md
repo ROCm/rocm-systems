@@ -453,3 +453,48 @@ If you need to modify the workflow behavior:
 2. Edit `master_config_workflow_script.py` for workflow logic changes
 3. Test with `--dry-run` extensively
 4. Update this README
+
+
+# Pre-commit: Hash Consistency Check
+
+We ship a lightweight pre-commit hook that catches inconsistent hash updates across config YAMLs and deltas.
+
+## What it enforces (per arch)
+
+* Latest panels changed → latest delta must change (if there are older archs).
+* Latest delta changed → latest panels must change or a new arch must be added.
+* Older arch panels changed → that arch’s delta must change.
+* Older arch delta changed → either latest panels or that arch’s panels must have changed.
+
+## Setup
+
+Install and enable pre-commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Our .pre-commit-config.yaml includes a local hook that runs the checker.
+
+```yaml
+- repo: local
+  hooks:
+    - id: hash-check
+      name: Hash consistency check
+      entry: bash -lc 'cd projects/rocprofiler-compute && python3 utils/config_management/hash_checker.py'
+      language: system
+      pass_filenames: false
+      stages: [pre-commit]
+```
+
+## Run manually
+
+```bash
+# from super-repo root
+pre-commit run --all-files
+
+# or directly in the subproject
+cd projects/rocprofiler-compute
+python3 utils/config_management/hash_checker.py
+```

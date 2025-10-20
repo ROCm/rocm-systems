@@ -46,9 +46,9 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils import (
+    get_panel_alias,
     get_uuid,
     is_workload_empty,
-    load_yaml,
     merge_counters_spatial_multiplex,
 )
 
@@ -196,15 +196,10 @@ class OmniAnalyze_Base:
 
         print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
         for key, value in self._arch_configs[arch].metric_list.items():
-            panel_yaml = load_yaml(
-                "utils/config_management/analysis_config_template.yaml"
-            )
-            panel_info = {
-                panel["panel_title"]: panel["panel_alias"] for panel in panel_yaml
-            }
+            panel_alias_dict = get_panel_alias()
             if key.count(".") > 0:
                 continue
-            print(f"{key:<8} {panel_info[value]:<16} {value}")
+            print(f"{key:<8} {panel_alias_dict[value]:<16} {value}")
 
         sys.exit(0)
 

@@ -23,8 +23,11 @@ from typing import Optional
 try:
     from . import hash_manager, metric_description_manager
 except Exception:
-    import hash_manager
-    import metric_description_manager
+    repo_root = Path(__file__).resolve().parents[1]  # repo root
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    import config_management.hash_manager as hash_manager  # type: ignore
+    import config_management.metric_description_manager as metric_description_manager  # type: ignore
 
 import yaml
 
@@ -36,7 +39,7 @@ CONFIG_FILE = "config_workflow.yaml"
 
 DEFAULT_CONFIG: dict = {
     "paths": {
-        "template": "utils/config_management/analysis_config_template.yaml",
+        "template": "utils/config_management/gfx9_config_template.yaml",
         "configs_root": "src/rocprof_compute_soc/analysis_configs",
         "backups": ".backups",
         "hashes": "utils/config_management/.config_hashes.json",

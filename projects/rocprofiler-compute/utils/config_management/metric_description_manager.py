@@ -21,13 +21,12 @@ import yaml
 try:
     from . import utils as cm_utils
 except Exception:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[1]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     try:
-        import utils.config_management.utils as cm_utils  # type: ignore
+        import config_management.utils as cm_utils  # type: ignore
     except Exception:
-        # last resort if there's a top-level utils.py
         import utils as cm_utils  # type: ignore
 
 # Section to panel ID mapping for organizing descriptions

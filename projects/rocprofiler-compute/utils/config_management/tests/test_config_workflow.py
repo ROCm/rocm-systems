@@ -8,11 +8,11 @@ from unittest.mock import patch
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import utils.config_management.master_config_workflow_script as mws  # noqa
+import master_config_workflow_script as mws  # noqa
 
 
 def build_panel_dict(
@@ -273,9 +273,7 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
         # (call the script's main via subprocess to mimic actual behavior)
         cmd = [
             sys.executable,
-            str(
-                REPO_ROOT / "utils" / "config_management" / "generate_config_deltas.py"
-            ),
+            str(REPO_ROOT / "generate_config_deltas.py"),
             str(self.gfx_curr),
             str(self.gfx_prev),
         ]
@@ -305,7 +303,7 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
         # Use apply_config_deltas.py exactly as workflow does
         cmd2 = [
             sys.executable,
-            str(REPO_ROOT / "utils" / "config_management" / "apply_config_deltas.py"),
+            str(REPO_ROOT / "apply_config_deltas.py"),
             str(self.gfx_prev),
             str(delta_file),
             str(out_clone),
@@ -328,9 +326,7 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
         # Generate delta
         cmd = [
             sys.executable,
-            str(
-                REPO_ROOT / "utils" / "config_management" / "generate_config_deltas.py"
-            ),
+            str(REPO_ROOT / "generate_config_deltas.py"),
             str(self.gfx_curr),
             str(self.gfx_prev),
         ]
@@ -371,9 +367,7 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
         # Generate delta from prev -> curr (same as edits applied)
         cmd = [
             sys.executable,
-            str(
-                REPO_ROOT / "utils" / "config_management" / "generate_config_deltas.py"
-            ),
+            str(REPO_ROOT / "generate_config_deltas.py"),
             str(self.gfx_curr),
             str(self.gfx_prev),
         ]

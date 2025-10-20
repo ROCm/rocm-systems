@@ -11,26 +11,16 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import yaml
-
-PathLike = Union[str, Path]
-
-
-def load_yaml(filepath: PathLike) -> dict:
-    with open(filepath) as f:
-        return yaml.safe_load(f) or {}
-
-
-def save_yaml(data: dict, filepath: PathLike) -> None:
-    with open(filepath, "w") as f:
-        yaml.dump(
-            data,
-            f,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-            width=float("inf"),
-        )
+try:
+    from . import utils as cm_utils
+except Exception:
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    try:
+        import config_management.utils as cm_utils  # type: ignore
+    except Exception:
+        import utils as cm_utils  # type: ignore
 
 
 def find_table_in_config(config: dict, table_id: Any) -> Optional[dict]:
@@ -173,9 +163,13 @@ def apply_changes(config: dict, changes: list[dict], category: str) -> None:
                 modify_descriptions(config, descriptions)
 
 
-def apply_delta(base_dir: PathLike, delta_file: PathLike, output_dir: PathLike) -> None:
+def apply_delta(
+    base_dir: Union[str, Path],
+    delta_file: Union[str, Path],
+    output_dir: Union[str, Path],
+) -> None:
     """Apply delta YAML to all files in base directory."""
-    delta = load_yaml(delta_file)
+    delta = cm_utils.load_yaml(delta_file)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -190,7 +184,7 @@ def apply_delta(base_dir: PathLike, delta_file: PathLike, output_dir: PathLike) 
 
     base_path = Path(base_dir)
     for yaml_file in base_path.glob("*.yaml"):
-        config = load_yaml(yaml_file)
+        config = cm_utils.load_yaml(yaml_file)
         panel_id = config.get("Panel Config", {}).get("id")
 
         if panel_id in changes_by_panel:
@@ -202,7 +196,7 @@ def apply_delta(base_dir: PathLike, delta_file: PathLike, output_dir: PathLike) 
                         config, changes_by_panel[panel_id][category], category
                     )
 
-            save_yaml(config, output_path / yaml_file.name)
+            cm_utils.save_yaml(config, output_path / yaml_file.name)
             print(f"Saved: {yaml_file.name}")
         else:
             shutil.copy(yaml_file, output_path / yaml_file.name)

@@ -1,131 +1,193 @@
 #!/usr/bin/env python3
 """
-Fail fast when hash changes look inconsistent:
-- If latest arch panels changed but no delta files changed -> error
-- If delta files changed but latest arch did not change and no new arch dir -> error
+Hash consistency guard for rocprofiler-compute.
 
-Run this from repo root:
-  python utils/config_management/check_hash_consistency.py
+Errors (per arch):
+- If latest-arch panels changed but its delta did not (and there are older archs)
+- If latest-arch delta changed but its panels did not AND no new arch was added
+- If an older arch's panels changed but its delta did not
+- If an older arch's delta changed but neither latest panels nor this arch's
+  panels changed
+
+Works from super-repo root or subproject dir.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Dict, List, Tuple
 
 import yaml
 
+# --- robust local import of hash_manager (works as module or direct file) ---
 try:
-    from . import hash_manager  # when run as module
+    from . import hash_manager  # type: ignore
 except Exception:
     import importlib.util
 
-    here = Path(__file__).resolve().parent
-    spec = importlib.util.spec_from_file_location(
-        "hash_manager", str(here / "hash_manager.py")
+    _HERE = Path(__file__).resolve().parent
+    _SPEC = importlib.util.spec_from_file_location(
+        "hash_manager", str(_HERE / "hash_manager.py")
     )
-    hash_manager = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(hash_manager)  # type: ignore[attr-defined]
-# ----------------------------------------------------------------------
+    hash_manager = importlib.util.module_from_spec(_SPEC)  # type: ignore[assignment]
+    assert _SPEC and _SPEC.loader is not None
+    _SPEC.loader.exec_module(hash_manager)  # type: ignore[attr-defined]
+# ---------------------------------------------------------------------------
+
+# Subproject root: .../projects/rocprofiler-compute
+SUBROOT = Path(__file__).resolve().parents[2]
+
+# Accept both the canonical and legacy folder spelling
+_AC_DIRS: List[Path] = [
+    SUBROOT / "src" / "rocprof_compute_soc" / "analysis_configs",
+]
+CONFIGS_ROOT: Path = next((p for p in _AC_DIRS if p.is_dir()), _AC_DIRS[0])
+
+HASH_FILE: Path = SUBROOT / "utils" / "config_management" / ".config_hashes.json"
+TEMPLATE_FILE: Path = (
+    SUBROOT / "utils" / "config_management" / "analysis_config_template.yaml"
+)
 
 
-CONFIGS_ROOT = Path("src/rocprof_compute_soc/analysis_configs")
-HASH_FILE = Path("utils/config_management/.config_hashes.json")
-TEMPLATE_FILE = Path("utils/config_management/analysis_config_template.yaml")
-PER_ARCH_DEFS_ROOT = Path(
-    "utils/per_arch_metric_definitions"
-)  # optional; passed if supported
+# ---------- helpers that match YOUR hash_manager shape ----------
 
 
-def get_latest_arch(template_file: Path) -> str:
+def _latest_arch(template_file: Path) -> str:
     if not template_file.is_file():
         return ""
     with open(template_file, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    return data.get("latest_arch", "") or ""
+    return str(data.get("latest_arch") or "")
 
 
-def get_all_archs(configs_root: Path) -> list[str]:
-    if not configs_root.is_dir():
+def _all_archs(cfg_root: Path) -> List[str]:
+    if not cfg_root.is_dir():
         return []
-    return sorted([
-        p.name
-        for p in configs_root.iterdir()
-        if p.is_dir() and p.name.startswith("gfx")
-    ])
+    return sorted(
+        p.name for p in cfg_root.iterdir() if p.is_dir() and p.name.startswith("gfx")
+    )
+
+
+def _cur_panels_and_delta(arch_dir: Path) -> Tuple[Dict[str, str], str]:
+    """
+    Current (on-disk) hashes using hash_manager.compute_arch_hashes API:
+      returns {"files": {...}, "delta_hash": <md5 or None>}
+    """
+    cur = hash_manager.compute_arch_hashes(arch_dir)
+    panels = dict(cur.get("files") or {})
+    delta_hash = cur.get("delta_hash") or ""
+    return panels, str(delta_hash)
+
+
+def _prev_panels_and_delta(
+    hashes_path: Path, arch_name: str
+) -> Tuple[Dict[str, str], str]:
+    """
+    Previous (DB) hashes saved in .config_hashes.json:
+      stored as {"files": {...}, "delta_hash": <md5 or None>}
+    """
+    db: dict = hash_manager.load_hash_db(hashes_path)
+    prev_arch: dict = (db.get("archs") or {}).get(arch_name, {})  # type: ignore[assignment]
+    panels = dict(prev_arch.get("files") or {})
+    delta_hash = prev_arch.get("delta_hash") or ""
+    return panels, str(delta_hash)
+
+
+def _changed_panel_files(cur: Dict[str, str], prev: Dict[str, str]) -> List[str]:
+    """
+    Return a small list of changed panel filenames (added/removed/modified).
+    """
+    # structural changes (added/removed)
+    changed = sorted(set(cur) ^ set(prev))
+    if not changed:
+        # content changes for existing files
+        changed = sorted(k for k in cur.keys() & prev.keys() if cur[k] != prev[k])
+    return changed
+
+
+# ---------- main ----------
 
 
 def main() -> int:
-    latest = get_latest_arch(TEMPLATE_FILE)
-    all_archs = get_all_archs(CONFIGS_ROOT)
-    other_archs = [a for a in all_archs if a != latest]
+    if not CONFIGS_ROOT.is_dir():
+        print(f"ERROR: analysis_configs directory not found at: {CONFIGS_ROOT}")
+        return 2
 
-    # detect changes (support newer signature with per_arch_defs_root; else fallback)
+    latest = _latest_arch(TEMPLATE_FILE)
+    all_archs = _all_archs(CONFIGS_ROOT)
+    older_archs = [a for a in all_archs if a != latest]
+
+    # detect new archs via hash_manager.detect_changes if available
     try:
-        changes: dict[str, Any] = hash_manager.detect_changes(
-            CONFIGS_ROOT, HASH_FILE, per_arch_defs_root=PER_ARCH_DEFS_ROOT
-        )  # type: ignore[arg-type]
+        changes: dict = hash_manager.detect_changes(CONFIGS_ROOT, HASH_FILE)  # type: ignore[call-arg]
     except TypeError:
+        # old/new signatures both accept (cfg_root, hashes_path)
         changes = hash_manager.detect_changes(CONFIGS_ROOT, HASH_FILE)  # type: ignore[call-arg]
+    new_archs: list = changes.get("new_archs") or []
 
-    modified_archs: dict[str, list[str]] = changes.get("modified_archs") or {}
-    delta_files: dict[str, str] = changes.get("delta_files") or {}
-    new_archs: list[str] = changes.get("new_archs") or []
+    errors: List[str] = []
 
-    latest_changed = latest and (latest in modified_archs or latest in new_archs)
-    num_delta_changes = len(delta_files)
+    # Track whether latest panels changed (used for older-arch delta rule)
+    latest_panels_changed = False
 
-    errors: list[str] = []
-    warnings: list[str] = []
+    for arch in all_archs:
+        arch_dir = CONFIGS_ROOT / arch
+        cur_panels, cur_delta = _cur_panels_and_delta(arch_dir)
+        prev_panels, prev_delta = _prev_panels_and_delta(HASH_FILE, arch)
 
-    # Rule 1: Latest changed (panels or new latest) -> expect some delta changes
-    if latest and latest_changed and num_delta_changes == 0 and len(other_archs) > 0:
-        errors.append(
-            f"Latest arch '{latest}' changed, but no delta files changed.\n"
-            f"Did you forget to regenerate deltas for previous archs?"
-        )
+        panel_changed = cur_panels != prev_panels
+        delta_changed = cur_delta != prev_delta
 
-    # Rule 2: Deltas changed but latest did NOT change (and no new arch dir)
-    if num_delta_changes > 0 and not latest_changed and len(new_archs) == 0:
-        changed_list = ", ".join([
-            f"{a}:{Path(p).name}" for a, p in delta_files.items()
-        ])
-        errors.append(
-            "Delta files changed, but latest architecture did not change and "
-            "no new arch was added.\n"
-            f"Changed deltas: {changed_list}\n"
-            "This usually means deltas were edited/regenerated without"
-            "corresponding latest panel updates."
-        )
+        if arch == latest:
+            latest_panels_changed = panel_changed
 
-    for a in modified_archs.keys():
-        if a != latest:
-            warnings.append(
-                f"Older arch '{a}' panels changed. If this was intentional, "
-                "ignore this warning. "
-                f"Otherwise consider applying a delta or promoting a new latest."
-            )
+            # A) Latest panels changed but no delta changed (and there ARE older archs)
+            if panel_changed and not delta_changed and older_archs:
+                snippet = ", ".join(_changed_panel_files(cur_panels, prev_panels)[:5])
+                errors.append(
+                    f"Panels changed in latest arch '{latest}' "
+                    "but its delta file did not change.\n"
+                    f"Changed panels (sample): {snippet}\n"
+                    "Run the workflow to regenerate deltas for previous archs."
+                )
 
-    if warnings:
-        print("\nHASH CONSISTENCY WARNINGS:")
-        for w in warnings:
-            print("  - " + w)
+            # B) Latest delta changed but panels did not AND no new arch was added
+            if delta_changed and not panel_changed and latest not in new_archs:
+                errors.append(
+                    "Delta file changed for latest, but panels "
+                    "didn't change and no new arch was added.\n"
+                    "This usually means deltas were edited/regenerated "
+                    "without corresponding latest updates."
+                )
+
+        else:
+            # C) Older arch panels changed but its delta did not
+            if panel_changed and not delta_changed:
+                snippet = ", ".join(_changed_panel_files(cur_panels, prev_panels)[:5])
+                errors.append(
+                    f"Panels changed in older arch '{arch}' "
+                    "but its delta file did not change.\n"
+                    f"Changed panels (sample): {snippet}\n"
+                    "Regenerate deltas for this arch (diff vs latest) "
+                    "and commit them."
+                )
+
+            # D) Older arch delta changed without either latest panels changing
+            #    OR this arch's panels changing -> error
+            #    (allow if latest panels changed: deltas can legitimately change then)
+            if delta_changed and not panel_changed and not latest_panels_changed:
+                errors.append(
+                    f"Delta file changed under older arch '{arch}' "
+                    "but neither latest nor this arch's panels changed.\n"
+                    "This suggests stray delta edits; "
+                    "verify latest panels or this arch's panels, or revert."
+                )
 
     if errors:
         print("\nHASH CONSISTENCY ERRORS:")
         for e in errors:
             print("  - " + e)
-        print("\nTo fix:")
-        print(
-            "  • If latest changed: regenerate deltas for prior archs via "
-            "the workflow script."
-        )
-        print(
-            "  • If deltas changed alone: verify latest panels/new arch promotion, "
-            "or revert stray delta edits."
-        )
         return 1
 
     print("Hash consistency check passed.")

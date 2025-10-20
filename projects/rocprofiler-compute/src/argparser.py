@@ -28,6 +28,24 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from utils.utils import METRIC_ID_RE
+
+
+def validate_block(value: str) -> str:
+    if METRIC_ID_RE.match(value):
+        return value
+    raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
+
+
+def block_token_or_alias(s: str) -> str:
+    try:
+        return validate_block(s)
+    except argparse.ArgumentTypeError:
+        s = (s or "").strip()
+        if not s:
+            raise argparse.ArgumentTypeError("empty token for --block")
+        return s
+
 
 def print_avail_arch(avail_arch: list[str], args: str) -> str:
     ret_str = f"List all available {args} for analysis on specified arch:"
@@ -252,6 +270,7 @@ Examples:
         dest="filter_blocks",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         required=False,
         default=[],
         help=(
@@ -659,6 +678,7 @@ Examples:
         dest="filter_metrics",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(

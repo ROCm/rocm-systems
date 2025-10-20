@@ -12,13 +12,21 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
+try:
+    from . import utils as cm_utils
+except Exception:
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    try:
+        import config_management.utils as cm_utils  # type: ignore
+    except Exception:
+        import utils as cm_utils  # type: ignore
 
 
 def parse_panel_config(yaml_file: Path) -> Optional[dict]:
     """Parse a single YAML file and extract panel and data source info."""
-    with open(yaml_file) as f:
-        data = yaml.safe_load(f) or {}
+    data = cm_utils.load_yaml(yaml_file)
     panel_config = data.get("Panel Config")
     if not isinstance(panel_config, dict):
         return None
@@ -92,8 +100,7 @@ def main() -> None:
         output_data: Any = results
         if args.latest_arch:
             output_data = {"latest_arch": args.latest_arch, "panels": results}
-        with open(args.output, "w") as f:
-            yaml.dump(output_data, f, sort_keys=False, default_flow_style=False)
+        cm_utils.save_yaml(output_data, args.output)
         print(f"\nResults saved to: {args.output}")
 
 
