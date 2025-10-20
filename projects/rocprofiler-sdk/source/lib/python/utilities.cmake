@@ -28,27 +28,26 @@ macro(rocprofiler_reset_python3_cache)
     endforeach()
 endmacro()
 
+# use Development.Module for manylinux compatibility
+set(ROCPROFILER_BUILD_Find_Python3_COMPONENTS
+    "Interpreter;Development.Module"
+    CACHE STRING "Components to find for Python3")
+
+if(ROCPROFILER_MEMCHECK)
+    # override with local variable for sanitizers. Sanitizers need Development (full) to
+    # get Python3_LIBRARIES for linking
+    set(ROCPROFILER_BUILD_Find_Python3_COMPONENTS "Interpreter" "Development")
+endif()
+
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
-    # Sanitizers need Development (full) to get Python3_LIBRARIES for linking otherwise
-    # use Development.Module for manylinux compatibility
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-        if(ROCPROFILER_MEMCHECK)
-            find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
-                         COMPONENTS Interpreter Development)
-        else()
-            find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
-                         COMPONENTS Interpreter Development.Module)
-        endif()
+        find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
+                     COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
     elseif("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
-        if(ROCPROFILER_MEMCHECK)
-            find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
-                         COMPONENTS Interpreter Development)
-        else()
-            find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
-                         COMPONENTS Interpreter Development.Module)
-        endif()
+        find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
+                     COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
     else()
         message(
             FATAL_ERROR
@@ -68,12 +67,8 @@ function(get_default_python_versions _VAR)
     set(_PYTHON_FOUND_VERSIONS)
 
     foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
-        if(ROCPROFILER_MEMCHECK)
-            find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter Development)
-        else()
-            find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter
-                                                                Development.Module)
-        endif()
+        find_package(Python3 ${_VER} EXACT QUIET
+                     COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
@@ -82,11 +77,7 @@ function(get_default_python_versions _VAR)
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
-        if(ROCPROFILER_MEMCHECK)
-            find_package(Python3 3.6 COMPONENTS Interpreter Development)
-        else()
-            find_package(Python3 3.6 COMPONENTS Interpreter Development.Module)
-        endif()
+        find_package(Python3 3.6 COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
