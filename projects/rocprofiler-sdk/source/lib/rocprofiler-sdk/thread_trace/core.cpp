@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
+
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -36,11 +39,8 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <mutex>
-#include <stdexcept>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -58,9 +58,7 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr size_t   QUEUE_SIZE      = 128;
 constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB
-constexpr double   SQTT_BANDIWDTH  = 16E9f * 5;  // 16GB/s, times 5 for wiggle room
 
 struct cbdata_t
 {
@@ -94,64 +92,6 @@ thread_trace_parameter_pack::are_params_valid() const
     return true;
 }
 
-class Signal
-{
-public:
-    Signal(hsa_ext_amd_aql_pm4_packet_t* packet)
-    {
-        auto& core = *hsa::get_core_table();
-        auto& ext  = *hsa::get_amd_ext_table();
-        ext.hsa_amd_signal_create_fn(0, 0, nullptr, 0, &signal);
-        packet->completion_signal = signal;
-        core.hsa_signal_store_screlease_fn(signal, 1);
-    }
-    ~Signal()
-    {
-        WaitOn();
-        hsa::get_core_table()->hsa_signal_destroy_fn(signal);
-    }
-    Signal(Signal& other)       = delete;
-    Signal(const Signal& other) = delete;
-    Signal& operator=(Signal& other) = delete;
-    Signal& operator=(const Signal& other) = delete;
-
-    void WaitOn() const
-    {
-        auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
-        while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
-        {}
-    }
-
-    hsa_signal_t      signal;
-    std::atomic<bool> released{false};
-};
-
-std::unique_ptr<Signal>
-ThreadTracerQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const
-{
-    auto* core = hsa::get_core_table();
-
-    std::unique_ptr<Signal> signal{};
-    const uint64_t          write_idx = core->hsa_queue_add_write_index_relaxed_fn(queue, 1);
-
-    size_t index = (write_idx % queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto* queue_slot = reinterpret_cast<uint32_t*>(size_t(queue->base_address) + index);
-
-    const auto* slot_data = reinterpret_cast<const uint32_t*>(packet);
-
-    memcpy(&queue_slot[1], &slot_data[1], sizeof(hsa_ext_amd_aql_pm4_packet_t) - sizeof(uint32_t));
-    if(bWait)
-        signal =
-            std::make_unique<Signal>(reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot));
-    auto* header = reinterpret_cast<std::atomic<uint32_t>*>(queue_slot);
-
-    header->store(slot_data[0], std::memory_order_release);
-    core->hsa_signal_store_screlease_fn(queue->doorbell_signal, write_idx);
-
-    return signal;
-}
-
 ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
                                      rocprofiler_agent_id_t      cache)
 : params(std::move(_params))
@@ -161,72 +101,39 @@ ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
-    auto* agent_cache = CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
+    auto* agent = CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
+
+    size_t double_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
+    queue = std::make_shared<HsaATTQueue>(*agent, double_buffer_size);
+
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
-        *agent_cache,
+        *agent,
         this->params,
         *core,
         *ext);
     control_packet = factory->construct_control_packet();
 
-    auto hsa_agent = *rocprofiler::agent::get_hsa_agent(agent_id);
-
-    auto status = core->hsa_queue_create_fn(hsa_agent,
-                                            QUEUE_SIZE,
-                                            HSA_QUEUE_TYPE_SINGLE,
-                                            nullptr,
-                                            nullptr,
-                                            UINT32_MAX,
-                                            UINT32_MAX,
-                                            &this->queue);
-    if(status != HSA_STATUS_SUCCESS)
-    {
-        ROCP_ERROR << "Failed to create thread trace async queue";
-        this->queue = nullptr;
-    }
-
     codeobj_reg = std::make_unique<code_object::CodeobjCallbackRegistry>(
-        [this](rocprofiler_agent_id_t agent, uint64_t codeobj_id, uint64_t addr, uint64_t size) {
-            if(agent == this->agent_id) this->load_codeobj(codeobj_id, addr, size);
+        [this](rocprofiler_agent_id_t _agent, uint64_t codeobj_id, uint64_t addr, uint64_t size) {
+            if(_agent == this->agent_id) this->load_codeobj(codeobj_id, addr, size);
         },
         [this](uint64_t codeobj_id) { this->unload_codeobj(codeobj_id); });
 
     codeobj_reg->IterateLoaded();
-
-    if (_params.triple_buffering)
-    {
-        for (auto& memory : double_buffer_memory)
-        {
-            CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(agent_cache->cpu_pool(), _params.buffer_size, 0, &memory), "failed to allocate contiguous memory");
-            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, memory), "failed to allow access");
-        }
-    }
 }
 
 ThreadTracerQueue::~ThreadTracerQueue()
 {
     ROCP_TRACE << "Destroying ATT Queue...";
     std::unique_lock<std::mutex> lk(trace_resources_mut);
-    if(active_traces.load() < 1)
-    {
-        hsa::get_core_table()->hsa_queue_destroy_fn(this->queue);
-        return;
-    }
+    if(active_traces.load() < 1) return;
 
     ROCP_CI_LOG(WARNING) << "Thread tracer being destroyed with thread trace active";
 
     control_packet->clear();
     control_packet->populate_after();
 
-    std::vector<std::unique_ptr<Signal>> wait_idx{};
-
-    for(auto& after_packet : control_packet->after_krn_pkt)
-        wait_idx.emplace_back(Submit(&after_packet, true));
-
-    wait_idx.clear();
-
-    for (auto memory : double_buffer_memory)
-        hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
+    for(auto& after_packet : control_packet->after_krn_pkt) queue->Submit(&after_packet, true);
 }
 
 /**
@@ -267,8 +174,8 @@ ThreadTracerQueue::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     auto status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &cb_dt);
     if(status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
         ROCP_WARNING << "Thread trace buffer full!";
-    else
-        CHECK_HSA(status, "Failed to iterate ATT data");
+    else if (status != HSA_STATUS_SUCCESS)
+        ROCP_CI_LOG(ERROR) << "Failed to iterate ATT data";
 
     active_traces.fetch_sub(1);
 }
@@ -283,7 +190,7 @@ ThreadTracerQueue::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
     if(!queue || active_traces.load() < 1) return;
 
     auto packet = factory->construct_load_marker_packet(id, addr, size);
-    Submit(&packet->packet, true)->WaitOn();
+    queue->Submit(&packet->packet, true)->WaitOn();
 }
 
 void
@@ -295,131 +202,56 @@ ThreadTracerQueue::unload_codeobj(code_object_id_t id)
     if(!queue || active_traces.load() < 1) return;
 
     auto packet = factory->construct_unload_marker_packet(id);
-    Submit(&packet->packet, true)->WaitOn();
+    queue->Submit(&packet->packet, true)->WaitOn();
 }
 
-void worker_loop(
-    rocprofiler::hsa::SQTTBufferingPackets buffer_packet,
-    ThreadTracerQueue* queue,
-    std::shared_ptr<std::atomic<bool>> running_flag
-) {
-    const size_t buffer_size = queue->params.buffer_size;
-    const auto callback = queue->params.shader_cb_fn;
-    const auto userdata = queue->params.callback_userdata;
-    const auto copy_fn = CHECK_NOTNULL(hsa::get_core_table())->hsa_memory_copy_fn;
-    const auto buffer = queue->get_double_buffer_memory();
-    const auto interval_microseconds = static_cast<size_t>(1E6 * buffer_size / SQTT_BANDIWDTH);
+std::shared_ptr<Signal> ThreadTracerQueue::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
+{
+    ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
 
-    std::atomic<bool> consumer_running{true};
-    std::condition_variable write_cv{};
-    std::atomic<size_t> write_index{0};
-    std::atomic<size_t> read_index{0};
+    auto buffer_packet = rocprofiler::hsa::SQTTBufferingPackets(control_packet->GetHandle());
+    if (buffer_packet.header)
+        params.shader_cb_fn(agent_id, 0, &buffer_packet.header, sizeof(buffer_packet.header), params.callback_userdata);
 
-    std::array<std::mutex, 2> mut{};
-    static_assert(mut.size() == buffer.size());
-
-    auto consumer = std::thread{[&] () {
-        while(true)
-        {
-            size_t parity = read_index%buffer.size();
-            {
-                std::unique_lock<std::mutex> lock(mut.at(parity));
-                write_cv.wait(lock, [&]() { return write_index > read_index || !consumer_running; });
-            }
-            if(!consumer_running && write_index <= read_index) return;
-
-            auto t0 = std::chrono::system_clock::now();
-            //std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
-            callback(queue->agent_id, 0, buffer.at(parity), buffer_size, userdata);
-            read_index.fetch_add(1);
-
-            auto duration = (std::chrono::system_clock::now() - t0).count();
-            std::cout << "callback time taken: " << duration*1E-6f << "ms. BW: " << buffer_size * 1.0f / duration << " Gb/s\n";
-        }
-    }};
-
-    auto control_packet = queue->get_control();
+    auto control_packet = get_control(true);
     control_packet->clear();
+    control_packet->populate_before();
     control_packet->populate_after();
 
-    auto stop_consumer = [&]() {
-        consumer_running.store(false);
-        write_cv.notify_all();
-        consumer.join();
-    };
+    auto unique_signal = queue->SubmitAndSignalLast(control_packet->before_krn_pkt);
+    auto shared_signal = std::shared_ptr<Signal>(std::move(unique_signal));
 
-    auto stop_trace = [&]() {
-        queue->SubmitAndSignalLast(control_packet->after_krn_pkt);
-    };
-
-    auto start_t0 = std::chrono::system_clock::now();
-    bool do_sleep = false;
-
-    while (running_flag->load())
+    if(params.triple_buffering)
     {
-        if (do_sleep) std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
-        do_sleep = true; // Reset value
+        auto worker_data = triple_buffer_worker_data_t{};
+        worker_data.callback_fn = params.shader_cb_fn;
+        worker_data.userdata = params.callback_userdata;
+        worker_data.queue = queue;
+        worker_data.running_flag = std::move(flag);
+        worker_data.start_pkt_signal = shared_signal;
+        worker_data.control_packet = std::move(control_packet);
 
-        // Send query status packet and wait for result
-        queue->Submit(&buffer_packet.query_status, true);
-        if (auto status = buffer_packet.query_buffer_status())
-        {
-            // Query returned buffer full: Send packet to trigger a buffer swap
-            queue->Submit(&status->packet, false);
-            ROCP_FATAL_IF(status->size != buffer_size) << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
-
-            {
-                const bool should_stop = read_index+1 < write_index;
-                if (should_stop)
-                {
-                    ROCP_WARNING << "SQTT buffer full!";
-                    stop_trace(); // Check is_running so we dont send twice
-                    while (read_index+1 < write_index) std::this_thread::sleep_for(std::chrono::microseconds(10));
-                }
-
-                {
-                    size_t parity = write_index%buffer.size();
-                    std::unique_lock<std::mutex> lock(mut.at(parity));
-
-                    auto err = copy_fn(buffer.at(parity), status->data, buffer_size);
-                    ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy returned error " << err;
-                    write_index.fetch_add(1);
-                    write_cv.notify_all();
-                }
-
-                if (should_stop)
-                {
-                    stop_consumer();
-                    return;
-                }
-            }
-            // If a buffer flip has happened, we dont want to sleep due to transfer delay
-            do_sleep = false;
-        }
+        worked_thread = std::thread{worker_loop, std::move(buffer_packet), std::move(worker_data)};
     }
-    stop_trace();
-    stop_consumer();
-
-    auto end_t0 = std::chrono::system_clock::now();
-    ROCP_WARNING << "Total trace size: " << (end_t0-start_t0).count()*1E-9f << " s.";
+    return shared_signal;
 }
 
-void ThreadTracerQueue::start_worker(std::shared_ptr<std::atomic<bool>> flag)
+std::unique_ptr<Signal> ThreadTracerQueue::stop_thread_trace()
 {
-    ROCP_WARNING << "Starting worker";
-    auto packets = rocprofiler::hsa::SQTTBufferingPackets(control_packet->GetHandle());
-    if (packets.header)
-        params.shader_cb_fn(agent_id, 0, &packets.header, sizeof(packets.header), params.callback_userdata);
+    ROCP_TRACE << "Stopping Thread trace for agent " << agent_id.handle;
 
-    //worked_thread = std::async(std::launch::async, worker_loop, std::move(packets), this, std::move(flag));
-    worked_thread = std::thread{worker_loop, std::move(packets), this, std::move(flag)};
-}
-
-void ThreadTracerQueue::stop_worker()
-{
-    ROCP_TRACE << "Stopping ATT worker";
-    worked_thread.join();
+    if(params.triple_buffering)
+    {
+        worked_thread.join();
+        return nullptr;
+    }
+    else
+    {
+        auto control_packet = get_control(true);
+        control_packet->clear();
+        control_packet->populate_after();
+        return queue->SubmitAndSignalLast(control_packet->after_krn_pkt);
+    }
 }
 
 void
@@ -599,7 +431,7 @@ DeviceThreadTracer::resource_deinit()
 void
 DeviceThreadTracer::start_context()
 {
-    ROCP_TRACE << "Start device context";
+    ROCP_TRACE << "Start device thread trace context";
     std::unique_lock<std::mutex> lk(agent_mut);
 
     if(agents.empty())
@@ -608,27 +440,13 @@ DeviceThreadTracer::start_context()
         return;
     }
 
-    std::vector<std::unique_ptr<Signal>> wait_list{};
-
-    for(auto& [_, tracer] : agents)
-    {
-        auto packet = tracer->get_control(true);
-        packet->clear();
-        packet->populate_before();
-
-        auto sig = tracer->SubmitAndSignalLast(packet->before_krn_pkt);
-        wait_list.emplace_back(std::move(sig));
-    }
-
-    ROCP_WARNING << "Starting context";
     worker_flag = std::make_shared<std::atomic<bool>>(true);
-    wait_list.clear();
+    auto wait_list = std::vector<std::shared_ptr<Signal>>{};
 
     for(auto& [_, tracer] : agents)
-    {
-        if (tracer->params.triple_buffering)
-            tracer->start_worker(worker_flag);
-    }
+        wait_list.emplace_back(tracer->start_thread_trace(worker_flag));
+
+    for (auto& signal : wait_list) CHECK_NOTNULL(signal)->WaitOn();
 }
 
 void
@@ -645,11 +463,15 @@ DeviceThreadTracer::stop_context()
     ROCP_WARNING << "Stopping context";
 
     worker_flag->store(false);
+
+    auto wait_list = std::vector<std::unique_ptr<Signal>>{};
+
+    for(auto& [_, tracer] : agents) wait_list.emplace_back(tracer->stop_thread_trace());
+
+    wait_list.clear();
+
     for(auto& [_, tracer] : agents)
-    {
-        tracer->stop_worker();
         tracer->iterate_data(tracer->get_control()->GetHandle(), tracer->params.callback_userdata);
-    }
 }
 
 void
