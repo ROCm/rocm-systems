@@ -25,6 +25,7 @@
 
 import argparse
 import copy
+import inspect
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, TextIO
@@ -133,6 +134,8 @@ def is_roofline_shown(
     roof_plot: Optional[str],
     hidden_cols: list[str],
 ) -> bool:
+    print(inspect.stack()[1].function)
+
     has_roofline_style = any(
         data_source.get(table_type, {}).get("cli_style") == "Roofline"
         for data_source in panel["data source"]
@@ -469,17 +472,12 @@ def show_all(
 
         panel_content = ""  # store content of all data_source from one panel
 
-        if panel_id == 400:
-            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
-                continue
-
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
-                # If block filtering was used during analysis, then don't use profiling
-                # config. If block filtering was used in profiling config, only show
-                # those panels. If block filtering not used in profiling config, show
-                # all panels. Skip this table if table id or panel id is not present
-                # in block filters. However, always show panel id <= 100.
+                # Block-filter logic:
+                # - If analysis used --filter-metrics, ignore profiling block filters
+                # - If profiling had block filters, only show selected tables/panels
+                # - Always show panels with id <= 100
                 if (
                     not args.filter_metrics
                     and filter_panel_ids
@@ -497,9 +495,13 @@ def show_all(
                     )
                     continue
 
-                # Metrics baseline comparison mode
+                if panel_id == 400 and is_roofline_shown(
+                    args, runs, output, panel, roof_plot, hidden_cols
+                ):
+                    continue
+
+                # Metrics baseline comparison mode: only show common metrics across runs
                 # We cannot guarantee that all runs have the same metrics.
-                # Only show common metrics.
                 if (
                     table_type == "metric_table"
                     and "Metric" in table_config["header"].values()
