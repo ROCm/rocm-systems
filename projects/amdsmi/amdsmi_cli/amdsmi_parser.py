@@ -918,7 +918,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(bad_pages_parser, required=False)
         self._add_command_modifiers(bad_pages_parser)
 
-
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         metric_help = "Gets metric/performance information about the specified GPU"

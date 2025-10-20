@@ -4932,6 +4932,165 @@ def amdsmi_get_gpu_metrics_info(
             gpu_metrics_output['xcp_stats.gfx_below_host_limit_total_acc'][xcp_index] = xcp_detail
     return gpu_metrics_output
 
+def amdsmi_get_gpu_partition_metrics_info(
+    processor_handle: processor_handle_t,
+) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    gpu_metrics = amdsmi_wrapper.amdsmi_gpu_metrics_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_partition_metrics_info(
+            processor_handle, ctypes.byref(gpu_metrics)
+        )
+    )
+
+    gpu_metrics_output = {
+        "common_header.structure_size": _validate_if_max_uint(gpu_metrics.common_header.structure_size, MaxUIntegerTypes.UINT16_T),
+        "common_header.format_revision": _validate_if_max_uint(gpu_metrics.common_header.format_revision, MaxUIntegerTypes.UINT8_T),
+        "common_header.content_revision": _validate_if_max_uint(gpu_metrics.common_header.content_revision, MaxUIntegerTypes.UINT8_T),
+        "temperature_edge": _validate_if_max_uint(gpu_metrics.temperature_edge, MaxUIntegerTypes.UINT16_T),
+        "temperature_hotspot": _validate_if_max_uint(gpu_metrics.temperature_hotspot, MaxUIntegerTypes.UINT16_T),
+        "temperature_mem": _validate_if_max_uint(gpu_metrics.temperature_mem, MaxUIntegerTypes.UINT16_T),
+        "temperature_vrgfx": _validate_if_max_uint(gpu_metrics.temperature_vrgfx, MaxUIntegerTypes.UINT16_T),
+        "temperature_vrsoc": _validate_if_max_uint(gpu_metrics.temperature_vrsoc, MaxUIntegerTypes.UINT16_T),
+        "temperature_vrmem": _validate_if_max_uint(gpu_metrics.temperature_vrmem, MaxUIntegerTypes.UINT16_T),
+        "average_gfx_activity": _validate_if_max_uint(gpu_metrics.average_gfx_activity, MaxUIntegerTypes.UINT16_T, isActivity=True),
+        "average_umc_activity": _validate_if_max_uint(gpu_metrics.average_umc_activity, MaxUIntegerTypes.UINT16_T, isActivity=True),
+        "average_mm_activity": _validate_if_max_uint(gpu_metrics.average_mm_activity, MaxUIntegerTypes.UINT16_T, isActivity=True),
+        "average_socket_power": _validate_if_max_uint(gpu_metrics.average_socket_power, MaxUIntegerTypes.UINT16_T),
+        "energy_accumulator": _validate_if_max_uint(gpu_metrics.energy_accumulator, MaxUIntegerTypes.UINT64_T),
+        "system_clock_counter": _validate_if_max_uint(gpu_metrics.system_clock_counter, MaxUIntegerTypes.UINT64_T),
+        "average_gfxclk_frequency": _validate_if_max_uint(gpu_metrics.average_gfxclk_frequency, MaxUIntegerTypes.UINT16_T),
+        "average_socclk_frequency": _validate_if_max_uint(gpu_metrics.average_socclk_frequency, MaxUIntegerTypes.UINT16_T),
+        "average_uclk_frequency": _validate_if_max_uint(gpu_metrics.average_uclk_frequency, MaxUIntegerTypes.UINT16_T),
+        "average_vclk0_frequency": _validate_if_max_uint(gpu_metrics.average_vclk0_frequency, MaxUIntegerTypes.UINT16_T),
+        "average_dclk0_frequency": _validate_if_max_uint(gpu_metrics.average_dclk0_frequency, MaxUIntegerTypes.UINT16_T),
+        "average_vclk1_frequency": _validate_if_max_uint(gpu_metrics.average_vclk1_frequency, MaxUIntegerTypes.UINT16_T),
+        "average_dclk1_frequency": _validate_if_max_uint(gpu_metrics.average_dclk1_frequency, MaxUIntegerTypes.UINT16_T),
+        "current_gfxclk": _validate_if_max_uint(gpu_metrics.current_gfxclk, MaxUIntegerTypes.UINT16_T),
+        "current_socclk": _validate_if_max_uint(gpu_metrics.current_socclk, MaxUIntegerTypes.UINT16_T),
+        "current_uclk": _validate_if_max_uint(gpu_metrics.current_uclk, MaxUIntegerTypes.UINT16_T),
+        "current_vclk0": _validate_if_max_uint(gpu_metrics.current_vclk0, MaxUIntegerTypes.UINT16_T),
+        "current_dclk0": _validate_if_max_uint(gpu_metrics.current_dclk0, MaxUIntegerTypes.UINT16_T),
+        "current_vclk1": _validate_if_max_uint(gpu_metrics.current_vclk1, MaxUIntegerTypes.UINT16_T),
+        "current_dclk1": _validate_if_max_uint(gpu_metrics.current_dclk1, MaxUIntegerTypes.UINT16_T),
+        "throttle_status": _validate_if_max_uint(gpu_metrics.throttle_status, MaxUIntegerTypes.UINT32_T, isBool=True),
+        "current_fan_speed": _validate_if_max_uint(gpu_metrics.current_fan_speed, MaxUIntegerTypes.UINT16_T),
+        "pcie_link_width": _validate_if_max_uint(gpu_metrics.pcie_link_width, MaxUIntegerTypes.UINT16_T),
+        "pcie_link_speed": _validate_if_max_uint(gpu_metrics.pcie_link_speed, MaxUIntegerTypes.UINT16_T),
+        "gfx_activity_acc": _validate_if_max_uint(gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT32_T),
+        "mem_activity_acc": _validate_if_max_uint(gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT32_T),
+        "temperature_hbm": _validate_if_max_uint(list(gpu_metrics.temperature_hbm), MaxUIntegerTypes.UINT16_T),
+        "firmware_timestamp": _validate_if_max_uint(gpu_metrics.firmware_timestamp, MaxUIntegerTypes.UINT64_T),
+        "voltage_soc": _validate_if_max_uint(gpu_metrics.voltage_soc, MaxUIntegerTypes.UINT16_T),
+        "voltage_gfx": _validate_if_max_uint(gpu_metrics.voltage_gfx, MaxUIntegerTypes.UINT16_T),
+        "voltage_mem": _validate_if_max_uint(gpu_metrics.voltage_mem, MaxUIntegerTypes.UINT16_T),
+        "indep_throttle_status": _validate_if_max_uint(gpu_metrics.indep_throttle_status, MaxUIntegerTypes.UINT64_T, isBool=True),
+        "current_socket_power": _validate_if_max_uint(gpu_metrics.current_socket_power, MaxUIntegerTypes.UINT16_T),
+        "vcn_activity": _validate_if_max_uint(list(gpu_metrics.vcn_activity), MaxUIntegerTypes.UINT16_T, isActivity=True),
+        "gfxclk_lock_status": _validate_if_max_uint(gpu_metrics.gfxclk_lock_status, MaxUIntegerTypes.UINT32_T),
+        "xgmi_link_width": _validate_if_max_uint(gpu_metrics.xgmi_link_width, MaxUIntegerTypes.UINT16_T),
+        "xgmi_link_speed": _validate_if_max_uint(gpu_metrics.xgmi_link_speed, MaxUIntegerTypes.UINT16_T),
+        "pcie_bandwidth_acc": _validate_if_max_uint(gpu_metrics.pcie_bandwidth_acc, MaxUIntegerTypes.UINT64_T),
+        "pcie_bandwidth_inst": _validate_if_max_uint(gpu_metrics.pcie_bandwidth_inst, MaxUIntegerTypes.UINT64_T),
+        "pcie_l0_to_recov_count_acc": _validate_if_max_uint(gpu_metrics.pcie_l0_to_recov_count_acc, MaxUIntegerTypes.UINT64_T),
+        "pcie_replay_count_acc": _validate_if_max_uint(gpu_metrics.pcie_replay_count_acc, MaxUIntegerTypes.UINT64_T),
+        "pcie_replay_rover_count_acc": _validate_if_max_uint(gpu_metrics.pcie_replay_rover_count_acc, MaxUIntegerTypes.UINT64_T),
+        "xgmi_read_data_acc": _validate_if_max_uint(list(gpu_metrics.xgmi_read_data_acc), MaxUIntegerTypes.UINT64_T),
+        "xgmi_write_data_acc": _validate_if_max_uint(list(gpu_metrics.xgmi_write_data_acc), MaxUIntegerTypes.UINT64_T),
+        "current_gfxclks": _validate_if_max_uint(list(gpu_metrics.current_gfxclks), MaxUIntegerTypes.UINT16_T),
+        "current_socclks": _validate_if_max_uint(list(gpu_metrics.current_socclks), MaxUIntegerTypes.UINT16_T),
+        "current_vclk0s": _validate_if_max_uint(list(gpu_metrics.current_vclk0s), MaxUIntegerTypes.UINT16_T),
+        "current_dclk0s": _validate_if_max_uint(list(gpu_metrics.current_dclk0s), MaxUIntegerTypes.UINT16_T),
+        "jpeg_activity": _validate_if_max_uint(list(gpu_metrics.jpeg_activity), MaxUIntegerTypes.UINT16_T, isActivity=True),
+        "pcie_nak_sent_count_acc": _validate_if_max_uint(gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT32_T),
+        "pcie_nak_rcvd_count_acc": _validate_if_max_uint(gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT32_T),
+        "accumulation_counter": _validate_if_max_uint(gpu_metrics.accumulation_counter, MaxUIntegerTypes.UINT64_T),
+        "prochot_residency_acc": _validate_if_max_uint(gpu_metrics.prochot_residency_acc, MaxUIntegerTypes.UINT64_T),
+        "ppt_residency_acc": _validate_if_max_uint(gpu_metrics.ppt_residency_acc, MaxUIntegerTypes.UINT64_T),
+        "socket_thm_residency_acc": _validate_if_max_uint(gpu_metrics.socket_thm_residency_acc, MaxUIntegerTypes.UINT64_T),
+        "vr_thm_residency_acc": _validate_if_max_uint(gpu_metrics.vr_thm_residency_acc, MaxUIntegerTypes.UINT64_T),
+        "hbm_thm_residency_acc": _validate_if_max_uint(gpu_metrics.hbm_thm_residency_acc, MaxUIntegerTypes.UINT64_T),
+        "num_partition": _validate_if_max_uint(gpu_metrics.num_partition, MaxUIntegerTypes.UINT16_T),
+        "xcp_stats.gfx_busy_inst": list(gpu_metrics.xcp_stats),
+        "xcp_stats.jpeg_busy": list(gpu_metrics.xcp_stats),
+        "xcp_stats.vcn_busy": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_busy_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_ppt_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_thm_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_low_utilization_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
+        "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T),
+        "vram_max_bandwidth": _validate_if_max_uint(gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T),
+        "xgmi_link_status": _validate_if_max_uint(list(gpu_metrics.xgmi_link_status), MaxUIntegerTypes.UINT16_T),
+    }
+
+    # Create 2d array with each XCD's stats
+    if 'xcp_stats.gfx_busy_inst' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_inst']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_busy_inst:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT32_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.gfx_busy_inst'][xcp_index] = xcp_detail
+
+    if 'xcp_stats.jpeg_busy' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.jpeg_busy']):
+            xcp_detail = []
+            for val in xcp_metrics.jpeg_busy:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.jpeg_busy'][xcp_index] = xcp_detail
+
+    if 'xcp_stats.vcn_busy' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.vcn_busy']):
+            xcp_detail = []
+            for val in xcp_metrics.vcn_busy:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
+            gpu_metrics_output["xcp_stats.vcn_busy"][xcp_index] = xcp_detail
+
+    if 'xcp_stats.gfx_busy_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_busy_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output["xcp_stats.gfx_busy_acc"][xcp_index] = xcp_detail
+
+    if 'xcp_stats.gfx_below_host_limit_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc'][xcp_index] = xcp_detail
+    # new for gpu metrics v1.8
+    if 'xcp_stats.gfx_below_host_limit_ppt_acc'  in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_ppt_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_ppt_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_ppt_acc'][xcp_index] = xcp_detail
+    if 'xcp_stats.gfx_below_host_limit_thm_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_thm_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_thm_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_thm_acc'][xcp_index] = xcp_detail
+    if 'xcp_stats.gfx_low_utilization_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_low_utilization_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_low_utilization_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_low_utilization_acc'][xcp_index] = xcp_detail
+    if 'xcp_stats.gfx_below_host_limit_total_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_total_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_total_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_total_acc'][xcp_index] = xcp_detail
+    return gpu_metrics_output
+
 
 def amdsmi_get_gpu_od_volt_curve_regions(
     processor_handle: processor_handle_t, num_regions: int

@@ -4056,6 +4056,30 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
                                             amdsmi_gpu_metrics_t *pgpu_metrics);
 
 /**
+ *  @brief This function retrieves the partition metrics information.
+ *
+ *  @ingroup tagClkPowerPerfQuery
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_1vf}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer to a
+ *  ::amdsmi_gpu_metrics_t structure @p pgpu_metrics, this function will populate
+ *  @p pgpu_metrics. See ::amdsmi_gpu_metrics_t for more details.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in,out] pgpu_metrics a pointer to an ::amdsmi_gpu_metrics_t structure
+ *  If this parameter is nullptr, this function will return
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
+ *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle processor_handle,
+                                                      amdsmi_gpu_metrics_t *pgpu_metrics);
+
+/**
  *  @brief Get the pm metrics table with provided device index.
  *
  *  @ingroup tagClkPowerPerfQuery

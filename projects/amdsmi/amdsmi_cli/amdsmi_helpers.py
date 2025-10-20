@@ -1018,7 +1018,6 @@ class AMDSMIHelpers():
         """This function will format output with unit based on the logger output format
 
         params:
-            args - argparser args to pass to subcommand
             logger (AMDSMILogger) - Logger to print out output
             value - the value to be formatted
             unit - the unit to be formatted with the value
@@ -1041,6 +1040,9 @@ class AMDSMIHelpers():
                     return {"value": value, "unit": unit}
                 else:
                     return value
+            if logger.is_csv_format():
+                # For CSV, return the raw value (number or "N/A"), not a string
+                return value
             if logger.is_human_readable_format():
                 if unit:
                     return f"{value} {unit}".rstrip()
@@ -1745,3 +1747,70 @@ class AMDSMIHelpers():
         # Flatten nested lists and filter integers
         flat = [v for value in data for v in (value if isinstance(value, list) else [value]) if isinstance(v, int)]
         return round(sum(flat) / len(flat)) if flat else "N/A"
+
+    def _get_metric_version_and_partition_info(self, gpu_metrics_info, is_partition_metrics, gpu_id, gpu_handle):
+        """
+        Helper method to compute metric version, partition ID, and num_partition for dynamic metrics.
+        Handles logging updates internally for reusability.
+        
+        Args:
+            gpu_metrics_info (dict): GPU metrics info from amdsmi_get_gpu_metrics_info.
+            is_partition_metrics (bool): Whether this is for partition metrics.
+            gpu_id (int): GPU ID for logging.
+            gpu_handle: GPU device handle for KFD info retrieval.
+        
+        Returns:
+            dict: {
+                'metric_version': float or "N/A",
+                'partition_id': int or "N/A",
+                'num_partition': int or "N/A",
+                'num_xcp': int or "N/A"  # Alias for num_partition
+            }
+        """
+        # Compute metric version from header revisions
+        metric_version = "N/A"
+        format_rev = gpu_metrics_info.get('common_header.format_revision', "N/A")
+        content_rev = gpu_metrics_info.get('common_header.content_revision', "N/A")
+        if format_rev != "N/A" and content_rev != "N/A":
+            try:
+                metric_version = float(f"{format_rev}.{content_rev}")
+            except ValueError:
+                metric_version = "N/A"  # Fallback if conversion fails
+        
+        # Retrieve partition ID from KFD info
+        partition_id = "N/A"
+        try:
+            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(gpu_handle)
+            partition_id = kfd_info.get('current_partition_id', "N/A")
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get current partition ID for GPU %s | %s", gpu_id, e.get_error_info())
+        
+        # Determine num_partition with fallback logic for dynamic metrics
+        num_partition = gpu_metrics_info.get('num_partition', "N/A")
+        if metric_version != "N/A" and num_partition == "N/A":
+            # Workaround: Default to 1 for newer metric versions if num_partition is missing
+            # (Confirmed with driver team; applies to GPU and partition metrics)
+            if not is_partition_metrics and metric_version >= 1.9:
+                num_partition = 1
+            elif is_partition_metrics and metric_version >= 1.1:
+                num_partition = 1
+            elif partition_id != "N/A" and partition_id > 0:
+                # Fallback to partition_id if partitions exist but num_partition is unavailable
+                num_partition = partition_id
+            # Else: Remains "N/A" if no conditions match
+        
+        # Alias num_xcp for XCP metrics usage
+        num_xcp = num_partition
+        
+        # Debug logging
+        logging.debug(
+            "GPU %s | Metric version: %s, num_partition: %s, partition_id: %s, num_xcp: %s",
+            gpu_id, metric_version, num_partition, partition_id, num_xcp
+        )
+        
+        return {
+            'metric_version': metric_version,
+            'partition_id': partition_id,
+            'num_partition': num_partition,
+            'num_xcp': num_xcp
+        }    

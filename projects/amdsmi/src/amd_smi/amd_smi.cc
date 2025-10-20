@@ -3352,13 +3352,27 @@ amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle,
                     reinterpret_cast<metrics_table_header_t*>(header_value));
 }
 
+amdsmi_status_t  amdsmi_get_gpu_partition_metrics_info(
+        amdsmi_processor_handle processor_handle,
+        amdsmi_gpu_metrics_t *pgpu_metrics) {
+    AMDSMI_CHECK_INIT();
+    if (pgpu_metrics != nullptr) {
+        *pgpu_metrics = amdsmi_gpu_metrics_t{};  // Use a default initializer for the struct
+    } else {
+        return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
+    }
+    return rsmi_wrapper(rsmi_dev_gpu_partition_metrics_info_get, processor_handle, 0,
+                       reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
+}
+
 amdsmi_status_t  amdsmi_get_gpu_metrics_info(
         amdsmi_processor_handle processor_handle,
         amdsmi_gpu_metrics_t *pgpu_metrics) {
     AMDSMI_CHECK_INIT();
-    // nullptr api supported
     if (pgpu_metrics != nullptr) {
         *pgpu_metrics = amdsmi_gpu_metrics_t{};  // Use a default initializer for the struct
+    } else {
+        return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
     }
     return rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0,
                        reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
