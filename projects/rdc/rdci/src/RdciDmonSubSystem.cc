@@ -254,7 +254,7 @@ void RdciDmonSubSystem::show_help() const {
 }
 
 void RdciDmonSubSystem::create_temp_group() {
-  if (device_indexes_.size() == 0) {
+  if (device_indexes_.size() != 0) {
     return;
   }
 
@@ -676,7 +676,7 @@ void RdciDmonSubSystem::clean_up() {
     rdc_field_unwatch(rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID]);
   }
 
-  if (device_indexes_.size() != 0) {
+  if (device_indexes_.size() == 0) {
     auto group = options_.find(OPTIONS_GROUP_ID);
     if (group != options_.end()) {
       rdc_group_gpu_destroy(rdc_handle_, group->second);
