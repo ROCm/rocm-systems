@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 83b25f87ea8f163ef37295f28204a9b4ab86f168 # 2025-09-30 commit
+          ref: ba26abf4d69137bd5341c658c81b4d6f4b0fcd90 # 2025-10-20 commit
 
       - name: Install python deps
         run: |
@@ -69,7 +69,7 @@ jobs:
 
       - name: Patch rocm-systems
         run: |
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0007-Rollup-of-build-changes-needed-for-compat-with-TheRo.patch
+          rm ./TheRock/patches/amd-mainline/rocm-systems/0001-Patch-version-and-getpath-files-for-Windows.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Configure Projects
