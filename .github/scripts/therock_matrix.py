@@ -6,6 +6,7 @@ subtree_to_project_map = {
     'projects/clr': 'core', 
     'projects/hip': 'core', 
     'projects/hip-tests': 'core', 
+    'projects/rocm-core': 'core', 
     'projects/rocminfo': 'core', 
     'projects/rocprofiler': 'profiler', 
     'projects/rocprofiler-compute': 'profiler', 
@@ -24,4 +25,8 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "rocprofiler-tests",
     },
+    "all": {
+        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "hip-tests, rocprofiler-tests",
+    }
 }
