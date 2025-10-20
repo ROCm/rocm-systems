@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
@@ -101,27 +102,14 @@ public:
     thread_trace_parameter_pack  params;
     const rocprofiler_agent_id_t agent_id;
 
-    std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
-                                         bool                          bWait) const;
-
-    template <typename VecType>
-    std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
-    {
-        for(size_t i = 0; i < vec.size(); i++)
-        {
-            auto sig = Submit(&vec.at(i), i == vec.size() - 1);
-            if(sig) return sig;
-        }
-        return nullptr;
-    }
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
-    void start_worker(std::shared_ptr<std::atomic<bool>> running_flag);
-    void stop_worker();
-    std::array<void*, 2> get_double_buffer_memory() const { return double_buffer_memory; }
+    std::shared_ptr<Signal> start_thread_trace(std::shared_ptr<std::atomic<bool>> running_flag);
+    std::unique_ptr<Signal> stop_thread_trace();
 
 private:
-    hsa_queue_t*     queue{nullptr};
+    std::shared_ptr<HsaATTQueue> queue{};
+
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
 
@@ -129,7 +117,6 @@ private:
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
     std::thread worked_thread{};
-    std::array<void*, 2> double_buffer_memory{};
 };
 
 class DispatchThreadTracer
