@@ -10,8 +10,6 @@ subtrees:
 
   - caption: Install
     entries:
-    - file: install/quick-start.rst
-      title: ROCm Systems Profiler quick start
     - file: install/install.rst
       title: ROCm Systems Profiler installation guide
 
@@ -68,7 +66,7 @@ subtrees:
 
   - caption: Tutorials
     entries:
-    - url: https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples
+    - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples
       title: GitHub examples
     - file: tutorials/video-tutorials.rst
       title: Video tutorials

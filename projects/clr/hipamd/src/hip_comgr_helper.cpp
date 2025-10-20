@@ -316,16 +316,16 @@ bool createAction(amd_comgr_action_info_t& action, std::vector<std::string>& opt
           amd::Comgr::action_info_set_option_list(action, optionsArgv.data(), optionsArgv.size());
       res != AMD_COMGR_STATUS_SUCCESS) {
     amd::Comgr::destroy_action_info(action);
-    return res;
+    return false;
   }
 
   if (auto res = amd::Comgr::action_info_set_logging(action, true);
       res != AMD_COMGR_STATUS_SUCCESS) {
     amd::Comgr::destroy_action_info(action);
-    return res;
+    return false;
   }
 
-  return AMD_COMGR_STATUS_SUCCESS;
+  return true;
 }
 
 bool compileToExecutable(const amd_comgr_data_set_t compileInputs, const std::string& isa,
@@ -338,7 +338,7 @@ bool compileToExecutable(const amd_comgr_data_set_t compileInputs, const std::st
   amd_comgr_data_set_t output;
   amd_comgr_data_set_t input = compileInputs;
 
-  if (auto res = createAction(action, compileOptions, isa, lang); res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, compileOptions, isa, lang)) {
     return false;
   }
 
@@ -371,7 +371,7 @@ bool compileToExecutable(const amd_comgr_data_set_t compileInputs, const std::st
   }
 
   amd::Comgr::destroy_action_info(action);
-  if (auto res = createAction(action, linkOptions, isa, lang); res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, linkOptions, isa, lang)) {
     amd::Comgr::destroy_action_info(action);
     amd::Comgr::destroy_data_set(reloc);
     amd::Comgr::destroy_data_set(output);
@@ -417,7 +417,7 @@ bool compileToBitCode(const amd_comgr_data_set_t compileInputs, const std::strin
   amd_comgr_data_set_t output;
   amd_comgr_data_set_t input = compileInputs;
 
-  if (auto res = createAction(action, compileOptions, isa, lang); res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, compileOptions, isa, lang)) {
     return false;
   }
 
@@ -478,7 +478,7 @@ bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
   }
 
   amd_comgr_action_info_t action;
-  if (createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE) != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE)) {
     return false;
   }
 
@@ -530,7 +530,7 @@ bool linkLLVMBitcode(const amd_comgr_data_set_t linkInputs, const std::string& i
   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   amd_comgr_action_info_t action;
 
-  if (auto res = createAction(action, linkOptions, isa, lang); res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, linkOptions, isa, lang)) {
     return false;
   }
 
@@ -569,8 +569,7 @@ bool convertSPIRVToLLVMBC(const amd_comgr_data_set_t linkInputs, const std::stri
                           std::vector<char>& LinkedLLVMBitcode) {
   amd_comgr_action_info_t action;
 
-  if (auto res = createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE);
-      res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE)) {
     return false;
   }
 
@@ -610,7 +609,7 @@ bool createExecutable(const amd_comgr_data_set_t linkInputs, const std::string& 
                       std::vector<char>& executable, bool spirv_bc /* default false */) {
   amd_comgr_action_info_t action;
 
-  if (auto res = createAction(action, exeOptions, isa); res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, exeOptions, isa)) {
     return false;
   }
 
@@ -648,7 +647,7 @@ bool createExecutable(const amd_comgr_data_set_t linkInputs, const std::string& 
 
   amd::Comgr::destroy_action_info(action);
   std::vector<std::string> emptyOpt;
-  if (auto res = createAction(action, emptyOpt, isa); res != AMD_COMGR_STATUS_SUCCESS) {
+  if (!createAction(action, emptyOpt, isa)) {
     amd::Comgr::destroy_data_set(relocatableData);
     return false;
   }

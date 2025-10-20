@@ -647,15 +647,19 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   if (!hip::isValid(stream)) {
     return hipErrorInvalidValue;
   }
+  if (hostFunction == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+
   hipFunction_t func = nullptr;
   int deviceId = hip::Stream::DeviceId(stream);
-  hipError_t hip_error = PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
+
+  hipError_t hip_error =
+      PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
   if ((hip_error != hipSuccess) || (func == nullptr)) {
-    if (hip_error == hipErrorNoBinaryForGpu) {
-      return hip_error;
-    } else {
-      return hipErrorInvalidDeviceFunction;
-    }
+    // assume its hip function type if we did not get a valid output from static
+    // func lookup
+    func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
   }
 
   constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -355,9 +355,10 @@ class VirtualGPU : public device::VirtualDevice {
 
   void HiddenHeapInit() {}
 
-  inline bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                amd::AccumulateCommand* vcmd = nullptr) {
-    vcmd->addKernelName(kernelName);
+  //! Dispatches multiple AQL packets in a single batch operation
+  bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                              const std::vector<std::string>& kernelNames,
+                              amd::AccumulateCommand* vcmd = nullptr) {
     return false;
   }
 
@@ -611,9 +612,37 @@ class VirtualGPU : public device::VirtualDevice {
   void profileEvent(EngineType engine, bool type) const;
 
   //! Creates buffer object from image
-  amd::Memory* createBufferFromImage(
+  inline amd::Memory* createBufferFromImage(
       amd::Memory& amdImage  //! The parent image object(untiled images only)
-  );
+  ) {
+    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
+    mem->setVirtualDevice(this);
+    if ((mem != nullptr) && !mem->create()) {
+      mem->release();
+    }
+    return mem;
+  }
+
+  //! Get copy command type from original copy command type and memory object types
+  inline cl_command_type getCopyCommandType(cl_command_type type, const cl_mem_object_type srcType,
+                                 const cl_mem_object_type dstType) {
+    if (srcType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (dstType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_BUFFER_TO_IMAGE;
+      }
+    } else if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (srcType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_IMAGE_TO_BUFFER;
+      }
+    }
+    return type;
+  }
 
  private:
   struct MemoryRange {
@@ -763,6 +792,5 @@ template <bool avoidBarrierSubmit> uint VirtualGPU::Queue::submit(bool forceFlus
   }
   return id;
 }
-
 /*@}*/  // namespace amd::pal
 }  // namespace amd::pal

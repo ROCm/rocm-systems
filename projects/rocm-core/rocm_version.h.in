@@ -30,7 +30,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif  /* __cplusplus */
+#endif  // __cplusplus
 
 
 #define LIB_API_PUBLIC __attribute__ ((visibility ("default")))
@@ -44,14 +44,15 @@ extern "C" {
 
 typedef enum {
 	VerSuccess=0,
-	VerIncorrecPararmeters,
+	VerIncorrectParameters,
+	VerMemoryAllocationFailed,
 	VerValuesNotDefined,
 	VerErrorMAX		//This should always be last value in the enumerations
 } VerErrors;
 
 
-//  API for getting the verion
-//  Return val :  VerErros : API execution status.  The parameters are valid only when the exetution status is SUCCESS==0
+//  API for getting the version
+//  Return val :  VerErrors : API execution status.  The parameters are valid only when the exetution status is SUCCESS==0
 LIB_API_PUBLIC VerErrors getROCmVersion(unsigned int* Major, unsigned int* Minor, unsigned int* Patch) __attribute__((nonnull)) ;
 //  Usage :
 //  int mj=0,mn=0,p=0,ret=0;

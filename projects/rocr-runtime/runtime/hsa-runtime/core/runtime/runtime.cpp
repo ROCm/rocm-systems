@@ -48,13 +48,19 @@
 #include <string>
 #include <vector>
 #include <list>
+#if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#else
+#define debug_warning(__VA_ARGS__)
+#endif
+#include <iostream>
 #include <thread>
+#include <chrono>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
@@ -97,8 +103,12 @@
 ROCPROFILER_REGISTER_DEFINE_IMPORT(hsa, ROCP_REG_VERSION)
 #endif
 
+#if defined(__linux__)
 const char rocrbuildid[] __attribute__((used)) = "ROCR BUILD ID: " STRING(ROCR_BUILD_ID);
-
+#else
+#include "loader/executable.hpp"
+const char rocrbuildid[] = "ROCR BUILD ID: " STRING(ROCR_BUILD_ID);
+#endif
 extern r_debug _amdgpu_r_debug;
 
 namespace rocr {
@@ -355,6 +365,18 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
 
     notifiers = std::move(it->second.notifiers);
 
+    //track the exporter BO to clear meta data via set_metadata
+    //clear the set metadata here if possible if theres an existing ldrm_bo
+    if (it->second.ldrm_bo) {
+      struct amdgpu_bo_info info = {0};
+      auto err = amdgpu_bo_query_info(it->second.ldrm_bo, &info);
+
+      //clear metadata
+      amdgpu_bo_metadata zero_metadata = {0};
+      memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
+      amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata);
+    }
+
     allocation_map_.erase(it);
   }
 
@@ -591,7 +613,7 @@ hsa_status_t Runtime::CopyMemoryOnEngine(void* dst, core::Agent* dst_agent, cons
   core::Agent* copy_agent = (src_gpu) ? src_agent : dst_agent;
 
   // engine_id is single bitset unique.
-  int engine_offset = ffs(engine_id);
+  int engine_offset = rocr::os::Ffs(engine_id);
   if (!engine_id || !!((engine_id >> engine_offset))) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -947,6 +969,7 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       info->agentBaseAddress = const_cast<void*>(ptr);
       info->hostBaseAddress = const_cast<void*>(ptr);
       info->sizeInBytes = mappedHandleIt->second.size;
+      info->registered = true;
       info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
 
       if (alloc && num_agents_accessible && accessible) {
@@ -977,6 +1000,7 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
     info->agentBaseAddress = NULL;
     info->hostBaseAddress = addressHandle->os_addr;
     info->sizeInBytes = addressHandle->size;
+    info->registered = addressHandle->registered;
     info->agentOwner = {};
 
     if (num_agents_accessible) {
@@ -1024,14 +1048,31 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
-      memcpy(info, &retInfo, retInfo.size);
-      return HSA_STATUS_SUCCESS;
+      /*
+       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
+       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
+       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
+       * and provide additional information from hsaKmtQueryPointerInfo.
+       */
+      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+        memcpy(info, &retInfo, retInfo.size);
+        return HSA_STATUS_SUCCESS;
+      }
     }
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
     auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
     if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
+         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
+         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
+         * were previously filled with VMemoryPtrInfo.
+         */
+        memcpy(info, &retInfo, retInfo.size);
+        return HSA_STATUS_SUCCESS;
+      }
       retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
       memcpy(info, &retInfo, retInfo.size);
       return HSA_STATUS_SUCCESS;
@@ -1047,6 +1088,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     retInfo.agentBaseAddress = reinterpret_cast<void*>(thunkInfo.GPUAddress);
     retInfo.hostBaseAddress = thunkInfo.CPUAddress;
     retInfo.sizeInBytes = thunkInfo.SizeInBytes;
+    retInfo.registered = true;
     retInfo.userData = thunkInfo.UserData;
     retInfo.global_flags = thunkInfo.MemFlags.ui32.CoarseGrain
         ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
@@ -1158,6 +1200,7 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
 
 // Send the dmabuf_fd to from process via Unix socket
 static int SendDmaBufFd(int socket, int dmabuf_fd) {
+#if defined(__linux__)
   char iov_buf[1];
   struct msghdr msg = {0};
   char buf[CMSG_SPACE(sizeof(dmabuf_fd))];
@@ -1185,10 +1228,15 @@ static int SendDmaBufFd(int socket, int dmabuf_fd) {
   ssize_t sent = sendmsg(socket, &msg, 0);
 
   return (sent < 0) ? -1 : 0;
+#else
+  assert(!"Unimplemented!");
+  return 0;
+#endif
 }
 
 // Receive the dmabuf_fd to from process via Unix socket
 static int ReceiveDmaBufFd(int socket) {
+#if defined(__linux__)
   struct msghdr msg = {0};
 
   // The struct iovec is needed, even if it points to minimal data
@@ -1213,6 +1261,10 @@ static int ReceiveDmaBufFd(int socket) {
   memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
 
   return fd;
+#else
+  assert(!"Unimplemented!");
+  return 0;
+#endif
 }
 
 #define IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH 64
@@ -1340,9 +1392,38 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   hsa_status_t err = agent->driver().ExportDMABuf(ptr, len, &dmabuf_fd, &dmabufOffset);
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSA_STATUS_SUCCESS) return err;
+
+  if (agent->device_type() == Agent::kAmdGpuDevice) {
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
+    amdgpu_bo_import_result res;
+
+    srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+    handle->handle[7] = rand();
+
+    //libdrm import for buffer object handle
+    if (DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res))) {
+      fprintf(stderr, "Error in amdgpu_bo_import\n");
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    //query buffer object for pre existing metadata
+    struct amdgpu_bo_info info = {0};
+    if (!amdgpu_bo_query_info(res.buf_handle, &info) && !!info.metadata.size_metadata) {
+      handle->handle[7] = info.metadata.umd_metadata[0];
+    } else {
+      amdgpu_bo_metadata buf_info = {0};
+      buf_info.size_metadata = sizeof(uint32_t);
+      buf_info.umd_metadata[0] = handle->handle[7];
+
+      amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
+      allocation_map_[ptr].ldrm_bo = res.buf_handle;
+    }
+  }
+
   close(dmabuf_fd);
 
   ScopedAcquire<KernelMutex> lock(&ipc_sock_server_lock_);
+#if defined(__linux__)
   if (!ipc_sock_server_conns_.size()) { // create new runtime socket server
     struct sockaddr_un address;
     ipc_sock_server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -1373,7 +1454,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     // as the attach life cycle is unknown.
     os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
   }
-
+#else
+  assert(!"Unimplemented! Do we really need this?");
+#endif
   ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
 
   // TODO: fragment block discard for better memory performance causes memory violations
@@ -1383,10 +1466,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 }
 
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
-                             amdgpu_bo_import_result *res,
                              unsigned int numNodes, HSAuint32 *nodes,
-                             void **importAddress, HSAuint64 *importSize) {
-    struct sockaddr_un address;
+                             void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem) {
     int dmabuf_fd = -1, socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     assert(socket_fd > -1 && "DMA buffer could not be imported for IPC!");
     if (socket_fd == -1) return -1;
@@ -1400,13 +1481,15 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     if (status) return -1;
 
     char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
-    memset(&address, 0, sizeof(struct sockaddr_un));
     memset(buf, 0, sizeof(buf));
+    int timeoutLimitMs = 10000, timeoutMs = 0, timeoutIntervalMs = 1;
+#if defined(__linux__)
+    struct sockaddr_un address;
+    memset(&address, 0, sizeof(struct sockaddr_un));
     address.sun_family = AF_UNIX;
     snprintf(address.sun_path, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
     address.sun_path[0] = 0; // first NULL char creates unlisted abstract socket
 
-    int timeoutLimitMs = 10000, timeoutMs = 0, timeoutIntervalMs = 1;
     while (timeoutMs < timeoutLimitMs) {
       if (connect(socket_fd, (struct sockaddr *) &address, sizeof(struct sockaddr_un))) {
         timeoutMs  += timeoutIntervalMs;
@@ -1415,7 +1498,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         break;
       }
     }
-
+#else
+    assert(!"Unimplmented!");
+#endif
     MAKE_SCOPE_GUARD([&]() { close(socket_fd); });
 
     if (timeoutMs >= timeoutLimitMs) return -1;
@@ -1429,20 +1514,28 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     dmabuf_fd = ReceiveDmaBufFd(socket_fd);
     if (dmabuf_fd == -1) return -1;
 
+    amdgpu_bo_import_result res = {0};
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags;
-    regFlags.ui32.requiresVAddr = !!res ? 0 : 1;
+    regFlags.ui32.requiresVAddr = !isDmabufSysmem;
     int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags));
     if (err == HSAKMT_STATUS_SUCCESS) {
       *importAddress = info.MemoryAddress;
       *importSize = info.SizeInBytes;
-      if (res) {
+
+      if (isDmabufSysmem)
         HSAKMT_CALL(hsaKmtDeregisterMemory(*importAddress));
 
-        // Manually libDRM import and GPU map system memory
-        AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
-        err = DRM_CALL(amdgpu_bo_import(agent->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd,
-                               dmabuf_fd, res));
+      AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
+      err = DRM_CALL(amdgpu_bo_import(agent->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd,
+                              dmabuf_fd, &res));
+
+      // Store the buffer object handle in allocation map for later use
+      if (err == HSAKMT_STATUS_SUCCESS) {
+        ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
+        allocation_map_[*importAddress] =
+            AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
+        allocation_map_[*importAddress].ldrm_bo = res.buf_handle;
       }
       close(dmabuf_fd);
     }
@@ -1475,17 +1568,30 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     allocation_map_[importAddress].ldrm_bo = ldrm_bo;
   };
 
-  auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes,
-                          amdgpu_bo_import_result *res) {
-    int ret = ipc_dmabuf_supported_ ?
-          IPCClientImport(importHandle.handle[2], dmaBufFDHandle, res,
-                          numNodes, nodes, &importAddress, &importSize) :
-          HSAKMT_CALL(hsaKmtRegisterSharedHandle(reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
-                                     &importAddress, &importSize));
-    if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
 
-    return HSA_STATUS_SUCCESS;
-  };
+      int ret = ipc_dmabuf_supported_ ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes,
+                                                        nodes, &importAddress, &importSize, isSysMem) :
+                                                        HSAKMT_CALL(hsaKmtRegisterSharedHandle(
+                                                        reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
+                                                        &importAddress, &importSize
+                                                        ));
+
+      if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      if (ipc_dmabuf_supported_ && !isSysMem) {
+        // use the bo from the allocation map
+        // Only check metadata for GPU memory
+        struct amdgpu_bo_info info = {0};
+        int ret = amdgpu_bo_query_info(allocation_map_[importAddress].ldrm_bo, &info);
+
+        // Validate metadata for IPC handle
+        if (ret || info.metadata.umd_metadata[0] != importHandle.handle[7]) {
+            fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
+            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+      }
+      return HSA_STATUS_SUCCESS;
+    };
 
   auto mapMemoryToNodes = [&](unsigned int numNodes, HSAuint32 *nodes) {
     HSAuint64 altAddress;
@@ -1525,11 +1631,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     dmaBufFDHandle = (dmaBufFDHandleHi << 32) | dmaBufFDHandleLo;
   }
 
+#if defined(__linux__)
   if (num_agents == 0) {
-    amdgpu_bo_import_result res;
     bool isDmabufSysMem = ipc_dmabuf_supported_ && importHandle.handle[3];
 
-    hsa_status_t err = importMemory(0, NULL, isDmabufSysMem ? &res : NULL);
+    hsa_status_t err = importMemory(0, NULL, isDmabufSysMem);
     if (err != HSA_STATUS_SUCCESS) return err;
     if (!isDmabufSysMem) return mapMemoryToNodes(0, NULL);
 
@@ -1542,7 +1648,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
-    amdgpu_bo_handle bo = res.buf_handle;
+    amdgpu_bo_handle bo = allocation_map_[importAddress].ldrm_bo;
     int ret = DRM_CALL(amdgpu_bo_cpu_map(bo, &cpuPtr));
     if (ret) return errCleanup(bo);
 
@@ -1555,6 +1661,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
   }
+#else
+  assert(!"Unimplemented!");
+#endif
 
   HSAuint32* nodes = nullptr;
   if (num_agents > tinyArraySize)
@@ -1570,8 +1679,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   for (uint32_t i = 0; i < num_agents; i++)
     agents[i]->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, &nodes[i]);
 
-  hsa_status_t err = importMemory(num_agents, nodes, NULL);
+  hsa_status_t err = importMemory(num_agents, nodes, false);
   if (err != HSA_STATUS_SUCCESS) return err;
+
   return mapMemoryToNodes(num_agents, nodes);
 }
 
@@ -1582,6 +1692,7 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     const auto& it = allocation_map_.find(ptr);
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+#if defined(__linux__)
       if (it->second.ldrm_bo) {
          if (DRM_CALL(amdgpu_bo_va_op(it->second.ldrm_bo, 0, it->second.size,
                              reinterpret_cast<uint64_t>(ptr), 0, AMDGPU_VA_OP_UNMAP)))
@@ -1590,6 +1701,9 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
          ldrmImportCleaned = true;
       }
+#else
+      assert(!"Unimplemented!");
+#endif
       allocation_map_.erase(it);
       lock.Release();  // Can't hold memory lock when using pointer info.
 
@@ -2163,7 +2277,7 @@ void Runtime::Unload() {
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
     IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
-                    NULL, 0, NULL, NULL, NULL);
+                    0, NULL, NULL, NULL, false);
 
   svm_profile_.reset(nullptr);
 
@@ -2305,6 +2419,7 @@ int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle) {
 
 int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
                                  int *drm_fd, uint64_t *cpu_addr) {
+#if defined(__linux__)
   int renderFd = fn_amdgpu_device_get_fd(static_cast<AMD::GpuAgent*>(agent)->libDrmDev());
   if (renderFd < 0) return HSA_STATUS_ERROR;
 
@@ -2323,6 +2438,9 @@ int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
 
   *drm_fd = renderFd;
   *cpu_addr = args.out.addr_ptr;
+#else
+  assert(!"Unimplemented!");
+#endif
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2333,6 +2451,7 @@ void Runtime::CheckVirtualMemApiSupport() {
   if (kfd_version.KernelInterfaceMajorVersion > 1 ||
       (kfd_version.KernelInterfaceMajorVersion == 1 &&
           kfd_version.KernelInterfaceMinorVersion >= 15)) {
+  #if defined(__linux__)
     char* error;
 
     fn_amdgpu_device_get_fd =
@@ -2345,6 +2464,9 @@ void Runtime::CheckVirtualMemApiSupport() {
     } else {
       virtual_mem_api_supported_ = true;
     }
+  #else
+    virtual_mem_api_supported_ = false;
+  #endif
   }
 }
 
@@ -2359,7 +2481,7 @@ void Runtime::InitIPCDmaBufSupport() {
 
   GetSystemInfo(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED, &dmabuf_supported);
   if (!dmabuf_supported) return;
-
+#if defined(__linux__)
   char* error;
   fn_amdgpu_device_get_fd =
       (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(
@@ -2371,6 +2493,9 @@ void Runtime::InitIPCDmaBufSupport() {
   } else {
     ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy();
   }
+#else
+  ipc_dmabuf_supported_ = false;
+#endif
 }
 
 void Runtime::LoadTools() {
@@ -3217,15 +3342,14 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   void* addr = (void*)address;
   HsaMemFlags memFlags = {};
 
-  if (!alignment)
-    alignment = sysconf(_SC_PAGE_SIZE);
+  if (!alignment) alignment = rocr::os::PageSize();
 
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
 
   if (flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER) {
-    size_t requested = size + alignment - sysconf(_SC_PAGE_SIZE);
-    auto mem = mmap(addr, requested, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
-    if (mem == MAP_FAILED)
+    size_t requested = size + alignment - rocr::os::PageSize();
+    auto mem = rocr::os::ReserveMemory(addr, requested, alignment, rocr::os::MEM_PROT_RW);
+    if (mem == nullptr)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
     auto aligned = AlignUp(mem, alignment);
@@ -3233,8 +3357,10 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
     // Hint to enable THP for large host allocations which can help in performance gain
     constexpr size_t kLargePageSize = 2*1024*1024;
     if (size >= kLargePageSize) {
+    #if defined(__linux__)
       if (madvise(aligned, size, MADV_HUGEPAGE))
         debug_warning(false && "madvise with MADV_HUGEPAGE failed");
+    #endif
     }
 
     reserved_address_map_[aligned] = AddressHandle(mem, size, false);
@@ -3272,10 +3398,11 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
   if (it->second.registered) {
-    if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  } else {
-    if (munmap(it->second.os_addr, size)) return HSA_STATUS_ERROR;
+    if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
   }
+  else if (!rocr::os::ReleaseMemory(it->second.os_addr, size))
+      return HSA_STATUS_ERROR;
 
   reserved_address_map_.erase(it);
   return HSA_STATUS_SUCCESS;
@@ -3468,10 +3595,10 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
 }
 
 Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
-    MappedHandle *mappedHandle, Agent *targetAgent, void *va, size_t size,
+    MappedHandle* _mappedHandle, Agent *targetAgent, void *va, size_t size,
     hsa_access_permission_t perms)
     : va(va), size(size), targetAgent(targetAgent), permissions(perms),
-      mappedHandle(mappedHandle) {
+      mappedHandle(_mappedHandle) {
 
   // CPU agents have access as the memory is already mapped to the host.
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
@@ -3507,6 +3634,7 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+  #if defined(__linux__)
     void* mapped_ptr =
         mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
              reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
@@ -3517,6 +3645,9 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
         shareable_handle, va, mappedHandle->offset, size, perms);
     if (status != HSA_STATUS_SUCCESS)
       return status;
+#else
+    assert(!"Unimplemented!");
+#endif
   }
   permissions = perms;
   return HSA_STATUS_SUCCESS;
@@ -3524,8 +3655,12 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+  #if defined(__linux__)
     if (munmap(va, size) != 0)
       return HSA_STATUS_ERROR;
+  #else
+    assert(!"Unimplemented!");
+  #endif
     return HSA_STATUS_SUCCESS;
   } else {
     return targetAgent->driver().Unmap(

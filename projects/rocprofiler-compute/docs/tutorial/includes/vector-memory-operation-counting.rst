@@ -623,7 +623,7 @@ manner. See
 for further reading on this instruction type.
 
 We develop a `simple
-kernel <https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/sample/stack.hip>`__
+kernel <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/sample/stack.hip>`__
 that uses stack memory:
 
 .. code-block:: cpp

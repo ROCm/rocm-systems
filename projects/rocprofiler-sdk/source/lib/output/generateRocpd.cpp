@@ -41,6 +41,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/sql/deferred_transaction.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -1212,6 +1213,9 @@ write_rocpd(
 
     auto insert_memory_alloc_data =
         [&conn, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen) {
+            auto address_to_agent_and_size =
+                std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+
             for(auto pitr : _gen)
             {
                 auto _deferred = sql::deferred_transaction{conn};
@@ -1231,16 +1235,54 @@ write_rocpd(
                     ROCP_FATAL_IF(_level != "REAL" && _level != "VIRTUAL" && _level != "SCRATCH")
                         << "erroneous db level: " << _level;
 
-                    auto _node_id = std::optional<uint64_t>{};
-                    if(_type == "ALLOC")
-                    {
-                        _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
-                    }
-
                     auto _stream_id       = get_stream_id(extract_stream_field(itr));
                     auto _queue_id        = get_queue_id(extract_queue_field(itr));
                     auto _address         = extract_address_field(itr);
                     auto _allocation_size = extract_allocation_size_field(itr);
+
+                    // memory allocation counter track
+                    struct free_memory_information
+                    {
+                        rocprofiler_timestamp_t start_timestamp = 0;
+                        rocprofiler_timestamp_t end_timestamp   = 0;
+                        rocprofiler_address_t   address         = {.handle = 0};
+                    };
+
+                    auto _node_id = std::optional<uint64_t>{};
+                    if(_type == "ALLOC")
+                    {
+                        _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
+                        address_to_agent_and_size.emplace(
+                            rocprofiler_address_t{.handle = _address.handle},
+                            rocprofiler::agent::index_and_size{_node_id.value(), _allocation_size});
+                    }
+                    else if(_type == "FREE")
+                    {
+                        if(address_to_agent_and_size.count(_address) == 0)
+                        {
+                            if(_address.handle == 0)
+                            {
+                                // Freeing null pointers is expected behavior and is occurs in HSA
+                                // functions like hipStreamDestroy
+                                ROCP_INFO << "null pointer freed due to HSA operation";
+                            }
+                            else
+                            {
+                                // Following should not occur
+                                ROCP_INFO << "Unpaired free operation occurred";
+                            }
+                        }
+                        else
+                        {
+                            auto [agent_abs_index, size] = address_to_agent_and_size[_address];
+                            _node_id                     = agent_abs_index;
+                            _allocation_size             = 0;
+                        }
+                    }
+                    else
+                    {
+                        ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
+                    }
 
                     auto evt_id = create_event(
                         conn,

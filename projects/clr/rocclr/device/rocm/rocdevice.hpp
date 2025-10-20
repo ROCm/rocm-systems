@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -32,16 +32,12 @@
 #include "thread/monitor.hpp"
 #include "utils/versions.hpp"
 
+#include "device/rocm/rocrctx.hpp"
 #include "device/rocm/rocsettings.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
-
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
-#include "hsa/hsa_ven_amd_loader.h"
 
 #include <atomic>
 #include <iostream>
@@ -137,7 +133,7 @@ class Sampler : public device::Sampler {
 class NullDevice : public amd::Device {
  public:
   //! constructor
-  NullDevice() {};
+  NullDevice(){};
 
   //! create the device
   bool create(const amd::Isa& isa);
@@ -283,6 +279,20 @@ class NullDevice : public amd::Device {
     return false;
   }
 
+  //! Empty implementation on Null device
+  bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                uint64_t* size_copied, int32_t* status) override {
+    ShouldNotReachHere();
+    return false;
+  }
+
+  //! Empty implementation on Null device
+  bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                 uint64_t* size_copied, int32_t* status) override {
+    ShouldNotReachHere();
+    return false;
+  }
+
   bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                     cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override {
     return true;
@@ -304,12 +314,6 @@ class NullDevice : public amd::Device {
   }
 #endif
 #endif
-
- protected:
-  //! Initialize compiler instance and handle
-  static bool initCompiler(bool isOffline);
-  //! destroy compiler instance and handle
-  static bool destroyCompiler();
 
  private:
   static constexpr bool offlineDevice_ = true;
@@ -414,8 +418,13 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const AgentInfo* agentInfo = nullptr) const;  // nullptr uses default CPU agent
+                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const;
+
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status) override;
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status) override;
 
   bool deviceAllowAccess(void* dst) const;
 
@@ -690,4 +699,3 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 /**
  * @}
  */
-

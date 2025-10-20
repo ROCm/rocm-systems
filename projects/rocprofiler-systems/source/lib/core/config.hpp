@@ -252,6 +252,9 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
+uint32_t
+get_perfetto_flush_period();
+
 bool
 get_perfetto_combined_traces();
 
