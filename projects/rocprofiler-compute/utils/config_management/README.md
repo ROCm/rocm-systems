@@ -96,8 +96,9 @@ Addition:
                 unit: Units
     metric_descriptions:
       New Metric:
-        plain: "Description text"
-        rst: "Description with :ref:`RST markup <link>`"  # Optional
+        plain: Description text
+        rst: |- # Optional
+          Description with :ref:`RST markup <link>`
 
 Deletion:
   []
@@ -197,8 +198,9 @@ Addition:
                 unit: (OPs + $normUnit)
     metric_descriptions:
       F8 OPs:
-        plain: "Number of 8-bit floating point operations"
-        rst: "Number of 8-bit floating point operations per :ref:`normalization unit <normalization-units>`"
+        plain: Number of 8-bit floating point operations
+        rst: |-
+          Number of 8-bit floating point operations per :ref:`normalization unit <normalization-units>`"
 
 Deletion:
   - Panel Config:
@@ -228,8 +230,9 @@ Modification:
                 avg: AVG(new_formula)  # Changed field only
     metric_descriptions:
       Existing Metric:
-        plain: "Updated description"
-        rst: "Updated description with **RST**"
+        plain: Updated description
+        rst: |-
+          Updated description with **RST**"
 ```
 
 ### Rules for Deltas
