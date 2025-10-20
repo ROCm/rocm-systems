@@ -47,7 +47,7 @@ Only a subset of the OMPT callbacks are processed:
   |----------------------------------+---------------------------|
 
 .. note::
-   ``omp_parallel`` tracks begin with ``ompt_callback_parallel_begin`` and end when their corresponding ``ompt_callback_parallel_end`` is encountered.
+   ``omp_parallel`` tracks begin with ``ompt_callback_parallel_begin`` and ends when their corresponding ``ompt_callback_parallel_end`` is encountered.
 
 Configuration
 =============
