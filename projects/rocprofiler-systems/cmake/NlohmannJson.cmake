@@ -7,6 +7,12 @@ if(ROCPROFSYS_BUILD_NLOHMANN_JSON)
         nlohmann_json
         GIT_REPOSITORY https://github.com/nlohmann/json.git
         GIT_TAG v3.11.3
+        SOURCE_DIR
+        ${PROJECT_BINARY_DIR}/external/nlohmann/src
+        BINARY_DIR
+        ${PROJECT_BINARY_DIR}/external/nlohmann/lib
+        SUBBUILD_DIR
+        ${PROJECT_BINARY_DIR}/external/nlohmann/subdir
     )
     FetchContent_MakeAvailable(nlohmann_json)
 
