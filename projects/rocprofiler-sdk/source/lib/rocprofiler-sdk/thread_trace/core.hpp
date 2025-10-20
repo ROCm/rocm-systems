@@ -36,8 +36,8 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
-#include <future>
 #include <cstdint>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -85,13 +85,13 @@ struct thread_trace_parameter_pack
     bool are_params_valid() const;
 };
 
-class ThreadTracerQueue
+class ThreadTracerAgent
 {
     using code_object_id_t = uint64_t;
 
 public:
-    ThreadTracerQueue(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
-    virtual ~ThreadTracerQueue();
+    ThreadTracerAgent(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
+    virtual ~ThreadTracerAgent();
 
     void load_codeobj(code_object_id_t id, uint64_t addr, uint64_t size);
     void unload_codeobj(code_object_id_t id);
@@ -150,7 +150,7 @@ public:
     const auto& get_agents() const { return agents; }
 
 private:
-    std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerQueue>>     agents{};
+    std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
     std::shared_mutex agents_map_mut{};
@@ -182,10 +182,10 @@ public:
     const auto& get_agents() const { return agents; }
 
 private:
-    std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerQueue>> agents{};
+    std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::mutex agent_mut;
+    std::mutex                         agent_mut;
     std::shared_ptr<std::atomic<bool>> worker_flag{nullptr};
 };
 

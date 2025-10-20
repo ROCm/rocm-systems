@@ -239,21 +239,24 @@ protected:
 
 struct sqtt_buffer_status_t
 {
-    void* data;
-    uint64_t size;
-    hsa_ext_amd_aql_pm4_packet_t packet;
+    void*                        data{};
+    uint64_t                     size{};
+    hsa_ext_amd_aql_pm4_packet_t packet{};
 };
 
-struct SQTTBufferingPackets
+class SQTTBufferingPackets
 {
+public:
     SQTTBufferingPackets(aqlprofile_handle_t handle);
 
-    hsa_ext_amd_aql_pm4_packet_t query_status{};
-    std::optional<sqtt_buffer_status_t> query_buffer_status();
+    hsa_ext_amd_aql_pm4_packet_t                query_status{};
+    virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
 
     const aqlprofile_handle_t handle;
-    uint64_t header{0};
-    size_t current_buffer{0};
+    uint64_t                  header{0};
+
+private:
+    size_t                                    current_buffer{0};
     std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
 };
 

@@ -186,9 +186,9 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
 
 typedef enum aqlprofile_att_parameter_rt_timestamp_t
 {
-  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DEFAULT = 0,
-  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_ENABLE,
-  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE
+    AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DEFAULT = 0,
+    AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_ENABLE,
+    AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE
 } aqlprofile_att_parameter_rt_timestamp_t;
 
 typedef enum aqlprofile_att_parameter_name_ext_t
@@ -379,7 +379,7 @@ aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * The caller must pool information by sending a query_status packet, followed by a call
  * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_v0_t.is_full, then
  * a buffer_swap packet must be inserted into the queue.
- * 
+ *
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
@@ -390,23 +390,24 @@ aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_get_buffer_packets(uint64_t* header,
-                                               hsa_ext_amd_aql_pm4_packet_t* query_status,
-                                               hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
-                                               uint64_t* num_buffer_swap,
-                                               aqlprofile_handle_t handle,
-                                               int shader_engine_id,
-                                               int flags);
+hsa_status_t
+aqlprofile_att_get_buffer_packets(uint64_t*                      header,
+                                  hsa_ext_amd_aql_pm4_packet_t*  query_status,
+                                  hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+                                  uint64_t*                      num_buffer_swap,
+                                  aqlprofile_handle_t            handle,
+                                  int                            shader_engine_id,
+                                  int                            flags);
 
 struct aqlprofile_att_buffer_status_v0_t
 {
-  uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_v0_t)
-  void*    data;        // Read data from, if is full
-  uint64_t read_size;   // Number of bytes to read, if is full
-  uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
-  bool     needs_swap;  // If buffer requires swap
-  bool     is_too_late;
-  bool     error;
+    uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_v0_t)
+    void*    data;        // Read data from, if is full
+    uint64_t read_size;   // Number of bytes to read, if is full
+    uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
+    bool     needs_swap;  // If buffer requires swap
+    bool     is_too_late;
+    bool     error;
 };
 
 /**
@@ -419,10 +420,11 @@ struct aqlprofile_att_buffer_status_v0_t
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_v0_t* out,
-                                                 aqlprofile_handle_t handle,
-                                                 int shader_engine_id,
-                                                 int flags);
+hsa_status_t
+aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_v0_t* out,
+                                    aqlprofile_handle_t                handle,
+                                    int                                shader_engine_id,
+                                    int                                flags);
 
 /**
  * @brief Callback for iteration of all possible event coordinate IDs and coordinate names.

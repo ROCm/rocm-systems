@@ -61,7 +61,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY)
     {
-        //for(size_t i = 0; i < trace_size; i++)
+        // for(size_t i = 0; i < trace_size; i++)
         //    tool.config.occupancy.push_back(static_cast<const occupancy_t*>(trace_events)[i]);
     }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_PERFEVENT)
@@ -107,7 +107,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
             prev_inst_time = std::max(prev_inst_time, inst.time + inst.duration);
         }
 
-        //WaveFile(tool.config, wave);
+        // WaveFile(tool.config, wave);
     }
     if(bInvalid) ROCP_WARNING << "Could not fetch some instructions!";
 

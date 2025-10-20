@@ -55,7 +55,8 @@ Signal::~Signal()
     hsa::get_core_table()->hsa_signal_destroy_fn(signal);
 }
 
-void Signal::WaitOn() const
+void
+Signal::WaitOn() const
 {
     auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
     while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
@@ -63,7 +64,8 @@ void Signal::WaitOn() const
 }
 
 HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size)
-: agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id), buffer_size(double_buffer_size)
+: agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
+, buffer_size(double_buffer_size)
 {
     ROCP_TRACE << "Constructing Async queue.";
 
@@ -83,12 +85,15 @@ HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
-    if (double_buffer_size)
+    if(double_buffer_size)
     {
-        for (auto& memory : double_buffer_memory)
+        for(auto& memory : double_buffer_memory)
         {
-            CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(agent.cpu_pool(), double_buffer_size, 0, &memory), "failed to allocate contiguous memory");
-            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, memory), "failed to allow access");
+            CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(
+                          agent.cpu_pool(), double_buffer_size, 0, &memory),
+                      "failed to allocate contiguous memory");
+            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, memory),
+                      "failed to allow access");
         }
     }
 
@@ -100,7 +105,7 @@ HsaATTQueue::~HsaATTQueue()
     ROCP_TRACE << "Destroying Async Queue...";
     hsa::get_core_table()->hsa_queue_destroy_fn(this->queue);
 
-    for (auto memory : double_buffer_memory)
+    for(auto memory : double_buffer_memory)
         hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
 }
 
