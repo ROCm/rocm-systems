@@ -491,6 +491,26 @@ function(rocprofiler_add_integration_validate_test NAME)
 
     endforeach()
 
+    # Build properties list safely to avoid argument shifting
+    set(_props
+        DISABLED ${arg_DISABLED}
+        TIMEOUT ${arg_TIMEOUT}
+        LABELS "${arg_LABELS}"
+        FAIL_REGULAR_EXPRESSION "${arg_FAIL_REGULAR_EXPRESSION}"
+    )
+
+    if(arg_SKIP_REGULAR_EXPRESSION)
+        list(APPEND _props SKIP_REGULAR_EXPRESSION "${arg_SKIP_REGULAR_EXPRESSION}")
+    endif()
+
+    if(arg_PASS_REGULAR_EXPRESSION)
+        list(APPEND _props PASS_REGULAR_EXPRESSION "${arg_PASS_REGULAR_EXPRESSION}")
+    endif()
+
+    if(arg_FIXTURES_REQUIRED)
+        list(APPEND _props FIXTURES_REQUIRED "${arg_FIXTURES_REQUIRED}")
+    endif()
+
     pytest_discover_tests(
         ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
         TEST_PATHS ${arg_TEST_PATHS}
@@ -503,13 +523,6 @@ function(rocprofiler_add_integration_validate_test NAME)
         DEPENDS "${arg_DEPENDS}"
         EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
         DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
-        PROPERTIES
-        DISABLED ${arg_DISABLED}
-        TIMEOUT ${arg_TIMEOUT}
-        LABELS "${arg_LABELS}"
-        FAIL_REGULAR_EXPRESSION "${arg_FAIL_REGULAR_EXPRESSION}"
-        SKIP_REGULAR_EXPRESSION "${arg_SKIP_REGULAR_EXPRESSION}"
-        PASS_REGULAR_EXPRESSION "${arg_PASS_REGULAR_EXPRESSION}"
-        FIXTURES_REQUIRED "${arg_FIXTURES_REQUIRED}")
+        PROPERTIES ${_props})
 
 endfunction()
