@@ -152,7 +152,7 @@ jobs:
           mkdir build
           cmake . -B build \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}bin/amdclang++ \
+            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
             -DENABLE_TESTS=ON \
             -DINSTALL_TESTS=ON 
           cmake --build build --target all --parallel 16
