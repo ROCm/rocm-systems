@@ -164,26 +164,12 @@ int getEngineFreq(const hipUUID& uuid) {
   } amdsmi_enumeration_info_t;
 
   typedef enum {
-    AMDSMI_CLK_TYPE_SYS = 0x0,  //!< System clock
-    AMDSMI_CLK_TYPE_FIRST = AMDSMI_CLK_TYPE_SYS,
-    AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,  //!< Graphics clock
-    AMDSMI_CLK_TYPE_DF,                         /**< Data Fabric clock (for ASICs
-                                                     running on a separate clock) */
-    AMDSMI_CLK_TYPE_DCEF,                       /**< Display Controller Engine Front clock,
-                                                     timing/bandwidth signals to display */
-    AMDSMI_CLK_TYPE_SOC,    //!< System On Chip clock, integrated circuit frequency
-    AMDSMI_CLK_TYPE_MEM,    //!< Memory clock speed, system operating frequency
-    AMDSMI_CLK_TYPE_PCIE,   //!< PCI Express clock, high bandwidth peripherals
-    AMDSMI_CLK_TYPE_VCLK0,  //!< Video 0 clock, video processing units
-    AMDSMI_CLK_TYPE_VCLK1,  //!< Video 1 clock, video processing units
-    AMDSMI_CLK_TYPE_DCLK0,  //!< Display 1 clock, timing signals for display output
-    AMDSMI_CLK_TYPE_DCLK1,  //!< Display 2 clock, timing signals for display output
-    AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
+    AMDSMI_CLK_TYPE_GFX = 0x0
   } amdsmi_clk_type_t;
 
   amdsmi_clk_info_t clk_info;
   uint32_t gpu_count = 0;
-  uint32_t numProcessor = 0;
+  uint32_t num_processor = 0;
   amdsmi_status_t (*fninit)(uint64_t);
   amdsmi_status_t (*fnget_socket_handles)(uint32_t*, amdsmi_socket_handle*);
   amdsmi_status_t (*fnget_processor_handles)(amdsmi_socket_handle, uint32_t*,
@@ -194,29 +180,29 @@ int getEngineFreq(const hipUUID& uuid) {
                                       amdsmi_clk_info_t*);
   amdsmi_status_t (*fnshut_down)();
   int result = -1;
-  bool smiInitialized = false;
-  auto cleanUp = [&smiInitialized, &fnshut_down](void* handle) {
-    if (smiInitialized)
+  bool smi_initialized = false;
+  auto cleanUp = [&smi_initialized, &fnshut_down](void* handle) {
+    if (smi_initialized)
       fnshut_down();
 
     if (handle)
       dlclose(handle);
   };
-  std::unique_ptr<void, decltype(cleanUp)> libHdl(nullptr, cleanUp);
+  std::unique_ptr<void, decltype(cleanUp)> lib_hdl(nullptr, cleanUp);
 
-  libHdl.reset(dlopen("libamd_smi.so", RTLD_LAZY));
+  lib_hdl.reset(dlopen("libamd_smi.so", RTLD_LAZY));
 
-  if (!libHdl) {
+  if (!lib_hdl) {
     return -1;
   }
 
   try {
-    loadSym(fninit, "amdsmi_init", libHdl.get());
-    loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", libHdl.get());
-    loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", libHdl.get());
-    loadSym(fnget_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info", libHdl.get());
-    loadSym(fnget_clock_info, "amdsmi_get_clock_info", libHdl.get());
-    loadSym(fnshut_down, "amdsmi_shut_down", libHdl.get());
+    loadSym(fninit, "amdsmi_init", lib_hdl.get());
+    loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", lib_hdl.get());
+    loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", lib_hdl.get());
+    loadSym(fnget_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info", lib_hdl.get());
+    loadSym(fnget_clock_info, "amdsmi_get_clock_info", lib_hdl.get());
+    loadSym(fnshut_down, "amdsmi_shut_down", lib_hdl.get());
   } catch (std::runtime_error&) {
     return -1;
   }
@@ -224,10 +210,10 @@ int getEngineFreq(const hipUUID& uuid) {
   if (fninit(1ul << 1)) {
     return -1;
   } else
-    smiInitialized = true;
+    smi_initialized = true;
 
   uint32_t socket_count = 0;
-  uint32_t numSocket = 0;
+  uint32_t num_socket = 0;
 
   // get the socket count available in the system
   if (fnget_socket_handles(&socket_count, nullptr)) {
@@ -239,23 +225,23 @@ int getEngineFreq(const hipUUID& uuid) {
     return -1;
   }
 
-  while (numSocket < socket_count && result == -1) {
+  while (num_socket < socket_count && result == -1) {
     // just get number of processors first
-    if (fnget_processor_handles(sockets[numSocket], &gpu_count, nullptr)) {
+    if (fnget_processor_handles(sockets[num_socket], &gpu_count, nullptr)) {
       return -1;
     }
 
     std::vector<amdsmi_processor_handle> processors(gpu_count);
-    if (fnget_processor_handles(sockets[numSocket], &gpu_count, &processors[0])) {
+    if (fnget_processor_handles(sockets[num_socket], &gpu_count, &processors[0])) {
       return -1;
     }
 
-    while (numProcessor < gpu_count && result == -1) {
+    while (num_processor < gpu_count && result == -1) {
       amdsmi_enumeration_info_t info;
       int offset = 0;
       const char* prefix = "GPU-";
 
-      if (fnget_gpu_enumeration_info(processors[numProcessor], &info)) {
+      if (fnget_gpu_enumeration_info(processors[num_processor], &info)) {
         return -1;
       }
 
@@ -265,18 +251,18 @@ int getEngineFreq(const hipUUID& uuid) {
       }
 
       if (!std::memcmp(uuid.bytes, info.hip_uuid + offset, sizeof(hipUUID::bytes) - offset)) {
-        if (fnget_clock_info(processors[numProcessor], AMDSMI_CLK_TYPE_GFX, &clk_info)) {
+        if (fnget_clock_info(processors[num_processor], AMDSMI_CLK_TYPE_GFX, &clk_info)) {
           return -1;
         }
 
         result = clk_info.max_clk;
       }
 
-      numProcessor++;
+      num_processor++;
     }
 
-    numSocket++;
-    numProcessor = 0;
+    num_socket++;
+    num_processor = 0;
   }
 
   return result;
