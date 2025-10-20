@@ -413,9 +413,9 @@ Examples:
         "--device",
         metavar="",
         required=False,
-        default=-1,
+        default=0,
         type=int,
-        help="\t\t\tTarget GPU device ID. (DEFAULT: ALL)",
+        help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
     )
     roofline_group.add_argument(
         "--kernel-names",
