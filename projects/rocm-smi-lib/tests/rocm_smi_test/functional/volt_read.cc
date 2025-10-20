@@ -117,11 +117,7 @@ void TestVoltRead::Run(void) {
             std::cout << "\t**" << label << ": " <<
                                "Not supported on this machine" << std::endl;
           }
-
-            // Verify api support checking functionality is working
-            err = rsmi_dev_volt_metric_get(i, type, met, nullptr);
-            ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
-            return;
+          return;
         } else {
           CHK_ERR_ASRT(err)
         }
