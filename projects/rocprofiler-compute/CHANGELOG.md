@@ -146,6 +146,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
   * Use ROCPROF=rocprofv3 to use rocprofv3 interface
 
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
+
 ### Removed
 
 * Usage of `rocm-smi` in favor of `amd-smi`.
