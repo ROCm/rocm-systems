@@ -134,7 +134,7 @@ uint ReferenceCountedObject::retain() {
 }
 
 uint ReferenceCountedObject::release() {
-  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_relaxed) - 1;
+  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_acq_rel) - 1;
   if (newCount == 0) {
     if (terminate()) {
       // The destructor should be called with a count==1 for the last thread
