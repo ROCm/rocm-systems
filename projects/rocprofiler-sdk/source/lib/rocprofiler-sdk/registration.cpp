@@ -182,7 +182,7 @@ struct attach_status
 auto*
 get_attach_status()
 {
-    static auto*& _v = common::static_object<attach_status>::construct(false);
+    static auto*& _v = common::static_object<attach_status>::construct();
     return _v;
 }
 
@@ -749,6 +749,12 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
     }
 }
 }  // namespace
+
+bool
+supports_attachment()
+{
+    return (get_attach_status()) ? get_attach_status()->has_attach_table : false;
+}
 
 void
 init_logging()
