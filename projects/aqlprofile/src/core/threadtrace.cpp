@@ -174,6 +174,9 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     callback(se_index, (void*)cpu_sample.data(), sample_size_plus_header, userdata);
   }
 
+  // Reset swaps for next thread trace start
+  memorymgr->buffer_swaps = 0;
+
   return status;
 }
 

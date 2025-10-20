@@ -243,7 +243,10 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     // to 4KB per thread trace specification
     const uint64_t se_number_xcc = se_number_total / GetXCCNumber();
     uint64_t base_addr = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
-    const uint64_t base_step = GetBaseStep(config->data_buffer_size, config->se_mask);
+    if (Primitives::GFXIP_LEVEL == 10 || Primitives::GFXIP_LEVEL >= 11)
+      config->capacity_per_disabled_se = 1 << Primitives::TT_BUFF_ALIGN_SHIFT;
+
+    const uint64_t base_step = GetBaseStep(config);
 
     // Old v1 API calls this with buffer == 0 first
     if (config->data_buffer_size > 0)
@@ -347,6 +350,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
           builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_MODE_ADDR,
                                           Primitives::sqtt_mode_on_value(!config->buffer_data.empty()));
 
+          // If we are in double buffer mode
           if (!config->buffer_data.empty())
           {
             builder.BuildWriteWaitIdlePacket(cmd_buffer);
@@ -599,12 +603,13 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     return std::max<uint64_t>(num_enabled, 1u);
   }
 
-  uint64_t GetBaseStep(uint64_t buffersize, uint64_t se_mask) const {
-    // Get selected
-    uint64_t num_enabled = PopCount(se_mask);
-    int64_t num_disabled = (64 - num_enabled) << 12;
+  uint64_t GetBaseStep(TraceConfig* config) const {
+    // Get number of selected shader engines
+    uint64_t num_enabled = PopCount(config->se_mask);
+    int64_t size_disabled = (64 - num_enabled) * config->capacity_per_disabled_se;
+
     // Make sure num divides buffersize
-    int64_t buffer_per_se = std::max<int64_t>(0, buffersize - num_disabled) / num_enabled;
+    int64_t buffer_per_se = (config->data_buffer_size - size_disabled) / num_enabled;
     return uint64_t(buffer_per_se) & ~((1 << Primitives::TT_BUFF_ALIGN_SHIFT) - 1);
   }
 

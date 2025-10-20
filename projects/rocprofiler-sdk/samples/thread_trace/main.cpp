@@ -157,7 +157,7 @@ main(int /*argc*/, char** /*argv*/)
 
     roctxProfilerResume(0);
 
-    for(size_t i = 0; i < streams.size() * kernels.size() * 3000; i++)
+    for(size_t i = 0; i < streams.size() * kernels.size() * 800; i++) // 3000 = 1GB
     {
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());
