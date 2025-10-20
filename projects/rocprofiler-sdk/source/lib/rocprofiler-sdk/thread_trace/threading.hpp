@@ -34,7 +34,6 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-
 struct triple_buffer_worker_data_t
 {
     rocprofiler_thread_trace_shader_data_callback_t callback_fn{};
@@ -47,7 +46,8 @@ struct triple_buffer_worker_data_t
     std::unique_ptr<hsa::TraceControlAQLPacket> control_packet{};
 };
 
-void worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t parameters);
+void
+worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t parameters);
 
 };  // namespace thread_trace
 };  // namespace rocprofiler

@@ -213,37 +213,42 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     clear();
 };
 
-SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle): handle(_handle)
+SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle)
+: handle(_handle)
 {
     uint64_t num_buffers{6};
     buffer_swap.resize(num_buffers);
 
     std::vector<hsa_ext_amd_aql_pm4_packet_t*> buffer_ptr{};
-    for (auto& buffer : buffer_swap) buffer_ptr.emplace_back(&buffer);
+    for(auto& buffer : buffer_swap)
+        buffer_ptr.emplace_back(&buffer);
 
-    auto status = aqlprofile_att_get_buffer_packets(&header, &query_status, buffer_ptr.data(), &num_buffers, handle, SHADER_ENGINE_ID, 0);
+    auto status = aqlprofile_att_get_buffer_packets(
+        &header, &query_status, buffer_ptr.data(), &num_buffers, handle, SHADER_ENGINE_ID, 0);
     CHECK_HSA(status, "failed to create ATT double buffer packet");
 
     buffer_swap.resize(num_buffers);
 
     query_status.header = VENDOR_BIT | BARRIER_BIT;
-    for (auto& buffer : buffer_swap) buffer.header = VENDOR_BIT | BARRIER_BIT;
+    for(auto& buffer : buffer_swap)
+        buffer.header = VENDOR_BIT | BARRIER_BIT;
 }
 
-std::optional<sqtt_buffer_status_t> SQTTBufferingPackets::query_buffer_status()
+std::optional<sqtt_buffer_status_t>
+SQTTBufferingPackets::query_buffer_status()
 {
     aqlprofile_att_buffer_status_v0_t ret{};
 
     auto status = aqlprofile_att_update_buffer_status(&ret, handle, SHADER_ENGINE_ID, 0);
     CHECK_HSA(status, "failed to query ATT status");
 
-    if (!ret.needs_swap) return {};
+    if(!ret.needs_swap) return {};
 
     ROCP_FATAL_IF((current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
 
-    auto query = sqtt_buffer_status_t{};
-    query.data = ret.data;
-    query.size = ret.read_size;
+    auto query   = sqtt_buffer_status_t{};
+    query.data   = ret.data;
+    query.size   = ret.read_size;
     query.packet = buffer_swap.at(ret.num_swaps % buffer_swap.size());
 
     return query;
