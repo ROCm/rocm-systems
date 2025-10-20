@@ -26,6 +26,7 @@
 #include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
@@ -40,10 +41,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 
-#include "core/trace_cache/cache_manager.hpp"
-
 #include <string_view>
-
 #include <utility>
 
 namespace
@@ -53,10 +51,13 @@ void
 cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
              uint64_t end_ts, const std::string& category)
 {
-    size_t zero = 0;
+    constexpr size_t      NO_CORRELATION_ID = 0;
+    constexpr const char* CALLSTACK         = "";
+    constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::entry_type::region, thread_id, name.c_str(), zero, zero,
-        start_ts, end_ts, "", "", category.c_str());
+        rocprofsys::trace_cache::entry_type::region, thread_id, name.c_str(),
+        NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts, end_ts, CALLSTACK, ARGUMENTS,
+        category.c_str());
 }
 
 struct entry_key
@@ -66,11 +67,16 @@ struct entry_key
 
     friend bool operator<(const entry_key& lhs, const entry_key& rhs)
     {
-        return lhs.name < rhs.name && lhs.category < rhs.category;
+        if(lhs.name != rhs.name)
+        {
+            return lhs.name < rhs.name;
+        }
+
+        return lhs.category < rhs.category;
     }
 };
 
-using timestamp_t = long;
+using timestamp_t = uint64_t;
 
 thread_local std::map<entry_key, timestamp_t> map_name_to_args;
 
@@ -78,8 +84,8 @@ template <typename CategoryT, typename... Args>
 void
 cache_start(const char* name)
 {
-    auto start_ts = rocprofsys::comp::wall_clock::record();
-
+    const auto start_ts =
+        static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
     map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }] = start_ts;
 }
 
@@ -94,15 +100,18 @@ cache_stop(const char* name)
         map_name_to_args.erase(key);
         auto timestamp = x->second;
 
-        auto        end_ts    = rocprofsys::comp::wall_clock::record();
-        uint64_t    thread_id = 0;
+        const auto end_ts =
+            static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+        uint64_t thread_id = 0;
+
         const auto& extended_info =
             rocprofsys::thread_info::get(std::this_thread::get_id());
         if(extended_info.has_value() && extended_info->index_data.has_value())
         {
-            thread_id = extended_info->index_data->system_value;
+            constexpr size_t UNKNOWN_TIME = 0;
+            thread_id                     = extended_info->index_data->system_value;
             rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { getppid(), getpid(), thread_id, 0, 0, "{}" });
+                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
         }
 
         cache_region(thread_id, name, timestamp, end_ts,
