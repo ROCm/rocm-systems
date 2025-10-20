@@ -68,7 +68,7 @@ function(get_default_python_versions _VAR)
     set(_PYTHON_FOUND_VERSIONS)
 
     foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
-        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+        if(ROCPROFILER_MEMCHECK)
             find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter Development)
         else()
             find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter
@@ -82,7 +82,7 @@ function(get_default_python_versions _VAR)
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
-        if(ROCPROFILER_MEMCHECK OR CMAKE_VERSION VERSION_LESS "3.18")
+        if(ROCPROFILER_MEMCHECK)
             find_package(Python3 3.6 COMPONENTS Interpreter Development)
         else()
             find_package(Python3 3.6 COMPONENTS Interpreter Development.Module)
