@@ -60,8 +60,8 @@ typedef enum rocprofiler_thread_trace_parameter_type_t
     ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK,  ///< Bitmask of which compute
                                                                   ///< units to exclude from
                                                                   ///< perfcounters. gfx9 only
-    ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL,  ///< Dont collect instruction timing,
-                                                   ///< only shader-wide information
+    ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL,       ///< Dont collect instruction timing,
+                                                        ///< only shader-wide information
     ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,  ///< Enables GPU Triple buffering.
     ROCPROFILER_THREAD_TRACE_PARAMETER_LAST
 } rocprofiler_thread_trace_parameter_type_t;
