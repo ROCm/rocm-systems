@@ -110,11 +110,13 @@ static int getROCmBase(char *buf)
     }
   }
 
-  // If Environment Variable is not set
-  // use platform-specific APIs to get target lib path
-  // and get rocm base install path using the lib Path.
+  /* If Environment Variable is not set
+   * use platform-specific APIs to get target lib path
+   * and get rocm base install path using the lib Path. */
 #if defined(_WIN32) || defined(_WIN64)
-  #error getROCmInstallPath() Needs ROCM_PATH environment variable set on Windows.
+  /* Limited support for Windows:
+   * getROCmBase() Needs ROCM_PATH environment variable set on Windows. */
+  return PathWindowsNotSet;
 #else
   #if BUILD_SHARED_LIBS
     sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);

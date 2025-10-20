@@ -33,8 +33,8 @@ typedef enum {
 } VerErrors;
 
 
-//  API for getting the verion
-//  Return val :  VerErros : API execution status.  The parameters are valid only when the exetution status is SUCCESS==0
+//  API for getting the version
+//  Return val :  VerErros : API execution status.  The parameters are valid only when the execution status is SUCCESS==0
 LIB_API_PUBLIC VerErrors getROCmVersion(unsigned int* Major, unsigned int* Minor, unsigned int* Patch) ATTRIBUTE_NON_NULL ;
 //  Usage :
 //  int mj=0,mn=0,p=0,ret=0;

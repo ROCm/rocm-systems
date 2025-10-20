@@ -23,6 +23,7 @@ extern "C" {
 /* Return Status Flag Definitions*/
 typedef enum {
         PathSuccess=0,
+        PathWindowsNotSet = -993,
         PathIncorrecPararmeters = -994,
         PathValuesNotDefined = -995,
         PathValuesTooLong = -996,
