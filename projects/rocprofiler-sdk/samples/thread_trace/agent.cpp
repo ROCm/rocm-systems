@@ -258,7 +258,6 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
                      int64_t /* se_id */,
                      void*  se_data,
                      size_t data_size,
-                     int flags,
                      rocprofiler_user_data_t /* userdata */)
 {
     CHECK_NOTNULL(Results::latencies);
@@ -313,7 +312,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u<<25});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TRIPLE_BUFFERING, 1});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE, ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,
