@@ -126,9 +126,8 @@ function(rocprofiler_roctx_python_bindings _VERSION)
         PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
                 rocprofiler-sdk::rocprofiler-sdk-pybind11)
 
-    # Sanitizers require explicit linking to libpython because they need all symbols
-    # resolved at link time. For normal builds, we avoid linking to allow manylinux
-    # compatibility.
+    # if "Development" is specified instead of "Development.Module", we need to link to
+    # python libraries
     if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
         target_link_libraries(rocprofiler-sdk-roctx-python-bindings-${_VERSION}
                               PRIVATE ${Python3_LIBRARIES})
@@ -212,9 +211,8 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 rocprofiler-sdk::rocprofiler-sdk-static-library
                 rocprofiler-sdk::rocprofiler-sdk-rocpd-library)
 
-    # Sanitizers require explicit linking to libpython because they need all symbols
-    # resolved at link time. For normal builds, we avoid linking to allow manylinux
-    # compatibility.
+    # if "Development" is specified instead of "Development.Module", we need to link to
+    # python libraries
     if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
         target_link_libraries(rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
                               PRIVATE ${Python3_LIBRARIES})
