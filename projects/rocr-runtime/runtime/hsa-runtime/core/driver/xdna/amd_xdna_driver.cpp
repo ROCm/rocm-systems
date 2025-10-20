@@ -47,6 +47,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -138,7 +139,7 @@ XdnaDriver::XdnaDriver(std::string devnode_name)
 
 hsa_status_t XdnaDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   for (uint32_t i = 0; i < devnode_max_minor_num; ++i) {
-    auto tmp_driver = std::unique_ptr<Driver>(new XdnaDriver(devnode_prefix + std::to_string(i)));
+    auto tmp_driver = std::make_unique<XdnaDriver>(devnode_prefix + std::to_string(i));
     if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
       if (tmp_driver->QueryKernelModeDriver(core::DriverQuery::GET_DRIVER_VERSION) ==
           HSA_STATUS_SUCCESS) {
@@ -228,7 +229,11 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
 
     XDNADeviceId device_id = {};
     std::ifstream is(device_id_file);
-    is >> std::hex >> device_id.device;  // Device ID is in hex.
+    // Device ID is in hex.
+    if (!(is >> std::hex >> device_id.device)) {
+      assert(false && "Failed to read device ID from sysfs.");
+      return HSA_STATUS_ERROR;
+    }
 
     const auto device_type_it = supported_xdna_devices.find(device_id);
     if (device_type_it == supported_xdna_devices.end()) {
@@ -274,6 +279,7 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
       assert(false && "Failed to read device name from sysfs.");
       return HSA_STATUS_ERROR;
     }
+    // Convert device name from ASCII to UTF-16 for MarketingName.
     std::copy(device_name.begin(), device_name.end(), node_props.MarketingName);
   }
 

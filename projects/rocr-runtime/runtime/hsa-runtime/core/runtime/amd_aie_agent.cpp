@@ -226,8 +226,7 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
       *static_cast<uint32_t*>(value) = 0;
       break;
     case HSA_AMD_AGENT_INFO_PRODUCT_NAME:
-      // The code copies HsaNodeProperties.MarketingName a Unicode string
-      // which is encoded in UTF-16 as a 7-bit ASCII string
+      // Copy MarketingName which is 7-bit ASCII stored in UTF-16 array
       std::copy_n(node_props_.MarketingName, HSA_PUBLIC_NAME_SIZE, static_cast<char*>(value));
       break;
     case HSA_AMD_AGENT_INFO_UUID: {
