@@ -95,7 +95,7 @@ public:
     void load_codeobj(code_object_id_t id, uint64_t addr, uint64_t size);
     void unload_codeobj(code_object_id_t id);
 
-    std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart);
+    std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
     void iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
 
     thread_trace_parameter_pack  params;
@@ -105,7 +105,7 @@ public:
                                          bool                          bWait) const;
 
     template <typename VecType>
-    [[nodiscard]] std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
+    std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
     {
         for(size_t i = 0; i < vec.size(); i++)
         {
@@ -117,7 +117,7 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     void start_worker(std::shared_ptr<std::atomic<bool>> running_flag);
-    std::unique_ptr<Signal> stop_worker();
+    void stop_worker();
     std::array<void*, 2> get_double_buffer_memory() const { return double_buffer_memory; }
 
 private:
@@ -128,7 +128,7 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::future<std::unique_ptr<Signal>> worked_thread{};
+    std::thread worked_thread{};
     std::array<void*, 2> double_buffer_memory{};
 };
 
