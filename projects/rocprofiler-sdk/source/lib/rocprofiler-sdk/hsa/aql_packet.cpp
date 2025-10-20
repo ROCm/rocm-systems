@@ -225,6 +225,9 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle): handle(
     CHECK_HSA(status, "failed to create ATT double buffer packet");
 
     buffer_swap.resize(num_buffers);
+
+    query_status.header = VENDOR_BIT | BARRIER_BIT;
+    for (auto& buffer : buffer_swap) buffer.header = VENDOR_BIT | BARRIER_BIT;
 }
 
 std::optional<sqtt_buffer_status_t> SQTTBufferingPackets::query_buffer_status()
@@ -237,7 +240,7 @@ std::optional<sqtt_buffer_status_t> SQTTBufferingPackets::query_buffer_status()
     if (!ret.needs_swap) return {};
 
     ROCP_FATAL_IF((current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
-    
+
     auto query = sqtt_buffer_status_t{};
     query.data = ret.data;
     query.size = ret.read_size;
