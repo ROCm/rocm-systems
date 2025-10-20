@@ -111,11 +111,12 @@ def retrieve_projects(args):
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
-    # Currently as we have no tests, we just build all packages available. 
+    # Currently as we have no tests, we just build all packages available if an applicable change is made. 
     # As we start to get an idea of test times, we can divide test jobs.
-    for project in ["all"]:
-        if project in project_map:
-            project_to_run.append(project_map.get(project))
+    if projects:
+        for project in ["all"]:
+            if project in project_map:
+                project_to_run.append(project_map.get(project))
 
     return project_to_run
 
