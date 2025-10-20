@@ -8,7 +8,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-- Fixed OMPT events and GPU performance counters not being collected in rocpd output.
+- Fixed OMPT events, GPU performance counters, VA-API, MPI, and host events not being collected in `rocpd` output.
 
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1
 
