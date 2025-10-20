@@ -140,7 +140,7 @@ jobs:
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
         run: |
-          python3 -m pip install --break-system-packages -r requirements.txt
+          python3 -m pip install --break-system-packages --ignore-installed -r requirements.txt
           python3 -m pip install --break-system-packages -r requirements-test.txt
           echo "✅ pip requirements installed!"
       
