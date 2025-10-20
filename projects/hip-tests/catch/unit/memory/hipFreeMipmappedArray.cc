@@ -56,15 +56,20 @@ TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, floa
   HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   for (auto numLevels : levels) {
+    INFO(" extent: (" << extent.width << ", " << extent.height << ", " << extent.depth << ") and "
+                      << numLevels << " levels. Total VRAM: " << props.totalGlobalMem);
     if (extent.width * extent.height * extent.depth * numLevels * sizeof(TestType) >
-        props.totalGlobalMem) {
+        props.totalGlobalMem / 2) {
       // some devices will not have enough memory allocate the 6GB required for the biggest extent
-      // We skip the test in that case (and no warning is needed)
+      // We would skip the test if the extent would require more than half of the global memory.
+      // Note that totalGlobalMem is not an exact measurement of the available memory for
+      // compute and we cannot use it as an exact value, so we use half
+      // (we use SUCCEED as no warning is needed)
       SUCCEED(
-          "Device does not have enough global memory to allocate a mipmapped array using this "
-          " extent: ("
-          << extent.width << ", " << extent.height << ", " << extent.depth << ") and " << numLevels
-          << " levels");
+          "Device might not have enough global memory to allocate a mipmapped array using this "
+          "extent; "
+          "test will not be run. Total global memory: "
+          << props.totalGlobalMem);
       continue;
     }
 

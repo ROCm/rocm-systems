@@ -2316,11 +2316,11 @@ void Runtime::Unload() {
   mapped_handle_map_.clear();
   memory_handle_map_.clear();
 
+  DestroyAgents();
+
   CloseTools();
 
   AMD::Unload();
-
-  DestroyAgents();
 
   DestroyDrivers();
 
