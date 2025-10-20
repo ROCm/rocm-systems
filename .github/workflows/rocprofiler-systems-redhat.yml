@@ -47,6 +47,10 @@ jobs:
         os-release: [ '8.10', '9' ]
         rocm-version: [ '0.0', '6.3', '6.4', '7.0' ]
         build-type: ['Release']
+        exclude:
+          # No ROCm 6.3 support for RHEL9.6
+          - os-release: '9'
+          - rocm-version: '6.3'
 
     steps:
     - uses: actions/checkout@v4
