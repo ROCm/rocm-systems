@@ -83,7 +83,7 @@ build_pack_from_array(parameter_pack&                             pack,
                 pack.no_detail_simd = param.value != 0;
                 break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE:
-                if (param.value >= ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST)
+                if(param.value >= ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST)
                     return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 pack.triple_buffering = param.value != 0;
                 break;

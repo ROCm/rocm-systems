@@ -142,8 +142,15 @@ public:
 };
 
 #define Launch(kernel, stream, arglast)                                                            \
-    hipLaunchKernelGGL(                                                                            \
-        kernel, DATA_SIZE / 512, 512, 0, 0, stream.dst.ptr, stream.src1.ptr, stream.src2.ptr, arglast);
+    hipLaunchKernelGGL(kernel,                                                                     \
+                       DATA_SIZE / 512,                                                            \
+                       512,                                                                        \
+                       0,                                                                          \
+                       0,                                                                          \
+                       stream.dst.ptr,                                                             \
+                       stream.src1.ptr,                                                            \
+                       stream.src2.ptr,                                                            \
+                       arglast);
 
 int
 main(int /*argc*/, char** /*argv*/)
@@ -157,7 +164,7 @@ main(int /*argc*/, char** /*argv*/)
 
     roctxProfilerResume(0);
 
-    for(size_t i = 0; i < streams.size() * kernels.size() * 800; i++) // 3000 = 1GB
+    for(size_t i = 0; i < streams.size() * kernels.size() * 800; i++)  // 3000 = 1GB
     {
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());

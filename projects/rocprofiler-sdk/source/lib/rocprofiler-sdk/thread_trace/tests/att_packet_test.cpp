@@ -258,7 +258,7 @@ TEST(thread_trace, perfcounters_aql_options_test)
             if(metric.name() == counter_name)
                 _params.perfcounters.push_back({std::atoi(metric.event().c_str()), simd_mask});
     _params.perfcounter_ctrl = 2;
-    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerQueue>(
+    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerAgent>(
         _params, begin(agents)->second.get_rocp_agent()->id);
 
     ASSERT_EQ(new_tracer->factory->aql_params.size(),

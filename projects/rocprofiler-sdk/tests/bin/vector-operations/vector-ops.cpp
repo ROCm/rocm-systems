@@ -54,8 +54,8 @@ using auto_lock_t = std::unique_lock<std::mutex>;
 auto print_lock   = std::mutex{};
 }  // namespace
 
-#define WIDTH  (8*1024)
-#define HEIGHT (8*1024)
+#define WIDTH  (8 * 1024)
+#define HEIGHT (8 * 1024)
 
 #define NUM (WIDTH * HEIGHT)
 

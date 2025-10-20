@@ -119,7 +119,7 @@ gen_output_stream()
 
     std::vector<Element> sorted(latencies->begin(), latencies->end());
     std::stable_sort(sorted.begin(), sorted.end(), [](const Element& a, const Element& b) {
-        //return a.second.latency > b.second.latency;
+        // return a.second.latency > b.second.latency;
         return a.first.address < b.first.address;
     });
 
@@ -129,7 +129,7 @@ gen_output_stream()
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
 
-        if (addr.code_object_id == 0) continue;
+        if(addr.code_object_id == 0) continue;
         auto inst = table->get(addr.code_object_id, addr.address);
 
         auto   comment = inst->comment;
@@ -195,12 +195,13 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-std::vector<char> output_buffer(1ul<<30);
+std::vector<char>   output_buffer(1ul << 30);
 std::atomic<size_t> output_size{0};
 
-void parse_output()
+void
+parse_output()
 {
-    //std::ofstream("result.att", std::ios::binary).write(output_buffer.data(), output_size);
+    // std::ofstream("result.att", std::ios::binary).write(output_buffer.data(), output_size);
 
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
@@ -228,7 +229,8 @@ void parse_output()
         {
             auto* infos = (rocprofiler_thread_trace_decoder_info_t*) events;
             for(size_t i = 0; i < num_events; i++)
-                std::cerr << rocprofiler_thread_trace_decoder_info_string(decoder, infos[i]) << std::endl;
+                std::cerr << rocprofiler_thread_trace_decoder_info_string(decoder, infos[i])
+                          << std::endl;
         }
 
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
@@ -246,7 +248,8 @@ void parse_output()
         }
     };
 
-    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, output_buffer.data(), output_size, nullptr));
+    DECODER_CALL(
+        rocprofiler_trace_decode(decoder, parse, output_buffer.data(), output_size, nullptr));
     output_size = 0;
 };
 
@@ -262,25 +265,26 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
 {
     CHECK_NOTNULL(Results::latencies);
 
-    //file.write((char*)se_data, data_size); return;
+    // file.write((char*)se_data, data_size); return;
     // Ensure buffer is page-aligned and page-sized for O_DIRECT
-    //write(fd, se_data, data_size); return;
+    // write(fd, se_data, data_size); return;
 
     size_t location = output_size.fetch_add(data_size);
-    void* output = output_buffer.data();
+    void*  output   = output_buffer.data();
 
-    auto is_ptr_mod8 = [](void* data) { return (reinterpret_cast<std::uintptr_t>(data)%8) == 0; };
-    auto is_int_mod8 = [](size_t data) { return (data%8) == 0; };
+    auto is_ptr_mod8 = [](void* data) { return (reinterpret_cast<std::uintptr_t>(data) % 8) == 0; };
+    auto is_int_mod8 = [](size_t data) { return (data % 8) == 0; };
 
-    if (is_int_mod8(location) && is_int_mod8(data_size) && is_ptr_mod8(se_data) && is_ptr_mod8(output))
+    if(is_int_mod8(location) && is_int_mod8(data_size) && is_ptr_mod8(se_data) &&
+       is_ptr_mod8(output))
     {
-        for (size_t j=0; j<data_size/8; j++)
-            static_cast<uint64_t*>(output)[j+location/8] = static_cast<uint64_t*>(se_data)[j];
+        for(size_t j = 0; j < data_size / 8; j++)
+            static_cast<uint64_t*>(output)[j + location / 8] = static_cast<uint64_t*>(se_data)[j];
     }
     else
     {
-        for (size_t j=0; j<data_size; j++)
-            static_cast<char*>(output)[j+location] = static_cast<char*>(se_data)[j];
+        for(size_t j = 0; j < data_size; j++)
+            static_cast<char*>(output)[j + location] = static_cast<char*>(se_data)[j];
     }
 
     std::cout << "Size: " << data_size << std::endl;
@@ -310,9 +314,10 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u<<25});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u << 25});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE, ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
+                              ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,

@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -36,45 +36,49 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr double SQTT_BANDIWDTH  = 16E9f * 5;  // 16GB/s, times 5 for wiggle room
+constexpr double SQTT_BANDIWDTH = 16E9f * 5;  // 16GB/s, times 5 for wiggle room
 
-void worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t parameters)
+void
+worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t parameters)
 {
     auto& queue = *CHECK_NOTNULL(parameters.queue);
-    auto& flag = *CHECK_NOTNULL(parameters.running_flag);
+    auto& flag  = *CHECK_NOTNULL(parameters.running_flag);
 
-    const size_t buffer_size = queue.buffer_size;
-    const auto copy_fn = CHECK_NOTNULL(hsa::get_core_table())->hsa_memory_copy_fn;
-    const auto buffer = queue.get_double_buffer_memory();
-    const auto interval_microseconds = static_cast<size_t>(1E6 * buffer_size / SQTT_BANDIWDTH);
+    const size_t buffer_size           = queue.buffer_size;
+    const auto   copy_fn               = CHECK_NOTNULL(hsa::get_core_table())->hsa_memory_copy_fn;
+    const auto   buffer                = queue.get_double_buffer_memory();
+    const auto   interval_microseconds = static_cast<size_t>(1E6 * buffer_size / SQTT_BANDIWDTH);
 
-    std::atomic<bool> consumer_running{true};
+    std::atomic<bool>       consumer_running{true};
     std::condition_variable write_cv{};
-    std::atomic<size_t> write_index{0};
-    std::atomic<size_t> read_index{0};
+    std::atomic<size_t>     write_index{0};
+    std::atomic<size_t>     read_index{0};
 
     std::array<std::mutex, 2> mut{};
 
     static_assert(mut.size() == buffer.size());
 
-    auto consumer = std::thread{[&] () {
+    auto consumer = std::thread{[&]() {
         while(true)
         {
-            size_t parity = read_index%buffer.size();
+            size_t parity = read_index % buffer.size();
             {
                 std::unique_lock<std::mutex> lock(mut.at(parity));
-                write_cv.wait(lock, [&]() { return write_index > read_index || !consumer_running; });
+                write_cv.wait(lock,
+                              [&]() { return write_index > read_index || !consumer_running; });
             }
             if(!consumer_running && write_index <= read_index) return;
 
             auto t0 = std::chrono::system_clock::now();
-            //std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            // std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-            parameters.callback_fn(queue.agent_id, 0, buffer.at(parity), buffer_size, parameters.userdata);
+            parameters.callback_fn(
+                queue.agent_id, 0, buffer.at(parity), buffer_size, parameters.userdata);
             read_index.fetch_add(1);
 
             auto duration = (std::chrono::system_clock::now() - t0).count();
-            std::cout << "callback time taken: " << duration*1E-6f << "ms. BW: " << buffer_size * 1.0f / duration << " Gb/s\n";
+            std::cout << "callback time taken: " << duration * 1E-6f
+                      << "ms. BW: " << buffer_size * 1.0f / duration << " Gb/s\n";
         }
     }};
 
@@ -93,39 +97,42 @@ void worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t 
     // Wait until ATT start packets have been executed
     CHECK_NOTNULL(parameters.start_pkt_signal)->WaitOn();
 
-    while (flag.load())
+    while(flag.load())
     {
-        if (do_sleep) std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
-        do_sleep = true; // Reset value
+        if(do_sleep) std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
+        do_sleep = true;  // Reset value
 
         // Send query status packet and wait for result
         queue.Submit(&packets.query_status, true);
-        if (auto status = packets.query_buffer_status())
+        if(auto status = packets.query_buffer_status())
         {
             // Query returned buffer full: Send packet to trigger a buffer swap
             queue.Submit(&status->packet, false);
-            ROCP_FATAL_IF(status->size != buffer_size) << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
+            ROCP_FATAL_IF(status->size != buffer_size)
+                << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
             {
-                const bool should_stop = read_index+1 < write_index;
-                if (should_stop)
+                const bool should_stop = read_index + 1 < write_index;
+                if(should_stop)
                 {
                     ROCP_WARNING << "SQTT buffer full!";
-                    stop_trace(); // Check is_running so we dont send twice
-                    while (read_index+1 < write_index) std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    stop_trace();  // Check is_running so we dont send twice
+                    while(read_index + 1 < write_index)
+                        std::this_thread::sleep_for(std::chrono::microseconds(10));
                 }
 
                 {
-                    size_t parity = write_index%buffer.size();
+                    size_t                       parity = write_index % buffer.size();
                     std::unique_lock<std::mutex> lock(mut.at(parity));
 
                     auto err = copy_fn(buffer.at(parity), status->data, buffer_size);
-                    ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy returned error " << err;
+                    ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS)
+                        << "Memory copy returned error " << err;
                     write_index.fetch_add(1);
                     write_cv.notify_all();
                 }
 
-                if (should_stop)
+                if(should_stop)
                 {
                     stop_consumer();
                     return;
@@ -139,7 +146,7 @@ void worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t 
     stop_consumer();
 
     auto end_t0 = std::chrono::system_clock::now();
-    ROCP_WARNING << "Total trace size: " << (end_t0-start_t0).count()*1E-9f << " s.";
+    ROCP_WARNING << "Total trace size: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler

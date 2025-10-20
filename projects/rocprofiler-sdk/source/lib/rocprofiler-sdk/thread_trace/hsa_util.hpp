@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
 #include <atomic>
 
@@ -31,16 +31,13 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-
 class Signal
 {
 public:
     Signal(hsa_ext_amd_aql_pm4_packet_t* packet);
     ~Signal();
-    Signal(Signal& other)       = delete;
-    Signal(const Signal& other) = delete;
+    Signal(Signal& other) = delete;
     Signal& operator=(Signal& other) = delete;
-    Signal& operator=(const Signal& other) = delete;
 
     void WaitOn() const;
 
@@ -56,9 +53,10 @@ class HsaATTQueue
 public:
     HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size);
     ~HsaATTQueue();
+    HsaATTQueue(HsaATTQueue& other) = delete;
+    HsaATTQueue& operator=(HsaATTQueue& other) = delete;
 
-    std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
-                                   bool                          bWait) const;
+    std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const;
 
     template <typename VecType>
     std::unique_ptr<Signal> SubmitAndSignalLast(VecType vec)
@@ -74,7 +72,8 @@ public:
     std::array<void*, 2> get_double_buffer_memory() const { return double_buffer_memory; }
 
     const rocprofiler_agent_id_t agent_id;
-    const size_t buffer_size;
+    const size_t                 buffer_size;
+
 private:
     hsa_queue_t*         queue{nullptr};
     std::array<void*, 2> double_buffer_memory{};
