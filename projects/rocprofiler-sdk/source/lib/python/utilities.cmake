@@ -129,7 +129,7 @@ function(rocprofiler_roctx_python_bindings _VERSION)
     # Sanitizers require explicit linking to libpython because they need all symbols
     # resolved at link time. For normal builds, we avoid linking to allow manylinux
     # compatibility.
-    if(ROCPROFILER_MEMCHECK)
+    if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
         target_link_libraries(rocprofiler-sdk-roctx-python-bindings-${_VERSION}
                               PRIVATE ${Python3_LIBRARIES})
     endif()
@@ -215,7 +215,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     # Sanitizers require explicit linking to libpython because they need all symbols
     # resolved at link time. For normal builds, we avoid linking to allow manylinux
     # compatibility.
-    if(ROCPROFILER_MEMCHECK)
+    if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
         target_link_libraries(rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
                               PRIVATE ${Python3_LIBRARIES})
     endif()
