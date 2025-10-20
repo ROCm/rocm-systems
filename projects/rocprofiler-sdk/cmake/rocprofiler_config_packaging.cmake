@@ -58,14 +58,15 @@ list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate
-set(ROCPROFILER_COMPONENT_GROUPS "core" "docs" "tests" "roctx" "rocpd")
+set(ROCPROFILER_COMPONENT_GROUPS "core" "docs" "tests" "roctx" "rocpd" "benchmark")
 
-set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "benchmark"
-                                    "Development" "Unspecified")
+set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "Development"
+                                    "Unspecified")
 set(COMPONENT_GROUP_docs_COMPONENTS "docs")
 set(COMPONENT_GROUP_tests_COMPONENTS "tests")
 set(COMPONENT_GROUP_roctx_COMPONENTS "roctx")
 set(COMPONENT_GROUP_rocpd_COMPONENTS "rocpd")
+set(COMPONENT_GROUP_benchmark_COMPONENTS "benchmark")
 
 # variables for each component group. Note: eventually we will probably want to separate
 # the core to just be the runtime libraries, development to be the headers and cmake
@@ -76,6 +77,7 @@ set(COMPONENT_NAME_docs "rocprofiler-sdk-docs")
 set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
 set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
+set(COMPONENT_NAME_benchmark "rocprofiler-sdk-benchmark")
 
 set(COMPONENT_DEP_core "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
                        "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
@@ -86,12 +88,14 @@ set(COMPONENT_DEP_tests
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
+set(COMPONENT_DEP_benchmark "rocprofiler-sdk (>= ${PROJECT_VERSION})")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
 set(COMPONENT_DESC_docs "rocprofiler-sdk documentation")
 set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
 set(COMPONENT_DESC_roctx "ROCm Tools Extension library and headers")
 set(COMPONENT_DESC_rocpd "ROCm Profiling Data library and headers")
+set(COMPONENT_DESC_benchmark "rocprofiler-sdk benchmark")
 
 set(EXPECTED_PACKAGING_COMPONENTS 7)
 if(ROCPROFILER_BUILD_DOCS)
@@ -108,13 +112,19 @@ if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL EXPECTED_PACKAGING_COMPONENTS)
         )
 endif()
 
+# default values
+set(_DEB_PACKAGE_DEPENDS)
+set(_RPM_PACKAGE_REQUIRES)
+
+# append rocm-core dependency if option specified
 if(ROCM_DEP_ROCMCORE OR ROCPROFILER_DEP_ROCMCORE)
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
-    set(CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
-else()
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
-    set(CPACK_RPM_PACKAGE_REQUIRES "")
+    set(_DEB_PACKAGE_DEPENDS "rocm-core")
+    set(_RPM_PACKAGE_REQUIRES "rocm-core")
 endif()
+
+# support general cache variables
+list(APPEND _DEB_PACKAGE_DEPENDS ${ROCPROFILER_CPACK_DEBIAN_PACKAGE_DEPENDS})
+list(APPEND _RPM_PACKAGE_REQUIRES ${ROCPROFILER_CPACK_RPM_PACKAGE_REQUIRES})
 
 foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")
@@ -160,27 +170,25 @@ set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON) # generate list of shared libs prov
                                              # package
 set(CPACK_DEBIAN_TESTS_PACKAGE_SHLIBDEPS OFF) # disable for tests package
 set(CPACK_DEBIAN_TESTS_PACKAGE_GENERATE_SHLIBS OFF) # disable for tests package
-# Python extension modules are loadable modules, not shared libraries - disable shared
-# library processing
-set(CPACK_DEBIAN_ROCPD_PACKAGE_SHLIBDEPS OFF) # Python modules don't need dependency
-                                              # scanning
-set(CPACK_DEBIAN_ROCPD_PACKAGE_GENERATE_SHLIBS OFF) # Python modules don't need SONAME
-set(CPACK_DEBIAN_ROCTX_PACKAGE_SHLIBDEPS OFF) # Python modules don't need dependency
-                                              # scanning
-set(CPACK_DEBIAN_ROCTX_PACKAGE_GENERATE_SHLIBS OFF) # Python modules don't need SONAME
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS_POLICY ">=")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${CPACK_PACKAGE_NAME})
+if(rocm_version_DIR)
+    # library directory of ROCm install is treated as private directory for shlibdeps
+    # since most ROCm packages do not set CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS=ON
+    list(APPEND CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+         "${rocm_version_DIR}/${CMAKE_INSTALL_LIBDIR}")
+endif()
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
     set(CPACK_DEBIAN_PACKAGE_RELEASE
         "$ENV{CPACK_DEBIAN_PACKAGE_RELEASE}"
         CACHE STRING "" FORCE)
 endif()
 
-rocprofiler_set_package_depends(CPACK_DEBIAN_PACKAGE_DEPENDS
-                                "${CPACK_DEBIAN_PACKAGE_DEPENDS}" "Debian" OFF)
+rocprofiler_set_package_depends(CPACK_DEBIAN_PACKAGE_DEPENDS "${_DEB_PACKAGE_DEPENDS}"
+                                "Debian" OFF)
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_VERSION "${PROJECT_VERSION}")
 
@@ -202,14 +210,14 @@ set(CPACK_RPM_PACKAGE_AUTOREQ
 set(CPACK_RPM_PACKAGE_AUTOPROV ON) # generate list of shared libs provided by package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOREQ OFF) # disable for tests package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOPROV OFF) # disable for tests package
-# Python extension modules should not have automatic dependency generation
-set(CPACK_RPM_ROCPD_PACKAGE_AUTOPROV OFF) # Python modules don't provide shared libraries
-set(CPACK_RPM_ROCTX_PACKAGE_AUTOPROV OFF) # Python modules don't provide shared libraries
 if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
     set(CPACK_RPM_PACKAGE_RELEASE
         "$ENV{CPACK_RPM_PACKAGE_RELEASE}"
         CACHE STRING "" FORCE)
 endif()
+
+rocprofiler_set_package_depends(CPACK_RPM_PACKAGE_REQUIRES "${_RPM_PACKAGE_REQUIRES}"
+                                "RedHat" ON)
 
 # Get rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
