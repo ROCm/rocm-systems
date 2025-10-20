@@ -2,7 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## Unreleased
+## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
 
 ### Added
 * Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
