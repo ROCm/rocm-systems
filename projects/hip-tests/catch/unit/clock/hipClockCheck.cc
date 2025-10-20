@@ -276,6 +276,7 @@ int getEngineFreq(const hipUUID& uuid) {
     }
 
     numSocket++;
+    numProcessor = 0;
   }
 
   return result;
