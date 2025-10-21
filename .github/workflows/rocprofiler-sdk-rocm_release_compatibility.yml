@@ -80,8 +80,9 @@ jobs:
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt update
-        apt install wget
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        apt install -y wget
+        sudo mkdir -p /etc/apt/keyrings
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
         tee /etc/apt/sources.list.d/rocm.list << EOF
         deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0.2 jammy main
         deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.0.2/ubuntu jammy main
