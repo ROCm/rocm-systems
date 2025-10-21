@@ -197,11 +197,7 @@ if(submit_result OR submit_error)
     message(STATUS "Results available locally in: ${{CTEST_BINARY_DIRECTORY}}/Testing/")
 else()
     message(STATUS "Successfully submitted to CDash!")
-    VIEW_URL = args.submit_url.replace(
-        "/submit.php?project=",
-        "/index.php?project="
-    )
-    message(STATUS f"View at: {VIEW_URL}")
+    message(STATUS "View at: {args.submit_url.replace('/submit.php?project=', '/index.php?project=')}")
     message(STATUS "Build name: {args.build_name}")
 endif()
 
