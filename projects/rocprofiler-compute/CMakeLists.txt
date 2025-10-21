@@ -73,7 +73,7 @@ option(CHECK_PYTHON_DEPS "Verify necessary python dependencies" ON)
 if(CHECK_PYTHON_DEPS)
     # Python 3 is required
     message(STATUS "Detecting Python interpreter...")
-    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
     # Allow user-provided python search path
     if(DEFINED PYTHON_DEPS)
@@ -95,11 +95,6 @@ if(CHECK_PYTHON_DEPS)
         set(PACKAGE ${ARGV0})
         if(${ARGV0} STREQUAL "pyyaml")
             set(PACKAGE "yaml")
-        endif()
-        # Skip check for textual_fspicker
-        if(${package} STREQUAL "textual_fspicker")
-            message(STATUS "Skipping check for textual_fspicker")
-            return()
         endif()
         execute_process(
             COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
