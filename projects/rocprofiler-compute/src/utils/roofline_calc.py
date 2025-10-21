@@ -216,7 +216,6 @@ def calc_ceilings(
         dynamic_xmax = max_ai * 1.2 if max_ai > 0 else 1000
     else:
         dynamic_xmax = 1000
-    print(XMAX, dynamic_xmax)
 
     # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {

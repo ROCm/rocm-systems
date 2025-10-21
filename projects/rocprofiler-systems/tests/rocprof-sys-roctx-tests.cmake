@@ -20,23 +20,42 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+find_package(ROCmVersion)
+
+if(NOT ROCmVersion_FOUND)
+    message(
+        WARNING
+        "ROCmVersion_FOUND not found, skipping tests in ${CMAKE_CURRENT_LIST_FILE}"
+    )
+    return()
+endif()
+
 # -------------------------------------------------------------------------------------- #
 #
 # roctx tests
 #
 # -------------------------------------------------------------------------------------- #
+
 # Ensure ROCPROFSYS_ROCM_DOMAINS is defined
 set(_roctx_environment
     "${_base_environment}"
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch"
 )
+
+# Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    list(APPEND _roctx_environment "ROCPROFSYS_USE_ROCPD=ON")
+endif()
+
 rocprofiler_systems_add_test(
-    # SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE SKIP_RUNTIME
+    SKIP_RUNTIME
     NAME roctx-api
     TARGET roctx
     GPU ON
+    LABELS "roctx"
     ENVIRONMENT "${_roctx_environment}"
 )
+
 set(ROCTX_LABEL
     roctxMark_GPU_workload
     roctxRangePush_run_profiling
@@ -86,3 +105,18 @@ rocprofiler_systems_add_validation_test(
     LABELS "roctx"
     ARGS -l ${ROCTX_LABEL} -c ${ROCTX_COUNT} -d ${ROCTX_DEPTH} -p
 )
+
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    set_property(TEST roctx-api-sampling APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME roctx-api-sampling
+        ROCPD_FILE "rocpd.db"
+        ARGS --validation-rules
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/amd-smi-rules.json"
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/validation-rules.json"
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/sdk-metrics-rules.json"
+        LABELS "roctx;rocpd"
+    )
+endif()
