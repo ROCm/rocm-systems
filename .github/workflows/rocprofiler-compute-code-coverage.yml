@@ -29,12 +29,7 @@ jobs:
       - name: Generate matrix
         id: generate_matrix
         run: |
-          MATRIX='[
-            { "os-release": "22.04", "gpu": "mi355", "arch": "gfx950", "runner": "linux-mi355-1gpu-ossci-rocm", "code-name": "jammy" },
-            { "os-release": "24.04", "gpu": "mi355", "arch": "gfx950", "runner": "linux-mi355-1gpu-ossci-rocm", "code-name": "noble" },
-            { "os-release": "22.04", "gpu": "mi325", "arch": "gfx94X", "runner": "linux-mi325-1gpu-ossci-rocm", "code-name": "jammy" },
-            { "os-release": "24.04", "gpu": "mi325", "arch": "gfx94X", "runner": "linux-mi325-1gpu-ossci-rocm", "code-name": "noble" }
-          ]'
+          MATRIX='[{"os-release":"22.04","gpu":"mi355","arch":"gfx950","runner":"linux-mi355-1gpu-ossci-rocm","code-name":"jammy"},{"os-release":"24.04","gpu":"mi355","arch":"gfx950","runner":"linux-mi355-1gpu-ossci-rocm","code-name":"noble"},{"os-release":"22.04","gpu":"mi325","arch":"gfx94X","runner":"linux-mi325-1gpu-ossci-rocm","code-name":"jammy"},{"os-release":"24.04","gpu":"mi325","arch":"gfx94X","runner":"linux-mi325-1gpu-ossci-rocm","code-name":"noble"}]'
           
           if [ -n "${{ github.event.inputs.runner_matrix }}" ]; then
             MATRIX='${{ github.event.inputs.runner_matrix }}'
