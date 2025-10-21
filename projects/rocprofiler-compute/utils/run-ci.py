@@ -65,23 +65,15 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
     - Submit to CDash
     """
 
-    cache_entries = []
-    for arg in args.cmake_args:
-        if arg.startswith("-D"):
-            var = arg[2:]
-            if "=" in var:
-                name, value = var.split("=", 1)
-                var_type = "BOOL" if value in ["ON", "OFF"] else "STRING"
-                cache_entries.append(f'{name}:{var_type}={value}')
-
-    cmake_cache_section = ""
-    if cache_entries:
-        cache_string = "\n    ".join(cache_entries)
-        cmake_cache_section = f'''
-set(CTEST_INITIAL_CACHE "
-    {cache_string}
-")
-'''
+    cmake_options = [
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DCMAKE_PREFIX_PATH={os.environ.get('ROCM_PATH', '/opt/rocm')}",
+        "-DENABLE_TESTS=ON",
+        "-DINSTALL_TESTS=ON",
+        "-DENABLE_COVERAGE=ON",
+        f"-DPYTEST_NUMPROCS={args.pytest_numprocs}",
+    ]
+    cmake_opts_str = " ".join(f'"{opt}"' for opt in cmake_options)
 
     test_args = ""
     if args.ctest_args:
@@ -120,15 +112,13 @@ set(CTEST_BINARY_DIRECTORY "{binary_dir}")
 set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
 set(CTEST_BUILD_CONFIGURATION "Release")
 
-# Set CMake cache variables
-{cmake_cache_section}
-
 message(STATUS "Starting {args.mode} dashboard...")
 ctest_start({args.mode})
 
 # Configure step
 message(STATUS "Configuring project...")
 ctest_configure(
+    OPTIONS "{cmake_opts_str}"
     RETURN_VALUE configure_result
     CAPTURE_CMAKE_ERROR configure_error
 )
@@ -229,6 +219,7 @@ endif()
 
     return script_content
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="CI script for rocprofiler-compute: build, test, and upload to CDash"
@@ -302,21 +293,24 @@ def main():
         action="store_true",
         help="Generate dashboard script but don't execute",
     )
-
+    # --- Start of Change ---
+    # Add a dedicated argument for pytest parallelism
     parser.add_argument(
-        "cmake_args",
-        nargs="*",
-        help="Arguments to pass to CMake configure (use -- to separate CTest args)",
+        "--pytest-numprocs",
+        type=int,
+        default=4,
+        help="Number of parallel processes for pytest",
     )
+    # Remove the generic cmake_args and ctest_args parsing
+    # --- End of Change ---
 
     args, unknown = parser.parse_known_args()
 
-    if "--" in args.cmake_args:
-        separator_idx = args.cmake_args.index("--")
-        args.ctest_args = args.cmake_args[separator_idx + 1 :]
-        args.cmake_args = args.cmake_args[:separator_idx]
-    else:
-        args.ctest_args = []
+    # --- Start of Change ---
+    # Simplified argument handling
+    args.cmake_args = []
+    args.ctest_args = []
+    # --- End of Change ---
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
 
@@ -413,3 +407,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
