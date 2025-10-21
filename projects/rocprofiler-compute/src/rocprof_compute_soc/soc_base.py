@@ -101,6 +101,7 @@ class OmniSoC_Base:
 
     def populate_mspec(self) -> None:
         from utils.specs import run, search, total_sqc
+        import utils.amdhip as amdhip
 
         if (
             not hasattr(self._mspec, "rocminfo_lines")
@@ -108,30 +109,37 @@ class OmniSoC_Base:
         ):
             return
 
+        props = amdhip.getDeviceProperties(0)
+
         # load stats from rocminfo
         self._mspec.gpu_l1 = ""
         self._mspec.gpu_l2 = ""
 
         for linetext in self._mspec.rocminfo_lines:
-            key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key is not None:
-                self._mspec.gpu_l1 = key
-                continue
 
-            key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key is not None:
-                self._mspec.gpu_l2 = key
-                continue
+            # Unused
+            # key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            # if key is not None:
+            #     self._mspec.gpu_l1 = key
+            #     continue
 
-            key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
-            if key is not None:
-                self._mspec.max_sclk = key
-                continue
+            #Unused
+            # key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            # if key is not None:
+            #     self._mspec.gpu_l2 = key
+            #     continue
 
-            key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key is not None:
-                self._mspec.cu_per_gpu = key
-                continue
+            # key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
+            # if key is not None:
+            #     self._mspec.max_sclk = key
+            #     continue
+            self._mspec.max_sclk = props.clockRate / 1000.0
+
+            # key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            # if key is not None:
+            #     self._mspec.cu_per_gpu = key
+            #     continue
+            self._mspec.cu_per_gpu = props.multiProcessorCount
 
             key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
@@ -143,20 +151,24 @@ class OmniSoC_Base:
                 self._mspec.se_per_gpu = key
                 continue
 
-            key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key is not None:
-                self._mspec.wave_size = key
-                continue
+            # key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            # if key is not None:
+            #     self._mspec.wave_size = key
+            #     continue
+            self._mspec.wave_size = props.warpSize
 
-            key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key is not None:
-                self._mspec.workgroup_max_size = key
-                continue
+            # TODO: Is this dimensions or nuj
+            # key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            # if key is not None:
+            #     self._mspec.workgroup_max_size = key
+            #     continue
+            self._mspec.workgroup_max_size = props.maxThreadsPerBlock
 
-            key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key is not None:
-                self._mspec.max_waves_per_cu = key
-                break
+            # key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            # if key is not None:
+            #     self._mspec.max_waves_per_cu = key
+            #     break
+            self._mspec.max_waves_per_cu = props.maxThreadsPerBlock / props.warpSize
 
         if self._mspec.gpu_arch and self._mspec.cu_per_gpu and self._mspec.se_per_gpu:
             self._mspec.sqc_per_gpu = str(
