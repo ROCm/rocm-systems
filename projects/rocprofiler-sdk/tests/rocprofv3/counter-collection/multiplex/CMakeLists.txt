@@ -66,7 +66,6 @@ set_tests_properties(
                "${cc-env-pmc1}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
                TRUE)
 
 add_test(
@@ -87,7 +86,6 @@ set_tests_properties(
                rocprofv3-test-counter-collection-multiplex-execute
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
                TRUE)
 
 add_test(
@@ -108,5 +106,4 @@ set_tests_properties(
                rocprofv3-test-counter-collection-multiple-yaml-execute
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
                TRUE)
