@@ -217,6 +217,7 @@ jobs:
         run: |
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:/usr/local/bin:$PATH \
+          CC=/opt/rocm/llvm/bin/clang CXX=/opt/rocm/llvm/bin/clang++ \
           python3 ./source/scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
@@ -371,17 +372,16 @@ jobs:
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16
 
-      - name: Install requirements (venv)
+      - name: Install requirements
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           git config --global --add safe.directory '*'
-          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pip install --upgrade pip
-          python3 -m pip install --upgrade -r requirements.txt
+          CC=/usr/bin/gcc CXX=/usr/bin/g++ \
+            python3 -m pip install --upgrade -r requirements.txt
           rm -rf \
             ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
             ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
@@ -463,8 +463,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
-          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:$PATH \
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --mode ${CI_MODE} \
