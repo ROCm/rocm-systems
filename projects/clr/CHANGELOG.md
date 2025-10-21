@@ -7,54 +7,60 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `hipStreamCopyAttributes` Copies attributes from source stream to destination stream
+    - `hipLibraryLoadData`      creates library object from code
+    - `hipLibraryLoadFromFile`  creates library object from file
+    - `hipLibraryUnload`        unloads library
+    - `hipLibraryGetKernel`     gets a kernel from library
+    - `hipLibraryGetKernelCount` gets kernel count in library
+    - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
 
 ## HIP 7.1 for ROCm 7.1
 
 ### Added
 
 * New HIP APIs
-    - `hipModuleGetFunctionCount`  returns the number of functions within a module
-    - `hipMemsetD2D8` Used for setting 2D memory range with specified 8-bit values
-    - `hipMemsetD2D8Async` Used for setting 2D memory range with specified 8-bit values asynchronously
-    - `hipMemsetD2D16` Used for setting 2D memory range with specified 16-bit values
-    - `hipMemsetD2D16Async` Used for setting 2D memory range with specified 16-bit values asynchronously
-    - `hipMemsetD2D32` Used for setting 2D memory range with specified 32-bit values
-    - `hipMemsetD2D32Async` Used for setting 2D memory range with specified 32-bit values asynchronously
+    - `hipModuleGetFunctionCount` returns the number of functions within a module
+    - `hipMemsetD2D8` sets 2D memory range with specified 8-bit values
+    - `hipMemsetD2D8Async` asynchronously sets 2D memory range with specified 8-bit values
+    - `hipMemsetD2D16` sets 2D memory range with specified 16-bit values
+    - `hipMemsetD2D16Async` asynchronously sets 2D memory range with specified 16-bit values
+    - `hipMemsetD2D32` sets 2D memory range with specified 32-bit values
+    - `hipMemsetD2D32Async` asynchronously sets 2D memory range with specified 32-bit values
     - `hipStreamSetAttribute` sets attributes such as synchronization policy for a given stream
     - `hipStreamGetAttribute` returns attributes such as priority for a given stream
     - `hipModuleLoadFatBinary`  loads fatbin binary to a module
-    - `hipMemcpyBatchAsync` Performs a batch of 1D or 2D memory copied asynchronously
-    - `hipMemcpy3DBatchAsync` Performs a batch of 3D memory copied asynchronously
-    - `hipMemcpy3DPeer` Copies memory between devices
-    - `hipMemcpy3DPeerAsync`Copied memory between devices asynchronously
-    - `hipMemsetD2D32Async` Used for setting 2D memory range with specified 32-bit values
-      asynchronously
+    - `hipMemcpyBatchAsync` asynchronously performs a batch copy of 1D or 2D memory
+    - `hipMemcpy3DBatchAsync` asynchronously performs a batch copy of 3D memory
+    - `hipMemcpy3DPeer` copies memory between devices
+    - `hipMemcpy3DPeerAsync` asynchronously copies memory between devices
+    - `hipMemsetD2D32Async` asynchronously sets 2D memory range with specified 32-bit values
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
-    - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipMemAdvise_v2`         advises about the usage of a given memory range
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
-    - `hipLibraryLoadData`      Create library object from code
-    - `hipLibraryLoadFromFile`  Create library object from file
-    - `hipLibraryUnload`        Unload library
-    - `hipLibraryGetKernel`     Get a kernel from library
-    - `hipLibraryGetKernelCount` Get kernel count in library
-* Changed HIP APIs
-    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
-    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
-      hipMemAllocationType and allocates uncached memory if so
+* Support for the flag `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
+* Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
+
+### Resolved issues
+
+* A segmentation fault occurred in application when capturing the same HIP graph from multiple streams with cross-stream dependencies.  HIP runtime fixed an issue where a forked stream joined to a parent stream which was not originally created with the API `hipStreamBeginCapture`.
+* Different behavior of en-queuing command on a legacy stream during stream capture on AMD ROCM platform, compared with NVIDIA CUDA. HIP runtime now returns an error in this specific situation, to behave the same as CUDA.
+* Failure of memory access fault occurred in rocm-examples test suite. When Heterogeneous Memory Management (HMM) is not supported in the driver, `hipMallocManaged` will only allocate system memory in HIP runtime.
 
 ### Optimized
 
-* Improved hip module loading latency
-* Optimized kernel metadata retrieval during module post load
+* Improved hip module loading latency.
+* Optimized kernel metadata retrieval during module post load.
+* Optimized doorbell ring in HIP runtime, advantages the following for performance improvement,
+    - Makes efficient packet batching for HIP graph launch,
+    - Dynamic packet copying based on defined maximum threshold or power-of-2 staggered copy pattern,
+    - If timestamps are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
 
 ## HIP 7.0.2 for ROCm 7.0.2
 
 ### Added
 
-* Support for rocBLAS and hipBLASL targeting the new AMD GPUs gfx1150 and gfx1151.
 * Support for the `hipMemAllocationTypeUncached` flag, enabling developers to allocate uncached memory. This flag is now supported in the following APIs:
     - `hipMemGetAllocationGranularity` determines the recommended allocation granularity for uncached memory.
     - `hipMemCreate` allocates memory with uncached properties.

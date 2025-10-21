@@ -110,7 +110,7 @@ __device__ static inline int __hip_move_dpp_N(int src) {
   return __builtin_amdgcn_mov_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
 }
 
-inline __device__ const struct final {
+inline __device__ const struct {
   __device__ __attribute__((always_inline, const)) operator int() const noexcept {
     return __builtin_amdgcn_wavefrontsize();
   }
