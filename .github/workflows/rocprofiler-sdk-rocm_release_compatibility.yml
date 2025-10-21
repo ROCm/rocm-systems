@@ -80,15 +80,12 @@ jobs:
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt update
-        apt install -y wget
-        sudo mkdir -p /etc/apt/keyrings
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        tee /etc/apt/sources.list.d/rocm.list << EOF
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0.2 jammy main
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.0.2/ubuntu jammy main
-        EOF
-        apt update
-        apt install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
+        apt install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
+
+        # Older ROCm versions don't provide these packages.
+        apt install -y rccl-dev rccl-unittests || true
+        apt install -y rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test || true
+        
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -U --user -r requirements.txt
