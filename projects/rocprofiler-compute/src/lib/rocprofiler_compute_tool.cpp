@@ -694,7 +694,6 @@ int tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 }
 
 void tool_detach(void *user_data) {
-  assert(user_data);
   std::clog << "In tool detach\n";
 
   auto *tool_data = static_cast<tool_data_t *>(user_data);
@@ -708,6 +707,8 @@ rocprofiler_tool_configure_attach_result_t *rocprofiler_configure_attach(
   // parameters. The data returned is only used when attaching to a running
   // process.
 
+  std::clog << "[rocprofiler-compute] [" << __FUNCTION__
+            << "] Attach mode configuration called." << std::endl;
   // create configure data using experimental struct with attach/detach support
   static auto cfg = rocprofiler_tool_configure_attach_result_t{
       sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach,
