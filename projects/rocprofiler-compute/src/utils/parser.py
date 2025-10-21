@@ -1441,8 +1441,42 @@ def load_pc_sampling_data_per_kernel(
     dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[
         ["Kernel_Id", "Kernel_Name"]
     ]
+
+    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
     df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
     df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
+
+    # Drop dispatch_id
+    df.drop(columns=["dispatch_id"], inplace=True)
+
+    def merge_stall_reasons(
+        stall_reason_series: list[Optional[list[tuple[str, int]]]],
+    ) -> list[tuple[str, int]]:
+        """
+        Function to merge stall_reason lists (list of dicts -> merged & sorted dict)
+        """
+        merged_counts = {}
+
+        for entry in stall_reason_series:
+            if not entry:
+                continue
+            # Each entry is a list of (key, count) tuples
+            for k, v in entry:
+                if v > 0:
+                    merged_counts[k] = merged_counts.get(k, 0) + v
+
+        # Return sorted list of tuples by descending count
+        return sorted(merged_counts.items(), key=lambda item: item[1], reverse=True)
+
+    # Group and aggregate
+    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg({
+        "inst_index": "first",
+        "count": "sum",
+        "count_issued": "sum",
+        "count_stalled": "sum",
+        "stall_reason": merge_stall_reasons,
+        "kernel_name": "first",
+    })
 
     # Filter DataFrame to only include rows matching the requested kernel_name
     df = df[df["kernel_name"] == kernel_name]
@@ -1474,6 +1508,11 @@ def load_pc_sampling_data_per_kernel(
         else None
     )
 
+    kernel_name_unique = df["kernel_name"].iloc[0] if not df.empty else "Unknown"
+    # Rename "instruction" column to include kernel name
+    instruction_col_new_name = f"instruction (Kernel Name: {kernel_name_unique})"
+    df = df.rename(columns={"instruction": instruction_col_new_name})
+
     # Sorting and returning relevant columns depending on method and sorting_type
     if sorting_type == "offset":
         df_sorted = df.sort_values(by=["code_object_id", "offset"])
@@ -1488,8 +1527,7 @@ def load_pc_sampling_data_per_kernel(
     columns_to_return = (
         [
             "source_line",
-            "kernel_name",
-            "instruction",
+            instruction_col_new_name,
             "code_object_id",
             "offset",
             "count",
@@ -1497,8 +1535,7 @@ def load_pc_sampling_data_per_kernel(
         if method == "host_trap"
         else [
             "source_line",
-            "kernel_name",
-            "instruction",
+            instruction_col_new_name,
             "code_object_id",
             "offset",
             "count",
