@@ -520,7 +520,6 @@ def show_all(
                     continue
 
                 # Metrics baseline comparison mode: only show common metrics across runs
-                # We cannot guarantee that all runs have the same metrics.
                 if (
                     table_type == "metric_table"
                     and "Metric" in table_config["header"].values()
