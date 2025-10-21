@@ -231,8 +231,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
                             reinterpret_cast<const void*>(buff_v->callback),
                             buff_v->callback_data,
                             _headers.size(),
-                            (_headers.size() ? reinterpret_cast<const void*>(&_headers[0])
-                                             : nullptr),
+                            (!_headers.empty() ? static_cast<const void*>(&_headers[0]) : nullptr),
                             buff_v->drop_count.load());
                     }
                 });
