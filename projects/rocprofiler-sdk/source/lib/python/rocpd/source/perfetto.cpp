@@ -578,54 +578,21 @@ write_perfetto(
     // counter tracks
     {
         // sample counter tracks
-
-        auto get_full_category_name = [](std::string_view _category,
-                                         std::string      _name) -> std::string {
-            // Sanitize name to be alphanumeric and underscores only
-            auto it = std::find_if(_name.begin(), _name.end(), [](unsigned char c) {
-                return !(std::isalpha(c) || c == '_');
-            });
-
-            std::string _name_prefix =
-                it != _name.end() ? _name.substr(0, it - _name.begin()) : _name;
-
-            // Tramsform to lowercase
-            std::transform(_name_prefix.begin(),
-                           _name_prefix.end(),
-                           _name_prefix.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-
-            // Remove trailing underscores
-            size_t pos = _name_prefix.find_last_not_of('_');
-            if(pos != std::string::npos) _name_prefix = _name_prefix.substr(0, pos + 1);
-
-            if(_name_prefix == _category) return std::string(_category);
-
-            return std::string(_category) + "_" + _name_prefix;
-        };
-
-        struct CounterTrackEventData
-        {
-            double      value     = 0;
-            std::string unit_name = {};
-        };
-
-        std::map<std::string, std::map<uint64_t, std::pair<uint32_t, CounterTrackEventData>>>
-            pmc_event_values;
+        std::map<std::string, std::map<uint64_t, double>> pmc_event_values;
         for(auto ditr : pmc_event_gen)
         {
             for(const auto& itr : pmc_event_gen.get(ditr))
             {
-                pmc_event_values[get_full_category_name(itr.category, itr.name)][itr.event_id] = {
-                    itr.agent_abs_index, {itr.counter_value, itr.units}};
+                pmc_event_values[itr.symbol][itr.event_id] = itr.counter_value;
             }
         }
 
         struct CounterTrackData
         {
-            std::string                                 agent_type = {};
-            std::string                                 unit_name  = {};
-            std::map<rocprofiler_timestamp_t, uint64_t> samples    = {};
+            std::string                               agent_type  = {};
+            std::string                               unit_name   = {};
+            std::string                               description = {};
+            std::map<rocprofiler_timestamp_t, double> samples     = {};
         };
 
         auto sample_endpoints =
@@ -635,171 +602,58 @@ write_perfetto(
         {
             for(const auto& itr : sample_gen.get(ditr))
             {
-                auto full_category_name = get_full_category_name(itr.category, itr.name);
-                auto it                 = pmc_event_values.find(full_category_name);
-                if(it == pmc_event_values.end())
-                {
-                    // No PMC events found for sample name
-                    continue;
-                }
+                // For CPU tracks, use (TID, 0) as the track index
+                // For GPU tracks, use (0, agent_abs_index) as the track index
+                std::pair<uint32_t, uint32_t> track_index = {itr.tid, itr.agent_abs_index};
+                auto& track_data = sample_endpoints[itr.symbol][track_index];
 
-                auto& [agent_abs_index, sample_data] = it->second[itr.event_id];
-
-                const auto _agent = agent_data.at(agent_abs_index).first;
-
-                auto& track_data = sample_endpoints[full_category_name][{itr.tid, agent_abs_index}];
-
-                track_data.agent_type = _agent.type;
-                track_data.unit_name  = sample_data.unit_name;
-                track_data.samples.emplace(itr.timestamp, sample_data.value);
+                const auto _agent      = agent_data.at(itr.agent_abs_index).first;
+                track_data.agent_type  = _agent.type;
+                track_data.unit_name   = itr.units;
+                track_data.description = itr.short_description;
+                track_data.samples.emplace(itr.timestamp,
+                                           pmc_event_values[itr.symbol][itr.event_id]);
             }
         }
 
-        auto trace_sample_counter =
-            [&]<typename T>(std::map<std::pair<uint32_t, uint32_t>, CounterTrackData>& track_data) {
-                for(auto& [abs_index, data] : track_data)
-                {
-                    auto _track_name = std::stringstream{};
-                    if(track_data.size() == 1)
-                        _track_name << T::description << " (S)";
-                    else if(data.agent_type == "CPU")
-                        _track_name << T::description << " [" << abs_index.first - 1 << "] (S)";
-                    else if(data.agent_type == "GPU")
-                        _track_name << T::description << " [" << abs_index.second - 1 << "] (S)";
-                    else
-                        _track_name << T::description << " (S)";
-
-                    uint32_t multiplier = 1;
-                    if(data.unit_name == "KB")
-                        multiplier = 1000;
-                    else if(data.unit_name == "MB")
-                        multiplier = 1000 * 1000;
-                    else if(data.unit_name == "GB")
-                        multiplier = 1000 * 1000 * 1000;
-                    else if(data.unit_name == "sec")
-                        multiplier = 1000 * 1000 * 1000;
-
-                    auto _name         = _track_name.str();
-                    auto counter_track = ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                             .set_unit_name(data.unit_name.c_str())
-                                             .set_unit_multiplier(1)
-                                             .set_is_incremental(false);
-
-                    for(auto itr : data.samples)
-                    {
-                        TRACE_COUNTER(T::name, counter_track, itr.first, itr.second);
-                    }
-
-                    tracing_session->FlushBlocking();
-                }
-            };
-
-        for(auto& [category, track_data] : sample_endpoints)
+        for(auto& [symbol, track_data] : sample_endpoints)
         {
-            if(category == sdk::perfetto_category<sdk::category::thread_context_switch>::name)
+            for(auto& [track_index, data] : track_data)
             {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::thread_context_switch>>(
-                    track_data);
-            }
-            else if(category == sdk::perfetto_category<sdk::category::thread_cpu_time>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::thread_cpu_time>>(track_data);
-            }
-            else if(category == sdk::perfetto_category<sdk::category::thread_page_fault>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::thread_page_fault>>(track_data);
-            }
-            else if(category == sdk::perfetto_category<sdk::category::thread_peak_memory>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::thread_peak_memory>>(track_data);
-            }
-            else if(category ==
-                    sdk::perfetto_category<sdk::category::amd_smi_device_busy_gfx>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::amd_smi_device_busy_gfx>>(
-                    track_data);
-            }
-            else if(category == sdk::perfetto_category<sdk::category::amd_smi_device_busy_mm>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::amd_smi_device_busy_mm>>(
-                    track_data);
-            }
-            else if(category ==
-                    sdk::perfetto_category<sdk::category::amd_smi_device_busy_umc>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::amd_smi_device_busy_umc>>(
-                    track_data);
-            }
-            else if(category ==
-                    sdk::perfetto_category<sdk::category::amd_smi_device_memory_usage>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::amd_smi_device_memory_usage>>(
-                    track_data);
-            }
-            else if(category == sdk::perfetto_category<sdk::category::amd_smi_device_power>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::amd_smi_device_power>>(track_data);
-            }
-            else if(category == sdk::perfetto_category<sdk::category::amd_smi_device_temp>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::amd_smi_device_temp>>(track_data);
-            }
-            else if(category == sdk::perfetto_category<
-                                    sdk::category::cpu_frequency_process_context_switch>::name)
-            {
-                trace_sample_counter.operator()<
-                    sdk::perfetto_category<sdk::category::cpu_frequency_process_context_switch>>(
-                    track_data);
-            }
-            else if(category == sdk::perfetto_category<
-                                    sdk::category::cpu_frequency_process_kernel_cpu_time>::name)
-            {
-                trace_sample_counter.operator()<
-                    sdk::perfetto_category<sdk::category::cpu_frequency_process_kernel_cpu_time>>(
-                    track_data);
-            }
-            else if(category ==
-                    sdk::perfetto_category<sdk::category::cpu_frequency_process_memory_hwm>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::cpu_frequency_process_memory_hwm>>(
-                    track_data);
-            }
-            else if(category ==
-                    sdk::perfetto_category<sdk::category::cpu_frequency_process_page_fault>::name)
-            {
-                trace_sample_counter.
-                operator()<sdk::perfetto_category<sdk::category::cpu_frequency_process_page_fault>>(
-                    track_data);
-            }
-            else if(category == sdk::perfetto_category<
-                                    sdk::category::cpu_frequency_process_user_cpu_time>::name)
-            {
-                trace_sample_counter.operator()<
-                    sdk::perfetto_category<sdk::category::cpu_frequency_process_user_cpu_time>>(
-                    track_data);
-            }
-            else if(category == sdk::perfetto_category<
-                                    sdk::category::cpu_frequency_process_virtual_memory>::name)
-            {
-                trace_sample_counter.operator()<
-                    sdk::perfetto_category<sdk::category::cpu_frequency_process_virtual_memory>>(
-                    track_data);
-            }
-            else
-            {
-                trace_sample_counter.operator()<sdk::perfetto_category<sdk::category::none>>(
-                    track_data);
+                auto track_name = std::stringstream{};
+                track_name << data.description;
+
+                if(track_data.size() != 1)
+                {
+                    if(data.agent_type == "CPU")
+                        track_name << " [" << track_index.first - 1 << "]";
+                    else if(data.agent_type == "GPU")
+                        track_name << " [" << track_index.second - 1 << "]";
+                }
+
+                track_name << " (S)";
+
+                uint32_t divider = 1;
+                if(data.unit_name == "MB")
+                    divider = 1000 * 1000;
+                else if(data.unit_name == "sec")
+                    divider = 1000 * 1000 * 1000;
+
+                auto name          = track_name.str();
+                auto counter_track = ::perfetto::CounterTrack{name.c_str(), this_pid_track}
+                                         .set_unit_name(data.unit_name.c_str())
+                                         .set_unit_multiplier(1)
+                                         .set_is_incremental(false);
+
+                for(auto itr : data.samples)
+                {
+                    TRACE_COUNTER(sdk::perfetto_category<sdk::category::generic_sample>::name,
+                                  counter_track,
+                                  itr.first,
+                                  itr.second / divider);
+                }
+
+                tracing_session->FlushBlocking();
             }
         }
 
