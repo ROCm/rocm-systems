@@ -406,19 +406,19 @@ hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
     // Limit pool sizes to 2 GB on emulator
     const size_t max_pool_size = 2*1024*1024*1024UL;
     pool_i->size = std::min(pool_i->size, max_pool_size);
-  } else {
-    pool_size_limit = 0;
-    char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
-    if (pool_size_limit_str) {
-      char *end;
-      pool_size_limit = strtoul(pool_size_limit_str, &end, 10);
-      if (pool_size_limit > pool_i->size) {
-        std::cout << "Warning: Pool size override > than reported size (override:"
-          << pool_size_limit << " reported:" << pool_i->size << ")" << std::endl;
-      }
-      pool_i->size = pool_size_limit;
   }
-}
+
+  pool_size_limit = 0;
+  char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
+  if (pool_size_limit_str) {
+    char *end;
+    pool_size_limit = strtoul(pool_size_limit_str, &end, 10);
+    if (pool_size_limit > pool_i->size) {
+      std::cout << "Warning: Pool size override > than reported size (override:"
+        << pool_size_limit << " reported:" << pool_i->size << ")" << std::endl;
+    }
+    pool_i->size = pool_size_limit;
+  }
 
   err = hsa_amd_memory_pool_get_info(pool,
              HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
