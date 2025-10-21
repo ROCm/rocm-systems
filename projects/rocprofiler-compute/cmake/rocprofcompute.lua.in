@@ -12,7 +12,7 @@ whatis("Name: @PROJECT_NAME@")
 whatis("Version: @ROCPROFCOMPUTE_FULL_VERSION@")
 whatis("Keywords: Profiling, Performance, GPU")
 whatis("Description: tool for GPU performance profiling")
-whatis("URL: https://github.com/ROCm/rocprofiler-compute")
+whatis("URL: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute")
 
 -- Export environmental variables
 local topDir="@CMAKE_INSTALL_PREFIX@"

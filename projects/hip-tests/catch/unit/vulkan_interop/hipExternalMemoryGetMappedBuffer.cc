@@ -157,3 +157,41 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters") {
   }
 #endif
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipExternalMemoryGetMappedBuffer while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/vulkan_interop/hipExternalMemoryGetMappedBuffer.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Capture") {
+  VulkanTest vkt(enable_validation);
+  using type = uint8_t;
+  constexpr uint32_t count = 3;
+
+  const auto vk_storage =
+      vkt.CreateMappedStorage<type>(count, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+  if (vk_storage.memory == nullptr) {
+    return;
+  }
+  const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
+  hipExternalMemory_t hip_ext_memory;
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+
+  hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
+  external_mem_buffer_desc.size = vk_storage.size;
+  type* hip_dev_ptr = nullptr;
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipExternalMemoryGetMappedBuffer(reinterpret_cast<void**>(&hip_dev_ptr),
+                                                   hip_ext_memory, &external_mem_buffer_desc),
+                                                   memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+  REQUIRE(nullptr != hip_dev_ptr);
+}

@@ -538,9 +538,9 @@ write_otf2(const OTF2Session&                                  otf2_session,
                 get_hash_id(_name),
                 region_info{_name, OTF2_REGION_ROLE_DATA_TRANSFER, OTF2_PARADIGM_HIP});
 
-            auto _extended_agent = agent_data.at(itr.dst_agent_abs_index);
-            auto _agent_handle   = _extended_agent.types_agent.id.handle;
-            auto _evt_info       = event_info{location_base{
+            const auto& _extended_agent = agent_data.at(itr.dst_agent_abs_index);
+            auto        _agent_handle   = _extended_agent.types_agent.id.handle;
+            auto        _evt_info       = event_info{location_base{
                 process.pid, itr.tid, _agent_handle, ROCPROFILER_AGENT_MEMORY_COPY_TYPE}};
 
             auto agent_index_info = _extended_agent.agent_index;
@@ -587,8 +587,8 @@ write_otf2(const OTF2Session&                                  otf2_session,
                     get_hash_id(_alloc_operation),
                     region_info{_alloc_operation, OTF2_REGION_ROLE_ALLOCATE, OTF2_PARADIGM_HIP});
 
-                auto _extended_agent = agent_data.at(itr.agent_abs_index);
-                auto _handle         = _extended_agent.types_agent.id.handle;
+                const auto& _extended_agent = agent_data.at(itr.agent_abs_index);
+                auto        _handle         = _extended_agent.types_agent.id.handle;
 
                 auto _evt_info = event_info{location_base{
                     process.pid, itr.tid, _handle, ROCPROFILER_AGENT_MEMORY_ALLOC_TYPE}};
@@ -672,9 +672,9 @@ write_otf2(const OTF2Session&                                  otf2_session,
             _attr_str.emplace(get_hash_id(_perfetto_name), _perfetto_name);
             auto* _attrs = create_attribute_list_for_name(_perfetto_name);
 
-            auto _extended_agent  = agent_data.at(itr.agent_abs_index);
-            auto _handle          = _extended_agent.types_agent.id.handle;
-            auto agent_index_info = _extended_agent.agent_index;
+            const auto& _extended_agent  = agent_data.at(itr.agent_abs_index);
+            auto        _handle          = _extended_agent.types_agent.id.handle;
+            auto        agent_index_info = _extended_agent.agent_index;
 
             auto _evt_info = event_info{location_base{
                 process.pid, itr.tid, _handle, ROCPROFILER_AGENT_DISPATCH_TYPE, itr.queue_id}};

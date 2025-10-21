@@ -80,6 +80,9 @@ set_init_status(int);
 void
 set_fini_status(int);
 
+bool
+supports_attachment();
+
 // call tool_reattach function for all registered clients
 rocprofiler_status_t
 attach();
