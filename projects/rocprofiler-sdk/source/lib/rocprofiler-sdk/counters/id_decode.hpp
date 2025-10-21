@@ -71,15 +71,15 @@ rec_to_dim_pos(rocprofiler_counter_instance_id_t          id,
                rocprofiler_profile_counter_instance_types dim);
 
 // Counter ID encoding/decoding functions for agent-specific counter IDs
-inline void
+void
 set_agent_in_counter_id(rocprofiler_counter_id_t& id, uint8_t agent_logical_node_id);
-inline uint8_t
+uint8_t
 get_agent_from_counter_id(rocprofiler_counter_id_t id);
-inline void
+void
 set_base_metric_in_counter_id(rocprofiler_counter_id_t& id, uint16_t metric_id);
-inline uint16_t
+uint16_t
 get_base_metric_from_counter_id(rocprofiler_counter_id_t id);
-inline bool
+bool
 is_agent_encoded_counter_id(rocprofiler_counter_id_t id);
 
 // Counter ID encoding constants
@@ -227,13 +227,13 @@ rocprofiler::counters::set_agent_in_counter_id(rocprofiler_counter_id_t& id,
                 (static_cast<uint64_t>(agent_encoded) << AGENT_BIT_OFFSET);
 }
 
-inline uint8_t
+uint8_t
 rocprofiler::counters::get_agent_from_counter_id(rocprofiler_counter_id_t id)
 {
     return static_cast<uint8_t>((id.handle >> AGENT_BIT_OFFSET) & AGENT_MASK);
 }
 
-inline void
+void
 rocprofiler::counters::set_base_metric_in_counter_id(rocprofiler_counter_id_t& id,
                                                      uint16_t                  metric_id)
 {
@@ -242,13 +242,13 @@ rocprofiler::counters::set_base_metric_in_counter_id(rocprofiler_counter_id_t& i
     id.handle = (id.handle & ~BASE_METRIC_MASK) | metric_id;
 }
 
-inline uint16_t
+uint16_t
 rocprofiler::counters::get_base_metric_from_counter_id(rocprofiler_counter_id_t id)
 {
     return static_cast<uint16_t>(id.handle & BASE_METRIC_MASK);
 }
 
-inline bool
+bool
 rocprofiler::counters::is_agent_encoded_counter_id(rocprofiler_counter_id_t id)
 {
     // Check if agent bits are non-zero
