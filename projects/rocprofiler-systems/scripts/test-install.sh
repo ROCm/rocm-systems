@@ -178,17 +178,17 @@ test-rocprof-sys-sample()
     verbose-run which rocprof-sys-sample
     verbose-run ldd $(which rocprof-sys-sample)
     verbose-run rocprof-sys-sample --help
-    verbose-run rocprof-sys-sample --cputime 100 --realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/examples/python/external.py -n 5 -v 20
+    verbose-run rocprof-sys-sample --cputime 100 --realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/samples/python/external.py -n 5 -v 20
 }
 
 test-rocprof-sys-python()
 {
     verbose-run which rocprof-sys-python
     verbose-run rocprof-sys-python --help
-    verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/examples/python/builtin.py -n 5 -v 5
-    verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/examples/python/noprofile.py -n 5 -v 5
-    verbose-run rocprof-sys-python -- ${SOURCE_DIR}/examples/python/external.py -n 5 -v 5
-    verbose-run python3 ${SOURCE_DIR}/examples/python/source.py -n 5 -v 5
+    verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/samples/python/builtin.py -n 5 -v 5
+    verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/samples/python/noprofile.py -n 5 -v 5
+    verbose-run rocprof-sys-python -- ${SOURCE_DIR}/samples/python/external.py -n 5 -v 5
+    verbose-run python3 ${SOURCE_DIR}/samples/python/source.py -n 5 -v 5
 }
 
 test-rocprof-sys-rewrite()

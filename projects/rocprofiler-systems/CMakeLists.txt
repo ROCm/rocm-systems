@@ -155,8 +155,8 @@ else()
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc."
                                    OFF ADVANCED NO_FEATURE
     )
-    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
-                                   "Enable building the examples" OFF ADVANCED
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SAMPLES
+                                   "Enable building the samples" OFF ADVANCED
     )
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
                                    "Enable building the testing suite" OFF ADVANCED
@@ -244,7 +244,7 @@ elseif("$ENV{ROCPROFSYS_CI}")
 endif()
 
 if(ROCPROFSYS_BUILD_TESTING)
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_BUILD_SAMPLES ON CACHE BOOL "Enable building the samples" FORCE)
 endif()
 
 include(ProcessorCount)
@@ -454,13 +454,13 @@ include(ConfigInstall)
 
 # ------------------------------------------------------------------------------#
 #
-# examples
+# samples
 #
 # ------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_BUILD_EXAMPLES)
-    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME examples)
-    add_subdirectory(examples)
+if(ROCPROFSYS_BUILD_SAMPLES)
+    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME samples)
+    add_subdirectory(samples)
 endif()
 
 # ------------------------------------------------------------------------------#

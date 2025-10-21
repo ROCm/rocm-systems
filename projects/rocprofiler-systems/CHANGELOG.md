@@ -11,6 +11,13 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added tracing of VAAPI, MPI and host events inside `rocpd` output database.
 
+### Changed
+
+- Terminology change: example -> sample
+  - Updated directory structure: examples/ -> samples/
+  - `ROCPROFSYS_BUILD_EXAMPLES` -> `ROCPROFSYS_BUILD_SAMPLES`
+  - `ROCPROFSYS_DISABLE_EXAMPLES` -> `ROCPROFSYS_DISABLE_SAMPLES`
+
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added

@@ -78,7 +78,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
         set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE "51200")
-        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;.*external/.*;.*examples/.*")
+        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;.*external/.*;.*samples/.*")
 
         set(CTEST_SITE "{SITE}")
         set(CTEST_BUILD_NAME "{NAME}")

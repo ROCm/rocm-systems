@@ -23,7 +23,7 @@
 # -------------------------------------------------------------------------------------- #
 #
 # python console script tests
-#   * These tests do not use the code present in examples/python
+#   * These tests do not use the code present in samples/python
 #
 # -------------------------------------------------------------------------------------- #
 

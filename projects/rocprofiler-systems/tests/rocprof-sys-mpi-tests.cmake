@@ -33,7 +33,7 @@ endif()
 rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME "mpi"
-    TARGET mpi-example
+    TARGET mpi-sample
     MPI ON
     NUM_PROCS 2
     REWRITE_ARGS
@@ -57,7 +57,7 @@ rocprofiler_systems_add_test(
 rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME "mpi-flat-mpip"
-    TARGET mpi-example
+    TARGET mpi-sample
     MPI ON
     NUM_PROCS 2
     LABELS "mpip"
@@ -80,7 +80,7 @@ rocprofiler_systems_add_test(
 rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME "mpi-flat"
-    TARGET mpi-example
+    TARGET mpi-sample
     MPI ON
     NUM_PROCS 2
     LABELS "mpip"
@@ -130,7 +130,7 @@ set(_mpip_all2all_environment
 )
 
 foreach(
-    _EXAMPLE
+    _SAMPLE
     all2all
     allgather
     allreduce
@@ -139,18 +139,18 @@ foreach(
     scatter-gather
     send-recv
 )
-    if("${_mpip_${_EXAMPLE}_environment}" STREQUAL "")
-        set(_mpip_${_EXAMPLE}_environment "${_mpip_environment}")
+    if("${_mpip_${_SAMPLE}_environment}" STREQUAL "")
+        set(_mpip_${_SAMPLE}_environment "${_mpip_environment}")
     endif()
     rocprofiler_systems_add_test(
         SKIP_RUNTIME SKIP_SAMPLING
-        NAME "mpi-${_EXAMPLE}"
-        TARGET mpi-${_EXAMPLE}
+        NAME "mpi-${_SAMPLE}"
+        TARGET mpi-${_SAMPLE}
         MPI ON
         NUM_PROCS 2
         LABELS "mpip"
         REWRITE_ARGS -e -v 2 --label file line --min-instructions 0
         RUN_ARGS 30
-        ENVIRONMENT "${_mpip_${_EXAMPLE}_environment}"
+        ENVIRONMENT "${_mpip_${_SAMPLE}_environment}"
     )
 endforeach()

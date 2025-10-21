@@ -68,7 +68,7 @@
 	path = projects/rocprofiler-systems/external/PTL
 	url = https://github.com/jrmadsen/PTL.git
 [submodule "projects/rocprofiler-systems/external/kokkos"]
-	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
+	path = projects/rocprofiler-systems/samples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
 [submodule "projects/rocprofiler-systems/external/papi"]
 	path = projects/rocprofiler-systems/external/papi
@@ -76,6 +76,6 @@
 [submodule "projects/rocprofiler-systems/external/pybind11"]
 	path = projects/rocprofiler-systems/external/pybind11
 	url = https://github.com/jrmadsen/pybind11.git
-[submodule "projects/rocprofiler-systems/examples/openmp/external/ompvv"]
-	path = projects/rocprofiler-systems/examples/openmp/external/ompvv
+[submodule "projects/rocprofiler-systems/samples/openmp/external/ompvv"]
+	path = projects/rocprofiler-systems/samples/openmp/external/ompvv
 	url = https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git

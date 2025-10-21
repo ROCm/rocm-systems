@@ -135,7 +135,7 @@ EXCLUDE                =
 EXCLUDE_SYMLINKS       = YES
 EXCLUDE_PATTERNS       = */.git/* \
                          ../../external/* \
-                         ../../examples/* \
+                         ../../samples/* \
                          ../../tests/*
 EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFSYS_ATTRIBUTE" \
@@ -144,7 +144,7 @@ EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFSYS_HIDDEN_API" \
                          "SpaceHandle" \
                          "KokkosPDevice*"
-EXAMPLE_PATH           = ../../examples
+EXAMPLE_PATH           = ../../samples
 EXAMPLE_PATTERNS       = *.h \
                          *.hh \
                          *.hpp \

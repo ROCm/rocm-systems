@@ -61,7 +61,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
   .. grid-item-card:: Tutorials
 
-    * `GitHub examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples>`_
+    * `GitHub samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/samples>`_
     * :doc:`Video tutorials <./tutorials/video-tutorials>`
 
 To contribute to the documentation, refer to

@@ -43,8 +43,8 @@ if [ -d "$(realpath /tmp)" ]; then
     export TMPDIR
 fi
 
-: ${EXAMPLE_DIR:=examples}
-: ${EXAMPLE_NAME:=user-api}
+: ${SAMPLE_DIR:=samples}
+: ${SAMPLE_NAME:=user-api}
 : ${SOURCE_DIR:=$(mktemp -t -d rocprof-sys-test-source-XXXX)}
 : ${BINARY_DIR:=$(mktemp -t -d rocprof-sys-test-build-XXXX)}
 : ${INSTALL_DIR:=$(mktemp -t -d rocprof-sys-install-XXXX)}
@@ -54,9 +54,9 @@ usage()
 {
     print_option() { printf "    --%-10s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "${4}"; }
     echo "Options:"
-    print_option example-name "<NAME>" "Name of the example project" "${EXAMPLE_NAME}"
-    print_option example-dir "<PATH>" "Directory containing example" "${EXAMPLE_DIR}"
-    print_option source-dir "<PATH>" "Location to copy example to" "${SOURCE_DIR}"
+    print_option sample-name "<NAME>" "Name of the sample project" "${SAMPLE_NAME}"
+    print_option sample-dir "<PATH>" "Directory containing sample" "${SAMPLE_DIR}"
+    print_option source-dir "<PATH>" "Location to copy sample to" "${SOURCE_DIR}"
     print_option binary-dir "<PATH>" "Location to build" "${BINARY_DIR}"
     print_option install-dir "<PATH>" "Location of rocprofiler-systems installation" "${INSTALL_DIR}"
     print_option install-script "<FILEPATH>" "Absolute path to the installer script" ""
@@ -82,12 +82,12 @@ do
     fi
 
     case "${ARG}" in
-        --example-name)
-            EXAMPLE_NAME=${VAL}
+        --sample-name)
+            SAMPLE_NAME=${VAL}
             continue
             ;;
-        --example-dir)
-            EXAMPLE_DIR=${VAL}
+        --sample-dir)
+            SAMPLE_DIR=${VAL}
             continue
             ;;
         --source-dir)
@@ -129,7 +129,7 @@ if [ ! -d ${SOURCE_DIR} ]; then
     verbose-run mkdir -p ${SOURCE_DIR}
 fi
 
-verbose-run cp -v -r ${EXAMPLE_DIR}/${EXAMPLE_NAME}/* ${SOURCE_DIR}/
+verbose-run cp -v -r ${SAMPLE_DIR}/${SAMPLE_NAME}/* ${SOURCE_DIR}/
 
 verbose-run pushd ${SOURCE_DIR}
 

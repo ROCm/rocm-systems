@@ -71,39 +71,39 @@ if(
         ${PROJECT_SOURCE_DIR}/source/*.h.in
     )
     file(
-        GLOB_RECURSE examples
-        ${PROJECT_SOURCE_DIR}/examples/*.cpp
-        ${PROJECT_SOURCE_DIR}/examples/*.c
-        ${PROJECT_SOURCE_DIR}/examples/*.hpp
-        ${PROJECT_SOURCE_DIR}/examples/*.h
+        GLOB_RECURSE samples
+        ${PROJECT_SOURCE_DIR}/samples/*.cpp
+        ${PROJECT_SOURCE_DIR}/samples/*.c
+        ${PROJECT_SOURCE_DIR}/samples/*.hpp
+        ${PROJECT_SOURCE_DIR}/samples/*.h
     )
     file(
         GLOB_RECURSE tests_source
         ${PROJECT_SOURCE_DIR}/tests/source/*.cpp
         ${PROJECT_SOURCE_DIR}/tests/source/*.hpp
     )
-    file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
+    file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/samples/lulesh/external/kokkos/*)
     file(
         GLOB_RECURSE cmake_files
         ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
-        ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
+        ${PROJECT_SOURCE_DIR}/samples/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/source/*.cmake
-        ${PROJECT_SOURCE_DIR}/examples/*.cmake
+        ${PROJECT_SOURCE_DIR}/samples/*.cmake
         ${PROJECT_SOURCE_DIR}/tests/*.cmake
         ${PROJECT_SOURCE_DIR}/cmake/*.cmake
         ${PROJECT_SOURCE_DIR}/source/*.cmake
     )
     list(APPEND cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)
     if(external)
-        list(REMOVE_ITEM examples ${external})
+        list(REMOVE_ITEM samples ${external})
         list(REMOVE_ITEM cmake_files ${external})
     endif()
 
     if(ROCPROFSYS_CLANG_FORMAT_EXE)
         add_custom_target(
             format-rocprofiler-systems-source
-            ${ROCPROFSYS_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
+            ${ROCPROFSYS_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${samples}
             ${tests_source}
             COMMENT
                 "[rocprofiler-systems] Running C++ formatter ${ROCPROFSYS_CLANG_FORMAT_EXE}..."

@@ -29,7 +29,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-external
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        FILE ${CMAKE_SOURCE_DIR}/samples/python/external.py
         PROFILE_ARGS "--label" "file"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -39,7 +39,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-external-exclude-inefficient
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        FILE ${CMAKE_SOURCE_DIR}/samples/python/external.py
         PROFILE_ARGS -E "^inefficient$"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -49,7 +49,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-builtin
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
+        FILE ${CMAKE_SOURCE_DIR}/samples/python/builtin.py
         PROFILE_ARGS "-b" "--label" "file" "line"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -59,7 +59,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-builtin-noprofile
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/noprofile.py
+        FILE ${CMAKE_SOURCE_DIR}/samples/python/noprofile.py
         PROFILE_ARGS "-b" "--label" "file"
         RUN_ARGS -v 15 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -70,7 +70,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-source
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
+        FILE ${CMAKE_SOURCE_DIR}/samples/python/source.py
         RUN_ARGS -v 5 -n 5 -s 3
         ENVIRONMENT "${_python_environment}"
     )
@@ -80,7 +80,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-code-coverage
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/code-coverage/code-coverage.py
+        FILE ${CMAKE_SOURCE_DIR}/samples/code-coverage/code-coverage.py
         RUN_ARGS
             -i
             ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json

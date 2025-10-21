@@ -66,8 +66,8 @@ subtrees:
 
   - caption: Tutorials
     entries:
-    - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples
-      title: GitHub examples
+    - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/samples
+      title: GitHub samples
     - file: tutorials/video-tutorials.rst
       title: Video tutorials
 
