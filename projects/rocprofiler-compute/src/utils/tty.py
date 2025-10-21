@@ -501,7 +501,7 @@ def show_all(
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels
-                # - Always show panels with id <= 100
+                # - Panels with id <= 100 are exempted from this filtering
                 if (
                     not args.filter_metrics
                     and filter_panel_ids
