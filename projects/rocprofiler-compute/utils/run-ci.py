@@ -118,7 +118,6 @@ set(CTEST_BUILD_CONFIGURATION "Release")
 # Set CMake cache variables
 {cmake_cache_section}
 
-# Start dashboard
 message(STATUS "Starting {args.mode} dashboard...")
 ctest_start({args.mode})
 
@@ -195,7 +194,7 @@ if(submit_result OR submit_error)
     message(STATUS "Results available locally in: ${{CTEST_BINARY_DIRECTORY}}/Testing/")
 else()
     message(STATUS "Successfully submitted to CDash!")
-    message(STATUS "View at: {args.submit_url.replace('/submit.php?project=', '/index.php?project=')}")
+    message(STATUS "View at: {args.submit_url.replace("/submit.php?project=", "/index.php?project=")}")
     message(STATUS "Build name: {args.build_name}")
 endif()
 
