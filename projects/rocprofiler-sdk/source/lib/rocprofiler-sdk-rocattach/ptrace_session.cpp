@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "ptrace_session.hpp"
-#include "details/filesystem.hpp"
 
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
 #include <dlfcn.h>
@@ -47,6 +47,8 @@ static_assert(sizeof(void*) == 8);
 #ifndef __x86_64__
 static_assert(false);
 #endif
+
+namespace fs = rocprofiler::common::filesystem;
 
 namespace
 {
