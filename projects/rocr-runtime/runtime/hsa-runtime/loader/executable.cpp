@@ -1614,6 +1614,8 @@ uint64_t ExecutableImpl::SymbolAddress(hsa_agent_t agent, code::Symbol* sym)
 uint64_t ExecutableImpl::SymbolAddress(hsa_agent_t agent, elf::Symbol* sym)
 {
   elf::Section* sec = sym->section();
+  if(!sec) { return NULL; }
+  
   Segment* seg = SectionSegment(agent, sec);
   uint64_t vaddr = sec->addr() + sym->value();
   return nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(vaddr);
