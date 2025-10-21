@@ -1,6 +1,3 @@
-find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}")
-include(ROCMInstallTargets)
-
 # hip_add_executable: Create HIP executable with EXCLUDE_FROM_ALL
 # Required: NAME, SOURCE
 # Optional: ADD_TO_TARGET, COMPILE_FLAGS, LINKER_LIBS
