@@ -40,6 +40,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/cxx/constants.hpp>
 
 #include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
@@ -151,8 +152,8 @@ struct async_copy_data
     hsa_signal_t                        orig_signal    = {};
     hsa_signal_t                        rocp_signal    = {};
     rocprofiler_thread_id_t             tid            = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent      = agent::null_agent_id;
-    rocprofiler_agent_id_t              src_agent      = agent::null_agent_id;
+    rocprofiler_agent_id_t              dst_agent      = sdk::null_agent_id;
+    rocprofiler_agent_id_t              src_agent      = sdk::null_agent_id;
     rocprofiler_address_t               dst_address    = {.value = 0};
     rocprofiler_address_t               src_address    = {.value = 0};
     rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;

@@ -43,4 +43,3 @@
 # VSCode Workspaces
 *.code-workspace
 /rocprofiler-sdk-build
-build-pr1440/
