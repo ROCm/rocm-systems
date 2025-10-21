@@ -1790,8 +1790,6 @@ store_sampling_data_in_cache(
     [[maybe_unused]] const std::vector<overflow_sampling_data>& _overflow_data)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    std::cout << "timer data size: " << _timer_data.size()
-              << " ; overflow data size:" << _overflow_data.size() << std::endl;
     cache_sampling_data(_tid, _timer_data, _overflow_data);
     cache_backtrace_metrics(_tid, _timer_data);
 #endif
