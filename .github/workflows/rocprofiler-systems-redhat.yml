@@ -93,14 +93,14 @@ jobs:
           if [ "${OS_VERSION_MAJOR}" -eq 9 ]; then OS_RELEASE=9.6; else OS_RELEASE=${{ matrix.os-release }}; fi
           dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
           tee /etc/yum.repos.d/rocm.repo <<EOF
-            [rocm]
-            name=ROCm $ROCM_VERSION repository
-            baseurl=https://repo.radeon.com/rocm/$RPM_TAG/$ROCM_VERSION/main
-            enabled=1
-            priority=50
-            gpgcheck=1
-            gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-            EOF
+          [rocm]
+          name=ROCm $ROCM_VERSION repository
+          baseurl=https://repo.radeon.com/rocm/$RPM_TAG/$ROCM_VERSION/main
+          enabled=1
+          priority=50
+          gpgcheck=1
+          gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+          EOF
           cat /etc/yum.repos.d/rocm.repo
           dnf clean all
           yum install -y rocm-dev
