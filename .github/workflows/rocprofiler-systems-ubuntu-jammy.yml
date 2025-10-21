@@ -132,7 +132,7 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv" \
+          -DROCPROFSYS_DISABLE_SAMPLES="transpose;rccl;openmp-target;openmp-vv" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \
@@ -253,7 +253,7 @@ jobs:
           echo "/opt/rocm/bin" >> $GITHUB_PATH
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-          /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
+          /opt/rocm/bin/hipcc -O3 -c ./samples/transpose/transpose.cpp -o /tmp/transpose.o
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -311,7 +311,7 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv" \
+          -DROCPROFSYS_DISABLE_SAMPLES="transpose;rccl;openmp-target;openmp-vv" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \
@@ -435,7 +435,7 @@ jobs:
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_USE_ROCM=OFF \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
+          -DROCPROFSYS_DISABLE_SAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"

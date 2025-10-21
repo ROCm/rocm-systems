@@ -137,7 +137,7 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         set +e
-        FILES=$(find source examples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
+        FILES=$(find source samples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
         FORMAT_OUT=$(clang-format-18 -output-replacements-xml ${FILES})
         RET=$(echo ${FORMAT_OUT} | grep -c '<replacement ')
         if [ "${RET}" -ne 0 ]; then
@@ -158,7 +158,7 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         set +e
-        FILES=$(find source examples -type f | egrep '\.(hpp|cpp)(|\.in)$')
+        FILES=$(find source samples -type f | egrep '\.(hpp|cpp)(|\.in)$')
         MATCHES=$(egrep 'include "timemory/|include <bits/' ${FILES})
         if [ -n "${MATCHES}" ]; then
           echo -e "\nError! Included timemory header with quotes or bits folder included\n"
