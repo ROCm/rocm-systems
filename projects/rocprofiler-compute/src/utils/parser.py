@@ -29,7 +29,7 @@ import json
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import astunparse
 import numpy as np
@@ -1229,8 +1229,8 @@ def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, No
 
 
 def search_pc_sampling_record(
-    records: Union[List[Dict], Dict],
-) -> Optional[List[Tuple]]:
+    records: Union[list[dict], dict],
+) -> Optional[list[tuple]]:
     """
     Search PC sampling records.
 
@@ -1255,7 +1255,7 @@ def search_pc_sampling_record(
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
-    # Normalize records to a list if it's a single dict
+    # records should always be a list of dict
     if isinstance(records, dict):
         records = [records]
 
@@ -1279,7 +1279,7 @@ def search_pc_sampling_record(
         "LAST": 0,
     }
 
-    grouped_data: Dict[Tuple, List] = {}
+    grouped_data: dict[tuple, list] = {}
 
     for item in records:
         record = item.get("record", {})
@@ -1346,7 +1346,7 @@ def search_pc_sampling_record(
                 inst_index,
             ), info in grouped_data.items()
         ],
-        key=lambda x: (x[0], x[1], x[2]),  # sort by code_object_id, offset, inst_index
+        key=lambda x: (x[0], x[1], x[2]),
     )
 
     return sorted_counts
