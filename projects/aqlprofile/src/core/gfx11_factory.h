@@ -51,6 +51,7 @@ class Gfx11Factory : public Pm4Factory {
 class Gfx115Factory : public Gfx11Factory {
  public:
   explicit Gfx115Factory(const AgentInfo* agent_info);
+  virtual ~Gfx115Factory();
 
  protected:
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];

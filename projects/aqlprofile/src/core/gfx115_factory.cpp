@@ -47,6 +47,15 @@ Gfx115Factory::Gfx115Factory(const AgentInfo* agent_info)
   }
 }
 
+Gfx115Factory::~Gfx115Factory() {
+  for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i) {
+    if (block_table_[i] != NULL) {
+      delete block_table_[i];
+      block_table_[i] = NULL;
+    }
+  }
+}
+
 Pm4Factory* Pm4Factory::Gfx115Create(const AgentInfo* agent_info) {
   auto p = new Gfx115Factory(agent_info);
   if (p == NULL) throw aql_profile_exc_msg("Gfx115Factory allocation failed");
