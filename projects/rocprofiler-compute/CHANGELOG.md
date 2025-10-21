@@ -8,6 +8,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
+
 ### Removed
 
 ### Optimized
@@ -96,8 +98,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Changed the basic (default) view of TUI from aggregated analysis data to individual kernel analysis data.
 
-* Updated Roofline plots to handle and apply kernel filtering.
-
 * Update `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
   * Theoretical Bandwidth (section 1202)
   * L1I-L2 Bandwidth (section 1303)
@@ -145,8 +145,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
   * Use ROCPROF=rocprofv3 to use rocprofv3 interface
-
-* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
 
 ### Removed
 
