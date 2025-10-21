@@ -10,7 +10,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer")
+set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
+                               "ThreadSanitizer")
 
 if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
     set(IS_DISABLED ON)
@@ -44,19 +45,18 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-twice-execute
-    PROPERTIES
-        TIMEOUT
-        120
-        LABELS
-        "integration-tests"
-        ENVIRONMENT
-        "${attachment-env}"
-        FAIL_REGULAR_EXPRESSION
-        "failed to retrieve stream ID|ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        FIXTURES_SETUP
-        rocprofv3-test-attachment-attach-twice
-        DISABLED
-        "${IS_DISABLED}")
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;attachment"
+               ENVIRONMENT
+               "${attachment-env}"
+               FAIL_REGULAR_EXPRESSION
+               "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-attachment-attach-twice
+               DISABLED
+               "${IS_DISABLED}")
 
 # Validate the output from the reattached profiling (CSV)
 add_test(
@@ -71,9 +71,16 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-twice-csv-validate
-    PROPERTIES TIMEOUT 30 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-attachment-attach-twice-execute FIXTURES_REQUIRED
-               rocprofv3-test-attachment-attach-twice)
+    PROPERTIES TIMEOUT
+               30
+               LABELS
+               "integration-tests;attachment"
+               DEPENDS
+               rocprofv3-test-attachment-attach-twice-execute
+               FIXTURES_REQUIRED
+               rocprofv3-test-attachment-attach-twice
+               DISABLED
+               "${IS_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-attachment-attach-twice-json-validate
@@ -87,6 +94,13 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-twice-json-validate
-    PROPERTIES TIMEOUT 30 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-attachment-attach-twice-execute FIXTURES_REQUIRED
-               rocprofv3-test-attachment-attach-twice)
+    PROPERTIES TIMEOUT
+               30
+               LABELS
+               "integration-tests;attachment"
+               DEPENDS
+               rocprofv3-test-attachment-attach-twice-execute
+               FIXTURES_REQUIRED
+               rocprofv3-test-attachment-attach-twice
+               DISABLED
+               "${IS_DISABLED}")

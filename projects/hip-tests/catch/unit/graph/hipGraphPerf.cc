@@ -1569,6 +1569,8 @@ static void hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams(const hipStre
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(childGraph1));
+  HIP_CHECK(hipGraphDestroy(childGraph2));
 }
 
 static void hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams_Kernel(
@@ -1688,6 +1690,8 @@ static void hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams_Kernel(
   HipTest::freeArrays(A_d1, B_d1, C_d1, A_h1, B_h1, C_h1, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(childGraph1));
+  HIP_CHECK(hipGraphDestroy(childGraph2));
 }
 
 static void hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams_mKernel(
@@ -1824,6 +1828,8 @@ static void hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams_mKernel(
   HipTest::freeArrays(A_d1, B_d1, C_d1, A_h1, B_h1, C_h1, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(childGraph1));
+  HIP_CHECK(hipGraphDestroy(childGraph2));
 }
 
 /**

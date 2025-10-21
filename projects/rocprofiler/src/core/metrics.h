@@ -213,7 +213,6 @@ class MetricsDict {
           "gfx1030", "gfx1031", "gfx1032",  // Navi2x
           "gfx1100", "gfx1101", "gfx1102",  // Navi3x
           "gfx1150", "gfx1151",
-          "gfx1200", "gfx1201",             // Navi4x
       };
       if (supported_agent_names.find(agent_name_) != supported_agent_names.end()) {
         ImportMetrics(agent_info, agent_name_);

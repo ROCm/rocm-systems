@@ -6,6 +6,25 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Known issues
+
+### Upcoming changes
+
+## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
+
+### Added
+* Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
+  * Use '--attach-pid' to specify the target process ID.
+  * Use '--attach-duration-msec' to specify time duration.
+
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
 
 * Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
@@ -57,6 +76,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Data-Return Busy
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
+
+* Roofline support for Debian 12 and Azure Linux 3.0.
 
 ### Changed
 
@@ -121,6 +142,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
   * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
   * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
+
+* Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
+  * Use ROCPROF=rocprofv3 to use rocprofv3 interface
+
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
 
 ### Removed
 

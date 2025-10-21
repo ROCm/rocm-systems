@@ -207,7 +207,7 @@ TEST_CASE("Unit_atomicOr_Negative_Parameters_RTC") {
   HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
   int error_count{0};
   // Please check the content of negative_kernels_rtc.hh
-  int expected_error_count{9};
+  int expected_error_count{10};
   std::string error_message{"error:"};
 
   size_t n_pos = log.find(error_message, 0);

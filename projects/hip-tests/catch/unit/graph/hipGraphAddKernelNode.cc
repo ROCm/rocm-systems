@@ -393,6 +393,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph") {
     HIP_CHECK(hipGraphDestroy(clonedGraph));
   }
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(childgraph));
   HIPCHECK(hipModuleUnload(Module));
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }

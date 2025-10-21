@@ -1,4 +1,4 @@
-/* Copyright (c) 2016 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2016 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -36,9 +36,9 @@ typedef _XDisplay Display;
 typedef __GLXcontextRec* GLXContext;
 #endif
 
+#include "device/rocm/rocdevice.hpp"
 #include "device/rocm/mesa_glinterop.h"
 #include "device/rocm/rocregisters.hpp"
-#include "hsa/hsa_ext_amd.h"
 
 namespace amd::roc {
 

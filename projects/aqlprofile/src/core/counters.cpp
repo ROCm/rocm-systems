@@ -256,6 +256,17 @@ hsa_status_t _internal_aqlprofile_pmc_create_packets(
 
 extern "C" {
 
+PUBLIC_API hsa_status_t aqlprofile_get_version(aqlprofile_version_t* info) {
+  if (info != nullptr) {
+    *info = {.major = AQLPROFILE_VERSION_MAJOR,
+             .minor = AQLPROFILE_VERSION_MINOR,
+             .patch = AQLPROFILE_VERSION_PATCH};
+    return HSA_STATUS_SUCCESS;
+  } else {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+}
+
 PUBLIC_API hsa_status_t aqlprofile_pmc_create_packets(
     aqlprofile_handle_t* handle, aqlprofile_pmc_aql_packets_t* packets,
     aqlprofile_pmc_profile_t profile, aqlprofile_memory_alloc_callback_t alloc_cb,

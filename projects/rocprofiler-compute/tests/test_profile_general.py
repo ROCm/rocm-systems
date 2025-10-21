@@ -60,7 +60,9 @@ CHIP_IDS = {
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config["app_occupancy"] = ["./tests/occupancy"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
+config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -68,6 +70,9 @@ config["METRIC_LOGGING"] = False
 
 num_kernels = 3
 num_devices = 1
+
+attach_detach_interval_msec_no_delay = 10000
+attach_detach_interval_msec_with_delay = 60000
 
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
@@ -106,7 +111,6 @@ ALL_CSVS_MI200 = sorted([
     "pmc_perf_4.csv",
     "pmc_perf_5.csv",
     "sysinfo.csv",
-    "timestamps.csv",
 ])
 ALL_CSVS_MI300 = sorted([
     "SQC_DCACHE_INFLIGHT_LEVEL.csv",
@@ -124,7 +128,6 @@ ALL_CSVS_MI300 = sorted([
     "pmc_perf_4.csv",
     "pmc_perf_5.csv",
     "sysinfo.csv",
-    "timestamps.csv",
 ])
 ALL_CSVS_MI350 = sorted([
     "SQC_DCACHE_INFLIGHT_LEVEL.csv",
@@ -159,7 +162,6 @@ ROOF_ONLY_FILES = sorted([
     "pmc_perf_2.csv",
     "roofline.csv",
     "sysinfo.csv",
-    "timestamps.csv",
 ])
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
@@ -362,18 +364,7 @@ def gpu_soc():
 
 soc = gpu_soc()
 
-os.environ["ROCPROF"] = "rocprofv3"
-
-
-def using_v3():
-    return "ROCPROF" not in os.environ.keys() or (
-        "ROCPROF" in os.environ.keys()
-        and (
-            os.environ["ROCPROF"].endswith("rocprofv3")
-            or os.environ["ROCPROF"] == "rocprofiler-sdk"
-        )
-    )
-
+os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
 
@@ -566,19 +557,11 @@ def test_path(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"This test is not supported for {soc}")
         assert 0
@@ -626,15 +609,7 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
-    else:
-        expected_files = (
-            [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
-            if using_v3()
-            else ROOF_ONLY_FILES
-        ) + ["kernelName_legend.pdf"]
-        assert sorted(list(file_dict.keys())) == sorted(expected_files)
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -676,12 +651,7 @@ def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
                 assert os.path.exists(f"{workload_dir}/pmc_perf.csv")
 
                 file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-                expected_files = (
-                    [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
-                    if using_v3()
-                    else ROOF_ONLY_FILES
-                ) + ["kernelName_legend.pdf"]
-                assert sorted(list(file_dict.keys())) == sorted(expected_files)
+                assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
             else:
                 pass
         finally:
@@ -975,7 +945,6 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         return
 
     # Test `--kernel` filtering outputs are present and labelled correctly
-    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
 
     plot_configurations = [
@@ -996,7 +965,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
                 "--kernel",
                 config["kernel_name_1"],
             ],
-            "expected_files": [filter_kernelName, filter_empirRoof],
+            "expected_files": [filter_empirRoof],
         },
     ]
 
@@ -1198,19 +1167,11 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1236,19 +1197,11 @@ def test_kernel(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1272,19 +1225,11 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1312,19 +1257,11 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1349,19 +1286,11 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1389,19 +1318,11 @@ def test_join_type_grid(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1426,19 +1347,11 @@ def test_join_type_kernel(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI200
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
-            if using_v3()
-            else ALL_CSVS_MI300
-        )
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1471,12 +1384,8 @@ def test_roof_sort_dispatches(binary_handler_profile_rocprof_compute):
     assert returncode == 0
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-    assert (
-        sorted(list(file_dict.keys()))
-        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
-        if using_v3()
-        else ROOF_ONLY_FILES
-    )
+
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1506,12 +1415,7 @@ def test_roof_sort_kernels(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    assert (
-        sorted(list(file_dict.keys()))
-        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
-        if using_v3()
-        else ROOF_ONLY_FILES
-    )
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1541,12 +1445,7 @@ def test_roof_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    assert (
-        sorted(list(file_dict.keys()))
-        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
-        if using_v3()
-        else ROOF_ONLY_FILES
-    )
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1576,12 +1475,7 @@ def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    assert (
-        sorted(list(file_dict.keys()))
-        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
-        if using_v3()
-        else ROOF_ONLY_FILES
-    )
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1711,8 +1605,8 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1725,8 +1619,8 @@ def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
     )
     # Should return code 1 since --block cannot be used with --list-metrics
     assert code == 1
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1737,8 +1631,8 @@ def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
     )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     # Test output
@@ -1758,8 +1652,8 @@ def test_list_available_metrics_with_block(
     )
     # Should return code 1 since --block cannot be used with --list-available-metrics
     assert code == 1
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
+    # workload dir should not exist
+    assert not Path(workload_dir).exists()
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1817,7 +1711,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
         "--pc-sampling-method",
         "host_trap",
         "--pc-sampling-interval",
-        "1048576",
+        "256",
     ]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1866,6 +1760,189 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.live_attach_detach
+def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
+    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+    workload_dir = test_utils.get_output_dir()
+    # TODO: temp fix for sdk defautly disable attach/detach,
+    # remove after it sets default to enable
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
+
+    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+
+    attach_detach = dict()
+    attach_detach["attach_pid"] = process_workload.pid
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_hip_dynamic_shared",
+        attach_detach_para=attach_detach,
+    )
+
+    # kill the process of the workload at thsi point if it's still running
+    if process_workload.poll() is None:
+        print(
+            f"rocprof-compute has detached and finished, "
+            f"killing workload process (pid={process_workload.pid})..."
+        )
+        process_workload.kill()
+        process_workload.wait()
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.skip(
+    reason="Temporarily disabled: \
+                  waiting for SDK fix for no outputfile with thread sleeping"
+)
+@pytest.mark.live_attach_detach
+def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_compute):
+    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+    workload_dir = test_utils.get_output_dir()
+    # TODO: temp fix for sdk defautly disable attach/detach,
+    # remove after it sets default to enable
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
+
+    process_workload = subprocess.Popen(
+        [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
+    )
+
+    attach_detach = dict()
+    attach_detach["attach_pid"] = process_workload.pid
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_with_delay
+
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_hip_dynamic_shared",
+        attach_detach_para=attach_detach,
+    )
+
+    # kill the process of the workload at thsi point if it's still running
+    if process_workload.poll() is None:
+        print(
+            f"rocprof-compute has detached and finished, "
+            f"killing workload process (pid={process_workload.pid})..."
+        )
+        process_workload.kill()
+        process_workload.wait()
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.live_attach_detach
+def test_live_attach_detach_singlepath_launch_stats(
+    binary_handler_profile_rocprof_compute,
+):
+    options = ["--set", "launch_stats"]
+    workload_dir = test_utils.get_output_dir()
+
+    # TODO: temp fix for sdk defautly disable attach/detach,
+    # remove after it sets default to enable
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
+
+    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+
+    attach_detach = dict()
+    attach_detach["attach_pid"] = process_workload.pid
+    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_hip_dynamic_shared",
+        attach_detach_para=attach_detach,
+    )
+
+    # kill the process of the workload at thsi point if it's still running
+    if process_workload.poll() is None:
+        print(
+            f"rocprof-compute has detached and finished, "
+            f"killing workload process (pid={process_workload.pid})..."
+        )
+        process_workload.kill()
+        process_workload.wait()
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "- 7.1.0", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.1", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.2", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.5", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.6", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.7", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.8", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- 7.1.9", f"{workload_dir}/profiling_config.yaml"
+    )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1984,6 +2061,6 @@ class TestSetsIntegration:
             check_success=False,
             roof=False,
         )
-        # workload dir should be empty
-        assert not os.listdir(workload_dir)
+        # workload dir should not exist
+        assert not Path(workload_dir).exists()
         test_utils.clean_output_dir(config["cleanup"], workload_dir)

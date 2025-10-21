@@ -189,7 +189,8 @@ void Graph::ScheduleOneNode(Node node, int stream_id) {
     // Assign active stream to the current node
     node->stream_id_ = stream_id;
     max_streams_ = std::max(max_streams_, (stream_id + 1));
-
+    // Track which devices are used by each stream for multi-device graph execution
+    streams_dev_ids_[stream_id].insert(node->dev_id_);
     // Process child graph separately, since, there is no connection
     if (node->GetType() == hipGraphNodeTypeGraph) {
       auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
@@ -317,7 +318,7 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
 
 // ================================================================================================
 Graph* Graph::clone() const {
-  Graph* newGraph = new Graph(device_);
+  Graph* newGraph = new Graph(getCurrentDevice());
   clone(newGraph);
   return newGraph;
 }
@@ -332,39 +333,115 @@ bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
 }
 
 // ================================================================================================
-hipError_t GraphExec::CreateStreams(uint32_t num_streams) {
+hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   amd::ScopedLock lock(graphExecStreamCreateLock_);
-  parallel_streams_.reserve(num_streams);
+
+  // Validate input parameters
+  if (num_streams == 0) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+            "[hipGraph] Attempting to create 0 streams for device %d", devId);
+    return hipSuccess;
+  }
+
+  if (devId < 0 || devId >= g_devices.size() || g_devices[devId] == nullptr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Invalid device ID %d for stream creation",
+            devId);
+    return hipErrorInvalidDevice;
+  }
+
+  // Check if streams already exist for this device
+  if (parallel_streams_.find(devId) != parallel_streams_.end() &&
+      !parallel_streams_[devId].empty()) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+            "[hipGraph] Streams already exist for device %d, skipping creation", devId);
+    return hipSuccess;
+  }
+
+  parallel_streams_[devId].reserve(num_streams);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating %u parallel streams for device %d",
+          num_streams, devId);
+
   for (uint32_t i = 0; i < num_streams; ++i) {
-    auto stream = new hip::Stream(hip::getCurrentDevice(), hip::Stream::Priority::Normal,
-                                  hipStreamNonBlocking);
+    auto stream =
+        new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal, hipStreamNonBlocking);
+
     if (stream == nullptr || !stream->Create()) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to %s stream %u for device %d",
+              stream == nullptr ? "allocate" : "create", i, devId);
       if (stream != nullptr) {
         hip::Stream::Destroy(stream);
       }
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create parallel stream!");
+      // Clean up any previously created streams for this device
+      for (auto& created_stream : parallel_streams_[devId]) {
+        hip::Stream::Destroy(created_stream);
+      }
+      parallel_streams_[devId].clear();
       return hipErrorOutOfMemory;
     }
-    parallel_streams_.push_back(stream);
+
+    parallel_streams_[devId].push_back(stream);
   }
   return hipSuccess;
+}
+
+void GraphExec::FindStreamsReqPerDev() {
+  // Count streams required per device based on stream-to-device mappings
+  for (auto const& [stream_id, dev_ids] : streams_dev_ids_) {
+    for (auto dev_id : dev_ids) {
+      max_streams_dev_[dev_id]++;
+    }
+  }
+
+  // Recursively process child graphs to determine their stream requirements
+  for (auto node : vertices_) {
+    if (node->GetType() == hipGraphNodeTypeGraph) {
+      auto childNode = reinterpret_cast<ChildGraphNode*>(node);
+
+      // Recursively find stream requirements for child graph
+      childNode->FindStreamsReqPerDev();
+
+      // Merge child graph's stream requirements with parent graph
+      // Take the maximum streams needed per device to handle concurrent execution
+      for (auto const& [dev_id, num_streams] : childNode->max_streams_dev_) {
+        auto it = max_streams_dev_.find(dev_id);
+        if (it != max_streams_dev_.end()) {
+          // Device already has stream requirements - take the maximum
+          max_streams_dev_[dev_id] = std::max(max_streams_dev_[dev_id], num_streams);
+        } else {
+          // New device - initialize with child graph's requirement
+          max_streams_dev_[dev_id] = num_streams;
+        }
+      }
+    }
+  }
 }
 
 // ================================================================================================
 hipError_t GraphExec::Init() {
   hipError_t status = hipSuccess;
   // create extra stream to avoid queue collision with the default execution stream
-  if (max_streams_ > 1) {
-    status = CreateStreams(max_streams_);
-  }
-  if (status != hipSuccess) {
-    return status;
-  }
-  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
-    if (max_streams_ == 1) {
+
+  if (max_streams_ == 1) {
+    FindStreamsReqPerDev();
+    if (max_streams_dev_.size() > 1) {
+      // Multi-device graph detected - create parallel streams for each device
+      for (auto const& [dev_id, num_streams] : max_streams_dev_) {
+        ClPrint(amd::LOG_INFO, amd::LOG_API,
+                "[hipGraph] For device id :%d max streams :%d for execution.\n", dev_id,
+                num_streams);
+        status = CreateStreams(num_streams, dev_id);
+        if (status != hipSuccess) {
+          return status;
+        }
+      }
+    }
+    if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       // For graph nodes capture AQL packets to dispatch them directly during graph launch.
       status = CaptureAQLPackets();
     }
+  } else {
+    status = CreateStreams(max_streams_, hip::getCurrentDevice()->deviceId());
   }
   instantiateDeviceId_ = hip::getCurrentDevice()->deviceId();
   static_cast<ReferenceCountedObject*>(hip::getCurrentDevice())->retain();
@@ -374,23 +451,53 @@ hipError_t GraphExec::Init() {
 //! Chunk size to add to kern arg pool
 constexpr uint32_t kKernArgChunkSize = 128 * Ki;
 // ================================================================================================
-void GraphExec::GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph) {
-  // GPU packet capture is enabled for kernel nodes. Calculate the kernel
-  // arg size required for all graph kernel nodes to allocate
+void GraphExec::GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph) {
+  // Calculate the kernel argument size required for all graph kernel nodes
+  // when GPU packet capture is enabled
   for (hip::GraphNode* node : topoOrder_) {
     if (node->GraphCaptureEnabled()) {
-      kernArgSizeForGraph += node->GetKerArgSize();
+      // Accumulate the kernel argument size for each device
+      kernArgSizeForGraph[node->dev_id_] += node->GetKerArgSize();
     } else if (node->GetType() == hipGraphNodeTypeGraph) {
+      // Handle child graph nodes
       auto childNode = reinterpret_cast<hip::ChildGraphNode*>(node);
+
       // Child graph shares same kernel arg manager
       GraphKernelArgManager* KernelArgManager = GetKernelArgManager();
-      KernelArgManager->retain();
-      childNode->SetKernelArgManager(KernelArgManager);
-      if (childNode->GetChildGraph()->max_streams_ == 1) {
-        childNode->GetKernelArgSizeForGraph(kernArgSizeForGraph);
+      if (KernelArgManager != nullptr) {
+        KernelArgManager->retain();
+        childNode->SetKernelArgManager(KernelArgManager);
+        // Recursively process child graph if it uses single stream
+        if (childNode->GetChildGraph()->max_streams_ == 1) {
+          childNode->GetKernelArgSizeForGraph(kernArgSizeForGraph);
+        }
       }
     }
   }
+}
+// ================================================================================================
+// Enable or disable a graph node's packets in the batch
+// Simply updates the enabled state and count of disabled nodes
+// ================================================================================================
+void GraphExec::PacketBatch::setEnabled(GraphNode* node, bool enabled) {
+  auto it = nodeToRangeIndex.find(node);
+  if (it == nodeToRangeIndex.end()) {
+    return;
+  }
+  NodeRange& range = nodeRanges[it->second];
+  // Early return if state hasn't changed
+  if (range.enabled == enabled) {
+    return;
+  }
+  // Update counter based on state change
+  if (enabled) {
+    // Node being enabled: decrement counter
+    disabledNodeCount--;
+  } else {
+    // Node being disabled: increment counter
+    disabledNodeCount++;
+  }
+  range.enabled = enabled;
 }
 
 // ================================================================================================
@@ -408,8 +515,8 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   for (size_t i = 0; i < topoOrder_.size(); ++i) {
     auto& node = topoOrder_[i];
 
+    // Check if kernel node requires hidden heap and set it for the entire graph
     if (node->GetType() == hipGraphNodeTypeKernel) {
-      // Check if graph requires hidden heap and set as part of graphExec param.
       static bool initialized = false;
       if (!initialized && reinterpret_cast<hip::GraphKernelNode*>(node)->HasHiddenHeap()) {
         SetHiddenHeap();
@@ -417,37 +524,66 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       }
     }
 
+    // Handle nodes that support graph capture
     if (node->GraphCaptureEnabled()) {
-      // Start of a potential batch - try to capture packets for this node
-      std::vector<uint8_t*> currentBatch;
-      std::vector<std::string> currentKernelNames;
+      // TODO: Add support for batching for multi-device linear graph
+      if (max_streams_dev_.size() == 1) {
+        // Single device - use batching optimization
+        // Start of a new batch
+        PacketBatch newBatch;
+        size_t j = i;
 
-      // Collect packets from consecutive captured nodes
-      size_t j = i;
-      size_t capturedNodeCount = 0;
-      while (j < topoOrder_.size() && topoOrder_[j]->GraphCaptureEnabled()) {
-        auto& currentNode = topoOrder_[j];
-        status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &currentBatch,
-                                                             &currentKernelNames);
+        // Collect packets from consecutive captured nodes
+        while (j < topoOrder_.size() && topoOrder_[j]->GraphCaptureEnabled()) {
+          auto& currentNode = topoOrder_[j];
 
-        if (status != hipSuccess || currentBatch.empty()) {
-          LogError("Packet capture failed");
+          // Capture packets for this node
+          std::vector<uint8_t*> nodePackets;
+          std::vector<std::string> nodeKernelNames;
+          status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
+                                                     &nodeKernelNames);
+
+          if (status != hipSuccess || nodePackets.empty()) {
+            LogError("Packet capture failed");
+            return status;
+          }
+
+          // Create NodeRange for this node
+          PacketBatch::NodeRange range;
+          range.startIndex = newBatch.dispatchPackets.size();
+          range.packetCount = nodePackets.size();
+          range.enabled = true;
+
+          // Add to dispatch lists (initially all enabled)
+          newBatch.dispatchPackets.insert(newBatch.dispatchPackets.end(), nodePackets.begin(),
+                                          nodePackets.end());
+          newBatch.dispatchKernelNames.insert(newBatch.dispatchKernelNames.end(),
+                                              nodeKernelNames.begin(), nodeKernelNames.end());
+
+          // Store node mapping
+          newBatch.nodeRanges.push_back(range);
+          newBatch.nodeToRangeIndex[currentNode] = newBatch.nodeRanges.size() - 1;
+
+          // Mark this node as successfully captured
+          nodeCaptureStatus_[j] = true;
+          ++j;
+        }
+
+        // Add the batch if it has packets
+        if (!newBatch.dispatchPackets.empty()) {
+          packetBatches_.emplace_back(std::move(newBatch));
+        }
+
+        // Skip the nodes we just processed, the index will be incremented by the loop
+        i = j - 1;
+      } else {
+        // Multi-device - capture individual packets without batching
+        status = node->CaptureAndFormPacket(GetKernelArgManager());
+        if (status != hipSuccess) {
+          LogError("Individual packet capture failed for multi-device node");
           return status;
         }
-        // Mark this node as successfully captured
-        nodeCaptureStatus_[j] = true;
-        ++j;
-        ++capturedNodeCount;
       }
-
-      // Add the batch if it has packets
-      if (!currentBatch.empty()) {
-        packetBatches_.emplace_back(std::move(currentBatch), std::move(currentKernelNames),
-                                    capturedNodeCount);
-      }
-
-      // Skip the nodes we just processed, the index will be incremented by the loop
-      i = j - 1;
     } else if (node->GetType() == hipGraphNodeTypeGraph) {
       auto childNode = reinterpret_cast<hip::ChildGraphNode*>(node);
       if (childNode->GetChildGraph()->max_streams_ == 1) {
@@ -455,29 +591,44 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
         status = childNode->CaptureAndFormPacketsForGraph();
         nodeCaptureStatus_[i] = (status == hipSuccess);
         if (status != hipSuccess) {
-          status = hipSuccess; // Continue with other nodes
+          LogWarning("Child graph packet capture failed continuing with other nodes");
+          status = hipSuccess;  // Continue processing other nodes
         }
       }
     }
   }
-
   return status;
 }
 
 // ================================================================================================
 hipError_t GraphExec::CaptureAQLPackets() {
   hipError_t status = hipSuccess;
-  size_t kernArgSizeForGraph = 0;
+
+  // Create a map to track kernel argument sizes for each device
+  std::unordered_map<int, size_t> kernArgSizeForGraph;
+  // Reserve space for all available devices and Initialize to 0
+  kernArgSizeForGraph.reserve(g_devices.size());
+  for (int devId = 0; devId < g_devices.size(); devId++) {
+    kernArgSizeForGraph[devId] = 0;
+  }
   GetKernelArgSizeForGraph(kernArgSizeForGraph);
-  // When we support multi device graph lauch we need to allocate the kenel args on respective
-  // device for each kernel Assume graph has nodes of same device allocate kernel args on the
-  // device from the first node
-  auto device = g_devices[topoOrder_[0]->GetDeviceId()]->devices()[0];
-  // Add a larger initial pool to accomodate for any updates to kernel args
-  bool bStatus =
-      kernArgManager_->AllocGraphKernargPool(kernArgSizeForGraph + kKernArgChunkSize, device);
-  if (bStatus != true) {
-    return hipErrorMemoryAllocation;
+  
+  // Allocate kernel argument pools on respective devices with extra space for updates
+  for (const auto& deviceKernArgPair : kernArgSizeForGraph) {
+    const int deviceId = deviceKernArgPair.first;
+    const size_t kernArgSize = deviceKernArgPair.second;
+    
+    if (kernArgSize == 0) {
+      continue;
+    }
+
+    const size_t totalPoolSize = kernArgSize + kKernArgChunkSize;
+    if (!kernArgManager_->AllocGraphKernargPool(totalPoolSize, g_devices[deviceId]->devices()[0])) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, 
+              "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d", 
+              totalPoolSize, deviceId);
+      return hipErrorMemoryAllocation;
+    }
   }
 
   status = CaptureAndFormPacketsForGraph();
@@ -486,16 +637,63 @@ hipError_t GraphExec::CaptureAQLPackets() {
   }
 
   kernArgManager_->ReadBackOrFlush();
-  return status;
+  return hipSuccess;;
 }
 
 // ================================================================================================
 hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
-  hipError_t status = hipSuccess;
-  if (max_streams_ == 1) {
-    status = node->CaptureAndFormPacket(kernArgManager_);
+  if (max_streams_ != 1 || !node->GraphCaptureEnabled()) {
+    return hipSuccess;
   }
-  return status;
+  //ToDo: Add batching support for multi-device linear graph
+  if (max_streams_dev_.size() == 1) {
+    // Find which batch contains this node and update it
+    for (auto& batch : packetBatches_) {
+      auto it = batch.nodeToRangeIndex.find(node);
+      if (it != batch.nodeToRangeIndex.end()) {
+        // Found the batch containing this node - update packets
+        PacketBatch::NodeRange& range = batch.nodeRanges[it->second];
+
+        // Capture new packets for this node
+        std::vector<uint8_t*> newPackets;
+        std::vector<std::string> newKernelNames;
+        hipError_t status =
+            node->CaptureAndFormPacket(kernArgManager_, &newPackets, &newKernelNames);
+        if (status != hipSuccess) {
+          return status;
+        }
+        // Update dispatch packets (always update regardless of enabled state)
+        // The enabled/disabled check happens during dispatch, not here
+        for (size_t i = 0; i < range.packetCount && i < newPackets.size(); ++i) {
+          size_t packetIndex = range.startIndex + i;
+          batch.dispatchPackets[packetIndex] = newPackets[i];
+          batch.dispatchKernelNames[packetIndex] = newKernelNames[i];
+        }
+        return hipSuccess;
+      }
+    }
+  } else {
+    return node->CaptureAndFormPacket(kernArgManager_);
+  }
+  return hipSuccess; // Node not in any batch
+}
+
+// ================================================================================================
+hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
+  if (max_streams_ != 1 && max_streams_dev_.size() == 1 && !node->GraphCaptureEnabled()) {
+    // Only handle single stream and single device case with captured nodes
+    return hipSuccess;
+  }
+  // Find which batch contains this node and update its enabled state
+  for (auto& batch : packetBatches_) {
+    auto it = batch.nodeToRangeIndex.find(node);
+    if (it != batch.nodeToRangeIndex.end()) {
+      // Found the batch containing this node - update enabled state
+      batch.setEnabled(node, isEnabled);
+      return hipSuccess;
+    }
+  }
+  return hipSuccess; // Node not in any batch
 }
 
 // ================================================================================================
@@ -523,26 +721,55 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
     auto& node = topoOrder_[i];
 
     if (!node->GraphCaptureEnabled()) {
-      // Node doesn't support capture - execute individually
-      node->SetStream(hip_stream);
-      status = node->CreateCommand(node->GetQueue());
-      node->EnqueueCommands(hip_stream);
+      // Node doesn't support capture - execute individually if enabled
+      if (node->GetEnabled() != 0) {
+        node->SetStream(hip_stream);
+        status = node->CreateCommand(node->GetQueue());
+        node->EnqueueCommands(hip_stream);
+      }
     } else if (i < nodeCaptureStatus_.size() && nodeCaptureStatus_[i]) {
-      // Node was successfully captured - find which batch it belongs to
-      // and dispatch the entire batch
+      // Node was successfully captured - dispatch the batch with enabled nodes only
       if (batchIndex < packetBatches_.size()) {
-        // Dispatch this batch
-        bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
-            packetBatches_[batchIndex].packets, packetBatches_[batchIndex].kernelNames, accumulate);
-        if (!batchStatus) {
-          status = hipErrorUnknown;
-          accumulate->release();
-          return status;
+        const auto& batch = packetBatches_[batchIndex];
+        // O(1) check: if no disabled nodes, dispatch entire batch directly
+        // This avoids creating new vectors when all nodes are enabled (common case)
+        if (batch.disabledNodeCount == 0) {
+          // Fast path: all nodes enabled, dispatch entire batch
+          bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
+              batch.dispatchPackets, batch.dispatchKernelNames, accumulate);
+          if (!batchStatus) {
+            status = hipErrorUnknown;
+            accumulate->release();
+            return status;
+          }
+        } else {
+          // Slow path: some nodes disabled, create filtered vectors
+          std::vector<uint8_t*> enabledPackets;
+          std::vector<std::string> enabledKernelNames;
+          for (const auto& range : batch.nodeRanges) {
+            if (range.enabled) {
+              // Add packets for this enabled node
+              for (size_t j = 0; j < range.packetCount; ++j) {
+                size_t packetIndex = range.startIndex + j;
+                enabledPackets.push_back(batch.dispatchPackets[packetIndex]);
+                enabledKernelNames.push_back(batch.dispatchKernelNames[packetIndex]);
+              }
+            }
+          }
+          // Only dispatch if there are enabled packets
+          if (!enabledPackets.empty()) {
+            bool batchStatus = hip_stream->vdev()->dispatchAqlPacketBatch(
+                enabledPackets, enabledKernelNames, accumulate);
+            if (!batchStatus) {
+              status = hipErrorUnknown;
+              accumulate->release();
+              return status;
+            }
+          }
         }
 
         // Skip all consecutive captured nodes that belong to this batch
-        // Use the tracked node count to skip directly instead of parsing one by one
-        i += packetBatches_[batchIndex].capturedNodeCount - 1;  // -1 because loop will increment
+        i += packetBatches_[batchIndex].nodeRanges.size() - 1;  // -1 because loop will increment
 
         ++batchIndex;
       }
@@ -555,34 +782,96 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
   }
   return status;
 }
+// ================================================================================================
+hipError_t GraphExec::EnqueueMultiDeviceLinearGraph(hip::Stream* launch_stream) {
+  // Accumulate command tracks all the AQL packet batch that we submit to the HW. For now we track
+  // only kernel nodes.
+  amd::AccumulateCommand* accumulate = nullptr;
+  hipError_t status = hipSuccess;
+  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+  }
+
+  auto createMarkerAndWait = [](hip::Stream* fromStream, hip::Stream* toStream) {
+    amd::Command::EventWaitList wait_list;
+    auto marker = new amd::Marker(*fromStream, true, wait_list);
+    marker->enqueue();
+    marker->release();
+    wait_list.push_back(marker);
+    auto wait_marker = new amd::Marker(*toStream, true, wait_list);
+    wait_marker->enqueue();
+    wait_marker->release();
+  };
+
+  hip::Stream* prevStream = launch_stream;
+  size_t batchIndex = 0;
+
+  for (size_t i = 0; i < topoOrder_.size(); ++i) {
+    auto& node = topoOrder_[i];
+    hip::Stream* currStream = parallel_streams_[node->dev_id_][0];
+
+    // Insert synchronization marker if switching devices
+    if (prevStream->DeviceId() != currStream->DeviceId()) {
+      createMarkerAndWait(prevStream, currStream);
+    }
+    // ToDo : Add batching for multi device graph launch
+    if (topoOrder_[i]->GraphCaptureEnabled()) {
+      if (topoOrder_[i]->GetEnabled()) {
+        std::vector<uint8_t*>& gpuPackets = topoOrder_[i]->GetAqlPackets();
+        std::vector<std::string> kernelNames;
+        for (auto& packet : gpuPackets) {
+          kernelNames.push_back(topoOrder_[i]->GetKernelName());
+        }
+        currStream->vdev()->dispatchAqlPacketBatch(gpuPackets, kernelNames, accumulate);
+      }
+    } else {
+      topoOrder_[i]->SetStream(currStream);
+      status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
+      topoOrder_[i]->EnqueueCommands(currStream);
+    }
+    prevStream = currStream;
+  }
+
+  // Synchronize back to launch stream if we ended on a different device
+  if (prevStream != launch_stream) {
+    createMarkerAndWait(prevStream, launch_stream);
+  }
+
+  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    accumulate->enqueue();
+    accumulate->release();
+  }
+
+  return status;
+}
 
 // ================================================================================================
-hipError_t Graph::UpdateStreams(hip::Stream* launch_stream,
-                                const std::vector<hip::Stream*>& parallel_streams) {
+void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
+  int devId = launch_stream->vdev()->device().index();
+  if (parallel_streams_.find(devId) == parallel_streams_.end()) {
+    LogPrintfError("UpdateStreams failed for device id:%d", devId);
+    return;
+  }
+  auto parallel_streams = parallel_streams_[devId];
   // Current stream is the default in the assignment
   streams_.push_back(launch_stream);
-  int* unique_stream_ids = new int[GPU_MAX_HW_QUEUES]();
-  if (unique_stream_ids == nullptr) {
-    LogError("Stream id array allocation is nullptr!");
-    return hipErrorOutOfMemory;
-  }
+  std::unordered_map<int, int> unique_stream_ids;
   unique_stream_ids[launch_stream->getQueueID()] = 1;
   std::vector<hip::Stream*> collided_streams;
   // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
   for (uint32_t i = 0; i < parallel_streams.size(); i++) {
-    if (unique_stream_ids[parallel_streams[i]->getQueueID()] == 0) {
+    auto qid = parallel_streams[i]->getQueueID();
+    if (unique_stream_ids[qid] == 0) {
       streams_.push_back(parallel_streams[i]);
     } else {
       collided_streams.push_back(parallel_streams[i]);
     }
-    unique_stream_ids[parallel_streams[i]->getQueueID()]++;
+    unique_stream_ids[qid]++;
   }
   // Assign the remaining streams for execution.
   for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
     streams_.push_back(collided_streams[j]);
   }
-  delete[] unique_stream_ids;
-  return hipSuccess;
 }
 
 
@@ -758,7 +1047,6 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
 // ================================================================================================
 hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
-
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (!topoOrder_.empty()) {
       topoOrder_[0]->GetParentGraph()->FreeAllMemory(launch_stream);
@@ -780,13 +1068,13 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   } else {
     repeatLaunch_ = true;
   }
-
   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
           "GraphExec::Run max_streams: %d, "
           "on device: %d, total number of nodes: %d",
           max_streams_, launch_stream->DeviceId(), topoOrder_.size());
 
-  if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
+  if (max_streams_ == 1 && max_streams_dev_.size() == 1 &&
+      max_streams_dev_.begin()->first == launch_stream->DeviceId()) {
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       // If the graph has kernels that does device side allocation,  during packet capture, heap is
       // allocated because heap pointer has to be added to the AQL packet, and initialized during
@@ -798,6 +1086,8 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       }
     }
     status = EnqueueGraphWithSingleList(launch_stream);
+  } else if (max_streams_ == 1 && max_streams_dev_.size() > 1) {
+    status = EnqueueMultiDeviceLinearGraph(launch_stream);
   } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
     for (int i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
@@ -806,10 +1096,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     }
   } else {
     // Update streams for the graph execution
-    status = UpdateStreams(launch_stream, parallel_streams_);
-    if (status != hipSuccess) {
-      return status;
-    }
+    UpdateStreams(launch_stream);
     // Execute all nodes in the graph
     if (!RunNodes()) {
       LogError("Failed to launch nodes!");
@@ -835,9 +1122,6 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
   bool bStatus = true;
   assert(pool_size > 0);
   address graph_kernarg_base;
-  // Current device is stored as part of tls. Save current device to destroy kernelArgs from the
-  // callback thread.
-  device_ = device;
   if (device->info().largeBar_) {
     amd::Device::AllocationFlags flags = {};
     flags.executable_ = true;
@@ -851,48 +1135,76 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
   if (graph_kernarg_base == nullptr) {
     return false;
   }
-  kernarg_graph_.push_back(KernelArgPoolGraph(graph_kernarg_base, pool_size));
+  kernarg_graph_[device].push_back(KernelArgPoolGraph(graph_kernarg_base, pool_size));
   return true;
 }
 
-address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment) {
-  assert(alignment != 0);
-  address result = nullptr;
-  result = amd::alignUp(
-      kernarg_graph_.back().kernarg_pool_addr_ + kernarg_graph_.back().kernarg_pool_offset_,
-      alignment);
-  const size_t pool_new_usage = (result + size) - kernarg_graph_.back().kernarg_pool_addr_;
-  if (pool_new_usage <= kernarg_graph_.back().kernarg_pool_size_) {
-    kernarg_graph_.back().kernarg_pool_offset_ = pool_new_usage;
-  } else {
-    // If current chunck is full allocate new chunck with same size as current
-    bool bStatus = AllocGraphKernargPool(kernarg_graph_.back().kernarg_pool_size_, device_);
-    if (bStatus == false) {
-      return nullptr;
-    } else {
-      // Allocte kernel arg memory from new chunck
-      return AllocKernArg(size, alignment);
-    }
+address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int devId) {
+  if (size == 0) {
+    return nullptr;
   }
-  return result;
+
+  amd::Device* device = g_devices[devId]->devices()[0];
+  assert(alignment != 0 && "Alignment must be non-zero");
+
+  // Check if we have any pools allocated for this device
+  auto& device_pools = kernarg_graph_[device];
+  if (device_pools.empty()) {
+    return nullptr;
+  }
+
+  auto& current_pool = device_pools.back();
+  
+  // Calculate aligned address for the allocation
+  address aligned_addr = amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
+  const size_t new_pool_usage = (aligned_addr + size) - current_pool.kernarg_pool_addr_;
+
+  // Check if allocation fits in current pool
+  if (new_pool_usage <= current_pool.kernarg_pool_size_) {
+    current_pool.kernarg_pool_offset_ = new_pool_usage;
+    return aligned_addr;
+  }
+
+  // Current pool is full - allocate a new pool with the same size
+  if (!AllocGraphKernargPool(current_pool.kernarg_pool_size_, device)) {
+    return nullptr;
+  }
+
+  // Recursively allocate from the new pool
+  return AllocKernArg(size, alignment, devId);
 }
 
 void GraphKernelArgManager::ReadBackOrFlush() {
-  if (device_kernarg_pool_ && device_) {
-    auto kernArgImpl = device_->settings().kernel_arg_impl_;
+  if (!device_kernarg_pool_) {
+    return;
+  }
+
+  for (const auto& kernarg : kernarg_graph_) {
+    const auto kernArgImpl = kernarg.first->settings().kernel_arg_impl_;
 
     if (kernArgImpl == KernelArgImpl::DeviceKernelArgsHDP) {
-      *device_->info().hdpMemFlushCntl = 1u;
-      auto kSentinel = *reinterpret_cast<volatile int*>(device_->info().hdpMemFlushCntl);
-    } else if (kernArgImpl == KernelArgImpl::DeviceKernelArgsReadback &&
-               kernarg_graph_.back().kernarg_pool_addr_ != 0) {
-      address dev_ptr =
-          kernarg_graph_.back().kernarg_pool_addr_ + kernarg_graph_.back().kernarg_pool_size_;
-      auto kSentinel = *reinterpret_cast<volatile unsigned char*>(dev_ptr - 1);
+      // Trigger HDP flush
+      *kernarg.first->info().hdpMemFlushCntl = 1u;
+      // Read back to ensure flush completion
+      volatile int kSentinel = *reinterpret_cast<volatile int*>(kernarg.first->info().hdpMemFlushCntl);
+      (void)kSentinel; // Suppress unused variable warning
+    } else if (kernArgImpl == KernelArgImpl::DeviceKernelArgsReadback) {
+      const auto& pool = kernarg.second.back();
+      if (pool.kernarg_pool_addr_ == 0) {
+        continue;
+      }
+
+      // Perform readback operation on the last byte of the pool
+      address dev_ptr = pool.kernarg_pool_addr_ + pool.kernarg_pool_size_;
+      volatile unsigned char* sentinel_ptr = reinterpret_cast<volatile unsigned char*>(dev_ptr - 1);
+      
+      // Read-modify-write sequence with memory barriers
+      volatile unsigned char kSentinel = *sentinel_ptr;
       _mm_sfence();
-      *(dev_ptr - 1) = kSentinel;
+      *sentinel_ptr = kSentinel;
       _mm_mfence();
-      kSentinel = *reinterpret_cast<volatile unsigned char*>(dev_ptr - 1);
+      kSentinel = *sentinel_ptr;
+      (void)kSentinel; // Suppress unused variable warning
     }
   }
 }
