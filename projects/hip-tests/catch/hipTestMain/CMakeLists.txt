@@ -22,9 +22,13 @@ if(CMAKE_BUILD_TYPE MATCHES "^Debug$")
     add_definitions(-DHT_LOG_ENABLE)
 endif()
 
-add_library(Main_Object EXCLUDE_FROM_ALL OBJECT main.cc hip_test_context.cc hip_test_features.cc)
 if(HIP_PLATFORM MATCHES "amd")
+    hip_add_library(NAME Main_Object
+                    TYPE OBJECT
+                    SOURCES main.cc hip_test_context.cc hip_test_features.cc)
     set_property(TARGET Main_Object PROPERTY CXX_STANDARD 17)
 else()
-    target_compile_options(Main_Object PUBLIC -std=c++17)
+    hip_add_library(NAME Main_Object
+                    TYPE OBJECT
+                    SOURCES main.cc hip_test_context.cc hip_test_features.cc)
 endif()

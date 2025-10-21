@@ -1,10 +1,65 @@
 cmake_minimum_required(VERSION 3.16.8)
 
-# to skip the simple compiler test
-set(CMAKE_C_COMPILER_WORKS 1)
-set(CMAKE_CXX_COMPILER_WORKS 1)
+if(NOT DEFINED HIP_PLATFORM OR (NOT HIP_PLATFORM STREQUAL "amd" AND NOT HIP_PLATFORM STREQUAL "nvidia"))
+    message(FATAL_ERROR "HIP_PLATFORM must be set to 'amd' or 'nvidia'. Got: '${HIP_PLATFORM}'")
+endif()
 
-project(hiptests)
+if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "ROCm installation path")
+    else()
+        set(ROCM_PATH "/opt/rocm" CACHE PATH "ROCm installation path")
+    endif()
+endif()
+
+if(HIP_PLATFORM STREQUAL "nvidia")
+    if(NOT DEFINED CUDA_PATH)
+        if(DEFINED ENV{CUDA_PATH})
+            set(CUDA_PATH $ENV{CUDA_PATH} CACHE PATH "CUDA installation path")
+        else()
+            set(CUDA_PATH "/usr/local/cuda" CACHE PATH "CUDA installation path")
+        endif()
+    endif()
+endif()
+
+if(NOT DEFINED HIP_PATH)
+    if(DEFINED ENV{HIP_PATH})
+        set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "HIP installation path")
+    else()
+        set(HIP_PATH ${ROCM_PATH} CACHE PATH "HIP installation path")
+    endif()
+endif()
+
+if(WIN32)
+    set(HIPCONFIG_EXEC "hipconfig.exe")
+else()
+    set(HIPCONFIG_EXEC "hipconfig")
+endif()
+
+if(HIP_PLATFORM STREQUAL "amd")
+    if(WIN32)
+        set(CMAKE_HIP_COMPILER "${ROCM_PATH}/../lc/bin/amdclang++.exe")
+    else()
+        set(CMAKE_HIP_COMPILER "${ROCM_PATH}/llvm/bin/amdclang++")
+    endif()
+endif()
+
+message(STATUS "Selected HIP Platform   : ${HIP_PLATFORM}")
+if(HIP_PLATFORM STREQUAL "amd")
+    message(STATUS "ROCm Path               : ${ROCM_PATH}")
+    message(STATUS "HIP Path                : ${HIP_PATH}")
+    message(STATUS "HIP Compiler            : ${CMAKE_HIP_COMPILER}")
+elseif(HIP_PLATFORM STREQUAL "nvidia")
+    message(STATUS "CUDA Path               : ${CUDA_PATH}")
+endif()
+
+if(HIP_PLATFORM STREQUAL "amd")
+  find_package(hip-lang PATHS "${HIP_PATH}" REQUIRED CONFIG)
+  project(hiptests LANGUAGES CXX HIP)
+elseif(HIP_PLATFORM STREQUAL "nvidia")
+  project(hiptests LANGUAGES CXX CUDA)
+  find_package(CUDAToolkit REQUIRED)
+endif()
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
@@ -21,58 +76,6 @@ if(NOT WIN32)
     set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
 endif()
 
-# Check if platform is set
-if(NOT HIP_PLATFORM STREQUAL "amd" AND NOT HIP_PLATFORM STREQUAL "nvidia")
-    message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
-endif()
-
-if(HIP_PLATFORM STREQUAL "amd")
-    if(UNIX AND DEFINED ROCM_PATH)
-        # Read -DROCM_PATH and set CXX_FLAGS for amd platform only
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --rocm-path=${ROCM_PATH}")
-    endif()
-
-    if(DEFINED HIP_PATH)
-        # Read -DHIP_PATH and set CXX_FLAGS for amd platform only
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${HIP_PATH}")
-    endif()
-endif()
-
-# Read -DHIP_PATH
-# If not set read env{HIP_PATH} only on Windows
-if(WIN32)
-    if(NOT DEFINED HIP_PATH)
-        if(DEFINED ENV{HIP_PATH})
-            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
-        endif()
-    endif()
-endif()
-
-if(NOT DEFINED HIP_PATH)
-    if(DEFINED ROCM_PATH)
-        set(HIP_PATH ${ROCM_PATH})
-    else()
-        set(HIP_PATH "/opt/rocm")
-    endif()
-endif()
-
-if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm")
-endif()
-
-message(STATUS "HIP_PATH: ${HIP_PATH}")
-message(STATUS "ROCM_PATH: ${ROCM_PATH}")
-
-if (WIN32)
-  set(HIPCC_EXEC "hipcc.exe")
-  set(HIPCONFIG_EXEC "hipconfig.exe")
-else()
-  set(HIPCC_EXEC "hipcc")
-  set(HIPCONFIG_EXEC "hipconfig")
-endif()
-
-set(CMAKE_C_COMPILER   "${HIP_PATH}/bin/${HIPCC_EXEC}")
-set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
 execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
                 OUTPUT_VARIABLE HIP_VERSION
                 RESULT_VARIABLE result
@@ -211,8 +214,8 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21.0)
 endif()
 message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 
-# Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
-# having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
+# Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900 --offload-arch=gfx906"
+# OFFLOAD_ARCH_STR is stored as a CMake list internally and automatically converted from string input
 # Identify the GPU Targets.
 # This is done due to limitation of rocm_agent_enumerator
 # While building test parallelly, rocm_agent_enumerator can fail and give out an empty target
@@ -232,20 +235,23 @@ if(NOT DEFINED OFFLOAD_ARCH_STR
     if (NOT HIP_GPU_ARCH STREQUAL "")
         string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
         list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
-        list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
-        set(OFFLOAD_ARCH_STR "")
+        set(OFFLOAD_ARCH_STR)
         foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
-            set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+            list(APPEND OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch}")
         endforeach()
     else()
         message(STATUS "ROCm Agent Enumerator found no valid architectures")
     endif()
 elseif(DEFINED OFFLOAD_ARCH_STR)
+    # If passed as string from command line, convert to list
+    if(NOT "${OFFLOAD_ARCH_STR}" MATCHES ";")
+        separate_arguments(OFFLOAD_ARCH_STR)
+    endif()
     string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 endif()
 
 if(DEFINED OFFLOAD_ARCH_STR)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OFFLOAD_ARCH_STR} ")
+    add_compile_options(${OFFLOAD_ARCH_STR})
 endif()
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 
@@ -260,18 +266,6 @@ if(git_result EQUAL 0)
   set(HIP_TESTS_GITHASH ${git_output})
 endif()
 
-set(OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR})
-separate_arguments(OFFLOAD_ARCH_LIST)
-list(REMOVE_DUPLICATES  OFFLOAD_ARCH_LIST)
-set(hip_gpu_arch_list "")
-foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
-    string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
-    string(REPLACE ":" ";" target_id_list ${targetid})
-    list(GET target_id_list 0 arch)
-    string(APPEND hip_gpu_arch_list "${arch};")
-    list(REMOVE_DUPLICATES  hip_gpu_arch_list)
-endforeach()
-
 if(WIN32)
     set(configToUse "config_amd_windows")
     set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
@@ -285,7 +279,19 @@ if(WIN32)
     message(STATUS "${configToUse}.json file generation result: ${json_result}")
 else()
     set(configToUse "config_amd_linux")
-    foreach(arch ${hip_gpu_arch_list})
+
+    # Extract base architecture names from OFFLOAD_ARCH_STR for config file generation
+    # Example: "--offload-arch=gfx906:xnack-" becomes "gfx906"
+    set(BASE_ARCH_LIST)
+    foreach(__offload_arch ${OFFLOAD_ARCH_STR})
+        string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
+        string(REPLACE ":" ";" target_id_list ${targetid})
+        list(GET target_id_list 0 arch)
+        list(APPEND BASE_ARCH_LIST ${arch})
+    endforeach()
+    list(REMOVE_DUPLICATES BASE_ARCH_LIST)
+
+    foreach(arch ${BASE_ARCH_LIST})
         set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
         set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
         set(cmd "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
@@ -327,6 +333,9 @@ endif()
 
 # Disable CXX extensions (gnu++11 etc)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Include HipTestHelpers for all subdirectories
+include(${CMAKE_SOURCE_DIR}/cmake/HipTestHelpers.cmake)
 
 add_custom_target(build_tests)
 

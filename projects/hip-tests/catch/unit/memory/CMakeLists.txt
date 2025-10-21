@@ -142,15 +142,15 @@ if(UNIX)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-  set_source_files_properties(hipHostRegister.cc PROPERTIES COMPILE_FLAGS -std=c++17)
-  add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
-  add_dependencies(build_tests hipHostRegisterPerf)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
-if(UNIX)
-  add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
-  add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
-endif()
+  hip_add_executable(NAME hipHostRegisterPerf
+                     SOURCE hipHostRegister_exe.cc
+                     ADD_TO_TARGET build_tests)
+
+  if(UNIX)
+    hip_add_executable(NAME hipMemAdviseTstAlignedAllocMem
+                       SOURCE hipMemAdvise_AlignedAllocMem_Exe.cc
+                       ADD_TO_TARGET MemoryTest1)
+  endif()
 endif()
 
 set(TEST_SRC

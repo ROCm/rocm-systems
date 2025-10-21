@@ -146,7 +146,7 @@ void runCmd(CmdType cmd, int* dst, const int* src, hipStream_t s, size_t numElem
                          numElements);
     } break;
     case MODULE_KERNEL: {
-      MemcpyFunction g_moduleMemcpy("memcpyInt.hsaco", "memcpyIntKernel");
+      MemcpyFunction g_moduleMemcpy("memcpyInt.code", "memcpyIntKernel");
       g_moduleMemcpy.launch(dst, src, numElements, s);
     } break;
     default:

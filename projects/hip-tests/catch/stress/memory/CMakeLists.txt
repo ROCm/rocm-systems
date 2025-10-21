@@ -11,8 +11,9 @@ set(TEST_SRC
 if(UNIX)
   set(TEST_SRC ${TEST_SRC}
                hipHmmOvrSubscriptionTst.cc)
-  add_executable(hold_memory EXCLUDE_FROM_ALL hold_memory.cc)
-  add_dependencies(stress_test hold_memory)
+  hip_add_executable(NAME hold_memory
+                     SOURCE hold_memory.cc
+                     ADD_TO_TARGET stress_test)
 endif()
 
 hip_add_exe_to_target(NAME memory_stress

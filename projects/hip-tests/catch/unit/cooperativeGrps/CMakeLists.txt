@@ -31,8 +31,11 @@ if(HIP_PLATFORM STREQUAL "nvidia")
   set_source_files_properties(binary_partition.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
   hip_add_exe_to_target(NAME coopGrpTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS "-rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80, -gencode arch=compute_86,code=sm_86, -gencode=arch=compute_86,code=compute_86")
+                      TEST_TARGET_NAME build_tests)
+
+  set_target_properties(coopGrpTest PROPERTIES
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+  )
 else()
   set_source_files_properties(cg_ballot.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
   set_source_files_properties(cg_any_all.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")

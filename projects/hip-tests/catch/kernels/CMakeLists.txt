@@ -3,6 +3,7 @@ if(NOT RTC_TESTING)
         Set.cpp
     )
 
-    add_library(KERNELS EXCLUDE_FROM_ALL OBJECT ${TEST_SRC})
-    target_compile_options(KERNELS PUBLIC -std=c++17)
+    hip_add_library(NAME KERNELS
+                    TYPE OBJECT
+                    SOURCES ${TEST_SRC})
 endif()

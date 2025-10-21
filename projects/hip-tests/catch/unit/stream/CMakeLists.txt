@@ -56,6 +56,6 @@ hip_add_exe_to_target(
   TEST_SRC ${TEST_SRC} TEST_TARGET_NAME build_tests
   COMPILE_OPTIONS -std=c++17 COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
-add_executable(hipStreamLegacy_exe EXCLUDE_FROM_ALL hipStreamLegacy_exe.cc)
-add_dependencies(StreamTest hipStreamLegacy_exe)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
+hip_add_executable(NAME hipStreamLegacy_exe
+                   SOURCE hipStreamLegacy_exe.cc
+                   ADD_TO_TARGET StreamTest)
