@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 #include <hip/hip_runtime.h>
 #include <cstring>
+#include <string>
 #include <vector>
 int main(int argc, char** argv) {
   if (argc < 0) {

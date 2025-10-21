@@ -279,6 +279,11 @@ rocpd_post_processing::get_region_callback() const
             return tokens;
         };
 
+        if(arg_str.empty())
+        {
+            return args;
+        }
+
         auto tokens = split(arg_str, delimiter);
 
         // Ensure the number of tokens is a multiple of 4
@@ -307,12 +312,7 @@ rocpd_post_processing::get_region_callback() const
         auto  thread_primary_key =
             data_processor.map_thread_id_to_primary_key(_rs.thread_id);
 
-        auto callback_tracing_info = m_metadata.get_callback_tracing_info();
-        auto _name                 = std::string{ callback_tracing_info.at(
-            static_cast<rocprofiler_callback_tracing_kind_t>(_rs.kind),
-            static_cast<rocprofiler_tracing_operation_t>(_rs.operation)) };
-        auto name_primary_key      = data_processor.insert_string(_name.c_str());
-
+        auto name_primary_key     = data_processor.insert_string(_rs.name.c_str());
         auto category_primary_key = data_processor.insert_string(_rs.category.c_str());
 
         size_t stack_id        = _rs.correlation_id_internal;

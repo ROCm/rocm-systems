@@ -35,6 +35,8 @@
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
+#include <initializer_list>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdint.h>
@@ -215,7 +217,7 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
-    metadata_registry() = default;
+    metadata_registry();
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
@@ -240,6 +242,14 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    using callback_rename_map_t =
+        std::map<rocprofiler_tracing_operation_t, std::string_view>;
+
+    void overwrite_callback_names(
+        std::initializer_list<
+            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+            rename_table);
 #endif
 };
 
