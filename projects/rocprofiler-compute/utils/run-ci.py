@@ -65,22 +65,20 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
     - Submit to CDash
     """
 
-    cmake_cache_lines = []
+    cache_entries = []
     for arg in args.cmake_args:
         if arg.startswith("-D"):
             var = arg[2:]
             if "=" in var:
                 name, value = var.split("=", 1)
-                var_type = "BOOL" if value in ["ON", "OFF", "True", "False"] else "STRING"
-                cmake_cache_lines.append(f'{name}:{var_type}={value}')
+                var_type = "BOOL" if value in ["ON", "OFF"] else "STRING"
+                cache_entries.append(f'{name}:{var_type}={value}')
 
-    if cmake_cache_lines:
-        cache_content = '\\n'.join(cmake_cache_lines)
-        cmake_cache_section = f'''
-    file(WRITE "${{CTEST_BINARY_DIRECTORY}}/CMakeCache.txt" "{cache_content}")
-    '''
-    else:
-        cmake_cache_section = ""
+    cmake_cache_section = f'''
+    set(CTEST_INITIAL_CACHE "
+    {'\\n'.join(cache_entries)}
+    ")
+    ''' if cache_entries else ""
 
     test_args = ""
     if args.ctest_args:
