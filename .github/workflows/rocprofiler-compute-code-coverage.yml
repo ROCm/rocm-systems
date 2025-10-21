@@ -88,6 +88,12 @@ jobs:
           apt install -y rocm-dev
           echo "✅ ROCm Installation Complete!"
 
+      - name: Install Python Dependencies
+        working-directory: projects/rocprofiler-compute
+        run: |
+          pip install -r requirements.txt
+          echo "✅ Python dependencies installed!"
+
       - name: Configure, Build, Test, and Upload Coverage
         id: run_coverage
         timeout-minutes: 120
