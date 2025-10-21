@@ -130,7 +130,7 @@ jobs:
           - { gpu: 'mi325', os: 'almalinux-10', build-type: 'RelWithDebInfo', container: '' }
           - { gpu: 'mi325', os: 'sles-15.7', build-type: 'RelWithDebInfo', container: '' }
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: linux-mi325-1gpu-ossci-rocm
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-gfx94X-latest-testing
       credentials:
