@@ -95,7 +95,7 @@ rocprofiler_systems_add_validation_test(
       -p
 )
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST openmp-target-sampling)
     set_property(TEST openmp-target-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
