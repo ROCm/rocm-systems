@@ -119,6 +119,15 @@ jobs:
             -DENABLE_TESTS=ON \
             -DPYTEST_NUMPROCS=8
 
+      - name: Check Coverage Configuration
+        if: always()
+        working-directory: projects/rocprofiler-compute
+        run: |
+          if [ -f "build/CMakeCache.txt" ]; then
+            echo "Checking ENABLE_COVERAGE in CMakeCache:"
+            grep ENABLE_COVERAGE build/CMakeCache.txt || echo "ENABLE_COVERAGE not found!"
+          fi
+
       - name: Extract Coverage and Test Statistics
         id: extract_stats
         if: always()
