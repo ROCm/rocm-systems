@@ -104,6 +104,26 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_Functional2") {
   //delete[] A;
   HIP_CHECK(hipModuleUnload(Module));
 }
+
+void setMode() {
+  setenv("HIP_MODULE_LOADING", "EAGER", 1);
+}
+
+void ChkMode(){
+  hipModuleLoadingMode_t mode;
+  HIP_CHECK(hipModuleGetLoadingMode(&mode));
+  REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
+  unsetenv("HIP_MODULE_LOADING");
+}
+
+TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
+  // Create Thraed one.
+  std::thread t1(setMode);
+  t1.join();
+  // Create Thread two
+  std::thread t2(ChkMode);
+  t2.join();
+}
 /**
  * End doxygen group ModuleTest.
  * @}
