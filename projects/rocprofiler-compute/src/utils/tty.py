@@ -25,7 +25,6 @@
 
 import argparse
 import copy
-import inspect
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, TextIO
@@ -134,8 +133,6 @@ def is_roofline_shown(
     roof_plot: Optional[str],
     hidden_cols: list[str],
 ) -> bool:
-    print(inspect.stack()[1].function)
-
     has_roofline_style = any(
         data_source.get(table_type, {}).get("cli_style") == "Roofline"
         for data_source in panel["data source"]
@@ -470,7 +467,34 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        panel_content = ""  # store content of all data_source from one panel
+        # Panel-level Filtering
+        if (
+            not args.filter_metrics
+            and filter_panel_ids
+            and panel_id > 100
+            and panel_id not in filter_panel_ids
+        ):
+            panel_table_ids = {
+                tbl_cfg["id"]
+                for ds in panel["data source"]
+                for _, tbl_cfg in ds.items()
+            }
+            if panel_table_ids.isdisjoint(filter_panel_ids):
+                for ds in panel["data source"]:
+                    for _, tbl_cfg in ds.items():
+                        table_id_str = f"{tbl_cfg['id'] // 100}.{tbl_cfg['id'] % 100}"
+                        console_log(
+                            f"Not showing table not selected during profiling: "
+                            f"{table_id_str} {tbl_cfg['title']}"
+                        )
+                continue
+
+        if panel_id == 400 and is_roofline_shown(
+            args, runs, output, panel, roof_plot, hidden_cols
+        ):
+            continue
+
+        panel_content = ""
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
@@ -493,11 +517,6 @@ def show_all(
                         f"Not showing table not selected during profiling: "
                         f"{table_id_str} {table_config['title']}"
                     )
-                    continue
-
-                if panel_id == 400 and is_roofline_shown(
-                    args, runs, output, panel, roof_plot, hidden_cols
-                ):
                     continue
 
                 # Metrics baseline comparison mode: only show common metrics across runs
@@ -552,7 +571,6 @@ def show_all(
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
     print(f"\n{'-' * 80}")
-    print("4. Roofline")
     print("4.3 Roofline Plot")
 
     if roof_plot:
