@@ -42,9 +42,10 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Generator, Optional, Union, cast
+from typing import Any, Optional, Union, cast
 
 import pandas as pd
 import yaml
@@ -767,7 +768,7 @@ def run_prof(
         if is_mode_live_attach:
 
             @contextmanager
-            def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
+            def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
                 """
                 Temporarily change the environment variable of this application.
                 """
