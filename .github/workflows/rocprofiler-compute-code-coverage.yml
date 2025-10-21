@@ -10,11 +10,6 @@ on:
         description: 'Runner configuration'
         required: false
         type: string
-  push:
-    branches: [ users/jamessiddeley-amd/improve-cdash ]
-    paths:
-      - '.github/workflows/rocprofiler-compute-nightly-coverage.yml'
-      - 'projects/rocprofiler-compute/**'
 
 env:
   ROCM_PATH: "/opt/rocm"
