@@ -61,13 +61,15 @@ elseif(HIP_PLATFORM MATCHES "amd")
                       LINKER_LIBS hiprtc)
 endif()
 
-add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ChkPtrdiff_t_Exe)
-
 if(HIP_PLATFORM MATCHES "nvidia")
-  target_link_libraries(ChkPtrdiff_t_Exe nvrtc)
+  set(RTC_LIB nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  target_link_libraries(ChkPtrdiff_t_Exe hiprtc)
+  set(RTC_LIB hiprtc)
 endif()
 
-add_dependencies(build_tests copyRtcHeaders ChkPtrdiff_t_Exe)
+hip_add_executable(NAME ChkPtrdiff_t_Exe
+                   SOURCE ChkPtrdiff_t_Exe.cc
+                   ADD_TO_TARGET build_tests
+                   LINKER_LIBS ${RTC_LIB})
+
+add_dependencies(build_tests copyRtcHeaders)

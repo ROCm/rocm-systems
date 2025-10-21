@@ -4,13 +4,9 @@ set(TEST_SRC
     library_negative.cc
 )
 
-add_custom_target(library_code_load.code
-    COMMAND ${CMAKE_CXX_COMPILER} --genco ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
-            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code ${OFFLOAD_ARCH_STR}
-            -I${HIP_PATH}/include/ -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-            --rocm-path=${ROCM_PATH})
-set_property(GLOBAL APPEND PROPERTY
-             G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/library_code_load.code)
+hip_add_device_code(
+  TARGET library_code_load
+  SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
     hip_add_exe_to_target(NAME LibraryTests
@@ -24,4 +20,4 @@ else()
                           LINKER_LIBS nvrtc)
 endif()
 
-add_dependencies(LibraryTests library_code_load.code)
+add_dependencies(LibraryTests library_code_load)

@@ -102,13 +102,9 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   endforeach()   # OFFLOAD_ARCH_LIST
 endfunction()  # CheckAcceptedArchs
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17 ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
-                   -o tex_ref_get_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
-                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
-add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
+hip_add_device_code(
+  TARGET tex_ref_get_module
+  SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   if (DEFINED OFFLOAD_ARCH_STR)

@@ -62,21 +62,15 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 endif()
 
 # Standalone exes
-add_executable(printfFlags_exe EXCLUDE_FROM_ALL printfFlags_exe.cc)
-add_executable(printfLength_exe EXCLUDE_FROM_ALL printfLength_exe.cc)
-add_executable(printfSpecifiers_exe EXCLUDE_FROM_ALL printfSpecifiers_exe.cc)
-add_executable(printfFlagsNonHost_exe EXCLUDE_FROM_ALL printfFlagsNonHost_exe.cc)
-add_executable(printfSpecifiersNonHost_exe EXCLUDE_FROM_ALL printfSpecifiersNonHost_exe.cc)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
-             printfFlags_exe
-             printfLength_exe
-             printfSpecifiers_exe
-             printfFlagsNonHost_exe
-             printfSpecifiersNonHost_exe)
-
-add_dependencies(build_tests printfFlags_exe)
-add_dependencies(build_tests printfLength_exe)
-add_dependencies(build_tests printfSpecifiers_exe)
-add_dependencies(build_tests printfFlagsNonHost_exe)
-add_dependencies(build_tests printfSpecifiersNonHost_exe)
-
+foreach(exe
+    printfFlags
+    printfLength
+    printfSpecifiers
+    printfFlagsNonHost
+    printfSpecifiersNonHost
+)
+  hip_add_executable(
+    NAME ${exe}_exe
+    SOURCE ${exe}_exe.cc
+    ADD_TO_TARGET build_tests)
+endforeach()

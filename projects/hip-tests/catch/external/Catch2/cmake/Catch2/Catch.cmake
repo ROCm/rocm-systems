@@ -247,11 +247,11 @@ function(catch_discover_tests TARGET)
       file(APPEND ${ctest_include_file_build} "set(crosscompiling_emulator ${crosscompiling_emulator})\n")
       file(APPEND ${ctest_include_file_build} "set(_PROPERTIES ${_PROPERTIES})\n")
       file(APPEND ${ctest_include_file_build} "include(${CATCH_INCLUDE_PATH})\n")
-      # Add discovered tests to directory TEST_INCLUDE_FILES      
+      # Add discovered tests to directory TEST_INCLUDE_FILES
       set_property(DIRECTORY
         APPEND PROPERTY TEST_INCLUDE_FILES "${ctest_include_rel_path}"
       )
-      
+
       # write install time include file
       file(WRITE ${ctest_include_file_install} "set(_TARGET_EXECUTABLE ${TARGET})\n")
       file(APPEND ${ctest_include_file_install} "set(TARGET ${TARGET})\n")
@@ -372,6 +372,15 @@ function(hip_add_exe_to_target)
     "${args}"
     "${list_args}"
   )
+
+  if(HIP_PLATFORM STREQUAL "amd")
+    set_source_files_properties(${TEST_SRC} PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(${COMMON_SHARED_SRC} PROPERTIES LANGUAGE HIP)
+  elseif(HIP_PLATFORM STREQUAL "nvidia")
+    set_source_files_properties(${TEST_SRC} PROPERTIES LANGUAGE CUDA)
+    set_source_files_properties(${COMMON_SHARED_SRC} PROPERTIES LANGUAGE CUDA)
+  endif()
+
   foreach(SRC_NAME ${TEST_SRC})
 
     if(NOT STANDALONE_TESTS EQUAL "1")
@@ -414,6 +423,11 @@ function(hip_add_exe_to_target)
       target_link_libraries(${_EXE_NAME} ${_LINKER_LIBS})
     endif()
 
+    # Link CUDA libraries for NVIDIA platform
+    if(HIP_PLATFORM STREQUAL "nvidia")
+      target_link_libraries(${_EXE_NAME} CUDA::cuda_driver)
+    endif()
+
     # Add dependency on build_tests to build it on this custom target
     add_dependencies(${_TEST_TARGET_NAME} ${_EXE_NAME})
 
@@ -435,4 +449,3 @@ function(hip_add_exe_to_target)
   endforeach()
 
 endfunction()
-
