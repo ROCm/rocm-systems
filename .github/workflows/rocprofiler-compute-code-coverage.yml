@@ -113,21 +113,18 @@ jobs:
             --build-name "${BUILD_NAME}" \
             --mode "Nightly" \
             --build-jobs 16 \
-            --install \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DENABLE_COVERAGE=ON \
-            -DENABLE_TESTS=ON \
-            -DINSTALL_TESTS=ON \
-            -DPYTEST_NUMPROCS=8
+            --pytest-numprocs 8 \
+            --install
 
       - name: Check Coverage Configuration
         if: always()
         working-directory: projects/rocprofiler-compute
         run: |
           if [ -f "build/CMakeCache.txt" ]; then
-            echo "Checking ENABLE_COVERAGE in CMakeCache:"
-            grep ENABLE_COVERAGE build/CMakeCache.txt || echo "ENABLE_COVERAGE not found!"
+            echo "Checking build configuration in CMakeCache:"
+            grep "ENABLE_TESTS" build/CMakeCache.txt || echo "ENABLE_TESTS not found!"
+            grep "ENABLE_COVERAGE" build/CMakeCache.txt || echo "ENABLE_COVERAGE not found!"
+            grep "INSTALL_TESTS" build/CMakeCache.txt || echo "INSTALL_TESTS not found!"
           fi
 
       - name: Upload Logs on Failure
