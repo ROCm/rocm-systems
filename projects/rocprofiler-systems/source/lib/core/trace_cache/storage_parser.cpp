@@ -164,8 +164,7 @@ storage_parser::consume_storage()
             case entry_type::region:
             {
                 region_sample _region_sample;
-                parse_data(sample.data(), _region_sample.thread_id, _region_sample.kind,
-                           _region_sample.operation,
+                parse_data(sample.data(), _region_sample.thread_id, _region_sample.name,
                            _region_sample.correlation_id_internal,
                            _region_sample.correlation_id_ancestor,
                            _region_sample.start_timestamp, _region_sample.end_timestamp,

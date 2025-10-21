@@ -30,9 +30,12 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      - id: check-json # Check JSON files for syntax errors
       - id: check-yaml # Check YAML files for syntax errors
       - id: trailing-whitespace # Remove trailing whitespace
       - id: end-of-file-fixer # Fix files to have a newline at the end
+      - id: pretty-format-json # Pretty-format JSON files
+        args: ['--indent', '4', '--autofix']
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.8 # Version 18 as specified in contributor guide
