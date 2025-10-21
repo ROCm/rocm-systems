@@ -125,8 +125,6 @@ ctest_start({args.mode})
 # Configure step
 message(STATUS "Configuring project...")
 ctest_configure(
-    SOURCE "${{CTEST_SOURCE_DIRECTORY}}"
-    BINARY "${{CTEST_BINARY_DIRECTORY}}"
     RETURN_VALUE configure_result
     CAPTURE_CMAKE_ERROR configure_error
 )
