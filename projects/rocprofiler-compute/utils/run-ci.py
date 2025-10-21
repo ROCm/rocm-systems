@@ -74,11 +74,14 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
                 var_type = "BOOL" if value in ["ON", "OFF"] else "STRING"
                 cache_entries.append(f'{name}:{var_type}={value}')
 
-    cmake_cache_section = f'''
-    set(CTEST_INITIAL_CACHE "
-    {'\\n'.join(cache_entries)}
-    ")
-    ''' if cache_entries else ""
+    cmake_cache_section = ""
+    if cache_entries:
+        cache_string = "\n    ".join(cache_entries)
+        cmake_cache_section = f'''
+set(CTEST_INITIAL_CACHE "
+    {cache_string}
+")
+'''
 
     test_args = ""
     if args.ctest_args:
@@ -225,7 +228,6 @@ endif()
 """
 
     return script_content
-
 
 def main():
     parser = argparse.ArgumentParser(
