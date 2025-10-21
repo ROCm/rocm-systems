@@ -38,6 +38,7 @@
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/constants.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/core.h>
@@ -105,7 +106,7 @@ get_agent_id_from_counter_id(rocprofiler_counter_id_t counter_id)
     }
 
     // Return invalid agent_id if not found
-    return agent::null_agent_id;
+    return sdk::null_agent_id;
 }
 
 }  // namespace counters
@@ -191,7 +192,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
     auto dim_permutations = [&](auto& out_struct) {
         // Get agent from counter ID encoding
         auto agent_id = counters::get_agent_id_from_counter_id(counter_id);
-        if(agent_id == rocprofiler::agent::null_agent_id) return false;
+        if(agent_id == rocprofiler::sdk::null_agent_id) return false;
 
         auto dim_ptr = counters::get_dimension_cache(agent_id);
         if(!dim_ptr) return false;
