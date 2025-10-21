@@ -64,7 +64,6 @@ RUN set -euo pipefail; \
       dnf clean all; \
       dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang elfutils-devel; \
       dnf install -y libva-amdgpu-devel || true; \
-      dnf install -y rocm-hip-runtime-dev || true; \
       python3 -m pip install -U awscli; \
     else \
       echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
@@ -95,24 +94,10 @@ RUN set -euo pipefail; \
     rm -rf "${EXTRACT_DIR}" "${TARBALL}"; \
     ln -s -f /opt/rocm-7.0.0 /opt/rocm
 
-# Common environment
-ENV CMAKE_HIP_PLATFORM=amd
-ENV HIP_PLATFORM=amd
-ENV HIP_RUNTIME=rocclr
-ENV HIP_COMPILER=amdclang++
-ENV LLVM_PATH=/opt/rocm/llvm
-ENV ROCM_PATH=/opt/rocm
-ENV CMAKE_PREFIX_PATH="${LLVM_PATH};${ROCM_PATH}"
-ENV PATH="/usr/local/bin:${ROCM_PATH}/bin:${LLVM_PATH}/bin:${PATH}"
-ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LLVM_PATH}/lib:${LD_LIBRARY_PATH}"
-
 
 # ----------------------------------------
 # Stage 3: rocm-systems dependencies build (includes optional media deps)
 # ----------------------------------------
-FROM stage2 AS stage3
-
-SHELL ["/bin/bash","-lc"]
 
 # Common environment
 ENV CMAKE_HIP_PLATFORM=amd
@@ -225,8 +210,6 @@ RUN set -euo pipefail; \
       cmake -G Ninja -B build-aqlprofile \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
-        -DClang_DIR=${LLVM_PATH}/lib/cmake/clang \
-        -DLLVM_DIR=${LLVM_PATH}/lib/cmake/llvm \
         -DCMAKE_C_COMPILER=${LLVM_PATH}/bin/amdclang \
         -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++ \
         -DCMAKE_INSTALL_PREFIX=${ROCM_PATH}; \

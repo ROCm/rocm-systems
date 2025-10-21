@@ -28,13 +28,22 @@ jobs:
   # Build a cached CI base image per OS using Buildx + GHA cache (Item #6)
   # -----------------------------------------------------------------------------
   build-ci-images:
-    name: Build CI Images • ${{ matrix.os }} • ${{ matrix.gpu }}
+    name: Build CI Images • ${{ matrix.system.os }} • ${{ matrix.system.gpu }}
     runs-on: azure-linux-scale-rocm
     strategy:
       fail-fast: false
       matrix:
-        os: [ 'ubuntu-22.04', 'ubuntu-24.04', 'almalinux-8.10', 'sles-15.7' ]
-        gpu: [ 'gfx94X', 'gfx110X', 'gfx120X' ]
+        system:
+          - { os: 'ubuntu-22.04', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-22.04', gpu: 'gfx110X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-22.04', gpu: 'gfx120X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-24.04', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-24.04', gpu: 'gfx110X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-24.04', gpu: 'gfx120X', rocdecode: true, rocjpeg: true }
+          - { os: 'almalinux-8.10', gpu: 'gfx94X', rocdecode: false, rocjpeg: false }
+          - { os: 'almalinux-10', gpu: 'gfx94X', rocdecode: false, rocjpeg: false }
+          - { os: 'sles-15.7', gpu: 'gfx94X', rocdecode: false, rocjpeg: false }
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -60,6 +69,8 @@ jobs:
         env:
           ROCDECODE_REF: develop
           ROCJPEG_REF: develop
+          BUILD_ROCDECODE: ${{ matrix.system.rocdecode }}
+          BUILD_ROCJPEG: ${{ matrix.system.rocjpeg }}
         run: |
           chmod +x projects/rocprofiler-sdk/ci_docker/docker-build.sh
-          projects/rocprofiler-sdk/ci_docker/docker-build.sh ${{ matrix.os }} --push --gpus ${{ matrix.gpu }}
+          projects/rocprofiler-sdk/ci_docker/docker-build.sh ${{ matrix.system.os }} --push --gpus ${{ matrix.system.gpu }}
