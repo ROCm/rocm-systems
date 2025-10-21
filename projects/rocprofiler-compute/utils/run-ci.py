@@ -64,7 +64,7 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
     - Coverage
     - Submit to CDash
     """
-    
+
     cmake_cache_vars = []
     for arg in args.cmake_args:
         if arg.startswith("-D"):
@@ -72,14 +72,17 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
             if "=" in var:
                 name, value = var.split("=", 1)
                 var_type = "BOOL" if value in ["ON", "OFF"] else "STRING"
-                cmake_cache_vars.append(f'set({name} "{value}" CACHE {var_type} "" FORCE)')
-    
+                cmake_cache_vars.append(
+                    f'set({name} "{value}" CACHE {var_type} "" FORCE)'
+                )
+
     cmake_cache_section = "\n".join(cmake_cache_vars)
-    
+
     test_args = ""
     if args.ctest_args:
         test_args = " ".join(args.ctest_args)
-    
+
+    # ruff: noqa
     script_content = f"""
 cmake_minimum_required(VERSION 3.19)
 
@@ -162,16 +165,16 @@ endif()
 set(COVERAGE_FILE "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
 if(EXISTS "${{COVERAGE_FILE}}")
     message(STATUS "Processing coverage data...")
-    
+
     file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo")
     file(COPY "${{COVERAGE_FILE}}"
          DESTINATION "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo/")
-    
+
     ctest_coverage(
         RETURN_VALUE coverage_result
         CAPTURE_CMAKE_ERROR coverage_error
     )
-    
+
     if(coverage_result OR coverage_error)
         message(WARNING "Coverage processing had issues but continuing...")
     endif()
@@ -194,7 +197,11 @@ if(submit_result OR submit_error)
     message(STATUS "Results available locally in: ${{CTEST_BINARY_DIRECTORY}}/Testing/")
 else()
     message(STATUS "Successfully submitted to CDash!")
-    message(STATUS "View at: {args.submit_url.replace('/submit.php?project=', '/index.php?project=')}")
+    VIEW_URL = args.submit_url.replace(
+        "/submit.php?project=",
+        "/index.php?project="
+    )
+    message(STATUS f"View at: {VIEW_URL}")
     message(STATUS "Build name: {args.build_name}")
 endif()
 
@@ -221,7 +228,7 @@ if("{args.mode}" STREQUAL "Experimental" AND test_result)
     message(WARNING "Tests failed in Experimental mode")
 endif()
 """
-    
+
     return script_content
 
 
@@ -309,19 +316,19 @@ def main():
 
     if "--" in args.cmake_args:
         separator_idx = args.cmake_args.index("--")
-        args.ctest_args = args.cmake_args[separator_idx + 1:]
+        args.ctest_args = args.cmake_args[separator_idx + 1 :]
         args.cmake_args = args.cmake_args[:separator_idx]
     else:
         args.ctest_args = []
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
-    
+
     if not args.source_dir:
         args.source_dir = str(project_root)
-    
+
     if not args.binary_dir:
         args.binary_dir = os.path.join(args.source_dir, "build")
-    
+
     if not args.site:
         if is_monorepo:
             args.site = f"Monorepo-{os.uname().nodename}"
@@ -376,11 +383,11 @@ def main():
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
         )
 
         for line in process.stdout:
-            print(line, end='')
+            print(line, end="")
 
         returncode = process.wait()
 
@@ -397,6 +404,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Error executing dashboard script: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
     finally:
