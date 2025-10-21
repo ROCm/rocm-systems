@@ -321,7 +321,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ 'mi325' ]
-        os: [ 'almalinux-8.10', 'sles-15.7' ]
+        os: [ 'almalinux-8.10', 'almalinux-10', 'sles-15.7' ]
         build-type: [ 'RelWithDebInfo' ]
         ci-flags: [ '' ]
     runs-on: linux-mi325-1gpu-ossci-rocm
