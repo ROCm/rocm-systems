@@ -60,5 +60,4 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-console-tests.cmake)
-
-add_subdirectory(source)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
