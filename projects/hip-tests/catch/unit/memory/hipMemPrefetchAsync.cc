@@ -157,3 +157,57 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
                     hipErrorInvalidDevice);
   }
 }
+
+TEST_CASE("Unit_hipMemPrefetchBatchAsync_Basic") {
+  const auto supported_devices = GetDevicesWithPrefetchSupport();
+  if (supported_devices.empty()) {
+    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+  }
+
+  LinearAllocGuard<int> alloc1(LinearAllocs::hipMallocManaged, kPageSize * 1);
+  LinearAllocGuard<int> alloc2(LinearAllocs::hipMallocManaged, kPageSize * 2);
+  LinearAllocGuard<int> alloc3(LinearAllocs::hipMallocManaged, kPageSize * 3);
+
+  const size_t count = 3;
+  size_t sizes[count] = {kPageSize * 1 / sizeof(*alloc1.ptr()),
+                         kPageSize * 2 / sizeof(*alloc1.ptr()),
+                         kPageSize * 3 / sizeof(*alloc1.ptr())};
+
+
+  constexpr auto fill_value = 42;
+  std::fill_n(alloc1.ptr(), sizes[0], fill_value);
+  std::fill_n(alloc2.ptr(), sizes[1], fill_value);
+  std::fill_n(alloc3.ptr(), sizes[2], fill_value);
+
+  void* d_ptrs[count] = {alloc1.ptr(), alloc2.ptr(), alloc3.ptr()};
+
+  for (const auto device : supported_devices) {
+    HIP_CHECK(hipSetDevice(device));
+
+    constexpr size_t numPrefetchLocs = 2;
+    hipMemLocation prefetchLocs[numPrefetchLocs] = {{hipMemLocationTypeDevice, device},
+                                                    {hipMemLocationTypeDevice, device}};
+    size_t prefetchLocIdxs[numPrefetchLocs] = {0, 3};
+
+    LinearAllocGuard<int> alloc2(LinearAllocs::hipMallocManaged, kPageSize);
+    StreamGuard sg(Streams::created);
+    HIP_CHECK(hipMemPrefetchBatchAsync(d_ptrs, sizes, count, prefetchLocs, prefetchLocIdxs,
+                                       numPrefetchLocs, 0, sg.stream()));
+    MemPrefetchAsyncKernel<<<count / 1024 + 1, 1024, 0, sg.stream()>>>(alloc2.ptr(), alloc1.ptr(),
+                                                                       count);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipStreamSynchronize(sg.stream()));
+    ArrayFindIfNot(alloc1.ptr(), fill_value, count);
+    ArrayFindIfNot(alloc2.ptr(), fill_value * fill_value, count);
+  }
+
+  constexpr size_t numPrefetchLocs = 2;
+  hipMemLocation prefetchLocs[numPrefetchLocs] = {{hipMemLocationTypeHost, 0},
+                                                  {hipMemLocationTypeHost, 0}};
+  size_t prefetchLocIdxs[numPrefetchLocs] = {0, 3};
+
+  HIP_CHECK(hipMemPrefetchBatchAsync(d_ptrs, sizes, count, prefetchLocs, prefetchLocIdxs,
+                                     numPrefetchLocs, 0));
+  HIP_CHECK(hipStreamSynchronize(nullptr));
+  ArrayFindIfNot(alloc1.ptr(), fill_value, count);
+}

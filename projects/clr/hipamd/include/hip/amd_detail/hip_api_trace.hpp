@@ -540,6 +540,10 @@ typedef hipError_t (*t_hipMemPrefetchAsync)(const void* dev_ptr, size_t count, i
 typedef hipError_t (*t_hipMemPrefetchAsync_v2)(const void* dev_ptr, size_t count,
                                                hipMemLocation location, unsigned int flags,
                                                hipStream_t stream);
+typedef hipError_t (*t_hipMemPrefetchBatchAsync)(void** ptrs, size_t* sizes, size_t count,
+                                                 hipMemLocation* prefetchLocs,
+                                                 size_t* prefetchLocIdx, size_t numPrefetchLocs,
+                                                 unsigned long long flags, hipStream_t stream);
 typedef hipError_t (*t_hipMemPtrGetInfo)(void* ptr, size_t* size);
 typedef hipError_t (*t_hipMemRangeGetAttribute)(void* data, size_t data_size,
                                                 hipMemRangeAttribute attribute, const void* dev_ptr,
@@ -1682,6 +1686,7 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
   t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
+  t_hipMemPrefetchBatchAsync hipMemPrefetchBatchAsync_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17

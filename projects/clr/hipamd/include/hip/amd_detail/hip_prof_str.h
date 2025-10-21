@@ -463,7 +463,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryGetKernelCount = 443,
   HIP_API_ID_hipMemGetHandleForAddressRange = 444,
   HIP_API_ID_hipStreamCopyAttributes = 445,
-  HIP_API_ID_LAST = 445,
+  HIP_API_ID_hipMemPrefetchBatchAsync = 446,
+  HIP_API_ID_LAST = 446,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -783,6 +784,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMemPoolTrimTo: return "hipMemPoolTrimTo";
     case HIP_API_ID_hipMemPrefetchAsync: return "hipMemPrefetchAsync";
     case HIP_API_ID_hipMemPrefetchAsync_v2: return "hipMemPrefetchAsync_v2";
+    case HIP_API_ID_hipMemPrefetchBatchAsync: return "hipMemPrefetchBatchAsync";
     case HIP_API_ID_hipMemPtrGetInfo: return "hipMemPtrGetInfo";
     case HIP_API_ID_hipMemRangeGetAttribute: return "hipMemRangeGetAttribute";
     case HIP_API_ID_hipMemRangeGetAttributes: return "hipMemRangeGetAttributes";
@@ -1222,6 +1224,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMemPoolTrimTo", name) == 0) return HIP_API_ID_hipMemPoolTrimTo;
   if (strcmp("hipMemPrefetchAsync", name) == 0) return HIP_API_ID_hipMemPrefetchAsync;
   if (strcmp("hipMemPrefetchAsync_v2", name) == 0) return HIP_API_ID_hipMemPrefetchAsync_v2;
+  if (strcmp("hipMemPrefetchBatchAsync", name) == 0) return HIP_API_ID_hipMemPrefetchBatchAsync;
   if (strcmp("hipMemPtrGetInfo", name) == 0) return HIP_API_ID_hipMemPtrGetInfo;
   if (strcmp("hipMemRangeGetAttribute", name) == 0) return HIP_API_ID_hipMemRangeGetAttribute;
   if (strcmp("hipMemRangeGetAttributes", name) == 0) return HIP_API_ID_hipMemRangeGetAttributes;
@@ -3052,6 +3055,20 @@ typedef struct hip_api_data_s {
       unsigned int flags;
       hipStream_t stream;
     } hipMemPrefetchAsync_v2;
+    struct {
+      void** ptrs;
+      void* ptrs__val;
+      size_t* sizes;
+      size_t sizes__val;
+      size_t count;
+      hipMemLocation* prefetchLocs;
+      hipMemLocation prefetchLocs__val;
+      size_t* prefetchLocIdx;
+      size_t prefetchLocIdx__val;
+      size_t numPrefetchLocs;
+      unsigned long long flags;
+      hipStream_t stream;
+    } hipMemPrefetchBatchAsync;
     struct {
       void* ptr;
       size_t* size;
@@ -5673,6 +5690,17 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemPrefetchAsync_v2.flags = (unsigned int)flags; \
   cb_data.args.hipMemPrefetchAsync_v2.stream = (hipStream_t)stream; \
 };
+// hipMemPrefetchBatchAsync[('void**', 'ptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('hipMemLocation*', 'prefetchLocs'), ('size_t*', 'prefetchLocIdx'), ('size_t', 'numPrefetchLocs'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+#define INIT_hipMemPrefetchBatchAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemPrefetchBatchAsync.ptrs = (void**)ptrs; \
+  cb_data.args.hipMemPrefetchBatchAsync.sizes = (size_t*)sizes; \
+  cb_data.args.hipMemPrefetchBatchAsync.count = (size_t)count; \
+  cb_data.args.hipMemPrefetchBatchAsync.prefetchLocs = (hipMemLocation*)prefetchLocs; \
+  cb_data.args.hipMemPrefetchBatchAsync.prefetchLocIdx = (size_t*)prefetchLocIdxs; \
+  cb_data.args.hipMemPrefetchBatchAsync.numPrefetchLocs = (size_t)numPrefetchLocs; \
+  cb_data.args.hipMemPrefetchBatchAsync.flags = (unsigned long long)flags; \
+  cb_data.args.hipMemPrefetchBatchAsync.stream = (hipStream_t)stream; \
+};
 // hipMemPtrGetInfo[('void*', 'ptr'), ('size_t*', 'size')]
 #define INIT_hipMemPtrGetInfo_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipMemPtrGetInfo.ptr = (void*)ptr; \
@@ -7869,6 +7897,13 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipMemPrefetchAsync_v2[('const void*', 'dev_ptr'), ('size_t', 'count'), ('hipMemLocation', 'location'), ('unsigned int', 'flags'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemPrefetchAsync_v2:
+      break;
+// hipMemPrefetchBatchAsync[('void**', 'ptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('hipMemLocation*', 'prefetchLocs'), ('size_t*', 'prefetchLocIdx'), ('size_t', 'numPrefetchLocs'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipMemPrefetchBatchAsync:
+      if (data->args.hipMemPrefetchBatchAsync.ptrs) data->args.hipMemPrefetchBatchAsync.ptrs__val = *(data->args.hipMemPrefetchBatchAsync.ptrs);
+      if (data->args.hipMemPrefetchBatchAsync.sizes) data->args.hipMemPrefetchBatchAsync.sizes__val = *(data->args.hipMemPrefetchBatchAsync.sizes);
+      if (data->args.hipMemPrefetchBatchAsync.prefetchLocs) data->args.hipMemPrefetchBatchAsync.prefetchLocs__val = *(data->args.hipMemPrefetchBatchAsync.prefetchLocs);
+      if (data->args.hipMemPrefetchBatchAsync.prefetchLocIdx) data->args.hipMemPrefetchBatchAsync.prefetchLocIdx__val = *(data->args.hipMemPrefetchBatchAsync.prefetchLocIdx);
       break;
 // hipMemPtrGetInfo[('void*', 'ptr'), ('size_t*', 'size')]
     case HIP_API_ID_hipMemPtrGetInfo:
@@ -10691,6 +10726,22 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", location="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchAsync_v2.location);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchAsync_v2.flags);
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchAsync_v2.stream);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipMemPrefetchBatchAsync:
+      oss << "hipMemPrefetchBatchAsync(";
+      if (data->args.hipMemPrefetchBatchAsync.ptrs == NULL) oss << "ptrs=NULL";
+      else { oss << "ptrs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.ptrs__val); }
+      if (data->args.hipMemPrefetchBatchAsync.sizes == NULL) oss << ", sizes=NULL";
+      else { oss << ", sizes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.sizes__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.count);
+      if (data->args.hipMemPrefetchBatchAsync.prefetchLocs == NULL) oss << ", prefetchLocs=NULL";
+      else { oss << ", prefetchLocs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.prefetchLocs__val); }
+      if (data->args.hipMemPrefetchBatchAsync.prefetchLocIdx == NULL) oss << ", prefetchLocIdx=NULL";
+      else { oss << ", prefetchLocIdx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.prefetchLocIdx__val); }
+      oss << ", numPrefetchLocs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.numPrefetchLocs);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.flags);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemPrefetchBatchAsync.stream);
       oss << ")";
     break;
     case HIP_API_ID_hipMemPtrGetInfo:

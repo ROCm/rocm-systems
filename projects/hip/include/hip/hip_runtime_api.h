@@ -3900,6 +3900,26 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream __dparm(0));
 /**
+ * @brief Prefetches memory to the specified destination device using HIP.
+ *
+ * @param [in] ptrs       pointers to be prefetched
+ * @param [in] sizes      sizes in bytes for prefetching
+ * @param [in] count      Number of pointers to be prefetched
+ * @param [in] prefetchLocs  Array of destinations to prefetch to
+ * @param [in] prefetchLocIdxs Array of indicies to specify which ptrs go to which location.
+ * @param [in] numPrefetchLocs  Size of arrays, prefetchLocs and prefetchLocIdxs
+ * @param [in] flags      flags for future use, must be zero now.
+ * @param [in] stream     stream to enqueue prefetch operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ */
+hipError_t hipMemPrefetchBatchAsync(void** ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetchLocs, size_t* prefetchLocIdx,
+                                    size_t numPrefetchLocs, unsigned long long flags,
+                                    hipStream_t stream __dparm(0));
+/**
  * @brief Advise about the usage of a given memory range to HIP.
  *
  * @param [in] dev_ptr  pointer to memory to set the advice for

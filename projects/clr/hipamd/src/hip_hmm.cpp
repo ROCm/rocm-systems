@@ -31,6 +31,10 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocation location,
                                 hipStream_t stream);
+hipError_t ihipMemPrefetchBatchAsync(void** ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+                                     size_t numPrefetchLocs, unsigned long long flags,
+                                     hipStream_t stream);
 hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                          hipMemLocation location);
 
@@ -117,6 +121,21 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipMemPrefetchAsync(dev_ptr, count, location, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemPrefetchBatchAsync(void** ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+                                    size_t numPrefetchLocs, unsigned long long flags,
+                                    hipStream_t stream) {
+  HIP_INIT_API(hipMemPrefetchBatchAsync, ptrs, sizes, count, prefetchLocs, prefetchLocIdxs,
+               numPrefetchLocs, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+  if (flags != 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(ihipMemPrefetchBatchAsync(ptrs, sizes, count, prefetchLocs, prefetchLocIdxs,
+                                       numPrefetchLocs, flags, stream));
 }
 
 // ================================================================================================
@@ -349,6 +368,105 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   }
   command->enqueue();
   command->release();
+  return hipSuccess;
+}
+// ================================================================================================
+hipError_t ihipMemPrefetchBatchAsync(void** ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+                                     size_t numPrefetchLocs, unsigned long long flags,
+                                     hipStream_t stream) {
+  if ((ptrs == nullptr) || (sizes == nullptr) || (prefetchLocs == nullptr) ||
+      (prefetchLocIdxs == nullptr) || (numPrefetchLocs == 0)) {
+    return hipErrorInvalidValue;
+  }
+
+  if (prefetchLocIdxs[0] != 0) {
+    return hipErrorInvalidValue;
+  }
+
+  size_t priorPrefetchLocIdx = 0;
+  for (size_t i = 1; i < numPrefetchLocs; ++i) {
+    if (prefetchLocIdxs[i] < priorPrefetchLocIdx) {
+      return hipErrorInvalidValue;
+    }
+
+    priorPrefetchLocIdx = prefetchLocIdxs[i];
+  }
+
+
+  getStreamPerThread(stream);
+
+  for (size_t i = 0; i < count; ++i) {
+    size_t count = sizes[i];
+    if ((ptrs[i] == nullptr) || (count == 0)) {
+      return hipErrorInvalidValue;
+    }
+
+    size_t offset = 0;
+    amd::Memory* memObj = getMemoryObject(ptrs[i], offset);
+    if ((memObj != nullptr) && (count > memObj->getSize())) {
+      return hipErrorInvalidValue;
+    }
+
+
+    // Find location
+    hipMemLocation location;
+    for (size_t locIdx = 1; locIdx < numPrefetchLocs; ++locIdx) {
+      if (prefetchLocIdxs[locIdx] > i) {
+        location = prefetchLocs[locIdx];
+        break;
+      }
+    }
+
+    // Compute the type of prefetch
+    const bool isHost = (location.type == hipMemLocationTypeHost);
+    const bool isHostNuma = (location.type == hipMemLocationTypeHostNuma);
+    const bool isHostCurrent = (location.type == hipMemLocationTypeHostNumaCurrent);
+    const bool cpuAccess = isHost || isHostNuma || isHostCurrent;
+
+    // Determine the target device index:
+    //  - for host-prefetch and host-current, always use device 0
+    //  - for host-NUMA or device-prefetch, use the provided id
+    int targetDevice = (isHost || isHostCurrent) ? hipCpuDeviceId : location.id;
+
+    amd::Device* dev = nullptr;
+    if (cpuAccess == false) {
+      if (static_cast<size_t>(targetDevice) >= g_devices.size()) {
+        return hipErrorInvalidDevice;
+      }
+      dev = g_devices[targetDevice]->devices()[0];
+      if (memObj == nullptr && !dev->info().hmmCpuMemoryAccessible_) {
+        return hipErrorNotSupported;
+      }
+    }
+
+    hip::Stream* hip_stream = nullptr;
+    // Pick the specified stream or Null one from the provided target device
+    if (cpuAccess == true) {
+      hip_stream = (stream == nullptr || stream == hipStreamLegacy)
+                       ? hip::getCurrentDevice()->NullStream()
+                       : hip::getStream(stream);
+    } else {
+      dev = g_devices[targetDevice]->devices()[0];
+      hip_stream = (stream == nullptr || stream == hipStreamLegacy)
+                       ? g_devices[targetDevice]->NullStream()
+                       : hip::getStream(stream);
+    }
+
+    if (hip_stream == nullptr) {
+      return hipErrorInvalidValue;
+    }
+
+    amd::Command::EventWaitList waitList;
+    amd::SvmPrefetchAsyncCommand* command = new amd::SvmPrefetchAsyncCommand(
+        *hip_stream, waitList, ptrs[i], count, dev, cpuAccess, targetDevice);
+    if (command == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+    command->enqueue();
+    command->release();
+  }
+
   return hipSuccess;
 }
 // ================================================================================================
