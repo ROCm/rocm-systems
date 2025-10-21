@@ -39,6 +39,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/cxx/constants.hpp>
 
 #include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
@@ -331,7 +332,7 @@ struct memory_allocation_data
     using buffered_data_t = rocprofiler_buffer_tracing_memory_allocation_record_t;
 
     rocprofiler_thread_id_t                   tid            = common::get_tid();
-    rocprofiler_agent_id_t                    agent          = agent::null_agent_id;
+    rocprofiler_agent_id_t                    agent          = sdk::null_agent_id;
     uint64_t                                  size_allocated = 0;
     rocprofiler_address_t                     address        = {.handle = 0};
     uint64_t                                  start_ts       = 0;
@@ -412,7 +413,7 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
             }
         }
     }
-    return existing.count(val) == 0 ? agent::null_agent_id : existing.at(val);
+    return existing.count(val) == 0 ? sdk::null_agent_id : existing.at(val);
 }
 
 rocprofiler_address_t

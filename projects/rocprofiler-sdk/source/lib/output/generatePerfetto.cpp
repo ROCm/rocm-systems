@@ -26,10 +26,10 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
+#include <rocprofiler-sdk/cxx/constants.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
@@ -879,7 +879,7 @@ write_perfetto(
                 if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
                    itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
                 {
-                    LOG_IF(FATAL, itr.agent_id == agent::null_agent_id)
+                    LOG_IF(FATAL, itr.agent_id == sdk::null_agent_id)
                         << "Missing agent id for memory allocation trace";
                     mem_alloc_endpoints[itr.agent_id].emplace(
                         itr.start_timestamp,
