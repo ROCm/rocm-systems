@@ -47,10 +47,6 @@ jobs:
         os-release: [ '8.10', '9' ]
         rocm-version: [ '0.0', '6.3', '6.4', '7.0' ]
         build-type: ['Release']
-        exclude:
-          # No ROCm 6.3 support for RHEL9.6
-          - os-release: '9'
-            rocm-version: '6.3'
 
     steps:
     - uses: actions/checkout@v4
@@ -88,7 +84,7 @@ jobs:
         timeout_minutes: 30
         max_attempts: 3
         command: |
-          RPM_TAG=".el${OS_VERSION_MAJOR}"
+          RPM_TAG="el${OS_VERSION_MAJOR}"
           ROCM_VERSION=${{ matrix.rocm-version }}
           ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
           ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
@@ -96,9 +92,18 @@ jobs:
           if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
           if [ "${OS_VERSION_MAJOR}" -eq 9 ]; then OS_RELEASE=9.6; else OS_RELEASE=${{ matrix.os-release }}; fi
           dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
-          yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${OS_RELEASE}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-          yum install -y rocm-dev rocdecode-devel
-          if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+          tee /etc/yum.repos.d/rocm.repo <<EOF
+            [rocm]
+            name=ROCm $ROCM_VERSION repository
+            baseurl=https://repo.radeon.com/rocm/$RPM_TAG/$ROCM_VERSION/main
+            enabled=1
+            priority=50
+            gpgcheck=1
+            gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+            EOF
+          cat /etc/yum.repos.d/rocm.repo
+          dnf clean all
+          yum install -y rocm-dev
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
@@ -109,8 +114,8 @@ jobs:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip" &&
-        USE_HIP=OFF &&
-        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_HIP=ON; TAG="${TAG}-rocm-${{ matrix.rocm-version }}"; fi &&
+        USE_ROCM=OFF &&
+        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_ROCM=ON; TAG="${TAG}-rocm-${{ matrix.rocm-version }}"; fi &&
         python3 ./scripts/run-ci.py -B build
           --name ${TAG}
           --build-jobs 2
@@ -122,7 +127,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_ROCM=${USE_HIP}
+          -DROCPROFSYS_USE_ROCM=${USE_ROCM}
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_BUILD_DYNINST=ON
@@ -136,7 +141,7 @@ jobs:
           -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
           -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
           -LE "transpose|rccl|videodecode|jpegdecode|network"
