@@ -24,7 +24,7 @@ build_stage1_image() {
     docker build \
         -f "${SCRIPT_DIR}/${dockerfile}" \
         -t "${REGISTRY}/${BASE_TAG}:${os_name}-${os_version}-${BUILD_DATE}" \
-        -t "${REGISTRY}/${BASE_TAG}:${os_name}-${os_version}-latest" \
+        -t "${REGISTRY}/${BASE_TAG}:${os_name}-${os_version}-latest-testing" \
         --build-arg BUILD_DATE="${BUILD_DATE}" \
         --build-arg GIT_HASH="${GIT_HASH}" \
         --build-arg ROCM_SYSTEMS_REF="${ROCM_SYSTEMS_REF:-develop}" \
@@ -55,7 +55,7 @@ build_stage2_image() {
 
     docker build \
         -f "${SCRIPT_DIR}/Dockerfile.stages" \
-        --build-arg BASE_IMAGE="${REGISTRY}/${BASE_TAG}:${os_tag}-latest" \
+        --build-arg BASE_IMAGE="${REGISTRY}/${BASE_TAG}:${os_tag}-latest-testing" \
         --build-arg GPU_TYPE="${gpu}" \
         --build-arg TARBALL_KEY="${TARBALL_KEYS["${gpu}"]}" \
         --build-arg ROCM_SYSTEMS_REF="${ROCM_SYSTEMS_REF:-develop}" \
@@ -70,7 +70,7 @@ build_stage2_image() {
         --build-arg BUILD_ROCDECODE="${BUILD_ROCDECODE:-true}" \
         --build-arg BUILD_ROCJPEG="${BUILD_ROCJPEG:-true}" \
         -t "${REGISTRY}/${BASE_TAG}:${os_tag}-${gpu}-${BUILD_DATE}" \
-        -t "${REGISTRY}/${BASE_TAG}:${os_tag}-${gpu}-latest" \
+        -t "${REGISTRY}/${BASE_TAG}:${os_tag}-${gpu}-latest-testing" \
         "${SCRIPT_DIR}"
 }
 
@@ -259,42 +259,42 @@ if [[ ${PUSH_IMAGES} == true ]]; then
         case $dist in
             ubuntu-22.04)
                 docker push "${REGISTRY}/${BASE_TAG}:ubuntu-22.04-${BUILD_DATE}"
-                docker push "${REGISTRY}/${BASE_TAG}:ubuntu-22.04-latest"
+                docker push "${REGISTRY}/${BASE_TAG}:ubuntu-22.04-latest-testing"
                 for gpu in "${GPU_TYPES[@]}"; do
                     docker push "${REGISTRY}/${BASE_TAG}:ubuntu-22.04-${gpu}-${BUILD_DATE}"
-                    docker push "${REGISTRY}/${BASE_TAG}:ubuntu-22.04-${gpu}-latest"
+                    docker push "${REGISTRY}/${BASE_TAG}:ubuntu-22.04-${gpu}-latest-testing"
                 done
                 ;;
             ubuntu-24.04)
                 docker push "${REGISTRY}/${BASE_TAG}:ubuntu-24.04-${BUILD_DATE}"
-                docker push "${REGISTRY}/${BASE_TAG}:ubuntu-24.04-latest"
+                docker push "${REGISTRY}/${BASE_TAG}:ubuntu-24.04-latest-testing"
                 for gpu in "${GPU_TYPES[@]}"; do
                     docker push "${REGISTRY}/${BASE_TAG}:ubuntu-24.04-${gpu}-${BUILD_DATE}"
-                    docker push "${REGISTRY}/${BASE_TAG}:ubuntu-24.04-${gpu}-latest"
+                    docker push "${REGISTRY}/${BASE_TAG}:ubuntu-24.04-${gpu}-latest-testing"
                 done
                 ;;
             almalinux-8.10)
                 docker push "${REGISTRY}/${BASE_TAG}:almalinux-8.10-${BUILD_DATE}"
-                docker push "${REGISTRY}/${BASE_TAG}:almalinux-8.10-latest"
+                docker push "${REGISTRY}/${BASE_TAG}:almalinux-8.10-latest-testing"
                 for gpu in "${GPU_TYPES[@]}"; do
                     docker push "${REGISTRY}/${BASE_TAG}:almalinux-8.10-${gpu}-${BUILD_DATE}"
-                    docker push "${REGISTRY}/${BASE_TAG}:almalinux-8.10-${gpu}-latest"
+                    docker push "${REGISTRY}/${BASE_TAG}:almalinux-8.10-${gpu}-latest-testing"
                 done
                 ;;
             almalinux-10)
                 docker push "${REGISTRY}/${BASE_TAG}:almalinux-10-${BUILD_DATE}"
-                docker push "${REGISTRY}/${BASE_TAG}:almalinux-10-latest"
+                docker push "${REGISTRY}/${BASE_TAG}:almalinux-10-latest-testing"
                 for gpu in "${GPU_TYPES[@]}"; do
                     docker push "${REGISTRY}/${BASE_TAG}:almalinux-10-${gpu}-${BUILD_DATE}"
-                    docker push "${REGISTRY}/${BASE_TAG}:almalinux-10-${gpu}-latest"
+                    docker push "${REGISTRY}/${BASE_TAG}:almalinux-10-${gpu}-latest-testing"
                 done
                 ;;
             sles-15.7)
                 docker push "${REGISTRY}/${BASE_TAG}:sles-15.7-${BUILD_DATE}"
-                docker push "${REGISTRY}/${BASE_TAG}:sles-15.7-latest"
+                docker push "${REGISTRY}/${BASE_TAG}:sles-15.7-latest-testing"
                 for gpu in "${GPU_TYPES[@]}"; do
                     docker push "${REGISTRY}/${BASE_TAG}:sles-15.7-${gpu}-${BUILD_DATE}"
-                    docker push "${REGISTRY}/${BASE_TAG}:sles-15.7-${gpu}-latest"
+                    docker push "${REGISTRY}/${BASE_TAG}:sles-15.7-${gpu}-latest-testing"
                 done
                 ;;
         esac
@@ -309,8 +309,8 @@ docker images | grep "${REGISTRY}/${BASE_TAG}" | head -20
 
 echo ""
 echo "To use these images in CI, update your workflow files to use (examples):"
-echo "  ${REGISTRY}/${BASE_TAG}:ubuntu-22.04-gfx94X-latest"
-echo "  ${REGISTRY}/${BASE_TAG}:ubuntu-24.04-gfx94X-latest"
-echo "  ${REGISTRY}/${BASE_TAG}:almalinux-8.10-gfx94X-latest"
-echo "  ${REGISTRY}/${BASE_TAG}:almalinux-10-gfx110X-latest"
-echo "  ${REGISTRY}/${BASE_TAG}:sles-15.7-gfx120X-latest"
+echo "  ${REGISTRY}/${BASE_TAG}:ubuntu-22.04-gfx94X-latest-testing"
+echo "  ${REGISTRY}/${BASE_TAG}:ubuntu-24.04-gfx94X-latest-testing"
+echo "  ${REGISTRY}/${BASE_TAG}:almalinux-8.10-gfx94X-latest-testing"
+echo "  ${REGISTRY}/${BASE_TAG}:almalinux-10-gfx110X-latest-testing"
+echo "  ${REGISTRY}/${BASE_TAG}:sles-15.7-gfx120X-latest-testing"
