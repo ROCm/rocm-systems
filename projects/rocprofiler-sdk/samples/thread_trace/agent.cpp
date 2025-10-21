@@ -257,9 +257,10 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, TARGET_CU});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, BUFFER_SIZE});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, SHADER_MASK});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {TARGET_CU}});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {BUFFER_SIZE}});
+        parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {SHADER_MASK}});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,
