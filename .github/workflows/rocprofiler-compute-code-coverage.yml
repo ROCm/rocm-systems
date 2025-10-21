@@ -128,57 +128,6 @@ jobs:
             grep ENABLE_COVERAGE build/CMakeCache.txt || echo "ENABLE_COVERAGE not found!"
           fi
 
-      - name: Extract Coverage and Test Statistics
-        id: extract_stats
-        if: always()
-        working-directory: projects/rocprofiler-compute
-        run: |
-          if [ -f "build/coverage.xml" ]; then
-            COVERAGE_INFO=$(python3 -c "
-          import xml.etree.ElementTree as ET
-          try:
-              tree = ET.parse('build/coverage.xml')
-              root = tree.getroot()
-              line_rate = float(root.get('line-rate', 0)) * 100
-              print(f'{line_rate:.1f}%')
-          except Exception as e:
-              print('N/A')
-          ")
-            echo "coverage=${COVERAGE_INFO}" >> $GITHUB_OUTPUT
-          else
-            echo "coverage=N/A" >> $GITHUB_OUTPUT
-          fi
-          
-          if [ -f "build/Testing/Temporary/LastTest.log" ]; then
-            TESTS_PASSED=$(grep -oP '\d+(?= tests passed)' build/Testing/Temporary/LastTest.log | tail -1 || echo "0")
-            TESTS_FAILED=$(grep -oP '\d+(?= tests failed)' build/Testing/Temporary/LastTest.log | tail -1 || echo "0")
-            TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED))
-            echo "tests_passed=${TESTS_PASSED}" >> $GITHUB_OUTPUT
-            echo "tests_failed=${TESTS_FAILED}" >> $GITHUB_OUTPUT
-            echo "tests_total=${TESTS_TOTAL}" >> $GITHUB_OUTPUT
-          else
-            echo "tests_passed=0" >> $GITHUB_OUTPUT
-            echo "tests_failed=0" >> $GITHUB_OUTPUT
-            echo "tests_total=0" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate Summary
-        if: always()
-        run: |
-          echo "## Coverage Report - ${{ matrix.system.gpu }} Ubuntu ${{ matrix.system.os-release }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Line Coverage** | ${{ steps.extract_stats.outputs.coverage }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tests Passed** | ${{ steps.extract_stats.outputs.tests_passed }}/${{ steps.extract_stats.outputs.tests_total }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tests Failed** | ${{ steps.extract_stats.outputs.tests_failed }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **GPU** | ${{ matrix.system.gpu }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Architecture** | ${{ matrix.system.arch }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **OS** | Ubuntu ${{ matrix.system.os-release }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Runner** | ${{ matrix.system.runner }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View on CDash](https://my.cdash.org/index.php?project=rocprofiler-compute)" >> $GITHUB_STEP_SUMMARY
-
       - name: Upload Logs on Failure
         if: failure()
         uses: actions/upload-artifact@v4
