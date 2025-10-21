@@ -27,6 +27,15 @@ include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
+# Executables
+add_executable(sleeper ${CMAKE_CURRENT_SOURCE_DIR}/sleeper.cpp)
+set_target_properties(
+    sleeper
+    PROPERTIES
+        BUILD_TYPE RelWithDebInfo
+        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/testing
+)
+
 # test groups
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
@@ -49,5 +58,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-console-tests.cmake)
 
 add_subdirectory(source)
