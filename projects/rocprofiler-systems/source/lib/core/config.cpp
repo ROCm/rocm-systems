@@ -2371,7 +2371,8 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
     auto        _dir = _existing_path ? std::string{ _existing_path } : std::string{};
     auto        _ext = std::string{ "db" };
 
-    auto _cfg = settings::compose_filename_config{ true, suffix, false, _dir };
+    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(), suffix,
+                                                   false, _dir };
 
     const auto get_path = [](const std::string& path) {
         size_t last_slash = path.find_last_of("/\\");
