@@ -61,6 +61,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <numaif.h>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
@@ -3129,11 +3130,28 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
       return false;
     }
 
-    HSA_SVM_ATTRIBUTE attrib;
-    attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
-    attrib.value = op->node_id;
-    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
-    assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
+    Agent* dest = Runtime::runtime_singleton_->GetSVMPrefetchAgent(op->base, op->size);
+
+    if (dest == nullptr || dest->device_type() == Agent::kAmdGpuDevice) {
+      // Prefetch location is not valid for move_pages usecase.
+      HSA_SVM_ATTRIBUTE attrib;
+      attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
+      attrib.value = op->node_id;
+      HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
+      assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
+    } else {
+      // Migrate pages to the requested CPU NUMA node
+      void* base_ptr = op->base;
+      size_t num_pages = op->size / 4096;
+      std::vector<void*> pages(num_pages);
+      for (size_t i = 0; i < num_pages; ++i)
+          pages[i] = static_cast<uint8_t*>(base_ptr) + i * 4096;
+      std::vector<int> nodes(num_pages, op->node_id);
+      std::vector<int> status(num_pages, -1);
+
+      int ret = move_pages(0, num_pages, pages.data(), nodes.data(), status.data(), 0);
+      assert(ret == 0 && "move_pages failed");
+    }
 
     removePrefetchRanges(op);
 
