@@ -212,8 +212,8 @@ TEST_CASE("Performance_hipExtLaunchKernelGGL_QueryGPUFrequency") {
 #endif
   cout << endl;
 
-  int blocksMax = 1024;
-  int blockSizeMax = 1024;
+  int blocksMax = 64;
+  int blockSizeMax = 64;
   bool passed = query_gpu_frequency(kernel1, wall_clock_rate, blocksMax, blockSizeMax,
                                     props.multiProcessorCount);
   REQUIRE(passed);
