@@ -1508,11 +1508,6 @@ def load_pc_sampling_data_per_kernel(
         else None
     )
 
-    kernel_name_unique = df["kernel_name"].iloc[0] if not df.empty else "Unknown"
-    # Rename "instruction" column to include kernel name
-    instruction_col_new_name = f"instruction (Kernel Name: {kernel_name_unique})"
-    df = df.rename(columns={"instruction": instruction_col_new_name})
-
     # Sorting and returning relevant columns depending on method and sorting_type
     if sorting_type == "offset":
         df_sorted = df.sort_values(by=["code_object_id", "offset"])
@@ -1527,7 +1522,7 @@ def load_pc_sampling_data_per_kernel(
     columns_to_return = (
         [
             "source_line",
-            instruction_col_new_name,
+            "instruction",
             "code_object_id",
             "offset",
             "count",
@@ -1535,7 +1530,7 @@ def load_pc_sampling_data_per_kernel(
         if method == "host_trap"
         else [
             "source_line",
-            instruction_col_new_name,
+            "instruction",
             "code_object_id",
             "offset",
             "count",
