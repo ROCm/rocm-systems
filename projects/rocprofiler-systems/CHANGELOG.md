@@ -15,8 +15,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Terminology change: example -> sample
   - Updated directory structure: examples/ -> samples/
-  - `ROCPROFSYS_BUILD_EXAMPLES` -> `ROCPROFSYS_BUILD_SAMPLES`
+  - `ROCPROFSYS_BUILD_EXAMPLES`   -> `ROCPROFSYS_BUILD_SAMPLES`
   - `ROCPROFSYS_DISABLE_EXAMPLES` -> `ROCPROFSYS_DISABLE_SAMPLES`
+  - `ROCPROFSYS_INSTALL_EXAMPLES` -> `ROCPROFSYS_INSTALL_SAMPLES`
 
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
