@@ -49,7 +49,7 @@ RUN set -euo pipefail; \
             make prefix=/usr install; \
             cd ..; rm -rf git-2.51.0*; \
             echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el8/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
-            echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/8.9/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+            echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/8.10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         else \
             rm -rf /etc/yum.repos.d/RHEL-partners.repo; \
             dnf clean all; \
