@@ -127,11 +127,12 @@ jobs:
       matrix:
         system:
           - { gpu: 'mi325', os: 'almalinux-8.10', build-type: 'RelWithDebInfo', container: '' }
+          - { gpu: 'mi325', os: 'almalinux-10', build-type: 'RelWithDebInfo', container: '' }
           - { gpu: 'mi325', os: 'sles-15.7', build-type: 'RelWithDebInfo', container: '' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest-testing
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-gfx94X-latest-testing
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
