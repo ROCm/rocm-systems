@@ -106,7 +106,7 @@ rocprofiler_systems_add_validation_test(
     ARGS -l ${ROCTX_LABEL} -c ${ROCTX_COUNT} -d ${ROCTX_DEPTH} -p
 )
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
     set_property(TEST roctx-api-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
