@@ -27,10 +27,9 @@ import argparse
 import ast
 import json
 import re
-import sys
 import warnings
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import astunparse
 import numpy as np
@@ -1230,23 +1229,38 @@ def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, No
 
 
 def search_pc_sampling_record(
-    records: Union[list[dict], dict],
-) -> Optional[list[tuple]]:
+    records: Union[List[Dict], Dict],
+) -> Optional[List[Tuple]]:
     """
-    Search PC sampling records, and group and sort them
-    """
+    Search PC sampling records.
 
-    # NB:
-    #  The field stall_reason is vailid only for HW stochastic pc sampling.
-    # TODO: might save wavefront count for HW stochastic pc sampling?
+    Group by (code_object_id, code_object_offset, inst_index), and aggregate
+    counts, stall reasons, and dispatch IDs.
+
+    Returns:
+        A sorted list of tuples:
+        (
+            code_object_id,
+            code_object_offset,
+            inst_index,
+            total_count,
+            count_issued,
+            count_stalled,
+            sorted_stall_reasons,
+            sorted_dispatch_ids,
+        )
+    """
 
     if not records:
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
+    # Normalize records to a list if it's a single dict
+    if isinstance(records, dict):
+        records = [records]
+
     rocp_inst_not_issued_prefix_len = len(PC_SAMPLING_NOT_ISSUE_PREFIX)
 
-    grouped_data = {}
     stall_reason_keys = {
         "NONE": 0,
         # No instruction available in the instruction cache.
@@ -1265,86 +1279,86 @@ def search_pc_sampling_record(
         "LAST": 0,
     }
 
-    # Populate grouped_data
+    grouped_data: Dict[Tuple, List] = {}
+
     for item in records:
-        record = item["record"]
+        record = item.get("record", {})
         pc_info = record.get("pc", {})
 
-        dispatch_id = record.get("dispatch_id")
         code_object_id = pc_info.get("code_object_id")
         code_object_offset = pc_info.get("code_object_offset")
         inst_index = item.get("inst_index")
+        dispatch_id = record.get("dispatch_id")
 
         if None in (code_object_id, code_object_offset, inst_index):
             continue
 
-        # Create composite key
-        key = (code_object_id, code_object_offset, dispatch_id)
+        key = (code_object_id, code_object_offset, inst_index)
 
         snapshot = record.get("snapshot", {})
-        issued = record.get("wave_issued")
+        issued = record.get("wave_issued", False)
 
         if key not in grouped_data:
-            grouped_data[key] = [0, 0, 0, inst_index, {}]
+            grouped_data[key] = [0, 0, 0, {}, set()]
+
+        entry = grouped_data[key]
 
         # Update counts
-        entry = grouped_data[key]
-        entry[0] += 1  # count
-        entry[3] = inst_index  # inst_index
+        entry[0] += 1  # total_count
+        if issued:
+            entry[1] += 1  # count_issued
+        else:
+            entry[2] += 1  # count_stalled
+            stall_reason = snapshot.get("stall_reason")
+            if stall_reason and len(stall_reason) > rocp_inst_not_issued_prefix_len:
+                reason_key = stall_reason[rocp_inst_not_issued_prefix_len:]
+                if reason_key in stall_reason_keys:
+                    entry[3][reason_key] = entry[3].get(reason_key, 0) + 1
 
-        # Process snapshot data
-        if snapshot:
-            if issued:
-                entry[1] += 1  # count_issued
-            else:
-                entry[2] += 1  # count_stalled
-
-                # Process stall reason only when stalled
-                stall_reason = snapshot.get("stall_reason")
-                if stall_reason:
-                    # Extract reason key with bounds checking
-                    if len(stall_reason) > rocp_inst_not_issued_prefix_len:
-                        reason_key = stall_reason[rocp_inst_not_issued_prefix_len:]
-                        # Only track known stall reasons
-                        if reason_key in stall_reason_keys:
-                            stall_reasons = entry[4]
-                            stall_reasons[reason_key] = (
-                                stall_reasons.get(reason_key, 0) + 1
-                            )
+        # Add dispatch_id if valid
+        if dispatch_id is not None:
+            entry[4].add(dispatch_id)
 
     if not grouped_data:
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
-    # Convert to sorted list of tuples:
-    # (code_object_id, inst_index, code_object_offset, count)
+    # Prepare sorted output list
     sorted_counts = sorted(
-    [
-        (
-            code_object_id,             # from key
-            entry[3],                   # inst_index
-            code_object_offset,         # from key
-            entry[0],                   # count
-            entry[1],                   # count_issued
-            entry[2],                   # count_stalled
-            dispatch_id,                # from key
-            sorted(
-                ((k, v) for k, v in entry[4].items() if v > 0),
-                key=lambda item: item[1],
-                reverse=True,
-            ),
-        )
-        for (code_object_id, code_object_offset, dispatch_id), entry in grouped_data.items()
-    ],
-    key=lambda x: (x[0], x[2]),  # sort by code_object_id, then code_object_offset
-)
+        [
+            (
+                code_object_id,
+                code_object_offset,
+                inst_index,
+                info[0],  # total_count
+                info[1],  # count_issued
+                info[2],  # count_stalled
+                sorted(
+                    ((k, v) for k, v in info[3].items() if v > 0),
+                    key=lambda item: item[1],
+                    reverse=True,
+                ),  # sorted stall reasons
+                sorted(info[4]),  # sorted dispatch_ids list
+            )
+            for (
+                code_object_id,
+                code_object_offset,
+                inst_index,
+            ), info in grouped_data.items()
+        ],
+        key=lambda x: (x[0], x[1], x[2]),  # sort by code_object_id, offset, inst_index
+    )
 
     return sorted_counts
 
 
 @demarcate
 def load_pc_sampling_data_per_kernel(
-    method: str, file_name: Path, csv_file_name: Path, kernel_name: str, sorting_type: str
+    method: str,
+    file_name: Path,
+    csv_file_name: Path,
+    kernel_name: str,
+    sorting_type: str,
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data from json file with given method and kernel name,
@@ -1363,17 +1377,21 @@ def load_pc_sampling_data_per_kernel(
     :return: The counted and reordering pc sampling info.
     :rtype: pd.DataFrame:
     """
-    # kernel_info extraction from CSV kernel trace 
-    kernel_trace_df = pd.read_csv(csv_file_name, usecols=["Dispatch_Id", "Kernel_Id", "Kernel_Name"])
-    console_debug(f"PC sampling: loaded kernel trace with {len(kernel_trace_df)} entries")
-    
-    # Find all rows matching kernel_name exactly in CSV
+    # Load kernel trace CSV with kernel info
+    kernel_trace_df = pd.read_csv(
+        csv_file_name, usecols=["Dispatch_Id", "Kernel_Id", "Kernel_Name"]
+    )
+    console_debug(
+        f"PC sampling: loaded kernel trace with {len(kernel_trace_df)} entries"
+    )
+
+    # Filter kernels matching requested kernel_name
     matching_kernels = kernel_trace_df[kernel_trace_df["Kernel_Name"] == kernel_name]
     if matching_kernels.empty:
         console_warning(f"PC sampling: cannot find kernel '{kernel_name}' in CSV")
         return pd.DataFrame()
 
-    # Load PC sampling records from JSON
+    # Extract raw PC sampling records from JSON
     pc_sample_key_loc = (
         search_key_in_json(file_name, "pc_sample_host_trap")
         if method == "host_trap"
@@ -1384,113 +1402,113 @@ def load_pc_sampling_data_per_kernel(
         console_warning("PC sampling: can not find pc sample.")
         return pd.DataFrame()
 
-    # Get raw data from JSON records (includes dispatch_id now)
-    df = pd.DataFrame(
-        search_pc_sampling_record(pc_sample_key_loc),
-        columns=[
-            "dispatch_id",
+    # Get processed sampling data grouped by (code_object_id, offset, inst_index)
+    records = search_pc_sampling_record(pc_sample_key_loc)
+    if not records:
+        console_warning("PC sampling: no records found in PC sampling data.")
+        return pd.DataFrame()
+
+    # Flatten records by dispatch_id to create one row per dispatch ID
+    rows = []
+    for (
+        code_object_id,
+        offset,
+        inst_index,
+        count,
+        count_issued,
+        count_stalled,
+        stall_reasons,
+        dispatch_ids,
+    ) in records:
+        for dispatch_id in dispatch_ids:
+            rows.append({
+                "dispatch_id": dispatch_id,
+                "code_object_id": code_object_id,
+                "offset": offset,
+                "inst_index": inst_index,
+                "count": count,
+                "count_issued": count_issued,
+                "count_stalled": count_stalled,
+                "stall_reason": stall_reasons,
+            })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        console_warning("PC sampling: no records found after flattening dispatch IDs.")
+        return df
+
+    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
+    dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[
+        ["Kernel_Id", "Kernel_Name"]
+    ]
+    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
+    df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
+
+    # Filter DataFrame to only include rows matching the requested kernel_name
+    df = df[df["kernel_name"] == kernel_name]
+
+    # Convert offset column to hex string for display, keep original numeric for sorting
+    df["offset"] = df["offset"].apply(lambda x: hex(x))
+
+    # Load PC sampling instructions from JSON (if available)
+    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
+    df["instruction"] = (
+        df["inst_index"].apply(
+            lambda x: pc_sample_instructions[x]
+            if x < len(pc_sample_instructions)
+            else None
+        )
+        if pc_sample_instructions
+        else None
+    )
+
+    # Load source code comments (if available)
+    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
+    df["source_line"] = (
+        df["inst_index"].apply(
+            lambda x: f".../{Path(pc_sample_comments[x]).name}"
+            if x < len(pc_sample_comments)
+            else None
+        )
+        if pc_sample_comments
+        else None
+    )
+
+    # Sorting and returning relevant columns depending on method and sorting_type
+    if sorting_type == "offset":
+        df_sorted = df.sort_values(by=["code_object_id", "offset"])
+    elif sorting_type == "count":
+        df_sorted = df.sort_values(by=["count"], ascending=False)
+    else:
+        console_error(
+            'Error: pc sampling sorting_type must be either "offset" or "count".'
+        )
+        return pd.DataFrame()
+
+    columns_to_return = (
+        [
+            "source_line",
+            "kernel_name",
+            "instruction",
             "code_object_id",
-            "inst_index",
+            "offset",
+            "count",
+        ]
+        if method == "host_trap"
+        else [
+            "source_line",
+            "kernel_name",
+            "instruction",
+            "code_object_id",
             "offset",
             "count",
             "count_issued",
             "count_stalled",
             "stall_reason",
-        ],
+        ]
     )
 
-    if df.empty:
-        console_warning("PC sampling: no records found in PC sampling data.")
-        return df
-
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[["Kernel_Id", "Kernel_Name"]]
-    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
-    df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
-
-    # Filter df to only include rows matching the requested kernel_name
-    df = df[df["kernel_name"] == kernel_name]
-
-    # Convert offset column to hex string for display, but keep original numeric for sorting
-    df["offset_hex"] = df["offset"].apply(lambda x: hex(x))
-
-    # Add instruction and source line information
-    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
-    if pc_sample_instructions:
-        df["instruction"] = df["inst_index"].apply(
-            lambda x: (
-                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
-            )
-        )
-
-    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
-    if pc_sample_comments:
-        df["source_line"] = df["inst_index"].apply(
-            lambda x: (
-                f".../{Path(pc_sample_comments[x]).name}"
-                if x < len(pc_sample_comments)
-                else None
-            )
-        )
-
-    # Return sorted data based on sorting type
-    if sorting_type == "offset":
-        df_sorted = df.sort_values(by=["offset"])
-        return (
-            df_sorted[["source_line", "instruction", "offset", "count", "kernel_name", "kernel_id"]]
-            if method == "host_trap"
-            else df_sorted[
-                [
-                    "source_line",
-                    "instruction",
-                    "offset",
-                    "count",
-                    "count_issued",
-                    "count_stalled",
-                    "stall_reason",
-                    "kernel_name",
-                    "kernel_id",
-                ]
-            ]
-        )
-    elif sorting_type == "count":
-        df_sorted = df.sort_values(by=["count"], ascending=False)
-        return (
-            df_sorted[["source_line", "instruction", "offset", "count", "kernel_name", "kernel_id"]]
-            if method == "host_trap"
-            else df_sorted[
-                [
-                    "source_line",
-                    "instruction",
-                    "offset",
-                    "count",
-                    "count_issued",
-                    "count_stalled",
-                    "stall_reason",
-                    "kernel_name",
-                    "kernel_id",
-                ]
-            ]
-        )
-    else:
-        # fallback, no sorting
-        return (
-            df[["source_line", "instruction", "offset", "count", "kernel_name", "kernel_id"]]
-            if method == "host_trap"
-            else df[
-                [
-                    "source_line",
-                    "instruction",
-                    "offset",
-                    "count",
-                    "count_issued",
-                    "count_stalled",
-                    "stall_reason",
-                    "kernel_name",
-                    "kernel_id",
-                ]
-            ]
-        )
+    return df_sorted[columns_to_return]
     # might support sort by stall reason in the future
 
 
@@ -1518,7 +1536,9 @@ def load_pc_sampling_data(
     csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
 
     if not csv_kernel_trace_file_path.exists():
-        console_error(f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False)
+        console_error(
+            f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False
+        )
         return pd.DataFrame()
 
     if stochastic_path.exists():
@@ -1546,7 +1566,7 @@ def load_pc_sampling_data(
             kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
             how="left",
             left_on="Correlation_Id",
-            right_on="Dispatch_Id"
+            right_on="Dispatch_Id",
         )
 
         # Group by Instruction_Comment and aggregate
@@ -1561,11 +1581,18 @@ def load_pc_sampling_data(
             .reset_index()
             .rename(columns={"Instruction_Comment": "source_line"})
         )
-        grouped_counts = grouped_counts[["source_line", "instruction", "count", "Kernel_Id", "Kernel_Name"]]
+        grouped_counts = grouped_counts[
+            [
+                "source_line",
+                "Kernel_Name",
+                "instruction",
+                "count",
+            ]
+        ]
         grouped_counts["source_line"] = grouped_counts["source_line"].apply(
             lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
         )
-        
+
         return grouped_counts.sort_values(by="count", ascending=False)
 
     elif len(workload.filter_kernel_ids) > 1:
@@ -1585,11 +1612,25 @@ def load_pc_sampling_data(
             #   We should find better way to remove the dependency on kernel_top_table
             kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
             file = Path(dir_path) / str(kernel_top_df.loc[0, "from_csv"])
-            kernel_name = pd.read_csv(file).loc[
-                workload.filter_kernel_ids[0], "Kernel_Name"
-            ]
+            kernel_index = workload.filter_kernel_ids[0]
+
+            kernel_df = pd.read_csv(file)
+
+            if kernel_index >= len(kernel_df):
+                console_warning(
+                    f"Kernel index {kernel_index} is out of bounds. "
+                    f"kernel_top CSV has only {len(kernel_df)} rows."
+                )
+                return pd.DataFrame()
+
+            kernel_name = kernel_df.iloc[kernel_index]["Kernel_Name"]
+
             return load_pc_sampling_data_per_kernel(
-                pc_sampling_method, json_file_path, csv_kernel_trace_file_path ,kernel_name, sorting_type
+                pc_sampling_method,
+                json_file_path,
+                csv_kernel_trace_file_path,
+                kernel_name,
+                sorting_type,
             )
     else:
         console_warning("PC sampling: No data")
