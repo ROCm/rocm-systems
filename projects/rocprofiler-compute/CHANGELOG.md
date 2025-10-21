@@ -11,6 +11,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Removed
 
 ### Optimized
+* Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
 
