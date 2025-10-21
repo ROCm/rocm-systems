@@ -76,13 +76,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
         if args.attach_pid:
             # In attach mode, tools are provided using ROCP_TOOL_LIBRARIES
-            # instead of LD_PRELOAD. Do not use native tool in attach
-            # mode until we figure out how multiple tools can attach
-            # TODO: Figure out how multiple tools can attach
-            rocp_tool_libraries = [args.rocprofiler_sdk_tool_path]
+            # instead of LD_PRELOAD.
             options.update({
-                "ROCPROF_COUNTER_COLLECTION": "1",
-                "ROCP_TOOL_LIBRARIES": ":".join(rocp_tool_libraries),
+                "ROCP_TOOL_LIBRARIES": ":".join(ld_preload),
             })
             options.pop("LD_PRELOAD", None)
 

@@ -418,10 +418,14 @@ class RocProfCompute_Base:
         native_tool_path = None
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
+        # Do not use native tool in attach
+        # mode until we figure out how multiple tools can attach
+        # TODO: Figure out how multiple tools can attach
         if (
             self.__profiler == "rocprofiler-sdk"
             and not args.no_native_tool
             and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
+            and not args.attach_pid
         ):
             # Use native counter collection tool
             native_tool_path = str(
