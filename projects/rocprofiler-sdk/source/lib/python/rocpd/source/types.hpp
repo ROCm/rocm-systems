@@ -230,19 +230,22 @@ struct sample
         std::optional<std::string> operation = {};
     };
 
-    uint64_t                id              = 0;
-    guid_t                  guid            = {};
-    std::string             category        = {};
-    std::string             name            = {};
-    pid_t                   nid             = 0;
-    pid_t                   pid             = 0;
-    pid_t                   tid             = 0;
-    rocprofiler_timestamp_t timestamp       = 0;
-    uint64_t                event_id        = 0;
-    uint64_t                stack_id        = 0;
-    uint64_t                parent_stack_id = 0;
-    uint64_t                corr_id         = 0;
-    std::string             extdata         = {};
+    uint64_t                id                = 0;
+    guid_t                  guid              = {};
+    std::string             name              = {};
+    std::string             symbol            = {};
+    pid_t                   nid               = 0;
+    pid_t                   pid               = 0;
+    pid_t                   tid               = 0;
+    rocprofiler_timestamp_t timestamp         = 0;
+    std::string             units             = {};
+    std::string             short_description = {};
+    uint64_t                agent_abs_index   = 0;
+    uint64_t                event_id          = 0;
+    uint64_t                stack_id          = 0;
+    uint64_t                parent_stack_id   = 0;
+    uint64_t                corr_id           = 0;
+    std::string             extdata           = {};
 
     bool            has_extdata() const { return (extdata.length() > 2); }
     decoded_extdata get_extdata() const;
@@ -456,11 +459,9 @@ struct pmc_event
     guid_t      guid     = {};
     uint64_t    event_id = 0;
     uint64_t    pmc_id   = 0;
-    std::string category = {};
     std::string name     = {};
+    std::string symbol   = {};
     double      value    = 0;
-    std::string units    = {};
-    uint32_t    agent_abs_index = 0;
     std::string extdata  = {};
 
     bool has_extdata() const { return (extdata.length() > 2); }
@@ -709,12 +710,15 @@ load(ArchiveT& ar, rocpd::types::sample& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
-    LOAD_DATA_FIELD(category);
     LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(symbol);
     LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(timestamp);
+    LOAD_DATA_FIELD(units);
+    LOAD_DATA_FIELD(short_description);
+    LOAD_DATA_FIELD(agent_abs_index);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
@@ -964,11 +968,9 @@ load(ArchiveT& ar, rocpd::types::pmc_event& data)
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(pmc_id);
-    LOAD_DATA_FIELD(category);
     LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(symbol);
     LOAD_DATA_FIELD(value);
-    LOAD_DATA_FIELD(units);
-    LOAD_DATA_FIELD(agent_abs_index);
     LOAD_DATA_FIELD(extdata);
 }
 
