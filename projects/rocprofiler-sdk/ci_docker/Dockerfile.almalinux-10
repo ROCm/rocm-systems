@@ -11,7 +11,11 @@ RUN dnf update -y && dnf install -y \
     git \
     wget \
     make \
+    vim-common \
+    gettext \
     # Development tools and libraries
+    curl-devel \
+    expat-devel \
     elfutils-libelf-devel \
     sqlite-devel \
     libdrm-devel \
@@ -22,6 +26,8 @@ RUN dnf update -y && dnf install -y \
     rpm-build \
     libzstd-devel \
     zlib-devel \
+    openssl-devel \
+    sqlite-devel \
     # Additional development tools
     diffutils \
     patch \

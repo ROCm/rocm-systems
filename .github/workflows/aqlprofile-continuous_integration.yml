@@ -125,9 +125,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: |
-          - {gpu: 'mi325', os: 'almalinux-8.10', build-type: 'RelWithDebInfo', container: ''}
-          - {gpu: 'mi325', os: 'sles-15.7', build-type: 'RelWithDebInfo', container: ''}
+        system:
+          - { gpu: 'mi325', os: 'almalinux-8.10', build-type: 'RelWithDebInfo', container: '' }
+          - { gpu: 'mi325', os: 'sles-15.7', build-type: 'RelWithDebInfo', container: '' }
 
     runs-on: ${{ matrix.system.runner }}
     container:

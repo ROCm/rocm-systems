@@ -55,20 +55,22 @@ RUN set -euo pipefail; \
       dnf clean all || true; \
       dnf install -y perl-ExtUtils-MakeMaker python3-pip ca-certificates gzip tar || true; \
       if grep -qi 'VERSION_ID="8.10"' /etc/os-release; then \
-        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/rhel8/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
-        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/7.0.1/rhel/8.10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el8/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/el/8/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
       else \
-        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/rhel10/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
-        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/7.0.1/rhel/10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el10/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/el/10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
       fi; \
       dnf clean all; \
-      dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
+      dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang elfutils-devel; \
+      dnf install -y libva-amdgpu-devel || true; \
+      dnf install -y rocm-hip-runtime-dev || true; \
       python3 -m pip install -U awscli; \
     else \
-      echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
-      echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/7.0.1/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
+      echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
+      echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
       zypper --gpg-auto-import-keys refresh || true; \
-      zypper --non-interactive install -y python3-pip ca-certificates gzip tar rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel || true; \
+      zypper --non-interactive install -y python3-pip ca-certificates gzip tar rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel libva-amdgpu-devel; \
       python3 -m pip install -U awscli; \
       zypper clean --all || true; \
     fi
@@ -167,11 +169,11 @@ ARG BUILD_ROCJPEG=true
 ENV BUILD_ROCJPEG=${BUILD_ROCJPEG}
 
 # Cache-busting refs/revs for external repos
-# - *_REF can be a branch/tag (default: release/rocm-rel-7.0)
+# - *_REF can be a branch/tag (default: develop)
 # - *_REV can pin to an exact commit SHA (optional)
-ARG ROCDECODE_REF=release/rocm-rel-7.0
+ARG ROCDECODE_REF=develop
 ARG ROCDECODE_REV
-ARG ROCJPEG_REF=release/rocm-rel-7.0
+ARG ROCJPEG_REF=develop
 ARG ROCJPEG_REV
 
 WORKDIR /workspace

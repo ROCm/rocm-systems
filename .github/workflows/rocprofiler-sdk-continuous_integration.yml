@@ -316,7 +316,7 @@ jobs:
   # RHEL/SLES (RPM) job(s)
   # -----------------------------------------------------------------------------
   core-rpm:
-    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    name: Core • ${{ matrix.runner }} • ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -326,15 +326,15 @@ jobs:
         ci-flags: [ '' ]
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest-testing
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest-testing
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       options: --privileged
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      OS_TYPE: ${{ matrix.system.os }}
-      GPU_RUNNER: ${{ matrix.system.gpu }}
+      OS_TYPE: ${{ matrix.os }}
+      GPU_RUNNER: gfx94X
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
@@ -343,9 +343,6 @@ jobs:
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
-            projects/rocr-runtime
-            projects/clr
-            projects/hip
           submodules: false
           set-safe-directory: true
 

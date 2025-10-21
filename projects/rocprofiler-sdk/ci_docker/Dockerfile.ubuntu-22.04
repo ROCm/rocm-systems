@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     curl \
     wget \
+    xxd \
     # Compiler toolchains
     gcc-11 \
     g++-11 \

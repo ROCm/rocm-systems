@@ -21,7 +21,7 @@ build_stage1_image() {
 
     echo "Building stage-1 (deps) ${os_name}-${os_version} image..."
 
-    docker build \
+    docker build --no-cache \
         -f "${SCRIPT_DIR}/${dockerfile}" \
         -t "${REGISTRY}/${BASE_TAG}:${os_name}-${os_version}-${BUILD_DATE}" \
         -t "${REGISTRY}/${BASE_TAG}:${os_name}-${os_version}-latest-testing" \
@@ -53,7 +53,7 @@ build_stage2_image() {
 
     echo "Building stage-2 (final) ${os_tag}-${gpu} using ${TARBALL_KEYS["${gpu}"]}..."
 
-    docker build \
+    docker build --no-cache \
         -f "${SCRIPT_DIR}/Dockerfile.stages" \
         --build-arg BASE_IMAGE="${REGISTRY}/${BASE_TAG}:${os_tag}-latest-testing" \
         --build-arg GPU_TYPE="${gpu}" \
@@ -229,7 +229,7 @@ for dist in "${DISTRIBUTIONS[@]}"; do
             fi
             ;;
         almalinux-10)
-            build_stage1_image "Dockerfile.almalinux-10" "rhel" "10"
+            build_stage1_image "Dockerfile.almalinux-10" "almalinux" "10"
             if [[ ${SKIP_ROCM} == false ]]; then
                 for gpu in "${GPU_TYPES[@]}"; do
                     build_stage2_image "almalinux-10" "${gpu}"

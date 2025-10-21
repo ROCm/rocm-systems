@@ -9,9 +9,11 @@ RUN dnf update -y && dnf install -y \
     cmake \
     python3 \
     python3-pip \
+    python3-devel \
     git \
     wget \
     make \
+    vim-common \
     # Development tools and libraries
     elfutils-libelf-devel \
     sqlite-devel \
@@ -24,7 +26,10 @@ RUN dnf update -y && dnf install -y \
     libzstd-devel \
     zlib-devel \
     openssl-devel \
+    sqlite-devel \
     # Additional development tools
+    curl-devel \
+    expat-devel \
     diffutils \
     patch \
     which \
@@ -33,6 +38,7 @@ RUN dnf update -y && dnf install -y \
     gzip \
     bzip2 \
     xz \
+    gettext \
     # Documentation tools (if available in RHEL repos)
     graphviz \
     && dnf clean all

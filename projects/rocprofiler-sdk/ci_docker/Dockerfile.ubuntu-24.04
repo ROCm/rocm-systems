@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     curl \
     wget \
+    xxd \
     # Compiler toolchains (Ubuntu 24.04 default is gcc-13)
     gcc-13 \
     g++-13 \
@@ -88,8 +89,7 @@ RUN apt-get update && apt-get install -y ccache && \
 ENV PATH="/usr/lib/ccache:${PATH}"
 
 # Install AWS CLI for later stages (use pip on noble to avoid apt candidate issues)
-RUN python3 -m pip install --upgrade pip --break-system-packages && \
-    python3 -m pip install awscli --break-system-packages
+RUN python3 -m pip install awscli --break-system-packages
 
 # Configure git for container builds (kept for compatibility)
 RUN git config --global --add safe.directory '*'
@@ -124,8 +124,8 @@ EOS
 RUN chmod +x /usr/local/bin/restore-submodules-cache.sh
 
 # Install Python requirements for rocprofiler-sdk
-RUN python3 -m pip install --upgrade pip --break-system-packages && \
-    python3 -m pip install --break-system-packages -r projects/rocprofiler-sdk/requirements.txt
+RUN python3 -m pip install --break-system-packages -r projects/rocprofiler-sdk/requirements.txt
+RUN python3 -m pip install --break-system-packages ninja
 
 # Set environment variables used by CI
 ENV GIT_DISCOVERY_ACROSS_FILESYSTEM=1
