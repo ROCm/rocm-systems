@@ -295,6 +295,7 @@ aux_source_directory(${ROCRTST_ROOT}/suites/performance performanceSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/functional functionalSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
+aux_source_directory(${ROCRTST_ROOT}/suites/image imagesSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
 # Header file include path
@@ -410,7 +411,7 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 
 # Build rules
 add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeSources} ${stressSources}
-                                           ${common_srcs} ${testCommonSources})
+                                           ${common_srcs} ${imagesSources} ${testCommonSources})
 
 target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt numa ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so.5)
 

@@ -79,6 +79,9 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/image/mipmap_3Darray.h"
+#include "suites/image/mipmap_2Darray.h"
+#include "suites/image/mipmap_1Darray.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 
@@ -478,6 +481,49 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
     RunCustomTestProlog(&vmt);
     RunCustomTestEpilog(&vmt);
   );
+}
+
+// Image Tests
+TEST(rocrtstImages, Mipmap_1DArray_CreateDestroy_Test) {
+  Mipmap1DArrayTest mat1D;
+  RunCustomTestProlog(&mat1D);
+  mat1D.MipmapCreateDestroy1DArrayTest();
+  RunCustomTestEpilog(&mat1D);
+}
+
+TEST(rocrtstImages, Mipmap_1DArray_Get_Level_Test) {
+  Mipmap1DArrayTest mat1D;
+  RunCustomTestProlog(&mat1D);
+  mat1D.MipmapGetLevel1DArrayTest();
+  RunCustomTestEpilog(&mat1D);
+}
+
+TEST(rocrtstImages, Mipmap_2DArray_CreateDestroy_Test) {
+  Mipmap2DArrayTest mat2D;
+  RunCustomTestProlog(&mat2D);
+  mat2D.MipmapCreateDestroy2DArrayTest();
+  RunCustomTestEpilog(&mat2D);
+}
+
+TEST(rocrtstImages, Mipmap_2DArray_Get_Level_Test) {
+  Mipmap2DArrayTest mat2D;
+  RunCustomTestProlog(&mat2D);
+  mat2D.MipmapGetLevel2DArrayTest();
+  RunCustomTestEpilog(&mat2D);
+}
+
+TEST(rocrtstImages, Mipmap_3DArray_CreateDestroy_Test) {
+  Mipmap3DArrayTest mat3D;
+  RunCustomTestProlog(&mat3D);
+  mat3D.MipmapCreateDestroy3DArrayTest();
+  RunCustomTestEpilog(&mat3D);
+}
+
+TEST(rocrtstImages, Mipmap_3DArray_Get_Level_Test) {
+  Mipmap3DArrayTest mat3D;
+  RunCustomTestProlog(&mat3D);
+  mat3D.MipmapGetLevel3DArrayTest();
+  RunCustomTestEpilog(&mat3D);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
