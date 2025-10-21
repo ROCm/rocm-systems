@@ -8,7 +8,7 @@
   #include <climits> /* PATH_MAX */
   #include <link.h>  /* ELF Dynamic Linking DS */
   #include <dlfcn.h> /* Dynamic linker Operations */
-  #define RC_PATH_MAX PATH_MAX
+  #define RC_PATH_MAX (PATH_MAX+1)
 #else
   #if defined(_WIN32) || defined(_WIN64)
     #include <windows.h> /* MAX_PATH */
@@ -16,7 +16,7 @@
   #elif !defined(PATH_MAX)
     #define PATH_MAX FILENAME_MAX
   #endif
-  #define RC_PATH_MAX (PATH_MAX > 1024 && FILENAME_MAX > 1024 ? 1024 : (PATH_MAX < FILENAME_MAX ? PATH_MAX : FILENAME_MAX))
+  #define RC_PATH_MAX ((PATH_MAX > 1024 && FILENAME_MAX > 1024 ? 1024 : (PATH_MAX < FILENAME_MAX ? PATH_MAX : FILENAME_MAX))+1)
 #endif
 
 #include "rocm_getpath.h"
@@ -26,9 +26,6 @@
 
 /* Target Library Install Dir */
 #define TARGET_LIB_INSTALL_DIR TARGET_LIBRARY_INSTALL_DIR
-
-/* Target Library Name Buf Size */
-#define LIBRARY_FILENAME_BUFSZ RC_PATH_MAX+1
 
 /* Internal Function to get Base Path - Ref from Icarus Logic*/
 static int getROCmBase(char *buf);
@@ -55,8 +52,8 @@ PathErrors_t getROCmInstallPath( char** InstallPath, unsigned int *InstallPathLe
         char *bufPtr = (char *)NULL;
         unsigned int bufSz = 0;
 
-        bufPtr = (char *)malloc( LIBRARY_FILENAME_BUFSZ * sizeof(char) );
-        memset( bufPtr, 0, LIBRARY_FILENAME_BUFSZ );
+        bufPtr = (char *)malloc( RC_PATH_MAX * sizeof(char) );
+        memset( bufPtr, 0, RC_PATH_MAX );
         *InstallPathLen = 0;
         *InstallPath = NULL;
 
@@ -85,7 +82,7 @@ static int getROCmBase(char *buf)
 {
   int len=0;
   char *envStr=NULL;
-  char libFileName[LIBRARY_FILENAME_BUFSZ];
+  char libFileName[RC_PATH_MAX];
   char *end=NULL;
 
   // Check Environment Variable is set for ROCM
@@ -98,7 +95,7 @@ static int getROCmBase(char *buf)
          /* Already has at least one terminating */
          len--;
       }
-      if (len > LIBRARY_FILENAME_BUFSZ-1 ) {
+      if (len > RC_PATH_MAX-1 ) {
          return PathValuesTooLong;
       }
       strncpy(buf, envStr, len);
