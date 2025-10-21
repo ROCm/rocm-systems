@@ -92,6 +92,7 @@ jobs:
         working-directory: projects/rocprofiler-compute
         run: |
           pip install -r requirements.txt --break-system-packages --ignore-installed
+          pip install -r requirements-test.txt --break-system-packages --ignore-installed
           echo "✅ Python dependencies installed!"
 
       - name: Configure, Build, Test, and Upload Coverage
