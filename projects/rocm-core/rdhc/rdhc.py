@@ -7,57 +7,10 @@ import json
 import argparse
 import glob
 import re
-import sys
+import yaml
 import textwrap
 from enum import Enum
-
-# Check for required packages before importing them
-def check_required_packages():
-    """Check if required Python packages are installed"""
-    missing_packages = []
-    required_packages = {
-        'prettytable': 'prettytable',
-        'yaml': 'PyYAML'
-    }
-
-    for import_name, package_name in required_packages.items():
-        try:
-            __import__(import_name)
-        except ImportError:
-            missing_packages.append(package_name)
-
-    if missing_packages:
-        print("\n" + "="*70)
-        print("WARNING: Missing Required Python Packages")
-        print("="*70)
-        print(f"\nThe following packages are required but not installed:")
-        for pkg in missing_packages:
-            print(f"  - {pkg}")
-
-        print("\nTo install the missing packages, run:")
-        print(f"  pip3 install {' '.join(missing_packages)}")
-        print("\nOr install all requirements:")
-        print("  pip3 install -r <ROCM_INSTALL_PATH>/share/rdhc/requirements.txt")
-        print("  Or\n  pip3 install -r requirements.txt")
-        print("\n" + "="*70 + "\n")
-
-        print("Exiting...")
-        sys.exit(1)
-    else:
-        return True
-
-# Check packages before importing
-packages_available = check_required_packages()
-
-# Now import the packages
-try:
-    from prettytable import PrettyTable
-    import yaml
-except ImportError:
-    print("WARNING: Unable to import the required Python Packages !!!!")
-    print("Exiting...")
-    sys.exit(1)
-
+from prettytable import PrettyTable
 
 # Define test status enum
 class TestStatus(Enum):
@@ -1795,8 +1748,7 @@ def main():
     parser = argparse.ArgumentParser(description="ROCm Deployment Health Check Tool",
                                     formatter_class=argparse.RawDescriptionHelpFormatter,
                                     usage="sudo -E ./rdhc.py [options]",
-                                    epilog="Refer the README @<ROCM_INSTALL_PATH>/share/rdhc/README.md \n"+
-                                        "Usage examples:\n"+
+                                    epilog="Usage examples:\n"+
                                         "# Run quick test (default tests only)\n" +
                                         "sudo -E ./rdhc.py\n" +
                                         "\n"+

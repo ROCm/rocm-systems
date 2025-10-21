@@ -157,31 +157,34 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t* /* user_data */,
                               void* /* userdata */)
 {
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
-
-    CHECK_NOTNULL(Results::table);
-    auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-
-    if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_LOAD &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
     {
+        CHECK_NOTNULL(Results::table);
+        auto* data =
+            static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+
+        if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+        {
+            Results::table->addDecoder(
+                data->uri, data->code_object_id, data->load_delta, data->load_size);
+            return;
+        }
+
+        auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
+        CHECK_NOTNULL(memorybase);
+
+        DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
+                                                                   data->code_object_id,
+                                                                   data->load_delta,
+                                                                   data->load_size,
+                                                                   memorybase,
+                                                                   data->memory_size));
+
         Results::table->addDecoder(
-            data->uri, data->code_object_id, data->load_delta, data->load_size);
-        return;
+            memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
     }
-
-    auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
-    CHECK_NOTNULL(memorybase);
-
-    DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
-                                                               data->code_object_id,
-                                                               data->load_delta,
-                                                               data->load_size,
-                                                               memorybase,
-                                                               data->memory_size));
-
-    Results::table->addDecoder(
-        memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
 }
 
 void
