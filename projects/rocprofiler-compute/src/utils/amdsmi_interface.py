@@ -1,7 +1,7 @@
 ##############################################################################
 # MIT License
 #
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,8 +25,8 @@
 
 import os
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from utils.logger import (
     console_debug,
@@ -34,7 +34,7 @@ from utils.logger import (
 )
 
 PYTHON_LIB_PATH = os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi"
-sys.path.append(PYTHON_LIB_PATH)
+sys.path.insert(0, PYTHON_LIB_PATH)
 # If the python library is installed, it will overwrite the path above
 
 try:
