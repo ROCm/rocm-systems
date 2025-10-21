@@ -30,7 +30,7 @@ namespace rocprofiler
 namespace sdk
 {
 // Null/invalid agent ID constant
-constexpr rocprofiler_agent_id_t null_agent_id = rocprofiler_agent_id_t{.handle = 0};
+constexpr auto null_agent_id = rocprofiler_agent_id_t{.handle = 0};
 
 }  // namespace sdk
 }  // namespace rocprofiler
