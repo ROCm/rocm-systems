@@ -5199,27 +5199,12 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
 
         case AMDSMI_AFFINITY_SCOPE_SOCKET:
         {
-            std::vector<uint32_t> sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(node_id);
-
-            if(sockets[0] == std::numeric_limits<int32_t>::max()){
+            uint32_t drm_card = gpu_device->get_card_id();
+            std::vector<uint64_t> bitmask = gpu_device->get_bitmask_from_local_cpulist(drm_card, cpu_set_size);
+            if(bitmask[0] == std::numeric_limits<int32_t>::max()){
                 return AMDSMI_STATUS_REFCOUNT_OVERFLOW;
             } else {
-            for (uint32_t idx : sockets) {
-                cpu_set[idx] = idx;
-            }
-
-            std::sort(cpu_set, cpu_set + cpu_set_size);
-
-            // Discard duplicates
-            uint32_t temp_size = 0;
-            for (uint32_t i = 0; i < cpu_set_size; ++i) {
-                if (i == 0 || cpu_set[i] != cpu_set[i - 1]) {
-                    cpu_set[temp_size++] = cpu_set[i];
-                }
-            }
-
-            // Update the size to the temp size after discarding duplicates
-            cpu_set_size = temp_size;
+                std::memcpy(cpu_set, bitmask.data(), cpu_set_size * sizeof(uint64_t));
             }
             break;
         }

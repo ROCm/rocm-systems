@@ -904,16 +904,24 @@ class AMDSMICommands():
                     logging.debug("Failed to get cpu affinity for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
-                    cpusockets = amdsmi_interface.amdsmi_get_cpu_affinity_with_scope(args.gpu, amdsmi_interface.AmdSmiAffinityScope.SOCKET_SCOPE)
-                    cpusockets = {f'socket_{i}': socket for i, socket in enumerate(set(cpusockets))}
+                    socket_set = amdsmi_interface.amdsmi_get_cpu_affinity_with_scope(args.gpu, amdsmi_interface.AmdSmiAffinityScope.SOCKET_SCOPE)
+                    socket_set = [f"{cpus:016X}" for cpus in socket_set]
+                    socket_set = {f'cpu_list_{i}': f"{cpus}" for i, cpus in enumerate(socket_set)}
+                    socket_bitmask_ranges = self.helpers.get_bitmask_ranges(socket_set)
+                    socket_affinity = {}
+                    for key in socket_set:
+                        socket_affinity[key] = {
+                            "bitmask": socket_set[key],
+                            "cpu_cores_affinity": socket_bitmask_ranges.get(key, "N/A")
+                        }
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    cpusockets = {}
+                    socket_affinity = "N/A"
                     logging.debug("Failed to get socket affinity for gpu %s | %s", gpu_id, e.get_error_info())
 
                 static_dict['numa'] = { 'node' : numa_node_number,
                                         'affinity' : numa_affinity,
                                         'cpu_affinity' : cpu_affinity,
-                                        'socket_affinity' : cpusockets if cpusockets else "N/A"}
+                                        'socket_affinity' : socket_affinity}
         if args.vram:
             vram_info_dict = {"type" : "N/A",
                               "vendor" : "N/A",
