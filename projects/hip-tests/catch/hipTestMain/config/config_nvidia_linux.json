@@ -13,8 +13,6 @@
         "Unit_ChannelDescriptor_Positive_Basic_3D - long3",
         "Unit_ChannelDescriptor_Positive_Basic_4D - ulong4",
         "Unit_ChannelDescriptor_Positive_Basic_4D - long4",
-        "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/38 ===",
-        "Unit_hipFreeAsync_Negative_Parameters",
         "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 ===",
         "Unit_hipGetTexObjectResourceDesc_positive",
         "Unit_hipGetTexObjectResourceDesc_Negative_Parameters",

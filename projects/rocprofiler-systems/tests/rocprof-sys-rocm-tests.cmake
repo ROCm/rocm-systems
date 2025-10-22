@@ -22,9 +22,19 @@
 
 # -------------------------------------------------------------------------------------- #
 #
-# ROCm tests
+# ROCm transpose tests
 #
 # -------------------------------------------------------------------------------------- #
+
+set(_transpose_environment
+    "${_base_environment}"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api"
+)
+
+# Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    list(APPEND _transpose_environment "ROCPROFSYS_USE_ROCPD=ON")
+endif()
 
 rocprofiler_systems_add_test(
     NAME transpose
@@ -44,7 +54,7 @@ rocprofiler_systems_add_test(
         args
         -E
         uniform_int_distribution
-    ENVIRONMENT "${_base_environment}"
+    ENVIRONMENT "${_transpose_environment}"
     RUNTIME_TIMEOUT 480
 )
 
@@ -56,7 +66,7 @@ rocprofiler_systems_add_test(
     GPU ON
     NUM_PROCS 1
     RUN_ARGS 1 2 2
-    ENVIRONMENT "${_base_environment}"
+    ENVIRONMENT "${_transpose_environment}"
 )
 
 rocprofiler_systems_add_test(
@@ -80,9 +90,15 @@ rocprofiler_systems_add_test(
         -E
         uniform_int_distribution
     RUN_ARGS 2 100 50
-    ENVIRONMENT "${_base_environment}"
+    ENVIRONMENT "${_transpose_environment}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure transpose"
 )
+
+# -------------------------------------------------------------------------------------- #
+#
+# ROCProfiler tests (counter collection)
+#
+# -------------------------------------------------------------------------------------- #
 
 if(ROCPROFSYS_USE_ROCM)
     set(NAVI_REGEX "gfx(10|11|12)[A-Fa-f0-9][A-Fa-f0-9]")
@@ -120,7 +136,7 @@ if(ROCPROFSYS_USE_ROCM)
         NUM_PROCS ${NUM_PROCS}
         REWRITE_ARGS -e -v 2 -E uniform_int_distribution
         ENVIRONMENT
-            "${_base_environment};ROCPROFSYS_ROCM_EVENTS=${ROCPROFSYS_ROCM_EVENTS_TEST}"
+            "${_transpose_environment};ROCPROFSYS_ROCM_EVENTS=${ROCPROFSYS_ROCM_EVENTS_TEST}"
         REWRITE_RUN_PASS_REGEX "${_ROCP_PASS_REGEX}"
         SAMPLING_PASS_REGEX "${_ROCP_PASS_REGEX}"
     )
@@ -139,5 +155,28 @@ if(ROCPROFSYS_USE_ROCM)
         ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
         EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
         LABELS "rocprofiler"
+    )
+endif()
+
+# -------------------------------------------------------------------------------------- #
+#
+# ROCpd tests
+#
+# -------------------------------------------------------------------------------------- #
+
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    set_property(TEST transpose-sampling APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME transpose-sampling
+        ROCPD_FILE "rocpd.db"
+        ARGS --validation-rules
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/validation-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/cpu-metrics-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/timer-sampling-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/sdk-metrics-rules.json"
+        LABELS "rocpd"
     )
 endif()

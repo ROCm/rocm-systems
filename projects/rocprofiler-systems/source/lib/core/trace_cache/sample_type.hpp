@@ -131,13 +131,12 @@ struct memory_allocate_sample : storage_parsed_type_base
 struct region_sample : storage_parsed_type_base
 {
     region_sample() = default;
-    region_sample(uint64_t _thread_id, int32_t _kind, int32_t _operation,
+    region_sample(uint64_t _thread_id, std::string _name,
                   uint64_t _correlation_id_internal, uint64_t _correlation_id_ancestor,
                   uint64_t _start_timestamp, uint64_t _end_timestamp,
                   std::string _call_stack, std::string _args_str, std::string _category)
     : thread_id(_thread_id)
-    , kind(_kind)
-    , operation(_operation)
+    , name(std::move(_name))
     , correlation_id_internal(_correlation_id_internal)
     , correlation_id_ancestor(_correlation_id_ancestor)
     , start_timestamp(_start_timestamp)
@@ -147,10 +146,8 @@ struct region_sample : storage_parsed_type_base
     , category(std::move(_category))
     {}
 
-    // Identification fields
-    uint64_t thread_id;
-    int32_t  kind;
-    int32_t  operation;
+    uint64_t    thread_id;
+    std::string name;
 
     // Correlation fields
     uint64_t correlation_id_internal;

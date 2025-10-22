@@ -68,6 +68,20 @@ if(MAX_CAUSAL_ITERATIONS GREATER 100)
     set(MAX_CAUSAL_ITERATIONS 100)
 endif()
 
+if(
+    DEFINED ROCmVersion_FULL_VERSION
+    AND ROCmVersion_FULL_VERSION VERSION_GREATER_EQUAL "7.0"
+)
+    set(ENABLE_ROCPD_TEST YES)
+else()
+    set(ENABLE_ROCPD_TEST NO)
+endif()
+
+rocprofiler_systems_message(
+    STATUS
+    "ROCm ${ROCmVersion_FULL_VERSION} - Including ROCPD Test: ${ENABLE_ROCPD_TEST}"
+)
+
 if(DEFINED ROCM_PATH)
     set(ROCM_LLVM_LIB_PATH "${ROCM_PATH}/lib/llvm/lib")
     set(_test_library_path
@@ -119,16 +133,6 @@ set(_lock_environment
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_TIMELINE_PROFILE=OFF"
     "ROCPROFSYS_VERBOSE=2"
-    "${_test_library_path}"
-)
-
-set(_ompt_environment
-    "ROCPROFSYS_TRACE=ON"
-    "ROCPROFSYS_PROFILE=ON"
-    "ROCPROFSYS_TIME_OUTPUT=OFF"
-    "ROCPROFSYS_USE_OMPT=ON"
-    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
-    "${_test_openmp_env}"
     "${_test_library_path}"
 )
 
@@ -1178,7 +1182,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
     cmake_parse_arguments(
         TEST
         ""
-        "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE"
+        "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE;ROCPD_FILE"
         "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;EXIST_FILES;ARGS"
         ${ARGN}
     )
@@ -1211,7 +1215,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
 
     if(NOT TEST_PASS_REGEX)
         set(TEST_PASS_REGEX
-            "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}) validated"
+            "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}|${TEST_ROCPD_FILE}) validated"
         )
     endif()
 
@@ -1250,10 +1254,43 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
+    if(TEST_ROCPD_FILE)
+        add_test(
+            NAME validate-${TEST_NAME}-rocpd
+            COMMAND
+                ${ROCPROFSYS_VALIDATION_PYTHON}
+                ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db
+                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_ROCPD_FILE}
+                ${TEST_ARGS}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        )
+    endif()
+
     list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}")
 
-    foreach(_TEST validate-${TEST_NAME}-timemory validate-${TEST_NAME}-perfetto)
+    foreach(
+        _TEST
+        validate-${TEST_NAME}-timemory
+        validate-${TEST_NAME}-perfetto
+        validate-${TEST_NAME}-rocpd
+    )
+        # Skip tests that don't exist
         if(NOT TEST "${_TEST}")
+            continue()
+        endif()
+
+        # Skip timemory validation if no timemory file is specified
+        if("${_TEST}" MATCHES "-timemory" AND NOT TEST_TIMEMORY_FILE)
+            continue()
+        endif()
+
+        # Skip perfetto validation if no perfetto file is specified
+        if("${_TEST}" MATCHES "-perfetto" AND NOT TEST_PERFETTO_FILE)
+            continue()
+        endif()
+
+        # Skip rocpd validation if no rocpd file is specified
+        if("${_TEST}" MATCHES "-rocpd" AND NOT TEST_ROCPD_FILE)
             continue()
         endif()
 

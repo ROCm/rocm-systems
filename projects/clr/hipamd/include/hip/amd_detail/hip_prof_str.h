@@ -11587,7 +11587,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.mode);
       oss << ")";
     break;
-     case HIP_API_ID_hipStreamCopyAttributes:
+    case HIP_API_ID_hipStreamCopyAttributes:
       oss << "hipStreamCopyAttributes(";
       oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamCopyAttributes.dst);
       oss << ", src="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamCopyAttributes.src);
