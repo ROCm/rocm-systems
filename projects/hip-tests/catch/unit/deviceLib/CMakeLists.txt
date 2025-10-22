@@ -159,8 +159,8 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-    if (DEFINED OFFLOAD_ARCH_STR)
-      CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
+    if (DEFINED OFFLOAD_ARCH_LIST)
+      CheckAcceptedArchs(${OFFLOAD_ARCH_LIST})
     elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
       CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})
     else()

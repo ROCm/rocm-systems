@@ -107,7 +107,7 @@ function(hip_add_device_code)
   elseif(HIP_PLATFORM STREQUAL "amd")
     set(OFFLOAD_ARCH ${ARG_OFFLOAD_ARCH_OVERRIDE})
     if(NOT OFFLOAD_ARCH)
-      set(OFFLOAD_ARCH ${OFFLOAD_ARCH_STR})
+      set(OFFLOAD_ARCH ${OFFLOAD_ARCH_LIST})
     endif()
 
     # Set flags and extension based on format

@@ -107,8 +107,8 @@ hip_add_device_code(
   SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
-  if (DEFINED OFFLOAD_ARCH_STR)
-    CheckRejectedArchs(${OFFLOAD_ARCH_STR})
+  if (DEFINED OFFLOAD_ARCH_LIST)
+    CheckRejectedArchs(${OFFLOAD_ARCH_LIST})
   elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
     CheckRejectedArchs($ENV{HCC_AMDGPU_TARGET})
   else()

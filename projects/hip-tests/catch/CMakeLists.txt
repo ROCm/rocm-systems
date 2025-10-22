@@ -215,7 +215,7 @@ endif()
 message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900 --offload-arch=gfx906"
-# OFFLOAD_ARCH_STR is stored as a CMake list internally and automatically converted from string input
+# OFFLOAD_ARCH_STR is accepted as input for backward compatibility and converted to OFFLOAD_ARCH_LIST
 # Identify the GPU Targets.
 # This is done due to limitation of rocm_agent_enumerator
 # While building test parallelly, rocm_agent_enumerator can fail and give out an empty target
@@ -235,9 +235,9 @@ if(NOT DEFINED OFFLOAD_ARCH_STR
     if (NOT HIP_GPU_ARCH STREQUAL "")
         string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
         list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
-        set(OFFLOAD_ARCH_STR)
+        set(OFFLOAD_ARCH_LIST)
         foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
-            list(APPEND OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch}")
+            list(APPEND OFFLOAD_ARCH_LIST "--offload-arch=${_hip_gpu_arch}")
         endforeach()
     else()
         message(STATUS "ROCm Agent Enumerator found no valid architectures")
@@ -247,13 +247,14 @@ elseif(DEFINED OFFLOAD_ARCH_STR)
     if(NOT "${OFFLOAD_ARCH_STR}" MATCHES ";")
         separate_arguments(OFFLOAD_ARCH_STR)
     endif()
-    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
+    set(OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR})
+    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_LIST})
 endif()
 
-if(DEFINED OFFLOAD_ARCH_STR)
-    add_compile_options(${OFFLOAD_ARCH_STR})
+if(DEFINED OFFLOAD_ARCH_LIST)
+    add_compile_options(${OFFLOAD_ARCH_LIST})
 endif()
-message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
+message(STATUS "Using offload arch list: ${OFFLOAD_ARCH_LIST}")
 
 find_package(Git)
 # get hip-tests commit short hash
@@ -280,10 +281,10 @@ if(WIN32)
 else()
     set(configToUse "config_amd_linux")
 
-    # Extract base architecture names from OFFLOAD_ARCH_STR for config file generation
+    # Extract base architecture names from OFFLOAD_ARCH_LIST for config file generation
     # Example: "--offload-arch=gfx906:xnack-" becomes "gfx906"
     set(BASE_ARCH_LIST)
-    foreach(__offload_arch ${OFFLOAD_ARCH_STR})
+    foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
         string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
         string(REPLACE ":" ";" target_id_list ${targetid})
         list(GET target_id_list 0 arch)
