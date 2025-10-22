@@ -217,9 +217,6 @@ typedef struct rocprofiler_thread_trace_decoder_other_simd_t
     uint8_t cu;    ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
     uint8_t simd;  ///< SIMD ID [0,3].
 
-    int64_t begin_time;  ///< Min instruction time in this data chunk.
-    int64_t end_time;    ///< Max instruction time in this data chunk.
-
     uint64_t                                 instructions_size;   ///< instructions_array size
     rocprofiler_thread_trace_decoder_inst_t* instructions_array;  ///< Instructions executed
 } rocprofiler_thread_trace_decoder_other_simd_t;

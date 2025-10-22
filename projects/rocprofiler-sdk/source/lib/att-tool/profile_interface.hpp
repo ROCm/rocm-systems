@@ -21,6 +21,7 @@
 // SOFTWARE.
 //
 // undefine NDEBUG so asserts are implemented
+#include <cstddef>
 #ifdef NDEBUG
 #    undef NDEBUG
 #endif
@@ -38,7 +39,6 @@
 #include <unordered_map>
 #include <vector>
 #include "code.hpp"
-#include "other_simd.hpp"
 #include "wave.hpp"
 
 #define C_API_BEGIN                                                                                \
@@ -75,8 +75,6 @@ struct ToolData
     size_t            num_waves = 0;
 
     rocprofiler_thread_trace_decoder_id_t decoder{};
-
-    int32_t other_simd_count = 0;
 };
 
 }  // namespace att_wrapper

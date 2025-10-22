@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "filenames.hpp"
+#include "other_simd.hpp"
 #include "outputfile.hpp"
 
 #include <fstream>
@@ -39,11 +40,44 @@ FilenameMgr::addwave(const Fspath& name, Coord coord, size_t begint, size_t endt
 }
 
 void
-FilenameMgr::add_other_simd(const Fspath& file, int se, size_t start, size_t end, size_t index)
+FilenameMgr::add_other_simd(int se, const rocprofiler_thread_trace_decoder_other_simd_t& rec)
 {
-    auto& vec = other_simd_files[se];
-    if(index >= vec.size()) vec.resize(index + 1);
-    vec[index] = OtherSIMDName{file.filename(), start, end};
+    // Compute begin/end from instructions
+    int64_t begin = 0;
+    int64_t end   = 0;
+
+    if(rec.instructions_array && rec.instructions_size > 0)
+    {
+        int64_t min_t = std::numeric_limits<int64_t>::max();
+        int64_t max_t = std::numeric_limits<int64_t>::min();
+
+        for(uint64_t i = 0; i < rec.instructions_size; ++i)
+        {
+            const auto& inst = rec.instructions_array[i];
+
+            if(inst.pc.code_object_id == 0 && inst.pc.address == 0) continue;
+
+            if(inst.time < min_t) min_t = inst.time;
+            const int64_t inst_end = inst.time + static_cast<int64_t>(inst.duration);
+            if(inst_end > max_t) max_t = inst_end;
+        }
+
+        if(min_t != std::numeric_limits<int64_t>::max())
+        {
+            begin = min_t;
+            end   = max_t;
+        }
+    }
+
+    auto&        vec = other_simd_files[se];
+    const size_t idx = vec.size();
+    Fspath       file =
+        dir / ("other_simd_se" + std::to_string(se) + "_" + std::to_string(idx) + ".json");
+
+    vec.emplace_back(
+        OtherSIMDName{file.filename(), static_cast<size_t>(begin), static_cast<size_t>(end)});
+
+    write_other_simd_json(rec, file, begin, end);
 }
 
 FilenameMgr::~FilenameMgr()

@@ -11,16 +11,18 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-inline void
+void
 write_other_simd_json(const rocprofiler_thread_trace_decoder_other_simd_t& rec,
-                      const Fspath&                                        filepath)
+                      const Fspath&                                        filepath,
+                      int64_t                                              begin_time,
+                      int64_t                                              end_time)
 {
     nlohmann::json out;
     out["type"]       = "OTHER_SIMD_INSTRUCTIONS";
     out["cu"]         = rec.cu;
     out["simd_sel"]   = rec.simd;
-    out["begin_time"] = rec.begin_time;
-    out["end_time"]   = rec.end_time;
+    out["begin_time"] = begin_time;
+    out["end_time"]   = end_time;
 
     nlohmann::json::array_t events;
 
@@ -38,8 +40,8 @@ write_other_simd_json(const rocprofiler_thread_trace_decoder_other_simd_t& rec,
         }
     }
 
-    out["events"] = std::move(events);
-
+    out["instructions_count"] = events.size();
+    out["instructions"]       = std::move(events);
     OutputFile(filepath.string()) << out;
 }
 
