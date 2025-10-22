@@ -33,30 +33,41 @@ if(HIP_PLATFORM MATCHES "amd")
   # Because default catch2 build will reference CMAKE_CXX_FLAGS that contains specific targets which will hijack generic
   # target in hip-rt, we have to use custom build to contain generic targets only.
   if(BUILD_SHARED_LIBS) # Build hipGenericTargetOnly for shared libs only
-    set(GENERIC_TARGET_ONLY_EXE hipSquareGenericTargetOnly)
-    set(GENERIC_TARGET_ONLY_COMPRESSED_EXE hipSquareGenericTargetOnlyCompressed)
+    set(GENERIC_SOURCES
+      hipSquareGenericTarget.cc
+      ../../hipTestMain/hip_test_context.cc
+      ../../hipTestMain/hip_test_features.cc
+      ../../hipTestMain/main.cc
+    )
 
-    set(LIBFS)
-    if(WIN32)
-      set(GENERIC_TARGET_ONLY_EXE ${GENERIC_TARGET_ONLY_EXE}.exe)
-      set(GENERIC_TARGET_ONLY_COMPRESSED_EXE ${GENERIC_TARGET_ONLY_COMPRESSED_EXE}.exe)
-    else()
-        set(LIBFS -lstdc++fs)
+    set(GENERIC_INCLUDE_DIRECTORIES
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
+    )
+
+    hip_add_executable(
+      NAME hipSquareGenericTargetOnly
+      SOURCE ${GENERIC_SOURCES}
+      COMPILE_FLAGS -DNO_GENERIC_TARGET_ONLY_TEST -mcode-object-version=6 -w ${OFFLOAD_ARCH_GENERIC_LIST}
+      INCLUDE_DIRECTORIES ${GENERIC_INCLUDE_DIRECTORIES}
+      REPLACE_COMPILE_FLAGS
+      ADD_TO_TARGET build_tests
+    )
+
+    hip_add_executable(
+      NAME hipSquareGenericTargetOnlyCompressed
+      SOURCE ${GENERIC_SOURCES}
+      COMPILE_FLAGS -DNO_GENERIC_TARGET_ONLY_TEST -DGENERIC_COMPRESSED -mcode-object-version=6 --offload-compress -w ${OFFLOAD_ARCH_GENERIC_LIST}
+      INCLUDE_DIRECTORIES ${GENERIC_INCLUDE_DIRECTORIES}
+      REPLACE_COMPILE_FLAGS
+      ADD_TO_TARGET build_tests
+    )
+
+    if(UNIX)
+      target_link_libraries(hipSquareGenericTargetOnly PRIVATE stdc++fs)
+      target_link_libraries(hipSquareGenericTargetOnlyCompressed PRIVATE stdc++fs)
     endif()
-
-    add_executable(${GENERIC_TARGET_ONLY_EXE}
-      hipSquareGenericTarget.cc
-      $<TARGET_OBJECTS:Main_Object>)
-    target_compile_options(${GENERIC_TARGET_ONLY_EXE} PUBLIC -w ${OFFLOAD_ARCH_GENERIC_LIST})
-    target_compile_definitions(${GENERIC_TARGET_ONLY_EXE} PRIVATE NO_GENERIC_TARGET_ONLY_TEST)
-
-    add_executable(${GENERIC_TARGET_ONLY_COMPRESSED_EXE}
-      hipSquareGenericTarget.cc
-      $<TARGET_OBJECTS:Main_Object>)
-    target_compile_definitions(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PRIVATE GENERIC_COMPRESSED NO_GENERIC_TARGET_ONLY_TEST)
-    target_compile_options(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PUBLIC --offload-compress -w ${OFFLOAD_ARCH_GENERIC_LIST})
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE})
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE})
   endif()
 
   # Build hipSquareGenericTarget to cover generic targets and the specific target

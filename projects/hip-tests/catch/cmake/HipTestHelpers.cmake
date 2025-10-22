@@ -1,8 +1,8 @@
 # hip_add_executable: Create HIP executable with EXCLUDE_FROM_ALL
-# Required: NAME, SOURCE
-# Optional: ADD_TO_TARGET, COMPILE_FLAGS, LINKER_LIBS
+# Required: NAME, SOURCE (can be multiple files)
+# Optional: ADD_TO_TARGET, COMPILE_FLAGS, LINKER_LIBS, INCLUDE_DIRECTORIES, REPLACE_COMPILE_FLAGS
 function(hip_add_executable)
-  cmake_parse_arguments(ARG "" "NAME;SOURCE;ADD_TO_TARGET;COMPILE_FLAGS" "LINKER_LIBS" ${ARGN})
+  cmake_parse_arguments(ARG "REPLACE_COMPILE_FLAGS" "NAME;ADD_TO_TARGET" "SOURCE;COMPILE_FLAGS;LINKER_LIBS;INCLUDE_DIRECTORIES" ${ARGN})
 
   if(NOT ARG_NAME OR NOT ARG_SOURCE)
     message(FATAL_ERROR "hip_add_executable: NAME and SOURCE required")
@@ -16,8 +16,18 @@ function(hip_add_executable)
 
   add_executable(${ARG_NAME} EXCLUDE_FROM_ALL ${ARG_SOURCE})
 
+  if(ARG_INCLUDE_DIRECTORIES)
+    target_include_directories(${ARG_NAME} PRIVATE ${ARG_INCLUDE_DIRECTORIES})
+  endif()
+
   if(ARG_COMPILE_FLAGS)
-    target_compile_options(${ARG_NAME} PRIVATE ${ARG_COMPILE_FLAGS})
+    if(ARG_REPLACE_COMPILE_FLAGS)
+      # REPLACE inherited compile options (don't append)
+      set_property(TARGET ${ARG_NAME} PROPERTY COMPILE_OPTIONS ${ARG_COMPILE_FLAGS})
+    else()
+      # APPEND to inherited compile options (default behavior)
+      target_compile_options(${ARG_NAME} PRIVATE ${ARG_COMPILE_FLAGS})
+    endif()
   endif()
 
   if(ARG_LINKER_LIBS)
