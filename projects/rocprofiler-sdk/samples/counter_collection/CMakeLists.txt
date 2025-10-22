@@ -63,6 +63,7 @@ set_tests_properties(
                "${counter-collection-buffer-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
                "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
 set_source_files_properties(device_serialized_main.cpp PROPERTIES LANGUAGE HIP)
@@ -117,6 +118,7 @@ set_tests_properties(
                "${counter-collection-callback-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
                "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
 add_library(counter-collection-functional-counter-client SHARED)
@@ -178,6 +180,7 @@ set_tests_properties(
                "${counter-collection-functional-counter-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
                "${IS_THREAD_SANITIZER}")
 
 add_library(counter-collection-device-profiling-sync-client SHARED)
@@ -212,4 +215,5 @@ set_tests_properties(
                "${counter-collection-functional-counter-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
                "${IS_THREAD_SANITIZER}")
