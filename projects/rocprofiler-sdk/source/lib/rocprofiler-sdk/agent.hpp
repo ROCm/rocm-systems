@@ -123,6 +123,5 @@ construct_agent_cache(::HsaApiTable* table);
 
 void
 internal_refresh_topology();  // only for internal testing
-
 }  // namespace agent
 }  // namespace rocprofiler
