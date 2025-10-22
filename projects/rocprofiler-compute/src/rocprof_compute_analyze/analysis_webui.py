@@ -286,21 +286,21 @@ class webui_analysis(OmniAnalyze_Base):
                             )
                         )
 
-                    # Append the new section with all of it's contents
-                    div_children.append(
-                        html.Section(
-                            id=section_title,
-                            children=[
-                                html.H3(
-                                    children=title,
-                                    style={"color": "white"},
-                                ),
-                                html.Div(
-                                    className="float-container", children=html_section
-                                ),
-                            ],
-                        )
+                # Append the new section with all of it's contents
+                div_children.append(
+                    html.Section(
+                        id=section_title,
+                        children=[
+                            html.H3(
+                                children=title,
+                                style={"color": "white"},
+                            ),
+                            html.Div(
+                                className="float-container", children=html_section
+                            ),
+                        ],
                     )
+                )
 
             # Display pop-up message if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
