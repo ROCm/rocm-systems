@@ -9,6 +9,7 @@ misc-*,\
 -misc-non-private-member-variables-in-classes,\
 -misc-include-cleaner,\
 -misc-const-correctness,\
+-misc-use-internal-linkage,\
 modernize-*,\
 -modernize-deprecated-headers,\
 -modernize-raw-string-literal,\
@@ -47,6 +48,8 @@ readability-*,\
 -readability-function-cognitive-complexity,\
 -readability-identifier-length,\
 -readability-use-anyofallof,\
+-readability-enum-initial-value,\
+-readability-math-missing-parentheses,\
 "
 CheckOptions:
   - key:             readability-braces-around-statements.ShortStatementLines
