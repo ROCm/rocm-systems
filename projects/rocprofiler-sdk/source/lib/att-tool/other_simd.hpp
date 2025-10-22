@@ -11,7 +11,7 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-void
+inline void
 write_other_simd_json(const rocprofiler_thread_trace_decoder_other_simd_t& rec,
                       const Fspath&                                        filepath,
                       int64_t                                              begin_time,
