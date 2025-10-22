@@ -214,24 +214,13 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# ROCm
+# ROCpd
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
-                                                   INTERFACE ROCPROFSYS_USE_ROCM
-    )
-    target_link_libraries(
-        rocprofiler-systems-rocm
-        INTERFACE rocprofiler-sdk::rocprofiler-sdk
-    )
-
-    find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
-
+function(ROCPROFILER_SYSTEMS_CONFIGURE_ROCPD)
     find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
+
     if(rocprofiler-sdk-rocpd_FOUND)
         get_target_property(
             ROCPD_INCLUDE_DIRS
@@ -303,6 +292,7 @@ if(ROCPROFSYS_USE_ROCM)
         foreach(SCHEMA_FILE ${SCHEMA_FILES})
             file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
 
+            # Escape quotes and backslashes for C++ string literal
             string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
             string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
             string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
@@ -323,6 +313,28 @@ if(ROCPROFSYS_USE_ROCM)
                 $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
         )
     endif()
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+#
+# ROCm
+#
+# ----------------------------------------------------------------------------------------#
+
+if(ROCPROFSYS_USE_ROCM)
+    find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
+                                                   INTERFACE ROCPROFSYS_USE_ROCM
+    )
+    target_link_libraries(
+        rocprofiler-systems-rocm
+        INTERFACE rocprofiler-sdk::rocprofiler-sdk
+    )
+
+    find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
+
+    rocprofiler_systems_configure_rocpd()
 endif()
 
 # ----------------------------------------------------------------------------------------#
