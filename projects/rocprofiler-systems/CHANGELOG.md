@@ -11,6 +11,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added tracing of VAAPI, MPI and host events inside `rocpd` output database.
 
+### Changed
+
+- Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
+
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added

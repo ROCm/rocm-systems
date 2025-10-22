@@ -60,6 +60,8 @@ from utils.logger import (
     demarcate,
 )
 
+METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+
 rocprof_cmd = ""
 rocprof_args = ""
 
@@ -1629,3 +1631,16 @@ def format_scientific_notation_if_needed(
         formatted = normal_str
 
     return formatted
+
+
+def load_yaml(filepath: str) -> dict[str, Any]:
+    """Load YAML file and return as dictionary."""
+    with open(filepath) as f:
+        return yaml.safe_load(f)
+
+
+def get_panel_alias() -> dict[str, str]:
+    panel_yaml = load_yaml("tools/config_management/gfx9_config_template.yaml")
+    return {
+        panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
+    }
