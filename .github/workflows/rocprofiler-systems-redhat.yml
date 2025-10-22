@@ -78,19 +78,22 @@ jobs:
     - name: Install ROCm Packages
       if: ${{ matrix.rocm-version > 0 }}
       timeout-minutes: 30
-      shell: bash
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        RPM_TAG=".el${OS_VERSION_MAJOR}"
-        ROCM_VERSION=${{ matrix.rocm-version }}
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
-        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
-        yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-        yum install -y rocm-dev rocdecode-devel
-        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 30
+        max_attempts: 3
+        command: |
+          RPM_TAG=".el${OS_VERSION_MAJOR}"
+          ROCM_VERSION=${{ matrix.rocm-version }}
+          ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
+          dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
+          yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+          yum install -y rocm-dev rocdecode-devel
+          if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
     - name: Configure, Build, and Test
       timeout-minutes: 115

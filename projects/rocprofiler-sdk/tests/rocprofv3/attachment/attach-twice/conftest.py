@@ -117,6 +117,8 @@ def convert_json_records_to_csv_format(records, section_name, kernel_symbols=Non
                 else queue_info
             )
             csv_record["Kernel_Id"] = str(kernel_id)
+            csv_record["Stream_Id"] = dispatch_info.get("stream_id", {}).get("handle", 0)
+            csv_record["Thread_Id"] = record.get("thread_id", 0)
 
             # Correlation ID with internal/external handling
             corr_id = record.get("correlation_id", {})
@@ -156,6 +158,8 @@ def convert_json_records_to_csv_format(records, section_name, kernel_symbols=Non
                 csv_record["Direction"] = "H2D" if src_agent < dst_agent else "D2H"
             else:
                 csv_record["Direction"] = "D2D"
+            # Get stream ID
+            csv_record["Stream_Id"] = record.get("stream_id", {}).get("handle", 0)
 
             # Correlation ID handling
             corr_id = record.get("correlation_id", {})
