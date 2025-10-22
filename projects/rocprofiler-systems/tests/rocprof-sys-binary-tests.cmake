@@ -331,99 +331,104 @@ file(
 "
 )
 
-rocprofiler_systems_add_bin_test(
-    NAME rocprofiler-systems-run-args
-    TARGET rocprofiler-systems-run
-    ARGS --monochrome
-         --debug=false
-         -v
-         1
-         -c
-         %env{TWD}%/rocprof-sys-tests-config/empty.cfg
-         -o
-         rocprof-sys-tests-output
-         rocprofiler-systems-run-args-output/
-         -TPHD
-         -S
-         cputime
-         realtime
-         --trace-wait=1.0e-12
-         --trace-duration=5.0
-         --wait=1.0
-         --duration=3.0
-         --trace-file=perfetto-run-args-trace.proto
-         --trace-buffer-size=100
-         --trace-fill-policy=ring_buffer
-         --profile-format
-         console
-         json
-         text
-         --process-freq
-         1000
-         --process-wait
-         0.0
-         --process-duration
-         10
-         --cpus
-         0-4
-         --gpus
-         0
-         -f
-         1000
-         --sampling-wait
-         1.0
-         --sampling-duration
-         10
-         -t
-         0-3
-         --sample-cputime
-         1000
-         1.0
-         0-3
-         --sample-realtime
-         10
-         0.5
-         0-3
-         -I
-         all
-         -E
-         mutex-locks
-         rw-locks
-         spin-locks
-         -C
-         perf::INSTRUCTIONS
-         --inlines
-         --hsa-interrupt
-         0
-         --use-causal=false
-         --use-kokkosp
-         --num-threads-hint=4
-         --sampling-allocator-size=32
-         --ci
-         --dl-verbose=3
-         --perfetto-annotations=off
-         --kokkosp-kernel-logger
-         --kokkosp-name-length-max=1024
-         --kokkosp-prefix="[kokkos]"
-         --tmpdir
-         ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/tmpdir
-         --perfetto-backend
-         inprocess
-         --use-pid
-         false
-         --time-output
-         off
-         --thread-pool-size
-         0
-         --timemory-components
-         wall_clock
-         cpu_clock
-         peak_rss
-         page_rss
-         --fork
-         --
-         $<TARGET_FILE:sleeper>
-         5
-    TIMEOUT 45
-    LABELS "rocprofiler-systems-run"
-)
+find_program(SLEEP_CMD NAMES sleep)
+if(SLEEP_CMD)
+    rocprofiler_systems_add_bin_test(
+        NAME rocprofiler-systems-run-args
+        TARGET rocprofiler-systems-run
+        ARGS --monochrome
+            --debug=false
+            -v
+            1
+            -c
+            %env{TWD}%/rocprof-sys-tests-config/empty.cfg
+            -o
+            rocprof-sys-tests-output
+            rocprofiler-systems-run-args-output/
+            -TPHD
+            -S
+            cputime
+            realtime
+            --trace-wait=1.0e-12
+            --trace-duration=5.0
+            --wait=1.0
+            --duration=3.0
+            --trace-file=perfetto-run-args-trace.proto
+            --trace-buffer-size=100
+            --trace-fill-policy=ring_buffer
+            --profile-format
+            console
+            json
+            text
+            --process-freq
+            1000
+            --process-wait
+            0.0
+            --process-duration
+            10
+            --cpus
+            0-4
+            --gpus
+            0
+            -f
+            1000
+            --sampling-wait
+            1.0
+            --sampling-duration
+            10
+            -t
+            0-3
+            --sample-cputime
+            1000
+            1.0
+            0-3
+            --sample-realtime
+            10
+            0.5
+            0-3
+            -I
+            all
+            -E
+            mutex-locks
+            rw-locks
+            spin-locks
+            -C
+            perf::INSTRUCTIONS
+            --inlines
+            --hsa-interrupt
+            0
+            --use-causal=false
+            --use-kokkosp
+            --num-threads-hint=4
+            --sampling-allocator-size=32
+            --ci
+            --dl-verbose=3
+            --perfetto-annotations=off
+            --kokkosp-kernel-logger
+            --kokkosp-name-length-max=1024
+            --kokkosp-prefix="[kokkos]"
+            --tmpdir
+            ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/tmpdir
+            --perfetto-backend
+            inprocess
+            --use-pid
+            false
+            --time-output
+            off
+            --thread-pool-size
+            0
+            --timemory-components
+            wall_clock
+            cpu_clock
+            peak_rss
+            page_rss
+            --fork
+            --
+            ${SLEEP_CMD}
+            5
+        TIMEOUT 45
+        LABELS "rocprofiler-systems-run"
+    )
+else()
+    rocprofiler_systems_message(WARNING "Sleep command not found. Disabling rocprofiler-systems-run-args ctest...")
+endif()

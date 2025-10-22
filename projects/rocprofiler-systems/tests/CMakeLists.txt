@@ -27,15 +27,6 @@ include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
-# Executables
-add_executable(sleeper ${CMAKE_CURRENT_SOURCE_DIR}/sleeper.cpp)
-set_target_properties(
-    sleeper
-    PROPERTIES
-        BUILD_TYPE RelWithDebInfo
-        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/testing
-)
-
 # test groups
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
