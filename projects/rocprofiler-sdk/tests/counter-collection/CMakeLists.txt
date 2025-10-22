@@ -33,7 +33,6 @@ set_tests_properties(
                "${counter-collection-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
                FIXTURES_SETUP
                test-counter-collection)
 
@@ -54,6 +53,5 @@ set_tests_properties(
                test-counter-collection-execute
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
                FIXTURES_REQUIRED
                test-counter-collection)
