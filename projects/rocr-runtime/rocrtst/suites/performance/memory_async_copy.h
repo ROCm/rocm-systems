@@ -197,16 +197,19 @@ class MemoryAsyncCopy : public TestBase {
 
  protected:
   void PrintTransactionType(Transaction *t);
+  
+  // Struct representing one granularity (copy size + string label)
+  struct Granularity {
+    const char* Str;
+    size_t Size;
+  };
+
   static const int kNumGranularity;
-  static const std::vector<const char*> Str;
-  static const std::vector<size_t> Size;
+  static const std::vector<Granularity> Granularities;
   static const int kMaxCopySize;
 
-  // @Brief: Helper function to initialize Str and Size based on emulator mode
-  static std::vector<const char*> initStr();
-
-  // @Brief: Helper function to initialize Size based on emulator mode
-  static std::vector<size_t> initSize();
+  // @Brief: Helper function to initialize Granularities based on emulator mode
+  static std::vector<Granularity> initGranularities();
 
   // @Brief: Get real iteration number
   virtual size_t RealIterationNum(void);

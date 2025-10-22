@@ -72,35 +72,39 @@
 /* PCIE BDF ID: 0xC81407 is specific to DTIF platform */
 static const uint32_t kDtifBdfId = 0xC81407;
 
-std::vector<const char*> MemoryAsyncCopy::initStr() {
+std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
   if (rocrtst::g_isEmuMode) {
-    return {"1k"};
+    return {{"1k", 1024}};
   } else {
-    return {"1k", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
-      "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M"};
-  }
-}
-
-std::vector<size_t> MemoryAsyncCopy::initSize() {
-  if (rocrtst::g_isEmuMode) {
-    return {1024};
-  } else {
-    return {1024, 2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024,
-      256*1024, 512*1024, 1024*1024, 2048*1024, 4096*1024, 8*1024*1024,
-      16*1024*1024, 32*1024*1024, 64*1024*1024, 128*1024*1024, 256*1024*1024,
-      512*1024*1024};
+    return {{"1k", 1024},
+            {"2K", 2 * 1024},
+            {"4K", 4 * 1024},
+            {"8K", 8 * 1024},
+            {"16K", 16 * 1024},
+            {"32K", 32 * 1024},
+            {"64K", 64 * 1024},
+            {"128K", 128 * 1024},
+            {"256K", 256 * 1024},
+            {"512K", 512 * 1024},
+            {"1M", 1024 * 1024},
+            {"2M", 2048 * 1024},
+            {"4M", 4096 * 1024},
+            {"8M", 8 * 1024 * 1024},
+            {"16M", 16 * 1024 * 1024},
+            {"32M", 32 * 1024 * 1024},
+            {"64M", 64 * 1024 * 1024},
+            {"128M", 128 * 1024 * 1024},
+            {"256M", 256 * 1024 * 1024},
+            {"512M", 512 * 1024 * 1024}};
   }
 }
 
 const int MemoryAsyncCopy::kNumGranularity = rocrtst::g_isEmuMode ? 1 : 20;
-const std::vector<const char*> MemoryAsyncCopy::Str = MemoryAsyncCopy::initStr();
-const std::vector<size_t> MemoryAsyncCopy::Size = MemoryAsyncCopy::initSize();
-const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Size.back();
+const std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::Granularities = MemoryAsyncCopy::initGranularities();
+const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Granularities.back().Size;
 
-MemoryAsyncCopy::MemoryAsyncCopy(void) :
-    TestBase() {
-  
-  if (Size.size() != kNumGranularity) {
+MemoryAsyncCopy::MemoryAsyncCopy(void) : TestBase() {
+  if (Granularities.size() != kNumGranularity) {
     throw std::runtime_error("kNumGranularity does not match size of arrays");
   }
 
@@ -162,8 +166,8 @@ void MemoryAsyncCopy::Run(void) {
 void MemoryAsyncCopy::FindSystemPool(void) {
   hsa_status_t err;
 
-//  err = hsa_iterate_agents(rocrtst::FindCPUDevice, &cpu_agent_);
-//  ASSERT_EQ(HSA_STATUS_INFO_BREAK, err);
+  //  err = hsa_iterate_agents(rocrtst::FindCPUDevice, &cpu_agent_);
+  //  ASSERT_EQ(HSA_STATUS_INFO_BREAK, err);
 
   err = hsa_amd_agent_iterate_memory_pools(cpu_agent_, rocrtst::FindGlobalPool,
         &sys_pool_);
@@ -283,7 +287,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
   PrintTransactionType(t);
 
   err = hsa_amd_memory_pool_get_info(src_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &src_alloc_size);
+                                     &src_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(src_agent, HSA_AGENT_INFO_DEVICE, &ag_type);
@@ -291,12 +295,12 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
 
   if (src_alloc_size <= 536870912 && ag_type == HSA_DEVICE_TYPE_GPU) {
     err = hsa_agent_get_info(src_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                              &src_alloc_size);
+                             &src_alloc_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
 
   err = hsa_amd_memory_pool_get_info(dst_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &dst_alloc_size);
+                                     &dst_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(dst_agent, HSA_AGENT_INFO_DEVICE, &ag_type);
@@ -304,7 +308,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
 
   if (dst_alloc_size <= 536870912 && ag_type == HSA_DEVICE_TYPE_GPU) {
     err = hsa_agent_get_info(dst_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                              &dst_alloc_size);
+                             &dst_alloc_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
 
@@ -397,11 +401,11 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
   }
 
   for (int i = 0; i < kNumGranularity; i++) {
-    if (Size[i] > size) {
-      printf("Skip test with block size %s\n", Str[i]);
+    if (Granularities[i].Size > size) {
+      printf("Skip test with block size %s\n", Granularities[i].Str);
       break;
     }
-    printf("Start test with block size %s\n",Str[i]);
+    printf("Start test with block size %s\n", Granularities[i].Str);
 
     std::vector<double> time;
 
@@ -417,8 +421,8 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
       int index = copy_timer.CreateTimer();
 
       copy_timer.StartTimer(index);
-      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag,
-                                                 Size[i], 0, NULL, t->signal);
+      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag, 
+                                                Granularities[i].Size, 0, NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
       while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,
@@ -434,8 +438,8 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
 
-      err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst,
-                                                 dst_agent, Size[i], 0, NULL, s);
+      err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst, dst_agent, Granularities[i].Size, 0,
+                                      NULL, s);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
       while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
@@ -445,7 +449,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
       err = AcquireAccess(cpu_agent_, sys_pool_, host_ptr_dst);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      if (memcmp(host_ptr_src, host_ptr_dst, Size[i])) {
+      if (memcmp(host_ptr_src, host_ptr_dst, Granularities[i].Size)) {
         verified_ = false;
       }
       // Push the result back to vector time
@@ -517,11 +521,11 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
   hsa_amd_memory_pool_t dst_pool = pool_info_[t->dst]->pool_;
 
   err = hsa_amd_memory_pool_get_info(src_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                    &src_alloc_size);
+                                     &src_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_amd_memory_pool_get_info(dst_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                    &dst_alloc_size);
+                                     &dst_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size: dst_alloc_size;
@@ -576,26 +580,21 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
   }
 
   printf("Data Size             Avg Time(us)         Avg BW(GB/s)"
-                           "          Min Time(us)          Peak BW(GB/s)\n");
+      "          Min Time(us)          Peak BW(GB/s)\n");
 
   for (int i = 0; i < kNumGranularity; i++) {
-
-    if (Size[i] > size) {
-      printf(
-         "Notice: Data Size >= %s is skipped due to hard limit of 1/2 vram size \n\n",
-         Str[i]
-      );
+    if (Granularities[i].Size > size) {
+      printf("Notice: Data Size >= %s is skipped due to hard limit of 1/2 vram size \n\n", Granularities[i].Str);
       break;
     }
 
     double band_width =
-    static_cast<double>(Size[i]/(*(t->benchmark_copy_time))[i]/1024/1024/1024);
+        static_cast<double>(Granularities[i].Size / (*(t->benchmark_copy_time))[i] / 1024 / 1024 / 1024);
     double peak_band_width =
-       static_cast<double>(Size[i] / (*(t->min_time))[i]/ 1024 / 1024 / 1024);
-    printf(
-        "  %4s            %14lf        %14lf         %14lf         %14lf\n",
-       Str[i], (*(t->benchmark_copy_time))[i] * 1e6, band_width,
-                                  (*(t->min_time))[i] * 1e6, peak_band_width);
+        static_cast<double>(Granularities[i].Size / (*(t->min_time))[i] / 1024 / 1024 / 1024);
+    printf("  %4s            %14lf        %14lf         %14lf         %14lf\n", Granularities[i].Str,
+           (*(t->benchmark_copy_time))[i] * 1e6, band_width, (*(t->min_time))[i] * 1e6,
+           peak_band_width);
   }
 
   return;
@@ -666,7 +665,7 @@ static hsa_status_t GetPoolInfo(hsa_amd_memory_pool_t pool, void* data) {
   int ag_ind = ptr->agent_index();
   ptr->pool_info()->push_back(
     new PoolInfo(pool, pool_i, region_segment, is_fine_grained, size,
-                                  alloc_max_size, ptr->agent_info()->back()));
+                                           alloc_max_size, ptr->agent_info()->back()));
 
   // Construct node_info and push back to agent_info_
   (*ptr->node_info())[ag_ind].pool.push_back(*ptr->pool_info()->back());
@@ -707,8 +706,8 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
     const char* name2 = (HSA_DEVICE_TYPE_GPU == device_type) ? "GPU" : "CPU";
 
     printf("The %s agent name located at PCIe Bus %x, Device %x, "
-                                                     "Function %x, is %s.\n",
-                                          name2, bus, device, function, name);
+        "Function %x, is %s.\n",
+        name2, bus, device, function, name);
   }
 
   uint32_t pci_domain_id = 0;
@@ -761,7 +760,7 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
       }
       if (ptr->gpu_local_agent1().handle != 0 &&
                                      ptr->gpu_local_agent2().handle != 0 &&
-                                        ptr->gpu_remote_agent().handle != 0) {
+          ptr->gpu_remote_agent().handle != 0) {
         return HSA_STATUS_INFO_BREAK;
       } else {
         return HSA_STATUS_SUCCESS;
@@ -825,7 +824,7 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 
   ptr->set_cpu_agent(agent);
   uint32_t cpu_numa_node_id;
-//  hwloc_obj_t cpu_numa;
+  //  hwloc_obj_t cpu_numa;
   hwloc_nodeset_t cpu_nodeset;
 
   err = hsa_agent_get_info(ptr->cpu_agent(), HSA_AGENT_INFO_NODE,

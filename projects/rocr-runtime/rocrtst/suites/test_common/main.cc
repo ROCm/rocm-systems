@@ -86,22 +86,26 @@ static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 bool rocrtst::g_isEmuMode = false;
 
 bool isEmuModeEnabled() {
-  const char* path = "/sys/module/amdgpu/parameters/emu_mode";
-  FILE* file = fopen(path, "r");
-  if (!file) {
-    std::cout << "Failed to open file." << std::endl;
-    return false;
-  }
+  auto checkMode = []{ 
+    const char* path = "/sys/module/amdgpu/parameters/emu_mode";
+    FILE* file = fopen(path, "r");
+    if (!file) {
+      std::cout << "Failed to open file." << std::endl;
+      return false;
+    }
 
-  int emu_mode = 0;
-  if (fscanf(file, "%d", &emu_mode) != 1) {
-    std::cout << "Failed to parse as a decimal." << std::endl;
+    int emu_mode = 0;
+    if (fscanf(file, "%d", &emu_mode) != 1) {
+      std::cout << "Failed to parse as a decimal." << std::endl;
+      fclose(file);
+      return false;
+    }
     fclose(file);
-    return false;
-  }
+    return emu_mode != 0;
+  };
 
-  fclose(file);
-  return emu_mode != 0;
+  static bool emu_mode = checkMode(); 
+  return emu_mode;
 }
 
 static void SetFlags(TestBase *test) {
