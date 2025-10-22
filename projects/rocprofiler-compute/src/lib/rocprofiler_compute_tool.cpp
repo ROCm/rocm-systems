@@ -249,17 +249,17 @@ std::string cxa_demangle(std::string_view _mangled_name, int *_status) {
     break;
   }
   case -1: {
-    std::clog << "memory allocation failure occurred demangling "
-              << _demangled_name << std::endl;
+    std::clog << "[rocprofiler-compute] memory allocation failure occurred demangling "
+          << _demangled_name << std::endl;
     break;
   }
   case -2: {
     break;
   }
   case -3: {
-    std::clog << "Invalid argument in: (\"" << _demangled_name
-              << "\", nullptr, nullptr, " << static_cast<void *>(_status) << ")"
-              << std::endl;
+    std::clog << "[rocprofiler-compute] Invalid argument in: (\"" << _demangled_name
+          << "\", nullptr, nullptr, " << static_cast<void *>(_status) << ")"
+          << std::endl;
     break;
   }
   default:
@@ -548,7 +548,7 @@ void generate_output(tool_data_t *tool_data) {
 
 void tool_fini(void *user_data) {
   assert(user_data);
-  std::clog << "In tool fini\n";
+  std::clog << "[rocprofiler-compute] In tool fini\n";
   rocprofiler_stop_context(get_client_ctx());
 
   auto *tool_data = static_cast<tool_data_t *>(user_data);
@@ -684,7 +684,7 @@ int tool_attach(rocprofiler_client_detach_t /*detach_func*/,
         rocprofiler_context_is_active(context_ids[i], &status) ==
             ROCPROFILER_STATUS_SUCCESS &&
         status == 0) {
-      std::clog << "Attach mode: starting context ID " << context_ids[i].handle;
+      std::clog << "[rocprofiler-compute] Attach mode: starting context ID " << context_ids[i].handle << std::endl;
       ROCPROFILER_CALL(rocprofiler_start_context(context_ids[i]),
                        "failed to start received context");
     }
@@ -694,7 +694,7 @@ int tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 }
 
 void tool_detach(void *user_data) {
-  std::clog << "In tool detach\n";
+  std::clog << "[rocprofiler-compute] In tool detach\n";
 
   auto *tool_data = static_cast<tool_data_t *>(user_data);
   generate_output(tool_data);
