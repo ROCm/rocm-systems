@@ -468,35 +468,35 @@ class OmniSoC_Base:
                 f"{get_submodules('rocprof_compute_profile')}"
             )
 
-        # Point to counter definition
-        old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-        os.environ["ROCPROFILER_METRICS_PATH"] = str(
-            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
-        )
-        sys.path.append(
-            str(
-                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent / "bin"
+            # Point to counter definition
+            old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
+            os.environ["ROCPROFILER_METRICS_PATH"] = str(
+                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
             )
-        )
-        from rocprofv3_avail_module import avail
+            sys.path.append(
+                str(
+                    Path(self.get_args().rocprofiler_sdk_library_path).parent
+                    / "python3/site-packages"
+                )
+            )
+            from rocprofv3 import avail
 
-        avail.loadLibrary.libname = str(
-            Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-            / "lib"
-            / "rocprofiler-sdk"
-            / "librocprofv3-list-avail.so"
-        )
-        counters = avail.get_counters()
-        rocprof_counters = {
-            counter.name
-            for counter in counters[list(counters.keys())[0]]
-            if hasattr(counter, "block") or hasattr(counter, "expression")
-        }
-        # Reset env. var.
-        if old_rocprofiler_metrics_path is None:
-            del os.environ["ROCPROFILER_METRICS_PATH"]
-        else:
-            os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
+            avail.loadLibrary.libname = str(
+                Path(args.rocprofiler_sdk_library_path).parent
+                / "rocprofiler-sdk"
+                / "librocprofv3-list-avail.so"
+            )
+            counters = avail.get_counters()
+            rocprof_counters = {
+                counter.name
+                for counter in counters[list(counters.keys())[0]]
+                if hasattr(counter, "block") or hasattr(counter, "expression")
+            }
+            # Reset env. var.
+            if old_rocprofiler_metrics_path is None:
+                del os.environ["ROCPROFILER_METRICS_PATH"]
+            else:
+                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         return rocprof_counters
 
