@@ -39,7 +39,7 @@ data_processor::data_processor(std::shared_ptr<data_storage::database> database)
         throw std::invalid_argument("Provided pointer to a non-existing database!");
     }
     _database->initialize_schema();
-    _upid = data_storage::database::get_upid();
+    _upid = _database->get_upid();
 
     initialize_event_stmt();
     initialize_pmc_event_stmt();

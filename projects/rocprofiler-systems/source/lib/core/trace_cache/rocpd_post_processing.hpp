@@ -35,8 +35,8 @@ namespace trace_cache
 class rocpd_post_processing
 {
 public:
-    rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr,
-                          const std::string& _database_tag);
+    rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr, int pid,
+                          int ppid);
 
     void register_parser_callback(storage_parser& parser);
     void post_process_metadata();
@@ -51,7 +51,7 @@ private:
 
     postprocessing_callback get_kernel_dispatch_callback() const;
     postprocessing_callback get_memory_copy_callback() const;
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     postprocessing_callback get_memory_allocate_callback() const;
 #endif
     postprocessing_callback get_region_callback() const;

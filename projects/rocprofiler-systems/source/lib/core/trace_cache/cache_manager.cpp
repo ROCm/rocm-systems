@@ -30,7 +30,6 @@
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
-#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -46,8 +45,7 @@ list_dir_files(const std::string& path)
     DIR* dir = opendir(path.c_str());
     if(dir == nullptr)
     {
-        std::cerr << "Error opening directory: " << path << std::endl;
-        return {};
+        ROCPROFSYS_THROW("Error opening directory: %s", path.c_str());
     }
 
     std::vector<std::string> result{};
@@ -140,8 +138,10 @@ cache_manager::post_process_bulk()
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
             rocpd_threads.emplace_back([this]() {
+                auto                  pid  = getpid();
+                auto                  ppid = get_root_process_id();
                 rocpd_post_processing _post_processing(
-                    m_metadata, get_agent_manager_instance(), std::to_string(getpid()));
+                    m_metadata, get_agent_manager_instance(), pid, ppid);
                 storage_parser _parser(
                     get_buffered_storage_filename(get_root_process_id(), getpid()));
                 _post_processing.register_parser_callback(_parser);
@@ -172,8 +172,9 @@ cache_manager::post_process_bulk()
                         }
 
                         agent_manager         _agent_manager{ _agents };
+                        auto                  ppid = get_root_process_id();
                         rocpd_post_processing _post_processing(_metadata, _agent_manager,
-                                                               std::to_string(pid));
+                                                               pid, ppid);
                         storage_parser        _parser(files.buff_storage);
                         _post_processing.register_parser_callback(_parser);
                         _post_processing.post_process_metadata();
