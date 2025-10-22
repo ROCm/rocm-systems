@@ -25,7 +25,6 @@
 #include "timestamps.hpp"
 
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
