@@ -89,6 +89,9 @@ class gfx9_cntx_prim {
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BASE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR{};
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR{};
+  static constexpr Register SQ_THREAD_TRACE_BUF1_SIZE_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE2);
   static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_SIZE);
@@ -100,6 +103,8 @@ class gfx9_cntx_prim {
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
   static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CNTR);
   static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
+      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_STATUS);
+  static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
     Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
     reg.offset -= UCONFIG_SPACE_START;

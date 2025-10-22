@@ -70,6 +70,12 @@ class gfx12_cntx_prim {
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF0_BASE_HI);
   static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF0_SIZE);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_BASE_LO);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_BASE_HI);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_SIZE_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_SIZE);
   static constexpr Register SQ_THREAD_TRACE_BASE_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR{};
@@ -79,6 +85,8 @@ class gfx12_cntx_prim {
   static const uint32_t SQ_THREAD_TRACE_HIWATER_VAL = 0x6;
   static constexpr Register SQ_THREAD_TRACE_STATUS_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
+  static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS2);
   static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_DROPPED_CNTR);
   static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
@@ -599,10 +607,10 @@ class gfx12_cntx_prim {
 
   enum ESQTT_STATUS_MASK {
     // Mask to check if memory error was received
-    TT_CONTROL_UTC_ERR_MASK = 0x1000000,
-    // TODO: Navi has 2 full bits on status2, one for each buffer
+    TT_CONTROL_UTC_ERR_MASK = SQ_THREAD_TRACE_STATUS__WRITE_ERROR_MASK,
     TT_CONTROL_FULL_MASK = 0x0,
-    TT_WRITE_PTR_MASK = 0x1FFFFFFF
+    TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,
+    TT_DOUBLE_BUF_FULL = SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK
   };
 
   static uint32_t sqtt_busy_mask() {

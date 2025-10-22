@@ -105,23 +105,22 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
   const size_t se_number_total = pm4_factory->GetShaderEnginesNumber();
   auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
 
-  // Check if SQTT buffer was wrapped
-  for (size_t se = 0; se < se_number_total; se++) {
-    if (control_ptr[se].status & sqttbuilder->GetUTCErrorMask()) {
-      ERR_LOGGING << "SQTT memory error received, SE(" << se << ")";
-      status = HSA_STATUS_ERROR_EXCEPTION;
-    } else if (control_ptr[se].status & sqttbuilder->GetBufferFullMask()) {
-      ERR2_LOGGING << "SQTT data buffer full, SE(" << se << ")";
-      if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-  }
-
   std::vector<size_t> sample_sizes(se_number_total, 0);
   size_t max_sample_size = 0;
 
-  // The samples sizes are returned in the control buffer
-  for (uint64_t se_index = 0; se_index < se_number_total; se_index++) {
+  // Check if SQTT buffer was wrapped
+  for (size_t se_index = 0; se_index < se_number_total; se_index++) {
     bool bMaskedIn = memorymgr->config.GetTargetCU(se_index) >= 0;
+    if (!bMaskedIn) continue;
+  
+    if (control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask()) {
+      ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
+      status = HSA_STATUS_ERROR_EXCEPTION;
+    } else if (control_ptr[se_index].status & sqttbuilder->GetBufferFullMask()) {
+      ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
+      if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
     uint64_t sample_capacity = memorymgr->config.GetCapacity(se_index);
     void* sample_ptr = reinterpret_cast<void*>(memorymgr->config.GetSEBaseAddr(se_index));
 
@@ -266,9 +265,18 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
 
     // First == Last buf for ring
     trace_config.buffer_data.emplace_back(memorymgr->GetOutputBuf());
+
+    if ((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num%2))
+    {
+      // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have swapped
+      // pointers after a round trip. We need two turns around the ring buffer to restore the state.
+      // Think about a Mobius Strip
+      for (int i=0; i<buffer_num; i++)
+        trace_config.buffer_data.emplace_back(trace_config.buffer_data.at(i));
+    }
   }
 
-  for (int64_t i=0; i<buffer_num; i++)
+  for (int64_t i=0; i<trace_config.buffer_data.size(); i++)
     std::cout << i << " Buffer data: " << std::hex << reinterpret_cast<uint64_t>(trace_config.buffer_data.at(i)) << std::dec << std::endl;
 
   MemoryManager::RegisterManager(memorymgr);
@@ -381,17 +389,16 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
 
   volatile auto& control = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
   uint32_t status        = control.status_double_buffer;
-  uint32_t wptr          = 2*(control.wptr_double_buffer >> 30);
-  
+
   out->_size       = sizeof(aqlprofile_att_buffer_status_v0_t);
   out->is_too_late = false;
-  out->needs_swap  = status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask();
-
-  if(out->needs_swap)
-    std::cout << out->needs_swap << " Status: " << std::hex << status << " - wptr 0x" << wptr << std::dec << std::endl;
+  out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask()) != 0;
 
   if (out->needs_swap)
   {
+    std::cout << out->needs_swap << " Status: " << std::hex << status << std::dec << std::endl;
+    out->is_too_late = (status & 3) == 3 || (status & 0x10) != 0;
+
     auto& config    = manager->config;
     out->read_size  = config.capacity_per_se;
     out->data       = config.buffer_data.at(manager->current_buffer.fetch_add(1) % config.buffer_data.size());
@@ -435,7 +442,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   for (size_t i=0; i<buffers.size(); i++)
   {
     pm4_builder::CmdBuffer commands;
-    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()), shader_engine_id);
+    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()), shader_engine_id, i%2);
 
     void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
     memcpy(cmdbuffer, commands.Data(), commands.Size());
