@@ -501,6 +501,7 @@ void dispatch_callback(
 }
 
 int tool_init(rocprofiler_client_finalize_t, void *user_data) {
+  std::clog << "[rocprofiler-compute] In tool init\n";
   ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()),
                    "context creation");
 
@@ -679,12 +680,13 @@ rocprofiler_configure(uint32_t version, const char *runtime_version,
 int tool_attach(rocprofiler_client_detach_t /*detach_func*/,
                 rocprofiler_context_id_t *context_ids,
                 uint64_t context_ids_length, void * /*tool_data*/) {
+  std::clog << "[rocprofiler-compute] In tool attach\n";
   for (uint64_t i = 0; i < context_ids_length; ++i) {
     if (int status = 0;
         rocprofiler_context_is_active(context_ids[i], &status) ==
             ROCPROFILER_STATUS_SUCCESS &&
         status == 0) {
-      std::clog << "[rocprofiler-compute] Attach mode: starting context ID " << context_ids[i].handle << std::endl;
+      std::clog << "[rocprofiler-compute] Attach mode: starting context." << std::endl;
       ROCPROFILER_CALL(rocprofiler_start_context(context_ids[i]),
                        "failed to start received context");
     }
@@ -693,11 +695,12 @@ int tool_attach(rocprofiler_client_detach_t /*detach_func*/,
   return 0;
 }
 
-void tool_detach(void *user_data) {
+void tool_detach(void * /*user_data*/) {
   std::clog << "[rocprofiler-compute] In tool detach\n";
+  rocprofiler_stop_context(get_client_ctx());
 
-  auto *tool_data = static_cast<tool_data_t *>(user_data);
-  generate_output(tool_data);
+  // auto *tool_data = static_cast<tool_data_t *>(user_data);
+  // generate_output(tool_data);
 }
 
 rocprofiler_tool_configure_attach_result_t *rocprofiler_configure_attach(
