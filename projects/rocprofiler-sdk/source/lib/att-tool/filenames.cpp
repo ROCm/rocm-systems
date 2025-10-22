@@ -57,11 +57,11 @@ FilenameMgr::add_other_simd(int se, const rocprofiler_thread_trace_decoder_other
 
             if(inst.pc.code_object_id == 0 && inst.pc.address == 0) continue;
 
-            const int64_t start = static_cast<int64_t>(inst.time);
-            const int64_t end   = start + static_cast<int64_t>(inst.duration);
+            const int64_t inst_start = static_cast<int64_t>(inst.time);
+            const int64_t inst_end   = inst_start + static_cast<int64_t>(inst.duration);
 
-            min_t = std::min(min_t, start);
-            max_t = std::max(max_t, end);
+            min_t = std::min(min_t, inst_start);
+            max_t = std::max(max_t, inst_end);
         }
 
         if(min_t != std::numeric_limits<int64_t>::max())
