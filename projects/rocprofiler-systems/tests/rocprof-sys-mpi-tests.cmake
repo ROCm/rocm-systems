@@ -195,8 +195,6 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
                 args
                 --min-instructions
                 0
-                --main-function
-                "MAIN__"
             ENVIRONMENT "${_fortran_mpip_flat_environment}"
             REWRITE_RUN_PASS_REGEX
                 ">>> mpi-fortran-${_FORTRAN_EXAMPLE}.inst(.*\n.*)${MPI_FPRTRAN_REWRITE_RUN_REGEX}"

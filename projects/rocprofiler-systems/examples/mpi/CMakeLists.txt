@@ -35,7 +35,7 @@ else()
         CACHE BOOL
         "Internal variable used by rocprofiler-systems"
     )
-    rocprofiler_systems_message(STATUS "gfortran was not found, disabling fortran MPI tests")
+    rocprofiler_systems_message(WARNING "gfortran was not found, disabling fortran MPI tests...")
 endif()
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
