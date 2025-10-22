@@ -164,7 +164,7 @@ endif()
 #
 # -------------------------------------------------------------------------------------- #
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
     set_property(TEST transpose-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
