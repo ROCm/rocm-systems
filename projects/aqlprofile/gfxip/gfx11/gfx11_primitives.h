@@ -680,10 +680,11 @@ class gfx11_cntx_prim {
 
   enum ESQTT_STATUS_MASK {
     // Mask to check if memory error was received
-    TT_CONTROL_UTC_ERR_MASK = 0x1000000,
+    TT_CONTROL_UTC_ERR_MASK = SQ_THREAD_TRACE_STATUS__WRITE_ERROR_MASK,
     // TODO: Navi has 2 full bits on status2, one for each buffer
     TT_CONTROL_FULL_MASK = 0x0,
-    TT_WRITE_PTR_MASK = 0x1FFFFFFF
+    TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,
+    TT_LOCKDOWN_FAIL = SQ_THREAD_TRACE_STATUS2__PACKET_LOST_BUF_NO_LOCKDOWN_MASK
   };
 
   static uint32_t sqtt_busy_mask() {

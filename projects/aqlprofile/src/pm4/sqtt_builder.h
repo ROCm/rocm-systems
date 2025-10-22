@@ -116,11 +116,10 @@ struct TraceControl
   uint32_t status{0};
   uint32_t cntr{0};
   uint32_t wptr{0};
-  uint32_t reserved{0};
-  uint32_t status_double_buffer{0};
-  uint32_t wptr_double_buffer{0};
+  uint32_t status2{0};
   uint64_t gpu_clock_cnt_start{0};
   uint64_t gpu_clock_cnt_end{0};
+  uint32_t status_double_buffer{0};
 };
 
 // Encapsulates the various Api and structures that are used to enable
@@ -152,6 +151,8 @@ class SqttBuilder {
   virtual size_t GetUTCErrorMask() const = 0;
   // Returns TT_CONTROL_FULL_MASK
   virtual size_t GetBufferFullMask() const = 0;
+  // Returns TT_LOCKDOWN_FAIL for double buffering
+  virtual size_t GetLockDownFailMask() const = 0;
   // Returns TT_WRITE_PTR_MASK
   virtual size_t GetWritePtrMask() const = 0;
   // Returns size of block in bytes per increment in WPTR
@@ -182,6 +183,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
   virtual size_t GetUTCErrorMask() const override { return Primitives::TT_CONTROL_UTC_ERR_MASK; };
   // Returns TT_CONTROL_FULL_MASK
   virtual size_t GetBufferFullMask() const override { return Primitives::TT_CONTROL_FULL_MASK; };
+  virtual size_t GetLockDownFailMask() const override { return Primitives::TT_LOCKDOWN_FAIL; };
   // Returns TT_WRITE_PTR_MASK
   virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
   // Returns size of block in bytes per increment in WPTR
@@ -600,6 +602,10 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
     builder.BuildCopyRegDataPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_WPTR_ADDR, &control.wptr,
                                    Primitives::COPY_DATA_SEL_COUNT_1DW_PRM, true);
+
+    if (Primitives::GFXIP_LEVEL >= 12)
+      builder.BuildCopyRegDataPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS2_ADDR,
+                                     &control.status2, Primitives::COPY_DATA_SEL_COUNT_1DW_PRM, true);
   }
 
   uint32_t GetXCCNumber() const { return xcc_number_; }
@@ -662,7 +668,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
     Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
 
-    auto status_addr = (Primitives::GFXIP_LEVEL < 12) ? Primitives::SQ_THREAD_TRACE_STATUS_ADDR : Primitives::SQ_THREAD_TRACE_STATUS2_ADDR;
+    auto status_addr = (Primitives::GFXIP_LEVEL >= 12) ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
     builder.BuildCopyRegDataPacket(cmd_buffer, status_addr, &control.status_double_buffer, Primitives::COPY_DATA_SEL_COUNT_1DW_PRM, false);
 
     builder.BuildWriteWaitIdlePacket(cmd_buffer);

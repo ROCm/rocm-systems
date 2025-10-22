@@ -116,7 +116,9 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     if (control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask()) {
       ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
       status = HSA_STATUS_ERROR_EXCEPTION;
-    } else if (control_ptr[se_index].status & sqttbuilder->GetBufferFullMask()) {
+    }
+    auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID) ? control_ptr[se_index].status2 : control_ptr[se_index].status;
+    if (status2_value & sqttbuilder->GetBufferFullMask()) {
       ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
       if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
@@ -397,7 +399,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
   if (out->needs_swap)
   {
     std::cout << out->needs_swap << " Status: " << std::hex << status << std::dec << std::endl;
-    out->is_too_late = (status & 3) == 3 || (status & 0x10) != 0;
+    out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetLockDownFailMask()) != 0;
 
     auto& config    = manager->config;
     out->read_size  = config.capacity_per_se;

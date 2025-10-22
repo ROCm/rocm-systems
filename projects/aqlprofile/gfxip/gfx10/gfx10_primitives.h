@@ -669,7 +669,8 @@ class gfx10_cntx_prim {
     TT_CONTROL_UTC_ERR_MASK = 0x1000000,
     // TODO: Navi has 2 full bits on status2, one for each buffer
     TT_CONTROL_FULL_MASK = 0x0,
-    TT_WRITE_PTR_MASK = 0x1FFFFFFF
+    TT_WRITE_PTR_MASK = 0x1FFFFFFF,
+    TT_LOCKDOWN_FAIL = 0
   };
 
   static uint32_t sqtt_busy_mask() {
