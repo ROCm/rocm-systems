@@ -25,13 +25,30 @@
 
 import argparse
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
+from utils.utils import METRIC_ID_RE
 
-def print_avail_arch(avail_arch: list[str]) -> str:
-    ret_str = "List all available metrics for analysis on specified arch:"
+
+def validate_block(value: str) -> str:
+    if METRIC_ID_RE.match(value):
+        return value
+    raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
+
+
+def block_token_or_alias(s: str) -> str:
+    try:
+        return validate_block(s)
+    except argparse.ArgumentTypeError:
+        s = (s or "").strip()
+        if not s:
+            raise argparse.ArgumentTypeError("empty token for --block")
+        return s
+
+
+def print_avail_arch(avail_arch: list[str], args: str) -> str:
+    ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += f"\n   {arch}"
     return ret_str
@@ -66,7 +83,14 @@ def add_general_group(
         dest="list_metrics",
         metavar="",
         choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(list(supported_archs.keys())),
+        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+    )
+    general_group.add_argument(
+        "--list-blocks",
+        dest="list_blocks",
+        metavar="",
+        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
     )
     general_group.add_argument(
         "--config-dir",
@@ -234,12 +258,6 @@ Examples:
         help="\t\t\tDispatch ID filtering.",
     )
 
-    def validate_block(value: str) -> str:
-        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
-        if re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$").match(value):
-            return value
-        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
-
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
@@ -249,15 +267,19 @@ Examples:
     profile_group.add_argument(
         "-b",
         "--block",
-        type=validate_block,
         dest="filter_blocks",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         required=False,
         default=[],
         help=(
             "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
             "(e.g. 12, 12.1, 12.1.1).\n"
+            "\t\t\tAlternatively, specify block id(s) for filtering "
+            "(e.g. 12, 13, 14).\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering "
+            "(e.g. lds, l1i, sl1d).\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set or --roof-only"
         ),
@@ -656,6 +678,7 @@ Examples:
         dest="filter_metrics",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(
