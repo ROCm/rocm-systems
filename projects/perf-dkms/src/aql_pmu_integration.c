@@ -14,7 +14,7 @@
 #include <linux/limits.h>
 
 #include "aql_perf.h"
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 
 /* Global AQL session - initialized during module load */
 static struct aql_perf_session *global_aql_session = NULL;

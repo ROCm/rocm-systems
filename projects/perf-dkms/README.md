@@ -77,7 +77,7 @@ cd perf-pmu-stub
 make
 
 # The build produces:
-# - src/pmu_stub.ko (kernel module)
+# - src/amdgpu_pmu.ko (kernel module)
 # - src/aql_c/tools/packet_gen_tool (PM4 packet generator)
 # - src/aql_c/tools/pm4_decoder (PM4 packet decoder)
 # - src/aql_c/tests/* (validation tests)
@@ -87,13 +87,13 @@ make
 
 ```bash
 # Load the module
-sudo insmod src/pmu_stub.ko
+sudo insmod src/amdgpu_pmu.ko
 
 # Or if using .o file (development kernels):
-sudo insmod src/pmu_stub.o
+sudo insmod src/amdgpu_pmu.o
 
 # Verify module is loaded
-lsmod | grep pmu_stub
+lsmod | grep amdgpu_pmu
 
 # Check kernel messages
 dmesg | tail -20
@@ -106,10 +106,10 @@ dmesg | tail -20
 ls -la /sys/bus/event_source/devices/ | grep pmu
 
 # List available GPU performance events
-perf list | grep pmu_stub
+perf list | grep amdgpu_pmu
 
 # Or directly check sysfs
-ls /sys/bus/event_source/devices/pmu_stub/events/
+ls /sys/bus/event_source/devices/amdgpu_pmu/events/
 ```
 
 ## Testing with Perf
@@ -120,7 +120,7 @@ Test GPU shader wave counting with detailed verbose output:
 
 ```bash
 # Monitor SQ_WAVES counter with 800ms intervals
-perf stat -I 800 -vv -C 0 -a --no-inherit -e pmu_stub/sq_waves/ sleep 4
+perf stat -I 800 -vv -C 0 -a --no-inherit -e amdgpu_pmu/sq_waves/ sleep 4
 ```
 
 **Command breakdown:**
@@ -129,7 +129,7 @@ perf stat -I 800 -vv -C 0 -a --no-inherit -e pmu_stub/sq_waves/ sleep 4
 - `-C 0`: Monitor CPU 0 (or use `-a` for all CPUs)
 - `-a`: System-wide monitoring
 - `--no-inherit`: Don't inherit counters to child processes
-- `-e pmu_stub/sq_waves/`: Monitor the SQ_WAVES GPU counter
+- `-e amdgpu_pmu/sq_waves/`: Monitor the SQ_WAVES GPU counter
 
 ### Available Hardware Counters
 
@@ -137,44 +137,44 @@ The module exposes GPU hardware performance counters through the perf interface:
 
 ```bash
 # Shader Processor (SQ) counters
-perf stat -e pmu_stub/sq_waves/ <command>           # Active waves
-perf stat -e pmu_stub/sq_busy_cycles/ <command>     # SQ busy cycles
-perf stat -e pmu_stub/sq_instructions/ <command>    # Instructions executed
+perf stat -e amdgpu_pmu/sq_waves/ <command>           # Active waves
+perf stat -e amdgpu_pmu/sq_busy_cycles/ <command>     # SQ busy cycles
+perf stat -e amdgpu_pmu/sq_instructions/ <command>    # Instructions executed
 
 # L2 Cache (GL2C) counters
-perf stat -e pmu_stub/gl2c_hit/ <command>           # L2 cache hits
-perf stat -e pmu_stub/gl2c_miss/ <command>          # L2 cache misses
+perf stat -e amdgpu_pmu/gl2c_hit/ <command>           # L2 cache hits
+perf stat -e amdgpu_pmu/gl2c_miss/ <command>          # L2 cache misses
 
 # Command Processor (CPC) counters
-perf stat -e pmu_stub/cpc_busy/ <command>           # CP busy cycles
-perf stat -e pmu_stub/cpc_stall/ <command>          # CP stall cycles
+perf stat -e amdgpu_pmu/cpc_busy/ <command>           # CP busy cycles
+perf stat -e amdgpu_pmu/cpc_stall/ <command>          # CP stall cycles
 ```
 
 ### Multi-Event Monitoring
 
 ```bash
 # Monitor multiple GPU counters simultaneously
-perf stat -e pmu_stub/sq_waves/,pmu_stub/gl2c_hit/,pmu_stub/gl2c_miss/ sleep 5
+perf stat -e amdgpu_pmu/sq_waves/,pmu_stub/gl2c_hit/,pmu_stub/gl2c_miss/ sleep 5
 
 # System-wide GPU monitoring
-sudo perf stat -a -e pmu_stub/sq_waves/ sleep 10
+sudo perf stat -a -e amdgpu_pmu/sq_waves/ sleep 10
 
 # Per-process GPU monitoring (when supported)
-perf stat -e pmu_stub/sq_waves/ ./gpu_workload
+perf stat -e amdgpu_pmu/sq_waves/ ./gpu_workload
 ```
 
 ### Advanced Perf Usage
 
 ```bash
 # Record GPU events with sampling
-sudo perf record -e pmu_stub/sq_waves/ -a sleep 5
+sudo perf record -e amdgpu_pmu/sq_waves/ -a sleep 5
 sudo perf report
 
 # Monitor with custom intervals
-perf stat -I 1000 -e pmu_stub/sq_waves/ sleep 10
+perf stat -I 1000 -e amdgpu_pmu/sq_waves/ sleep 10
 
 # Export to JSON
-perf stat -j -e pmu_stub/sq_waves/ sleep 2
+perf stat -j -e amdgpu_pmu/sq_waves/ sleep 2
 ```
 
 ## Architecture Support
@@ -241,7 +241,7 @@ cd src/aql_c/tests
 
 ```bash
 # Enable kernel debug messages
-echo 'module pmu_stub +p' | sudo tee /sys/kernel/debug/dynamic_debug/control
+echo 'module amdgpu_pmu +p' | sudo tee /sys/kernel/debug/dynamic_debug/control
 
 # View trace output
 sudo cat /sys/kernel/debug/tracing/trace
@@ -300,7 +300,7 @@ perf-pmu-stub/
 └──────┬──────────────────────┘
        │ PMU callbacks
 ┌──────▼──────────────────────┐
-│   pmu_stub (this module)    │  (kernel)
+│   amdgpu_pmu (this module)    │  (kernel)
 │  ┌─────────────────────┐    │
 │  │ AQL Packet Gen (C)  │    │
 │  │ - PM4 packets       │    │
@@ -317,7 +317,7 @@ perf-pmu-stub/
 
 ### Event Flow
 
-1. **User runs perf**: `perf stat -e pmu_stub/sq_waves/ <cmd>`
+1. **User runs perf**: `perf stat -e amdgpu_pmu/sq_waves/ <cmd>`
 2. **Perf subsystem**: Calls PMU driver `add()` callback
 3. **PMU driver**: Creates AQL measurement session
 4. **AQL library**: Generates PM4 START packet
@@ -344,10 +344,10 @@ sudo dmesg | grep -i error
 
 ```bash
 # Verify sysfs registration
-ls /sys/bus/event_source/devices/pmu_stub/
+ls /sys/bus/event_source/devices/amdgpu_pmu/
 
 # Check event files
-cat /sys/bus/event_source/devices/pmu_stub/events/*
+cat /sys/bus/event_source/devices/amdgpu_pmu/events/*
 ```
 
 ### Perf can't find events
@@ -355,10 +355,10 @@ cat /sys/bus/event_source/devices/pmu_stub/events/*
 ```bash
 # Refresh perf cache
 sudo rm -rf ~/.debug/
-perf list | grep pmu_stub
+perf list | grep amdgpu_pmu
 
 # Check permissions
-sudo chmod -R 755 /sys/bus/event_source/devices/pmu_stub/
+sudo chmod -R 755 /sys/bus/event_source/devices/amdgpu_pmu/
 ```
 
 ### Build failures
@@ -375,10 +375,10 @@ make clean && make
 
 ```bash
 # Remove module
-sudo rmmod pmu_stub
+sudo rmmod amdgpu_pmu
 
 # Verify removal
-lsmod | grep pmu_stub
+lsmod | grep amdgpu_pmu
 
 # Check for errors
 dmesg | tail -20

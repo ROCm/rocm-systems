@@ -16,21 +16,21 @@ cd perf-pmu-stub
 make clean && make
 ```
 
-**Expected Output**: Should see compilation complete without errors, producing `pmu_stub.o`.
+**Expected Output**: Should see compilation complete without errors, producing `amdgpu_pmu.o`.
 
 ### 2. Test Loading (Requires Root)
 ```bash
 # Method 1: Try loading the .o file directly (some kernels support this)
-sudo insmod src/pmu_stub.o
+sudo insmod src/amdgpu_pmu.o
 
 # Method 2: If that fails, try with explicit path
-sudo insmod ./src/pmu_stub.o debug_enable=1 timer_period_ms=100
+sudo insmod ./src/amdgpu_pmu.o debug_enable=1 timer_period_ms=100
 ```
 
 ### 3. Verify Loading
 ```bash
 # Check if module loaded
-lsmod | grep pmu_stub
+lsmod | grep amdgpu_pmu
 
 # Check kernel messages
 dmesg | tail -10
@@ -42,15 +42,15 @@ ls -la /sys/bus/event_source/devices/ | grep pmu
 ### 4. Test Perf Integration (If Loaded Successfully)
 ```bash
 # List events
-perf list | grep pmu_stub
+perf list | grep amdgpu_pmu
 
 # Test event counting
-perf stat -e pmu_stub/cycles/ sleep 2
+perf stat -e amdgpu_pmu/cycles/ sleep 2
 ```
 
 ### 5. Unload Module
 ```bash
-sudo rmmod pmu_stub
+sudo rmmod amdgpu_pmu
 ```
 
 ## Expected Behavior
@@ -58,7 +58,7 @@ sudo rmmod pmu_stub
 ### If Loading Succeeds:
 - Module appears in `lsmod`
 - Kernel messages show "PMU Stub module loaded successfully"
-- Directory `/sys/bus/event_source/devices/pmu_stub/` is created
+- Directory `/sys/bus/event_source/devices/amdgpu_pmu/` is created
 - Perf tools can list and use the events
 
 ### If Loading Fails:
@@ -72,7 +72,7 @@ sudo rmmod pmu_stub
 This can happen with development kernels. Try:
 ```bash
 # Check module info
-modinfo src/pmu_stub.o
+modinfo src/amdgpu_pmu.o
 
 # Verify kernel compatibility
 uname -r

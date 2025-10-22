@@ -11,11 +11,11 @@
 #include <linux/perf_event.h>
 #include <linux/slab.h>
 
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 #include "aql_c/counter_registry.h"
 
 /* Get event name from configuration */
-const char *pmu_stub_get_event_name(u64 config)
+const char *amdgpu_pmu_get_event_name(u64 config)
 {
     const counter_def_t *counter;
 
@@ -29,7 +29,7 @@ const char *pmu_stub_get_event_name(u64 config)
 }
 
 /* Get event description from configuration */
-const char *pmu_stub_get_event_description(u64 config)
+const char *amdgpu_pmu_get_event_description(u64 config)
 {
     const counter_def_t *counter;
 
@@ -67,14 +67,14 @@ const char *pmu_stub_get_event_description(u64 config)
 }
 
 /* Validate event configuration */
-bool pmu_stub_is_valid_event(u64 config)
+bool amdgpu_pmu_is_valid_event(u64 config)
 {
     /* Check if the counter ID exists in the registry */
     return lookup_counter_by_id((counter_id_t)config) != NULL;
 }
 
 /* Get total number of available events */
-size_t pmu_stub_get_event_count(void)
+size_t amdgpu_pmu_get_event_count(void)
 {
     return get_counter_count();
 }
@@ -87,7 +87,7 @@ size_t pmu_stub_get_event_count(void)
  */
 
 /* Get counter value based on event type */
-u64 pmu_stub_get_counter_value(struct pmu_stub *pmu, u64 config)
+u64 amdgpu_pmu_get_counter_value(struct amdgpu_pmu *pmu, u64 config)
 {
     /* Counter values are now read from hardware via AQL */
     pmu_debug("Legacy counter read for config 0x%llx - values managed by AQL\n", config);
@@ -95,21 +95,21 @@ u64 pmu_stub_get_counter_value(struct pmu_stub *pmu, u64 config)
 }
 
 /* Update counter value based on event type */
-void pmu_stub_update_counter(struct pmu_stub *pmu, u64 config, s64 delta)
+void amdgpu_pmu_update_counter(struct amdgpu_pmu *pmu, u64 config, s64 delta)
 {
     /* Counter updates are now handled by hardware via AQL */
     pmu_debug("Legacy counter update for config 0x%llx - managed by AQL\n", config);
 }
 
 /* Reset all counters */
-void pmu_stub_reset_counters(struct pmu_stub *pmu)
+void amdgpu_pmu_reset_counters(struct amdgpu_pmu *pmu)
 {
     /* Counter resets are now handled by hardware via AQL */
     pmu_debug("Legacy counter reset - managed by AQL\n");
 }
 
 /* Print event statistics (for debugging) */
-void pmu_stub_print_event_stats(struct pmu_stub *pmu)
+void amdgpu_pmu_print_event_stats(struct amdgpu_pmu *pmu)
 {
     pmu_info("Event Statistics:\n");
     pmu_info("  Total Events: %lld\n", atomic64_read(&pmu->total_events));
@@ -118,6 +118,6 @@ void pmu_stub_print_event_stats(struct pmu_stub *pmu)
 }
 
 /* Export symbols if needed by other modules */
-EXPORT_SYMBOL_GPL(pmu_stub_get_event_name);
-EXPORT_SYMBOL_GPL(pmu_stub_get_event_description);
-EXPORT_SYMBOL_GPL(pmu_stub_is_valid_event);
+EXPORT_SYMBOL_GPL(amdgpu_pmu_get_event_name);
+EXPORT_SYMBOL_GPL(amdgpu_pmu_get_event_description);
+EXPORT_SYMBOL_GPL(amdgpu_pmu_is_valid_event);

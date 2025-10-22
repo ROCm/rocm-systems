@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Test configuration
-MODULE_NAME="pmu_stub"
+MODULE_NAME="amdgpu_pmu"
 TEST_TIMEOUT=30
 
 # Helper functions

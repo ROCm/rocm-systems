@@ -12,7 +12,7 @@
 #include <linux/file.h>
 #include <uapi/linux/kfd_ioctl.h>
 
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 #include "kfd_test.h"
 
 /* Forward declarations for KFD structures */

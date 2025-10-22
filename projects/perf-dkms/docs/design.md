@@ -51,7 +51,7 @@ perf-pmu-stub/
 ├── Makefile                  # Main build file
 ├── src/
 │   ├── Makefile             # Kernel module build file
-│   ├── pmu_stub.h           # Main header file
+│   ├── amdgpu_pmu.h           # Main header file
 │   ├── pmu_main.c           # Core PMU implementation
 │   └── pmu_events.c         # Event handling utilities
 ├── test/
@@ -63,19 +63,19 @@ perf-pmu-stub/
 
 ## Core Components
 
-### 1. PMU Structure (`struct pmu_stub`)
+### 1. PMU Structure (`struct amdgpu_pmu`)
 
 The main data structure that represents our PMU driver:
 
 ```c
-struct pmu_stub {
+struct amdgpu_pmu {
     struct pmu pmu;                          /* Base PMU structure */
     struct device *dev;                      /* Device for sysfs */
 
     /* Event management */
     spinlock_t lock;                         /* Protects event_list */
-    struct pmu_stub_event events[PMU_STUB_MAX_EVENTS];
-    DECLARE_BITMAP(used_mask, PMU_STUB_MAX_EVENTS);
+    struct amdgpu_pmu_event events[AMDGPU_PMU_MAX_EVENTS];
+    DECLARE_BITMAP(used_mask, AMDGPU_PMU_MAX_EVENTS);
     int num_events;
 
     /* Timer for simulating counter updates */
@@ -116,7 +116,7 @@ Required callbacks for perf integration:
 
 ### Module Initialization
 
-1. **Memory Allocation**: Allocate `struct pmu_stub` instance
+1. **Memory Allocation**: Allocate `struct amdgpu_pmu` instance
 2. **Lock Initialization**: Set up spinlocks for thread safety
 3. **Timer Setup**: Initialize high-resolution timer for counter updates
 4. **PMU Registration**: Register with Linux perf subsystem via `perf_pmu_register()`
@@ -129,15 +129,15 @@ Required callbacks for perf integration:
 ```
 perf_event_open() syscall
         ↓
-pmu_stub_event_init()
+amdgpu_pmu_event_init()
         ↓
 Event validation
         ↓
-pmu_stub_add()
+amdgpu_pmu_add()
         ↓
 Assign counter slot
         ↓
-pmu_stub_start()
+amdgpu_pmu_start()
         ↓
 Begin counting
 ```
@@ -181,7 +181,7 @@ sudo dkms install -m perf-pmu-stub -v 1.0.0
 The module creates the following sysfs structure:
 
 ```
-/sys/bus/event_source/devices/pmu_stub/
+/sys/bus/event_source/devices/amdgpu_pmu/
 ├── events/
 │   ├── cycles
 │   ├── instructions
@@ -211,10 +211,10 @@ The module creates the following sysfs structure:
 
 ```bash
 # Manual load
-sudo modprobe pmu_stub
+sudo modprobe amdgpu_pmu
 
 # Check if loaded
-lsmod | grep pmu_stub
+lsmod | grep amdgpu_pmu
 
 # Check kernel messages
 dmesg | tail -10
@@ -225,7 +225,7 @@ dmesg | tail -10
 #### List Available Events
 
 ```bash
-perf list | grep pmu_stub
+perf list | grep amdgpu_pmu
 ```
 
 Expected output:
@@ -240,13 +240,13 @@ pmu_stub/instructions/                     [Kernel PMU event]
 
 ```bash
 # Single event
-perf stat -e pmu_stub/cycles/ sleep 5
+perf stat -e amdgpu_pmu/cycles/ sleep 5
 
 # Multiple events
-perf stat -e pmu_stub/cycles/,pmu_stub/instructions/ sleep 5
+perf stat -e amdgpu_pmu/cycles/,pmu_stub/instructions/ sleep 5
 
 # System-wide monitoring
-perf stat -a -e pmu_stub/cache-misses/ sleep 10
+perf stat -a -e amdgpu_pmu/cache-misses/ sleep 10
 ```
 
 Example output:
@@ -265,7 +265,7 @@ Performance counter stats for 'sleep 5':
 
 ```bash
 # Load with debug enabled
-sudo modprobe pmu_stub debug_enable=true timer_period_ms=50
+sudo modprobe amdgpu_pmu debug_enable=true timer_period_ms=50
 ```
 
 ## Testing Strategy
@@ -301,13 +301,13 @@ sudo ./test/perf_test.sh
 #### Debug Information
 ```bash
 # Module information
-modinfo pmu_stub
+modinfo amdgpu_pmu
 
 # Module parameters
-cat /sys/module/pmu_stub/parameters/*
+cat /sys/module/amdgpu_pmu/parameters/*
 
 # Event configuration
-cat /sys/bus/event_source/devices/pmu_stub/events/*
+cat /sys/bus/event_source/devices/amdgpu_pmu/events/*
 ```
 
 ## Extension Points
@@ -346,7 +346,7 @@ Support multiple GPU devices:
 
 ```c
 struct gpu_pmu_instance {
-    struct pmu_stub base;
+    struct amdgpu_pmu base;
     int gpu_id;
     void __iomem *registers;
     struct pci_dev *pdev;
@@ -394,14 +394,14 @@ modprobe --dry-run pmu_stub
 ls /sys/bus/event_source/devices/
 
 # Verify events directory
-ls /sys/bus/event_source/devices/pmu_stub/events/
+ls /sys/bus/event_source/devices/amdgpu_pmu/events/
 
 # Check perf capabilities
 perf --version
 ```
 
 **Solutions**:
-- Ensure module is loaded: `lsmod | grep pmu_stub`
+- Ensure module is loaded: `lsmod | grep amdgpu_pmu`
 - Check sysfs permissions
 - Verify perf tools version compatibility
 
@@ -415,7 +415,7 @@ perf --version
 cat /proc/interrupts | grep timer
 
 # Enable debug output
-echo 'module pmu_stub +p' > /sys/kernel/debug/dynamic_debug/control
+echo 'module amdgpu_pmu +p' > /sys/kernel/debug/dynamic_debug/control
 
 # Monitor kernel messages
 dmesg -w
@@ -433,10 +433,10 @@ dmesg -w
 Enable runtime debugging:
 ```bash
 # Enable all debug messages
-echo 'module pmu_stub +p' > /sys/kernel/debug/dynamic_debug/control
+echo 'module amdgpu_pmu +p' > /sys/kernel/debug/dynamic_debug/control
 
 # Enable specific function
-echo 'func pmu_stub_timer_handler +p' > /sys/kernel/debug/dynamic_debug/control
+echo 'func amdgpu_pmu_timer_handler +p' > /sys/kernel/debug/dynamic_debug/control
 ```
 
 #### Module Statistics
@@ -444,7 +444,7 @@ echo 'func pmu_stub_timer_handler +p' > /sys/kernel/debug/dynamic_debug/control
 Check module statistics:
 ```bash
 # Via sysfs (if implemented)
-cat /sys/module/pmu_stub/stats/*
+cat /sys/module/amdgpu_pmu/stats/*
 
 # Via kernel messages
 dmesg | grep "pmu_stub.*statistics"
