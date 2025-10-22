@@ -65,15 +65,14 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
     - Submit to CDash
     """
 
-    cmake_options = [
-        "-DCMAKE_BUILD_TYPE=Release",
-        f"-DCMAKE_PREFIX_PATH={os.environ.get('ROCM_PATH', '/opt/rocm')}",
-        "-DENABLE_TESTS=ON",
-        "-DINSTALL_TESTS=ON",
-        "-DENABLE_COVERAGE=ON",
-        f"-DPYTEST_NUMPROCS={args.pytest_numprocs}",
+    cache_entries = [
+        "CMAKE_BUILD_TYPE:STRING=Release",
+        f"CMAKE_PREFIX_PATH:PATH={os.environ.get('ROCM_PATH', '/opt/rocm')}",
+        "ENABLE_TESTS:BOOL=ON",
+        "INSTALL_TESTS:BOOL=ON",
+        "ENABLE_COVERAGE:BOOL=ON",
+        f"PYTEST_NUMPROCS:STRING={args.pytest_numprocs}",
     ]
-    cmake_opts_str = " ".join(f'"{opt}"' for opt in cmake_options)
 
     test_args = ""
     if args.ctest_args:
@@ -112,13 +111,16 @@ set(CTEST_BINARY_DIRECTORY "{binary_dir}")
 set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
 set(CTEST_BUILD_CONFIGURATION "Release")
 
+set(CTEST_INITIAL_CACHE "
+{chr(10).join(cache_entries)}
+")
+
 message(STATUS "Starting {args.mode} dashboard...")
 ctest_start({args.mode})
 
 # Configure step
 message(STATUS "Configuring project...")
 ctest_configure(
-    OPTIONS "{cmake_opts_str}"
     RETURN_VALUE configure_result
     CAPTURE_CMAKE_ERROR configure_error
 )
