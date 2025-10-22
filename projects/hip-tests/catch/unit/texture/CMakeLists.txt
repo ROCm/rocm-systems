@@ -113,8 +113,6 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BIN
 if(HIP_PLATFORM MATCHES "amd")
   if (DEFINED OFFLOAD_ARCH_STR)
     CheckRejectedArchs(${OFFLOAD_ARCH_STR})
-  elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
-    CheckRejectedArchs($ENV{HCC_AMDGPU_TARGET})
   else()
     set(ARCH_CHECK -1)
   endif()
@@ -130,7 +128,7 @@ endif()
 
 # Mipmap APIs are not supported on Linux
 if(WIN32)
-set(TEST_SRC
+  set(TEST_SRC
     ${TEST_SRC}
     hipBindTextureToMipmappedArray.cc
     hipMallocMipmappedArray.cc
