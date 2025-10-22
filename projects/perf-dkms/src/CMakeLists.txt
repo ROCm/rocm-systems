@@ -1,7 +1,7 @@
 # Kernel Module Build
 # CMake wrapper around Kbuild for building the kernel module
 
-set(MODULE_KO "pmu_stub.ko")
+set(MODULE_KO "amdgpu_pmu.ko")
 set(KBUILD_CMD ${CMAKE_MAKE_PROGRAM})
 
 # Get the current source directory for the kernel module
@@ -12,7 +12,7 @@ set(KBUILD_BIN_DIR ${CMAKE_CURRENT_BINARY_DIR})
 set(KERNEL_MODULE_SOURCES
     pmu_main.c
     pmu_events.c
-    pmu_stub.h
+    amdgpu_pmu.h
     kfd_test.c
     kfd_test.h
     aql_perf.c
@@ -42,10 +42,10 @@ execute_process(
 # Create Kbuild file from the Makefile (extract only the kernel build parts)
 file(WRITE ${KBUILD_BIN_DIR}/Kbuild
 "# Kernel build configuration
-obj-m := pmu_stub.o
+obj-m := amdgpu_pmu.o
 
-# Include PMU stub, KFD test, and minimal AQL integration
-pmu_stub-y := pmu_main.o pmu_events.o kfd_test.o \\
+# Include AMD GPU PMU, KFD test, and minimal AQL integration
+amdgpu_pmu-y := pmu_main.o pmu_events.o kfd_test.o \\
               aql_perf.o aql_packet_ops.o aql_error_recovery.o aql_pmu_integration.o \\
               aql_c/arch_creator.o aql_c/gfx12_creator.o \\
               aql_c/pm4_packets.o aql_c/counter_registry.o aql_c/gfx12_events.o \\
@@ -114,7 +114,7 @@ add_custom_target(load-module
 )
 
 add_custom_target(unload-module
-    COMMAND sudo rmmod pmu_stub || true
+    COMMAND sudo rmmod amdgpu_pmu || true
     COMMENT "Unloading kernel module"
 )
 
@@ -129,6 +129,6 @@ add_custom_target(module-info
     COMMAND ${CMAKE_COMMAND} -E echo "Module: ${MODULE_NAME}"
     COMMAND ${CMAKE_COMMAND} -E echo "Version: ${MODULE_VERSION}"
     COMMAND ${CMAKE_COMMAND} -E echo "Kernel: ${KERNEL_VERSION}"
-    COMMAND lsmod | grep pmu_stub || echo "Module not loaded"
+    COMMAND lsmod | grep amdgpu_pmu || echo "Module not loaded"
     COMMENT "Displaying module information"
 )

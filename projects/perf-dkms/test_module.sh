@@ -14,7 +14,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Module path
-MODULE_PATH="src/pmu_stub.ko"
+MODULE_PATH="src/amdgpu_pmu.ko"
 
 # Check if module exists
 if [ ! -f "$MODULE_PATH" ]; then
@@ -29,9 +29,9 @@ echo "   ✓ Module loaded successfully"
 echo
 
 echo "2. Verifying module is loaded..."
-if lsmod | grep -q pmu_stub; then
+if lsmod | grep -q amdgpu_pmu; then
     echo "   ✓ Module found in lsmod:"
-    lsmod | grep pmu_stub
+    lsmod | grep amdgpu_pmu
 else
     echo "   ✗ Module not found in lsmod"
     exit 1
@@ -39,14 +39,14 @@ fi
 echo
 
 echo "3. Checking kernel logs..."
-dmesg | tail -20 | grep -i pmu_stub || true
+dmesg | tail -20 | grep -i amdgpu_pmu || true
 echo
 
 echo "4. Checking sysfs interface..."
 if [ -d "/sys/bus/event_source/devices/pmu_stub" ]; then
     echo "   ✓ Sysfs interface created at /sys/bus/event_source/devices/pmu_stub"
     echo "   Contents:"
-    ls -la /sys/bus/event_source/devices/pmu_stub/
+    ls -la /sys/bus/event_source/devices/amdgpu_pmu/
 else
     echo "   ✗ Sysfs interface not found"
 fi
@@ -54,12 +54,12 @@ echo
 
 echo "5. Checking perf integration..."
 echo "   Perf PMU list (filtered for pmu_stub):"
-perf list | grep -i pmu_stub || echo "   Note: pmu_stub events not visible in perf list"
+perf list | grep -i amdgpu_pmu || echo "   Note: pmu_stub events not visible in perf list"
 echo
 
 echo "6. Testing perf stat with module..."
-echo "   Running: perf stat -e pmu_stub/cycles/ sleep 0.1"
-perf stat -e pmu_stub/cycles/ sleep 0.1 2>&1 || echo "   Note: Direct perf usage may require additional setup"
+echo "   Running: perf stat -e amdgpu_pmu/cycles/ sleep 0.1"
+perf stat -e amdgpu_pmu/cycles/ sleep 0.1 2>&1 || echo "   Note: Direct perf usage may require additional setup"
 echo
 
 echo "7. Module information:"
@@ -67,12 +67,12 @@ modinfo $MODULE_PATH
 echo
 
 echo "8. Unloading module..."
-rmmod pmu_stub
+rmmod amdgpu_pmu
 echo "   ✓ Module unloaded successfully"
 echo
 
 echo "9. Verifying module is unloaded..."
-if ! lsmod | grep -q pmu_stub; then
+if ! lsmod | grep -q amdgpu_pmu; then
     echo "   ✓ Module successfully removed from kernel"
 else
     echo "   ✗ Module still loaded"

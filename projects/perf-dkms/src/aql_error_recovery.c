@@ -15,7 +15,7 @@
 #include <linux/list.h>
 
 #include "aql_perf.h"
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 
 /**
  * aql_perf_disable_gpu - Disable a faulty GPU

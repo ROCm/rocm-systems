@@ -16,13 +16,13 @@
 #include <linux/atomic.h>
 #include <linux/device.h>
 
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 #include "kfd_test.h"
 #include "aql_perf.h"
 #include "aql_c/counter_registry.h"
 
 /* Global PMU instance */
-static struct pmu_stub *pmu_stub_instance;
+static struct amdgpu_pmu *amdgpu_pmu_instance;
 
 /* Module parameters */
 bool debug_enable = true;
@@ -35,31 +35,31 @@ module_param(timer_period_ms, int, 0644);
 MODULE_PARM_DESC(timer_period_ms, "Timer period in milliseconds (default: 100)");
 
 /* Forward declarations for PMU callbacks */
-static int pmu_stub_event_init(struct perf_event *event);
-static int pmu_stub_add(struct perf_event *event, int flags);
-static void pmu_stub_del(struct perf_event *event, int flags);
-static void pmu_stub_start(struct perf_event *event, int flags);
-static void pmu_stub_stop(struct perf_event *event, int flags);
-static void pmu_stub_read(struct perf_event *event);
+static int amdgpu_pmu_event_init(struct perf_event *event);
+static int amdgpu_pmu_add(struct perf_event *event, int flags);
+static void amdgpu_pmu_del(struct perf_event *event, int flags);
+static void amdgpu_pmu_start(struct perf_event *event, int flags);
+static void amdgpu_pmu_stop(struct perf_event *event, int flags);
+static void amdgpu_pmu_read(struct perf_event *event);
 
 /* Sysfs attribute functions */
-static ssize_t pmu_stub_format_show(struct device *dev,
+static ssize_t amdgpu_pmu_format_show(struct device *dev,
                                     struct device_attribute *attr,
                                     char *buf)
 {
     return sprintf(buf, "config:0-63\n");
 }
 
-static DEVICE_ATTR(format, 0444, pmu_stub_format_show, NULL);
+static DEVICE_ATTR(format, 0444, amdgpu_pmu_format_show, NULL);
 
-static struct attribute *pmu_stub_format_attrs[] = {
+static struct attribute *amdgpu_pmu_format_attrs[] = {
     &dev_attr_format.attr,
     NULL,
 };
 
-static struct attribute_group pmu_stub_format_group = {
+static struct attribute_group amdgpu_pmu_format_group = {
     .name = "format",
-    .attrs = pmu_stub_format_attrs,
+    .attrs = amdgpu_pmu_format_attrs,
 };
 
 /* Event attributes - dynamically generated from counter_registry */
@@ -68,7 +68,7 @@ struct pmu_event_attr {
     u64 id;
 };
 
-static ssize_t pmu_stub_event_show(struct device *dev,
+static ssize_t amdgpu_pmu_event_show(struct device *dev,
                                    struct device_attribute *attr,
                                    char *buf)
 {
@@ -77,23 +77,23 @@ static ssize_t pmu_stub_event_show(struct device *dev,
 }
 
 /* Dynamic event attributes - allocated during init */
-static struct pmu_event_attr *pmu_stub_event_attrs_dynamic = NULL;
-static struct attribute **pmu_stub_event_attrs = NULL;
-static size_t pmu_stub_event_count = 0;
+static struct pmu_event_attr *amdgpu_pmu_event_attrs_dynamic = NULL;
+static struct attribute **amdgpu_pmu_event_attrs = NULL;
+static size_t amdgpu_pmu_event_count = 0;
 
-static struct attribute_group pmu_stub_events_group = {
+static struct attribute_group amdgpu_pmu_events_group = {
     .name = "events",
     .attrs = NULL,  /* Set during init */
 };
 
-static const struct attribute_group *pmu_stub_attr_groups[] = {
-    &pmu_stub_format_group,
-    &pmu_stub_events_group,
+static const struct attribute_group *amdgpu_pmu_attr_groups[] = {
+    &amdgpu_pmu_format_group,
+    &amdgpu_pmu_events_group,
     NULL,
 };
 
 /* Timer handler - Legacy stub (not used with hardware-only mode) */
-enum hrtimer_restart pmu_stub_timer_handler(struct hrtimer *timer)
+enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer)
 {
     (void)timer; /* Unused in hardware-only mode */
 
@@ -104,12 +104,12 @@ enum hrtimer_restart pmu_stub_timer_handler(struct hrtimer *timer)
 }
 
 /* Find free event slot */
-int pmu_stub_get_event_idx(struct pmu_stub *pmu)
+int amdgpu_pmu_get_event_idx(struct amdgpu_pmu *pmu)
 {
     int idx;
 
-    idx = find_first_zero_bit(pmu->used_mask, PMU_STUB_MAX_EVENTS);
-    if (idx == PMU_STUB_MAX_EVENTS)
+    idx = find_first_zero_bit(pmu->used_mask, AMDGPU_PMU_MAX_EVENTS);
+    if (idx == AMDGPU_PMU_MAX_EVENTS)
         return -EAGAIN;
 
     set_bit(idx, pmu->used_mask);
@@ -117,9 +117,9 @@ int pmu_stub_get_event_idx(struct pmu_stub *pmu)
 }
 
 /* Free event slot */
-void pmu_stub_free_event_idx(struct pmu_stub *pmu, int idx)
+void amdgpu_pmu_free_event_idx(struct amdgpu_pmu *pmu, int idx)
 {
-    if (idx >= 0 && idx < PMU_STUB_MAX_EVENTS) {
+    if (idx >= 0 && idx < AMDGPU_PMU_MAX_EVENTS) {
         clear_bit(idx, pmu->used_mask);
         pmu->events[idx].event = NULL;
         pmu->events[idx].active = false;
@@ -127,9 +127,9 @@ void pmu_stub_free_event_idx(struct pmu_stub *pmu, int idx)
 }
 
 /* PMU callback: Initialize event */
-static int pmu_stub_event_init(struct perf_event *event)
+static int amdgpu_pmu_event_init(struct perf_event *event)
 {
-    struct pmu_stub *pmu = pmu_stub_instance;
+    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
     int ret;
 
     pmu_debug("event_init: config=0x%llx\n", event->attr.config);
@@ -139,7 +139,7 @@ static int pmu_stub_event_init(struct perf_event *event)
         return -ENOENT;
 
     /* Check if event configuration is supported */
-    if (!pmu_stub_is_valid_event(event->attr.config)) {
+    if (!amdgpu_pmu_is_valid_event(event->attr.config)) {
         pmu_err("Unsupported event config: 0x%llx\n", event->attr.config);
         return -EINVAL;
     }
@@ -180,7 +180,7 @@ static int pmu_stub_event_init(struct perf_event *event)
 }
 
 /* PMU callback: Add event to PMU */
-static int pmu_stub_add(struct perf_event *event, int flags)
+static int amdgpu_pmu_add(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
@@ -218,7 +218,7 @@ static int pmu_stub_add(struct perf_event *event, int flags)
 }
 
 /* PMU callback: Remove event from PMU */
-static void pmu_stub_del(struct perf_event *event, int flags)
+static void amdgpu_pmu_del(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
@@ -231,7 +231,7 @@ static void pmu_stub_del(struct perf_event *event, int flags)
         /* AQL hardware event - stop and cleanup */
         if (flags & PERF_EF_UPDATE) {
             pmu_debug("del: Reading final count (PERF_EF_UPDATE flag set)\n");
-            pmu_stub_read(event);
+            amdgpu_pmu_read(event);
         }
 
         /* Destroy handles stopping internally - don't call stop separately
@@ -248,7 +248,7 @@ static void pmu_stub_del(struct perf_event *event, int flags)
 }
 
 /* PMU callback: Start event */
-static void pmu_stub_start(struct perf_event *event, int flags)
+static void amdgpu_pmu_start(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
@@ -279,7 +279,7 @@ static void pmu_stub_start(struct perf_event *event, int flags)
 }
 
 /* PMU callback: Stop event */
-static void pmu_stub_stop(struct perf_event *event, int flags)
+static void amdgpu_pmu_stop(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
@@ -292,7 +292,7 @@ static void pmu_stub_stop(struct perf_event *event, int flags)
         /* Update count if requested */
         if (flags & PERF_EF_UPDATE) {
             pmu_debug("stop: Reading final count (PERF_EF_UPDATE flag set)\n");
-            pmu_stub_read(event);
+            amdgpu_pmu_read(event);
         }
 
         if (aql_pmu_event_stop(event) == 0) {
@@ -309,7 +309,7 @@ static void pmu_stub_stop(struct perf_event *event, int flags)
 }
 
 /* PMU callback: Read event counter */
-static void pmu_stub_read(struct perf_event *event)
+static void amdgpu_pmu_read(struct perf_event *event)
 {
     struct hw_perf_event *hwc = &event->hw;
     uint64_t old_count, new_count;
@@ -336,37 +336,37 @@ static void pmu_stub_read(struct perf_event *event)
 }
 
 /* Initialize event attributes from counter_registry */
-static int pmu_stub_init_event_attrs(void)
+static int amdgpu_pmu_init_event_attrs(void)
 {
     const counter_def_t *counters;
     size_t i;
 
-    pmu_stub_event_count = get_counter_count();
+    amdgpu_pmu_event_count = get_counter_count();
     counters = get_all_counters();
 
-    pmu_info("Initializing %zu event attributes from counter registry\n", pmu_stub_event_count);
+    pmu_info("Initializing %zu event attributes from counter registry\n", amdgpu_pmu_event_count);
 
     /* Allocate array of pmu_event_attr structures */
-    pmu_stub_event_attrs_dynamic = kzalloc(pmu_stub_event_count * sizeof(struct pmu_event_attr),
+    amdgpu_pmu_event_attrs_dynamic = kzalloc(amdgpu_pmu_event_count * sizeof(struct pmu_event_attr),
                                            GFP_KERNEL);
-    if (!pmu_stub_event_attrs_dynamic) {
+    if (!amdgpu_pmu_event_attrs_dynamic) {
         pmu_err("Failed to allocate event attributes\n");
         return -ENOMEM;
     }
 
     /* Allocate array of attribute pointers (+ 1 for NULL terminator) */
-    pmu_stub_event_attrs = kzalloc((pmu_stub_event_count + 1) * sizeof(struct attribute *),
+    amdgpu_pmu_event_attrs = kzalloc((amdgpu_pmu_event_count + 1) * sizeof(struct attribute *),
                                    GFP_KERNEL);
-    if (!pmu_stub_event_attrs) {
-        kfree(pmu_stub_event_attrs_dynamic);
-        pmu_stub_event_attrs_dynamic = NULL;
+    if (!amdgpu_pmu_event_attrs) {
+        kfree(amdgpu_pmu_event_attrs_dynamic);
+        amdgpu_pmu_event_attrs_dynamic = NULL;
         pmu_err("Failed to allocate event attribute array\n");
         return -ENOMEM;
     }
 
     /* Initialize each event attribute */
-    for (i = 0; i < pmu_stub_event_count; i++) {
-        struct pmu_event_attr *pmu_attr = &pmu_stub_event_attrs_dynamic[i];
+    for (i = 0; i < amdgpu_pmu_event_count; i++) {
+        struct pmu_event_attr *pmu_attr = &amdgpu_pmu_event_attrs_dynamic[i];
         const counter_def_t *counter = &counters[i];
         char *name_lower;
 
@@ -379,12 +379,12 @@ static int pmu_stub_init_event_attrs(void)
             /* Cleanup on error */
             while (i > 0) {
                 i--;
-                kfree(pmu_stub_event_attrs_dynamic[i].attr.attr.name);
+                kfree(amdgpu_pmu_event_attrs_dynamic[i].attr.attr.name);
             }
-            kfree(pmu_stub_event_attrs);
-            kfree(pmu_stub_event_attrs_dynamic);
-            pmu_stub_event_attrs = NULL;
-            pmu_stub_event_attrs_dynamic = NULL;
+            kfree(amdgpu_pmu_event_attrs);
+            kfree(amdgpu_pmu_event_attrs_dynamic);
+            amdgpu_pmu_event_attrs = NULL;
+            amdgpu_pmu_event_attrs_dynamic = NULL;
             return -ENOMEM;
         }
 
@@ -392,70 +392,70 @@ static int pmu_stub_init_event_attrs(void)
         sysfs_attr_init(&pmu_attr->attr.attr);
         pmu_attr->attr.attr.name = name_lower;
         pmu_attr->attr.attr.mode = 0444;
-        pmu_attr->attr.show = pmu_stub_event_show;
+        pmu_attr->attr.show = amdgpu_pmu_event_show;
         pmu_attr->attr.store = NULL;
 
         /* Add to attribute array */
-        pmu_stub_event_attrs[i] = &pmu_attr->attr.attr;
+        amdgpu_pmu_event_attrs[i] = &pmu_attr->attr.attr;
 
         pmu_debug("  Event %zu: %s = config=0x%llx\n", i, name_lower, (u64)counter->id);
     }
 
     /* NULL terminate the array */
-    pmu_stub_event_attrs[pmu_stub_event_count] = NULL;
+    amdgpu_pmu_event_attrs[amdgpu_pmu_event_count] = NULL;
 
     /* Set the events group attrs pointer */
-    pmu_stub_events_group.attrs = pmu_stub_event_attrs;
+    amdgpu_pmu_events_group.attrs = amdgpu_pmu_event_attrs;
 
-    pmu_info("Successfully initialized %zu events\n", pmu_stub_event_count);
+    pmu_info("Successfully initialized %zu events\n", amdgpu_pmu_event_count);
     return 0;
 }
 
 /* Cleanup event attributes */
-static void pmu_stub_cleanup_event_attrs(void)
+static void amdgpu_pmu_cleanup_event_attrs(void)
 {
     size_t i;
 
-    if (pmu_stub_event_attrs_dynamic) {
-        for (i = 0; i < pmu_stub_event_count; i++) {
-            kfree(pmu_stub_event_attrs_dynamic[i].attr.attr.name);
+    if (amdgpu_pmu_event_attrs_dynamic) {
+        for (i = 0; i < amdgpu_pmu_event_count; i++) {
+            kfree(amdgpu_pmu_event_attrs_dynamic[i].attr.attr.name);
         }
-        kfree(pmu_stub_event_attrs_dynamic);
-        pmu_stub_event_attrs_dynamic = NULL;
+        kfree(amdgpu_pmu_event_attrs_dynamic);
+        amdgpu_pmu_event_attrs_dynamic = NULL;
     }
 
-    if (pmu_stub_event_attrs) {
-        kfree(pmu_stub_event_attrs);
-        pmu_stub_event_attrs = NULL;
+    if (amdgpu_pmu_event_attrs) {
+        kfree(amdgpu_pmu_event_attrs);
+        amdgpu_pmu_event_attrs = NULL;
     }
 
-    pmu_stub_event_count = 0;
-    pmu_stub_events_group.attrs = NULL;
+    amdgpu_pmu_event_count = 0;
+    amdgpu_pmu_events_group.attrs = NULL;
 }
 
 /* Module initialization */
-static int __init pmu_stub_init(void)
+static int __init amdgpu_pmu_init(void)
 {
-    struct pmu_stub *pmu;
+    struct amdgpu_pmu *pmu;
     int ret;
 
-    pmu_info("Initializing PMU Stub module v%s\n", PMU_STUB_VERSION);
+    pmu_info("Initializing PMU Stub module v%s\n", AMDGPU_PMU_VERSION);
 
     /* Initialize event attributes from counter_registry */
-    ret = pmu_stub_init_event_attrs();
+    ret = amdgpu_pmu_init_event_attrs();
     if (ret)
         return ret;
 
     /* Allocate PMU structure */
     pmu = kzalloc(sizeof(*pmu), GFP_KERNEL);
     if (!pmu) {
-        pmu_stub_cleanup_event_attrs();
+        amdgpu_pmu_cleanup_event_attrs();
         return -ENOMEM;
     }
 
     /* Initialize PMU structure */
     spin_lock_init(&pmu->lock);
-    bitmap_zero(pmu->used_mask, PMU_STUB_MAX_EVENTS);
+    bitmap_zero(pmu->used_mask, AMDGPU_PMU_MAX_EVENTS);
     pmu->num_events = 0;
 
     /* Initialize counters */
@@ -471,20 +471,20 @@ static int __init pmu_stub_init(void)
     mutex_init(&pmu->aql_mutex);
 
     /* Initialize timer */
-    hrtimer_setup(&pmu->timer, pmu_stub_timer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+    hrtimer_setup(&pmu->timer, amdgpu_pmu_timer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     pmu->timer_period = ms_to_ktime(timer_period_ms);
 
     /* Set up PMU structure */
     pmu->pmu = (struct pmu) {
         .name           = PMU_NAME,
         .task_ctx_nr    = -1,
-        .event_init     = pmu_stub_event_init,
-        .add            = pmu_stub_add,
-        .del            = pmu_stub_del,
-        .start          = pmu_stub_start,
-        .stop           = pmu_stub_stop,
-        .read           = pmu_stub_read,
-        .attr_groups    = pmu_stub_attr_groups,
+        .event_init     = amdgpu_pmu_event_init,
+        .add            = amdgpu_pmu_add,
+        .del            = amdgpu_pmu_del,
+        .start          = amdgpu_pmu_start,
+        .stop           = amdgpu_pmu_stop,
+        .read           = amdgpu_pmu_read,
+        .attr_groups    = amdgpu_pmu_attr_groups,
         .capabilities   = PERF_PMU_CAP_NO_INTERRUPT,
     };
 
@@ -492,12 +492,12 @@ static int __init pmu_stub_init(void)
     ret = perf_pmu_register(&pmu->pmu, PMU_NAME, -1);
     if (ret) {
         pmu_err("Failed to register PMU: %d\n", ret);
-        pmu_stub_cleanup_event_attrs();
+        amdgpu_pmu_cleanup_event_attrs();
         kfree(pmu);
         return ret;
     }
 
-    pmu_stub_instance = pmu;
+    amdgpu_pmu_instance = pmu;
 
     /* Initialize AQL PMU integration */
     ret = aql_pmu_init();
@@ -506,7 +506,7 @@ static int __init pmu_stub_init(void)
     } else {
         pmu_err("AQL hardware acceleration required but not available: %d\n", ret);
         perf_pmu_unregister(&pmu->pmu);
-        pmu_stub_cleanup_event_attrs();
+        amdgpu_pmu_cleanup_event_attrs();
         kfree(pmu);
         return ret;
     }
@@ -518,9 +518,9 @@ static int __init pmu_stub_init(void)
 }
 
 /* Module cleanup */
-static void __exit pmu_stub_exit(void)
+static void __exit amdgpu_pmu_exit(void)
 {
-    struct pmu_stub *pmu = pmu_stub_instance;
+    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
 
     pmu_info("Unloading PMU Stub module\n");
 
@@ -547,19 +547,19 @@ static void __exit pmu_stub_exit(void)
 
         /* Free memory */
         kfree(pmu);
-        pmu_stub_instance = NULL;
+        amdgpu_pmu_instance = NULL;
     }
 
     /* Cleanup event attributes */
-    pmu_stub_cleanup_event_attrs();
+    amdgpu_pmu_cleanup_event_attrs();
 
     pmu_info("PMU Stub module unloaded\n");
 }
 
-module_init(pmu_stub_init);
-module_exit(pmu_stub_exit);
+module_init(amdgpu_pmu_init);
+module_exit(amdgpu_pmu_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Your Name");
 MODULE_DESCRIPTION("Skeleton PMU driver for Linux perf subsystem");
-MODULE_VERSION(PMU_STUB_VERSION);
+MODULE_VERSION(AMDGPU_PMU_VERSION);
