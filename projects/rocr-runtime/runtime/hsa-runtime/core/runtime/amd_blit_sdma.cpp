@@ -47,7 +47,6 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <core/util/utils.h>
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -856,7 +855,7 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
   // width | 16 ensures that we don't return a higher element than is supported and avoids
   // issues with 0.
   auto maxAlignedElement = [](size_t width) {
-    return rocr::os::Ctz(width | 16);
+    return __builtin_ctz(width | 16);
   };
 
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
@@ -873,7 +872,7 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
   // Find maximum element that describes the pitch and slice.
   // Pitch and slice must both be represented in units of elements.  No element larger than this
   // may be used in any tile as the pitches would not be exactly represented.
-  auto max_ele = Min(maxAlignedElement(src->pitch), maxAlignedElement(dst->pitch));
+  int max_ele = Min(maxAlignedElement(src->pitch), maxAlignedElement(dst->pitch));
   if (range->z != 1)  // Only need to consider slice if HW will copy along Z.
     max_ele = Min(max_ele, maxAlignedElement(src->slice), maxAlignedElement(dst->slice));
 
@@ -896,8 +895,8 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
   src and dst base has already been checked for DWORD alignment so we only need to consider the
   offset here.
   */
-  auto min_ele = Min(max_ele, maxAlignedElement(range->x), maxAlignedElement(src_offset->x % 4),
-                     maxAlignedElement(dst_offset->x % 4));
+  int min_ele = Min(max_ele, maxAlignedElement(range->x), maxAlignedElement(src_offset->x % 4),
+                    maxAlignedElement(dst_offset->x % 4));
 
   // Check that pitch and slice can be represented in the tile with the smallest element
   if ((src->pitch >> min_ele) > max_pitch || (dst->pitch >> min_ele) > max_pitch)
@@ -917,8 +916,8 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
 
         // Get largest element which describes the start of this tile after its base address has
         // been aligned.  Base addresses must be DWORD (4 byte) aligned.
-        auto aligned_ele = Min(maxAlignedElement((src_offset->x + x) % 4),
-                               maxAlignedElement((dst_offset->x + x) % 4), max_ele);
+        int aligned_ele = Min(maxAlignedElement((src_offset->x + x) % 4),
+                              maxAlignedElement((dst_offset->x + x) % 4), max_ele);
 
         // Get largest permissible element which exactly covers width
         int element = Min(maxAlignedElement(width), aligned_ele);
