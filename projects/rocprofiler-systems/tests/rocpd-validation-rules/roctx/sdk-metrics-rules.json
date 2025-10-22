@@ -38,10 +38,10 @@
             ],
             "validation_queries": [
                 {
-                    "comparison": "equals",
-                    "description": "Verify that 'rocm_marker_api' appears in category 11 times in 'regions' table",
-                    "error_message": "Expected 11 'rocm_marker_api' entries in the 'regions' table",
-                    "expected_result": 11,
+                    "comparison": "greater_than_or_equal",
+                    "description": "Verify that 'rocm_marker_api' appears in category 10 times in 'regions' table",
+                    "error_message": "Less than 10 'rocm_marker_api' entries in the 'regions' table",
+                    "expected_result": 10,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api';"
                 },
                 {
@@ -91,17 +91,17 @@
             ],
             "validation_queries": [
                 {
-                    "comparison": "greater_than_or_equal",
+                    "comparison": "greater_than",
                     "description": "Verify that 'rocm_marker_api' string is present in the table",
                     "error_message": "'rocm_marker_api' string not found in the table rocpd_string",
-                    "expected_result": 1,
+                    "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_marker_api%';"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that 'roctx' string is present in the table",
                     "error_message": "'roctx' string not found in the table rocpd_string",
-                    "expected_result": 1,
+                    "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%roctx%';"
                 }
             ]

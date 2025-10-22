@@ -858,7 +858,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     [](auto&                                 data_vec,
                        std::string                           file_name,
                        tool::rocprofiler_code_object_info_t* obj_data_v) {
-                        data_vec.push_back({file_name,
+                        data_vec.push_back({std::move(file_name),
                                             obj_data_v->code_object_id,
                                             obj_data_v->load_base,
                                             obj_data_v->load_size});
@@ -900,7 +900,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     [](auto&                                 data_vec,
                        std::string                           file_name,
                        tool::rocprofiler_code_object_info_t* obj_data_v) {
-                        data_vec.push_back({file_name,
+                        data_vec.push_back({std::move(file_name),
                                             obj_data_v->code_object_id,
                                             obj_data_v->load_base,
                                             obj_data_v->load_size});

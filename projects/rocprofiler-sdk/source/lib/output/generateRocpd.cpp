@@ -906,7 +906,7 @@ write_rocpd(
             if(itr.kernel_id == 0 && itr.code_object_id == 0) continue;
 
             auto json_data =
-                get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
+                get_json_string([](auto& ar, const auto& oitr) { cereal::save(ar, oitr); }, itr);
 
             auto stmt = get_insert_statement(
                 "rocpd_info_kernel_symbol{{uuid}}",
