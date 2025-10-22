@@ -16,7 +16,7 @@
 #include <linux/completion.h>
 
 #include "aql_perf.h"
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 #include "aql_c/counter_registry.h"
 #include "aql_c/packet_generation.h"
 #include "aql_c/pm4_packets.h"

@@ -19,7 +19,7 @@
 #include <uapi/linux/kfd_ioctl.h>
 
 #include "aql_perf.h"
-#include "pmu_stub.h"
+#include "amdgpu_pmu.h"
 #include "aql_c/arch_creator_common.h"
 #include "aql_c/counter_registry.h"
 #include "aql_c/packet_generation.h"

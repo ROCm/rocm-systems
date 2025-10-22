@@ -29,10 +29,10 @@ dkms-remove:
 
 # Quick test targets
 load:
-	sudo insmod src/pmu_stub.ko
+	sudo insmod src/amdgpu_pmu.ko
 
 unload:
-	-sudo rmmod pmu_stub
+	-sudo rmmod amdgpu_pmu
 
 reload: unload load
 
@@ -53,7 +53,7 @@ info:
 	@echo "Module: $(MODULE_NAME)"
 	@echo "Version: $(MODULE_VERSION)"
 	@echo "Kernel: $(KERNEL_VERSION)"
-	@lsmod | grep pmu_stub || echo "Module not loaded"
+	@lsmod | grep amdgpu_pmu || echo "Module not loaded"
 
 dmesg:
 	@dmesg | tail -20
