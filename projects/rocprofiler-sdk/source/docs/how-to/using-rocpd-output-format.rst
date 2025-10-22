@@ -613,8 +613,6 @@ Integration with rocprofv3 workflow
 
 The ``rocpd summary`` command maintains full compatibility with ``rocprofv3`` summary analysis, while extending capabilities to multidatabase scenarios. Users familiar with ``rocprofv3 --summary`` will find identical statistical outputs and report formats when using ``rocpd summary`` on database files, with the added benefit of cross-session analysis capabilities.
 
-For detailed information about summary statistics and report interpretation, see :ref:`using-rocprofv3-summary`.
-
 Aggregating multiprofiling data using rocpd
 --------------------------------------------
 
