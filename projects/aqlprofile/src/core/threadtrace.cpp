@@ -261,7 +261,7 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
     }
   }
 
-  for (int64_t i=0; i<buffer_num; i++)
+  for (int64_t i=0; i<trace_config.buffer_data.size(); i++)
     std::cout << i << " Buffer data: " << std::hex << reinterpret_cast<uint64_t>(trace_config.buffer_data.at(i)) << std::dec << std::endl;
 
   MemoryManager::RegisterManager(memorymgr);
