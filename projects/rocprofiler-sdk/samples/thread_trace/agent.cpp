@@ -119,12 +119,12 @@ gen_output_stream()
 
     std::vector<Element> sorted(latencies->begin(), latencies->end());
     std::stable_sort(sorted.begin(), sorted.end(), [](const Element& a, const Element& b) {
-        // return a.second.latency > b.second.latency;
-        return a.first.address < b.first.address;
+        return a.second.latency > b.second.latency;
+        //return a.first.address < b.first.address;
     });
 
-    output << "Top 50 hotspots for trace (cycles):\n";
-    for(size_t i = 0; i < sorted.size() /* && i < 50 */; i++)
+    output << "Top 20 hotspots for trace (cycles):\n";
+    for(size_t i = 0; i < sorted.size() && i < 20; i++)
     {
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
@@ -314,7 +314,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u << 25});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u << 23});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
                               ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
