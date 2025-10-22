@@ -1703,7 +1703,28 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    auto* main_func       = find_function(app_image, main_fname.c_str());
+    procedure_t* main_func = nullptr;
+    // Fortran programs typically have a C-style "main" wrapper that calls the actual
+    // Fortran main. This should be prioritized as:
+    //  1. It contains the actual user code that should be instrumented and will not be
+    //  treated as a subroutine.
+    //  2. If we instrument the C wrapper and if the Fortran main is written in such a way
+    //     that Dyninst marks it with funcReturnStatus == NORETURN, then during
+    //     rocprof-sys-run, the instrumented Fortran main will not be reached.
+    if(main_fname == "main")
+    {
+        // _MAIN__, MAIN__, main_, _main_, _QQmain
+        main_func = find_function(app_image, "^_?MAIN__|^_?main_|^_QQmain");
+    }
+    // Note: Some Fortran compilers (e.g. Cray) may name the Fortran main function after
+    // the program name in the PROGRAM statement. E.g, "PROGRAM hello" becomes "hello_"
+    // in the disassembly.
+    // This is not a problem as the compiler will also generate a corresponding "main"
+    // symbol that has the same start address, allowing Dyninst to latch onto that.
+    // However, if problems persist, users should specify their main with
+    // "--main-function"
+
+    if(!main_func) main_func = find_function(app_image, main_fname.c_str());
     auto* user_start_func = find_function(app_image, "rocprofsys_user_start_trace",
                                           { "rocprofsys_user_start_thread_trace" });
     auto* user_stop_func  = find_function(app_image, "rocprofsys_user_stop_trace",
@@ -1934,7 +1955,6 @@ main(int argc, char** argv)
 
     verbprintf(2, "Getting call expressions... ");
 
-    auto _init_arg0 = main_fname;
     if(main_func) main_sign.get();
 
     auto main_call_args = rocprofsys_call_expr(main_sign.get());
