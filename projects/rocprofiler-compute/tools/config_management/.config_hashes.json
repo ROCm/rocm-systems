@@ -1,7 +1,7 @@
 {
   "archs": {
     "gfx908": {
-      "delta_hash": "8ca2a6347853121c0e9822d87c016860",
+      "delta_hash": "a2d9bef7e5d8b056605f9b1fa6569678",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -24,7 +24,7 @@
       }
     },
     "gfx90a": {
-      "delta_hash": "a6f077816300098f41469c2a376ef9f3",
+      "delta_hash": "55e28dda19e9ae640ba436be1a42fe97",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -47,7 +47,7 @@
       }
     },
     "gfx940": {
-      "delta_hash": "454f5b646c84b030dfb405a79507c535",
+      "delta_hash": "531bb865bffcb2fc5658c2e613b341d2",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -70,7 +70,7 @@
       }
     },
     "gfx941": {
-      "delta_hash": "e80ebc73d654e93d0993c28bf0aa4615",
+      "delta_hash": "9b30264f36ff99f54941346a18af016a",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -93,7 +93,7 @@
       }
     },
     "gfx942": {
-      "delta_hash": "b22745e20745ba5ff675df1f3b5e257b",
+      "delta_hash": "66cf66455fafa2b6b5936d31fecf3e85",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",

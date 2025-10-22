@@ -1,3 +1,28 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 import shutil
 import subprocess
 import sys
@@ -153,9 +178,10 @@ class TestUserFlows(unittest.TestCase):
     @patch.object(mws, "prompt_yes_no", return_value=True)
     def test_edits_on_older_arch_no_create_new_prompt(self, _yesno, _get_latest):
         # For older arch (e.g., gfx940), we should NOT prompt for 1/2 input branch.
-        with patch("builtins.input") as mock_input, patch.object(
-            mws, "update_older_arch_from_edits", return_value=True
-        ) as upd:
+        with (
+            patch("builtins.input") as mock_input,
+            patch.object(mws, "update_older_arch_from_edits", return_value=True) as upd,
+        ):
             ok = mws.handle_direct_edits(
                 "gfx940",
                 ["file.yaml"],
@@ -170,9 +196,10 @@ class TestUserFlows(unittest.TestCase):
     @patch.object(mws, "get_latest_arch", return_value="gfx950")
     @patch.object(mws, "prompt_yes_no", return_value=True)
     def test_delta_on_older_arch_in_place_only(self, _yesno, _get_latest, _valid):
-        with patch("builtins.input") as mock_input, patch.object(
-            mws, "update_older_arch_from_delta", return_value=True
-        ) as upd:
+        with (
+            patch("builtins.input") as mock_input,
+            patch.object(mws, "update_older_arch_from_delta", return_value=True) as upd,
+        ):
             ok = mws.handle_delta_file(
                 "/tmp/old_delta.yaml",
                 "gfx940",

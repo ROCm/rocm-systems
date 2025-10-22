@@ -45,7 +45,7 @@ from utils.utils import (
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
-    """·
+    """
     Adjust string with multiple lines by inserting '\n'
     """
     lines: list[str] = []
