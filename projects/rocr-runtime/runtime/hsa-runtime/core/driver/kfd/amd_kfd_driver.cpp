@@ -45,11 +45,9 @@
 #include <memory>
 #include <string>
 
-#if defined(__linux__)
 #include <amdgpu_drm.h>
 #include <link.h>
 #include <sys/ioctl.h>
-#endif
 
 #include "hsakmt/hsakmt.h"
 
@@ -57,16 +55,11 @@
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 
-#if defined(_WIN32)
-#include "loader/executable.hpp"
-#endif
-
 extern r_debug _amdgpu_r_debug;
 
 namespace rocr {
 namespace AMD {
 
-#if defined(__linux__)
 static_assert(
     (sizeof(core::ShareableHandle::handle) >= sizeof(amdgpu_bo_handle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(amdgpu_bo_handle)),
@@ -89,7 +82,6 @@ __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
 }
 
 } // namespace
-#endif
 
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
@@ -436,7 +428,6 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
 
 hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
                                      core::ShareableHandle &handle) {
-#if defined(__linux__)
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   amdgpu_bo_import_result res;
   auto ret = DRM_CALL(amdgpu_bo_import(
@@ -445,16 +436,12 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
     return HSA_STATUS_ERROR;
 
   handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
-#else
-  assert(!"Unimplemented!");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
                             size_t offset, size_t size,
                             hsa_access_permission_t perms) {
-#if defined(__linux__)
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -462,15 +449,12 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
   if (DRM_CALL(amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem),
                       drm_perm(perms), AMDGPU_VA_OP_MAP)) != 0)
     return HSA_STATUS_ERROR;
-#else
-  assert(!"Unimplemented!");
-#endif
+
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
                               size_t offset, size_t size) {
-#if defined(__linux__)
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -478,14 +462,11 @@ hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
   if (DRM_CALL(amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
                       AMDGPU_VA_OP_UNMAP)) != 0)
     return HSA_STATUS_ERROR;
-#else
-  assert(!"Unimplemented!");
-#endif
+
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
-#if defined(__linux__)
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -495,9 +476,6 @@ hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
     return HSA_STATUS_ERROR;
 
   handle = {};
-#else
-  assert(!"Unimplemented!");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 
