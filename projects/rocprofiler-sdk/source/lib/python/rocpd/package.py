@@ -33,39 +33,51 @@ from . import output_config
 rocpd_package_version = "1.0"
 rocpd_metadata_param_version = "rocpd_package_version"
 
-IDEAL_NUMBER_OF_DATABASE_FILES = 1
+IDEAL_NUMBER_OF_DATABASE_FILES = 5
 
 
-def create_output_folder(output_path, consolidate) -> str:
+def prepare_output_folder(output_path, consolidate) -> str:
     """
-    Creates the output folder if it doesn't exist.
+    Prepares the output folder path with appropriate .rpdb extension.
+
+    When consolidating to current directory, generates a timestamped folder.
+    Otherwise, ensures the provided path has .rpdb extension.
 
     Args:
         output_path (str): The path to the output folder.
         consolidate (bool): Whether to consolidate output files.
 
     Returns:
-        str: The path to the created output folder.
+        str: The output folder path with .rpdb extension.
     """
-    if output_path != ".":
-        if not output_path.endswith(".rpdb"):
-            output_path = f"{output_path}.rpdb"
-    else:
-        # Create a new folder with current date and time for unique folder to consolidate files to
+    # Current directory with consolidation - generate timestamped folder
+    if output_path == ".":
         if consolidate:
             date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_path = f"rocpd-{date_str}.rpdb"
+    else:
+        # Custom path provided - ensure it has .rpdb extension
+        if not output_path.endswith(".rpdb"):
+            output_path = f"{output_path}.rpdb"
     return output_path
 
 
 def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
     """
-    Processes a YAML file containing rocprofiler-sdk/rocpd metadata and returns a list of database files.
-    Also expands wildcards in both YAML 'files' and direct input parameters.
-    Supports .rpdb folders containing index.yaml.
+    Processes input files and returns a flattened list of database files.
+
+    Handles multiple input types:
+    - YAML files containing rocpd metadata
+    - .rpdb folders with index.yaml
+    - Direct database files
+    - Directories containing .db files
+    - Wildcard patterns
+
+    Optionally merges databases if count exceeds threshold.
 
     Args:
         input (list of str): List of input file paths (YAML, DB, or .rpdb folder).
+        skip_auto_merge (bool): If True, skip automatic merging of multiple databases.
 
     Returns:
         list: List of database file paths.
@@ -73,161 +85,250 @@ def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
     import glob
 
     def parse_yaml_file(yaml_path, base_dir=None):
-        """Parse a rocprofiler-sdk YAML file and expand wildcards."""
+        """
+        Parse a rocprofiler-sdk YAML file and extract database file paths.
+
+        Args:
+            yaml_path (str): Path to the YAML file.
+            base_dir (str): Base directory for resolving relative paths.
+
+        Returns:
+            list: Expanded list of database file paths.
+        """
         with open(yaml_path, "r") as f:
             meta = yaml.safe_load(f)
             rocpd_meta = meta.get("rocprofiler-sdk", {}).get("rocpd", {})
+
+            # Check version compatibility
             version = rocpd_meta.get(rocpd_metadata_param_version, "0")
             if version < rocpd_package_version:
                 print(
                     f"Warning: {yaml_path} is using an outdated version of rocpd package ({version})."
                 )
-            cwd = rocpd_meta.get("path", os.getcwd())
-            # If base_dir is provided (e.g., for .rpdb), override cwd
-            if base_dir is not None:
-                cwd = base_dir
+
+            # Determine working directory for relative paths
+            cwd = (
+                base_dir if base_dir is not None else rocpd_meta.get("path", os.getcwd())
+            )
+
+            # Get database file list from YAML
             dbs = rocpd_meta.get("files", [])
             if isinstance(dbs, str):
                 dbs = [dbs]
+
+            # Expand each database path (handle wildcards and relative paths)
             files = []
             for db in dbs:
                 db_path = os.path.join(cwd, db) if not os.path.isabs(db) else db
-                if "*" in db_path or "?" in db_path or "[" in db_path:
+                if _contains_wildcard(db_path):
                     files.extend(glob.glob(db_path))
                 else:
                     files.append(db_path)
+
             return files
 
-    return_list = []
-    input_files = []
-    sanitized_input = output_config.sanitize_input_list(input)
-    for item in sanitized_input:
-        # Handle .rpdb folder: look for index.yaml inside and flatten it
-        if item.endswith(".rpdb") and os.path.isdir(item):
-            index_yaml = os.path.join(item, "index.yaml")
-            if os.path.isfile(index_yaml):
-                input_files.extend(
-                    parse_yaml_file(index_yaml, base_dir=os.path.abspath(item))
-                )
-            else:
-                # If no index.yaml, treat as a directory and look for *.db files
-                input_files.extend(glob.glob(os.path.join(item, "*.db")))
-        elif item.endswith((".yaml", ".yml")):
-            base_dir = os.path.dirname(item)
-            input_files.extend(parse_yaml_file(item, base_dir))
-        else:
-            # If a directory, check inside for *.db files
-            if os.path.isdir(item):
-                input_files.extend(glob.glob(os.path.join(item, "*.db")))
-            else:
-                # Expand wildcards in direct input parameters as well
-                if "*" in item or "?" in item or "[" in item:
-                    input_files.extend(glob.glob(item))
-                else:
-                    input_files.append(item)
+    def _contains_wildcard(path):
+        """Check if path contains wildcard characters."""
+        return "*" in path or "?" in path or "[" in path
 
+    def _process_rpdb_folder(item):
+        """Process .rpdb folder and extract database files."""
+        index_yaml = os.path.join(item, "index.yaml")
+        if os.path.isfile(index_yaml):
+            return parse_yaml_file(index_yaml, base_dir=os.path.abspath(item))
+        else:
+            # No index.yaml, search for .db files directly
+            return glob.glob(os.path.join(item, "*.db"))
+
+    def _process_yaml_file(item):
+        """Process YAML file and extract database files."""
+        base_dir = os.path.dirname(item)
+        return parse_yaml_file(item, base_dir)
+
+    def _process_directory(item):
+        """Process directory and find .db files."""
+        return glob.glob(os.path.join(item, "*.db"))
+
+    def _process_file_or_pattern(item):
+        """Process individual file or wildcard pattern."""
+        if _contains_wildcard(item):
+            return glob.glob(item)
+        else:
+            return [item]
+
+    # Sanitize and categorize input
+    sanitized_input = output_config.sanitize_input_list(input)
+
+    # Process each input item based on its type
+    input_files = []
+    for item in sanitized_input:
+        if item.endswith(".rpdb") and os.path.isdir(item):
+            input_files.extend(_process_rpdb_folder(item))
+        elif item.endswith((".yaml", ".yml")):
+            input_files.extend(_process_yaml_file(item))
+        elif os.path.isdir(item):
+            input_files.extend(_process_directory(item))
+        else:
+            input_files.extend(_process_file_or_pattern(item))
+
+    # Validate all files exist
     num_dbs = len(input_files)
     print(f"Found {num_dbs} database files.")
 
-    # Sanity check if all input files exist, now that we have the list
     for db in input_files:
         if not os.path.exists(db):
             print(f"Warning: Input database file not found: {db}. Exiting.")
             return []
 
-    # If all exist, then we can return the list of DBs
-    return_list = input_files
-
+    # Optionally merge databases if count exceeds threshold
     skip_auto_merge = kwargs.get("skip_auto_merge", False)
     if skip_auto_merge:
         print("Skip auto merge and packaging.")
-    else:
-        if num_dbs > IDEAL_NUMBER_OF_DATABASE_FILES:
-            print(
-                f"More than {IDEAL_NUMBER_OF_DATABASE_FILES} database files found. It is recommended to merge and package databases"
-            )
-            fewer_input_files = merge_and_repackage(input_files, **kwargs)
-            print(f"Reduced to {len(fewer_input_files)} database files.")
-            return_list = fewer_input_files
+        return input_files
 
-    return return_list
+    if num_dbs > IDEAL_NUMBER_OF_DATABASE_FILES:
+        print(
+            f"More than {IDEAL_NUMBER_OF_DATABASE_FILES} database files found. "
+            f"It is recommended to merge and package databases"
+        )
+        merged_files = merge_and_repackage(input_files, **kwargs)
+        print(f"Reduced to {len(merged_files)} database files.")
+        return merged_files
+
+    return input_files
 
 
 def merge_and_repackage(
     input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES, **kwargs
 ) -> list:
     """
-    Merges and repackages the input database files.
+    Merges and repackages database files into batches to reduce file count.
+
+    If the number of input files is within the limit, returns them unchanged.
+    Otherwise, merges files into batches and creates a timestamped .rpdb folder
+    with the merged databases and metadata file.
 
     Args:
-        input_files (list of str): List of database file paths.
+        input_files (list of str): List of database file paths to merge.
+        max_limit (int): Maximum number of output files desired (default: 1).
 
     Returns:
-        list: List of merged and repackaged database file paths.
+        list: List of merged database file paths.
     """
     from . import merge
-
-    # Maybe this try is not necessary since uuid is standard python lib
-    try:
-        import uuid
-
-        unique_str = uuid.uuid4()
-    except Exception as e:
-        print(
-            f"Warning: could not import uuid, falling back to time as unique string. {e}"
-        )
-        unique_str = datetime.datetime.now().strftime("%H%M%S")
+    import uuid
 
     original_num_dbs = len(input_files)
 
-    # If within the LIMIT, then return the DBs, no automerge required
+    # Early return if already within limit
     if original_num_dbs <= max_limit:
         print(
-            f"Number of database files ({original_num_dbs}) is within the limit ({max_limit}). No merging needed."
+            f"Number of database files ({original_num_dbs}) is within the limit ({max_limit}). "
+            f"No merging needed."
         )
         return input_files
 
-    # Otherwise, calculate how many DBs to merge
-    target_num_dbs_to_merge = (original_num_dbs // max_limit) + (
-        original_num_dbs % max_limit > 0
-    )
+    # Calculate batch size for merging
+    batch_size = _calculate_batch_size(original_num_dbs, max_limit)
     print(
-        f"Original number of DBs: {original_num_dbs}, Target number of DBs to merge during each batch: {target_num_dbs_to_merge}"
+        f"Original number of DBs: {original_num_dbs}, "
+        f"Target number of DBs to merge per batch: {batch_size}"
     )
 
-    # Create an output folder to store the merged DBs to
-    merged_output_folder = create_output_folder(".", consolidate=True)
+    # Prepare output folder for merged databases
+    unique_str = uuid.uuid4()
+    merged_output_folder = prepare_output_folder(".", consolidate=True)
     os.makedirs(merged_output_folder, exist_ok=True)
 
-    copy_instead_of_move = kwargs.get("copy", False)
-    # Beging batch processing the DBs
-    reduced_file_list = []
-    for i in range(0, original_num_dbs, target_num_dbs_to_merge):
-        batch_files = input_files[i : i + target_num_dbs_to_merge]
-        merged_filename = f"merged_db_{i // target_num_dbs_to_merge}_{unique_str}.db"
-        args = {"output_path": merged_output_folder, "output_file": merged_filename}
-        if len(batch_files) > 1:
-            reduced_file_list.append(str(merge.execute(batch_files, **args)))
-        elif len(batch_files) == 1:
-            # optimize, if just 1 db, no need to call merge, just copy it
-            dest_file = os.path.join(merged_output_folder, merged_filename)
-            if copy_instead_of_move:
-                shutil.copy2(batch_files[0], dest_file)
-            else:
-                shutil.move(batch_files[0], dest_file)
-            reduced_file_list.append(str(dest_file))
-
-    for item in reduced_file_list:
-        print(f"Reduced file list: {item}")
-
-    # Once # of dbs is reduced (merged), then package and create the metadata .yaml file
-    create_metadata_file(reduced_file_list, output_path=merged_output_folder)
-
-    print(
-        f"\033[1;34mMerge and repackage completed. Output files are located in: {merged_output_folder}\033[0m"
+    # Process databases in batches
+    merged_files = _process_batches(
+        input_files, batch_size, merged_output_folder, unique_str, **kwargs
     )
 
-    return reduced_file_list
+    # Display merged file list
+    for item in merged_files:
+        print(f"Reduced file list: {item}")
+
+    # Create metadata file for the merged databases
+    create_metadata_file(merged_files, output_path=merged_output_folder)
+
+    print(
+        f"\033[1;34mMerge and repackage completed. "
+        f"Output files are located in: {merged_output_folder}\033[0m"
+    )
+
+    return merged_files
+
+
+def _calculate_batch_size(total_files, max_output_files):
+    """
+    Calculate how many input files should be merged per batch.
+
+    Args:
+        total_files (int): Total number of input files.
+        max_output_files (int): Desired maximum number of output files.
+
+    Returns:
+        int: Number of files to merge per batch.
+    """
+    # Use ceiling division to ensure we don't exceed max_output_files
+    return (total_files // max_output_files) + (total_files % max_output_files > 0)
+
+
+def _process_batches(input_files, batch_size, output_folder, unique_str, **kwargs):
+    """
+    Process database files in batches, merging or copying as needed.
+
+    Args:
+        input_files (list): List of input database file paths.
+        batch_size (int): Number of files per batch.
+        output_folder (str): Directory to store merged files.
+        unique_str: Unique identifier for merged filenames.
+
+    Returns:
+        list: List of merged/copied database file paths.
+    """
+
+    merged_files = []
+    total_files = len(input_files)
+
+    for batch_index, i in enumerate(range(0, total_files, batch_size)):
+        batch_files = input_files[i : i + batch_size]
+        merged_filename = f"merged_db_{batch_index}_{unique_str}.db"
+
+        merged_path = _merge_a_batch(
+            batch_files, output_folder, merged_filename, **kwargs
+        )
+        merged_files.append(merged_path)
+
+    return merged_files
+
+
+def _merge_a_batch(batch_files, output_folder, output_filename, **kwargs):
+    """
+    Merge multiple files or copy a single file to the output folder.
+
+    Args:
+        batch_files (list): List of database files in this batch.
+        output_folder (str): Destination folder.
+        output_filename (str): Name for the output file.
+
+    Returns:
+        str: Path to the merged or copied file.
+    """
+    from . import merge
+
+    dest_file = os.path.join(output_folder, output_filename)
+
+    if len(batch_files) > 1:
+        # Multiple files: merge them
+        args = {"output_path": output_folder, "output_file": output_filename}
+        return str(merge.execute(batch_files, **args))
+    else:
+        # Single file: just copy it (optimization)
+        # Because this is auto-merge, we want to just copy the file, don't just move it for the user.
+        shutil.copy2(batch_files[0], dest_file)
+        return str(dest_file)
 
 
 def create_metadata_file(db_files, output_path=".", metadata_filename="index.yaml"):
@@ -280,7 +381,13 @@ def add_args(parser):
         "-c",
         "--consolidate",
         action="store_true",
-        help="Consolidate database files into a new folder and generate metadata file pointing to that folder",
+        help="Consolidate (move) database files into a new folder and generate metadata file pointing to that folder",
+    )
+
+    package_options.add_argument(
+        "--copy",
+        action="store_true",
+        help="Copy database files instead of moving them",
     )
 
     package_options.add_argument(
@@ -292,17 +399,11 @@ def add_args(parser):
         required=False,
     )
 
-    package_options.add_argument(
-        "--copy",
-        action="store_true",
-        help="Copy database files instead of moving them",
-    )
-
     def process_args(input, args):
         valid_args = [
             "consolidate",
-            "output_path",
             "copy",
+            "output_path",
         ]
         ret = {}
         for itr in valid_args:
@@ -318,10 +419,11 @@ def add_args(parser):
 def execute(input_files, **kwargs):
     import glob
 
-    output_path_kw = kwargs.get("output_path", os.getcwd())
+    output_path_kw = kwargs.get("output_path", ".")
     consolidate = kwargs.get("consolidate", False)
+    copy_instead_of_move = kwargs.get("copy", False)
 
-    output_path = create_output_folder(output_path_kw, consolidate)
+    output_path = prepare_output_folder(output_path_kw, consolidate)
     db_files = output_config.sanitize_input_list(input_files)
 
     # check if a folder is provided, if so, search for *.db
@@ -333,7 +435,6 @@ def execute(input_files, **kwargs):
             expanded_files.append(itr)
     db_files = expanded_files
 
-    copy_instead_of_move = kwargs.get("copy", False)
     if consolidate:
         # Create a new folder with current date and time
         os.makedirs(output_path, exist_ok=True)
