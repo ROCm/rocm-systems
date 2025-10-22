@@ -90,7 +90,6 @@ jobs:
           ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
-          if [ "${OS_VERSION_MAJOR}" -eq 9 ]; then OS_RELEASE=9.6; else OS_RELEASE=${{ matrix.os-release }}; fi
           dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
           tee /etc/yum.repos.d/rocm.repo <<EOF
           [rocm]
