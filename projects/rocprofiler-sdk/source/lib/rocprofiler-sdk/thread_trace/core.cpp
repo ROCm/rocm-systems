@@ -173,7 +173,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     if(status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
         ROCP_WARNING << "Thread trace buffer full!";
     else if(status != HSA_STATUS_SUCCESS)
-        ROCP_CI_LOG(ERROR) << "Failed to iterate ATT data";
+        ROCP_CI_LOG(ERROR) << "Failed to iterate ATT data: " << status;
 
     active_traces.fetch_sub(1);
 }
