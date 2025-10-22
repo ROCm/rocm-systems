@@ -168,11 +168,11 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
     )
 
     if(ROCPROFSYS_USE_MPI)
-        set(MPI_FPRTRAN_REWRITE_RUN_REGEX
+        set(MPI_FORTRAN_REWRITE_RUN_REGEX
             ">>> MPI_Init(.*\n.*)>>> MPI_Send(.*\n.*)>>> MPI_Recv(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)"
         )
     else()
-        set(MPI_FPRTRAN_REWRITE_RUN_REGEX
+        set(MPI_FORTRAN_REWRITE_RUN_REGEX
             ">>> PMPI_Init(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)"
         )
     endif()
@@ -197,7 +197,7 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
                 0
             ENVIRONMENT "${_fortran_mpip_flat_environment}"
             REWRITE_RUN_PASS_REGEX
-                ">>> mpi-fortran-${_FORTRAN_EXAMPLE}.inst(.*\n.*)${MPI_FPRTRAN_REWRITE_RUN_REGEX}"
+                ">>> mpi-fortran-${_FORTRAN_EXAMPLE}.inst(.*\n.*)${MPI_FORTRAN_REWRITE_RUN_REGEX}"
         )
     endforeach()
 endif()
