@@ -112,7 +112,7 @@ struct agent_pools_t{
 
 extern size_t pool_size_limit;
 
-extern bool g_isEmuMode;
+bool isEmuModeEnabled();
 
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved

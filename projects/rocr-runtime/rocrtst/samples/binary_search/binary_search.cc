@@ -63,9 +63,9 @@
   } \
 }
 
-static const uint32_t kBinarySearchLength = g_isEmuMode ? 16 : 512;
-static const uint32_t kBinarySearchFindMe = g_isEmuMode ? 6 : 108;
-static const uint32_t kWorkGroupSize = g_isEmuMode ? 8 : 256;
+static const uint32_t kBinarySearchLength = isEmuModeEnabled() ? 16 : 512;
+static const uint32_t kBinarySearchFindMe = isEmuModeEnabled() ? 6 : 108;
+static const uint32_t kWorkGroupSize = isEmuModeEnabled() ? 8 : 256;
 
 // Hold all the info specific to binary search
 typedef struct BinarySearch {

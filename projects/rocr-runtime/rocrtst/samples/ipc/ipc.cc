@@ -134,7 +134,7 @@ static hsa_status_t FindDevicePool(hsa_amd_memory_pool_t pool, void* data) {
   if (err == HSA_STATUS_INFO_BREAK) {
     args->gpu_pool = pool;
 
-    if (rocrtst::g_isEmuMode) {
+    if (rocrtst::isEmuModeEnabled()) {
       args->gpu_mem_granule = 4;
     } else {
       err = hsa_amd_memory_pool_get_info(args->gpu_pool,

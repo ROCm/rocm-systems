@@ -83,30 +83,6 @@
 #include "common/common.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
-bool rocrtst::g_isEmuMode = false;
-
-bool isEmuModeEnabled() {
-  auto checkMode = []{ 
-    const char* path = "/sys/module/amdgpu/parameters/emu_mode";
-    FILE* file = fopen(path, "r");
-    if (!file) {
-      std::cout << "Failed to open file." << std::endl;
-      return false;
-    }
-
-    int emu_mode = 0;
-    if (fscanf(file, "%d", &emu_mode) != 1) {
-      std::cout << "Failed to parse as a decimal." << std::endl;
-      fclose(file);
-      return false;
-    }
-    fclose(file);
-    return emu_mode != 0;
-  };
-
-  static bool emu_mode = checkMode(); 
-  return emu_mode;
-}
 
 static void SetFlags(TestBase *test) {
   assert(sRocrtstGlvalues != nullptr);
@@ -674,9 +650,8 @@ TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_Interrupt) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
 
-  if (isEmuModeEnabled()) {
+  if (rocrtst::isEmuModeEnabled()) {
     std::cout << "--- Emulation build ---" << std::endl;
-    rocrtst::g_isEmuMode = true;
   }
 
   RocrTstGlobals settings;

@@ -73,7 +73,7 @@
 static const uint32_t kDtifBdfId = 0xC81407;
 
 std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
-  if (rocrtst::g_isEmuMode) {
+  if (rocrtst::isEmuModeEnabled()) {
     return {{"1k", 1024}};
   } else {
     return {{"1k", 1024},
@@ -99,7 +99,7 @@ std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
   }
 }
 
-const int MemoryAsyncCopy::kNumGranularity = rocrtst::g_isEmuMode ? 1 : 20;
+const int MemoryAsyncCopy::kNumGranularity = rocrtst::isEmuModeEnabled() ? 1 : 20;
 const std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::Granularities = MemoryAsyncCopy::initGranularities();
 const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Granularities.back().Size;
 
