@@ -292,7 +292,8 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             att_param.type      = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
             att_param.simd_mask = 0xF;
             for(auto& metric : metrics)
-                if(metric.name() == "SQ_WAVES") rocprofiler_counter_id_t{.handle = metric.id()};
+                if(metric.name() == "SQ_WAVES")
+                    att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
 
             params.push_back(att_param);
         }

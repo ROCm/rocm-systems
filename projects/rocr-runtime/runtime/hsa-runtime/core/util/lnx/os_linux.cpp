@@ -539,6 +539,8 @@ typedef struct EventDescriptor_ {
 EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
   EventDescriptor* eventDescrp;
   eventDescrp = (EventDescriptor*)malloc(sizeof(EventDescriptor));
+  
+  if(!eventDescrp) { return nullptr; }
 
   pthread_mutex_init(&eventDescrp->mutex, NULL);
   pthread_cond_init(&eventDescrp->event, NULL);

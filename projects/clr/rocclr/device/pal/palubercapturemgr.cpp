@@ -57,6 +57,37 @@ UberTraceCaptureMgr* UberTraceCaptureMgr::Create(Pal::IPlatform* platform, const
   return mgr;
 }
 
+static void UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
+                                         GpuUtil::TraceSessionState newState,
+                                         void* pPrivateData)
+{
+    UberTraceCaptureMgr* mgr = static_cast<UberTraceCaptureMgr*>(pPrivateData);
+
+    switch (newState)
+    {
+        // boundary for prepare-phase dispatches
+        case GpuUtil::TraceSessionState::Preparing:
+        // boundary for detailed capture
+        case GpuUtil::TraceSessionState::Running:
+        // boundary for end of detailed trace
+#if (PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939)
+        case GpuUtil::TraceSessionState::Postamble:
+#endif
+        // boundary for end of trace
+        case GpuUtil::TraceSessionState::Waiting:
+        {
+            VirtualGPU* current_gpu = mgr->GetCurrentGPU();
+            if (current_gpu != nullptr) {
+                bool flush_success = current_gpu->queue(MainEngine).flush();
+                assert(flush_success);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 // ================================================================================================
 UberTraceCaptureMgr::UberTraceCaptureMgr(Pal::IPlatform* platform, const Device& device)
     : device_(device),
@@ -67,7 +98,8 @@ UberTraceCaptureMgr::UberTraceCaptureMgr(Pal::IPlatform* platform, const Device&
       trace_session_(platform->GetTraceSession()),
       trace_controller_(nullptr),
       code_object_trace_source_(nullptr),
-      queue_timings_trace_source_(nullptr) {}
+      queue_timings_trace_source_(nullptr),
+      registered_trace_state_callback_(false) {}
 
 // ================================================================================================
 UberTraceCaptureMgr::~UberTraceCaptureMgr() { DestroyUberTraceResources(); }
@@ -116,6 +148,13 @@ bool UberTraceCaptureMgr::CreateUberTraceResources(Pal::IPlatform* platform) {
       break;
     }
 
+    result = trace_session_->RegisterTraceStateChangeCallback(UberTraceStateChangeCallback, this);
+    if (result != Pal::Result::Success) {
+      break;
+    }
+
+    registered_trace_state_callback_ = true;
+
     success = true;
   } while (false);
 
@@ -150,6 +189,11 @@ void UberTraceCaptureMgr::DestroyUberTraceResources() {
     delete queue_timings_trace_source_;
     queue_timings_trace_source_ = nullptr;
   }
+
+  if (registered_trace_state_callback_) {
+    trace_session_->UnregisterTraceStateChangeCallback(UberTraceStateChangeCallback, this);
+    registered_trace_state_callback_ = false;
+  }
 }
 
 // ================================================================================================
@@ -182,7 +226,9 @@ void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel
   GpuUtil::RenderOpCounts opCounts = {
       .dispatchCount = 1u,
   };
+  current_gpu_ = gpu;
   trace_controller_->RecordRenderOps(pQueue, opCounts);
+  current_gpu_ = nullptr;
 
   if (trace_session_->GetTraceSessionState() == GpuUtil::TraceSessionState::Running) {
     RgpSqttMarkerEventType apiEvent = RgpSqttMarkerEventType::CmdNDRangeKernel;
