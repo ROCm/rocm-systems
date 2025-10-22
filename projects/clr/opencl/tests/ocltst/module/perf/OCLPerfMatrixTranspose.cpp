@@ -261,7 +261,7 @@ void OCLPerfMatrixTranspose::run(void) {
 
   _perfInfo = (float)perf;
   testDescString = "";
-  char str[64];
+  char str[90];
   sprintf(str, "(%d,%d) matrix with (%2d,%2d) block size %fms (GB/s) ", width_, height_, blockSize_,
           blockSize_, (sec / (double)MAX_ITERATIONS) * 1000.);
   testDescString += str;

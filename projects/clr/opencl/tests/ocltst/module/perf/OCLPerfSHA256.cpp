@@ -777,7 +777,7 @@ void OCLPerfSHA256::run(void) {
   }
 
   testDescString += "with ";
-  char str[40];
+  char str[45];
   sprintf(str, "%2d ip buff and %2d op buff ", num_input_buf_, num_output_buf_);
   testDescString += str;
 }
