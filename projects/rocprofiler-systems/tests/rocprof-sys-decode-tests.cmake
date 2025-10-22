@@ -90,7 +90,7 @@ rocprofiler_systems_add_validation_test(
     ARGS -l rocDecCreateVideoParser -c 2 -d 1 ${_vcn_counter_names} -p
 )
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST video-decode-sampling)
     set_property(TEST video-decode-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
@@ -126,7 +126,7 @@ rocprofiler_systems_add_validation_test(
     ARGS -l rocJpegCreate -c 1 -d 1 ${_jpeg_counter_names} -p
 )
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST jpeg-decode-sampling)
     set_property(TEST jpeg-decode-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(

@@ -73,7 +73,7 @@
                     "comparison": "greater_than",
                     "description": "Verify that 'rocm_rocdecode_api' string is present in the table",
                     "error_message": "'rocm_rocdecode_api' string not found in the table rocpd_string",
-                    "expected_result": 1,
+                    "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_rocdecode_api%';"
                 }
             ]
@@ -148,10 +148,10 @@
             ],
             "validation_queries": [
                 {
-                    "comparison": "greater_than_or_equal",
+                    "comparison": "greater_than",
                     "description": "Verify that 'rocm_hip_api' string is present in the table",
                     "error_message": "'rocm_hip_api' string not found in the table rocpd_string",
-                    "expected_result": 1,
+                    "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_hip_api%';"
                 }
             ]
