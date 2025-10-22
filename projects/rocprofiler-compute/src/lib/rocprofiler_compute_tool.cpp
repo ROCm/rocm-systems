@@ -560,29 +560,11 @@ void tool_fini(void *user_data) {
 
 } // namespace
 
-rocprofiler_tool_configure_result_t *
-rocprofiler_configure(uint32_t version, const char *runtime_version,
-                      uint32_t priority, rocprofiler_client_id_t *id) {
-  // set the client name
-  id->name = "[rocprofiler-compute]";
 
-  // compute major/minor/patch version info
-  uint32_t major = version / 10000;
-  uint32_t minor = (version % 10000) / 100;
-  uint32_t patch = version % 100;
-
-  // generate info string
-  auto info = std::stringstream{};
-  info << id->name << " [" << __FUNCTION__ << "] (priority=" << priority
-       << ") is using rocprofiler-sdk v" << major << "." << minor << "."
-       << patch << " (" << runtime_version << ")";
-
-  std::clog << info.str() << std::endl;
-
+tool_data_t* create_tool_data(rocprofiler_client_id_t* id) {
   auto *tool_data = new tool_data_t{};
 
-  // Generate a unique output filename using a random hex string (no libuuid
-  // dependency)
+  // Generate a unique output filename using a random hex string (no libuuid dependency)
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint32_t> dis(0, 0xFFFFFFFF);
@@ -665,6 +647,31 @@ rocprofiler_configure(uint32_t version, const char *runtime_version,
     }
   }
 
+  return tool_data;
+}
+
+rocprofiler_tool_configure_result_t *
+rocprofiler_configure(uint32_t version, const char *runtime_version,
+                      uint32_t priority, rocprofiler_client_id_t *id) {
+  // set the client name
+  id->name = "[rocprofiler-compute]";
+
+  // compute major/minor/patch version info
+  uint32_t major = version / 10000;
+  uint32_t minor = (version % 10000) / 100;
+  uint32_t patch = version % 100;
+
+  // generate info string
+  auto info = std::stringstream{};
+  info << id->name << " [" << __FUNCTION__ << "] (priority=" << priority
+       << ") is using rocprofiler-sdk v" << major << "." << minor << "."
+       << patch << " (" << runtime_version << ")";
+
+  std::clog << info.str() << std::endl;
+
+  // init tool data
+  auto *tool_data = create_tool_data(id);
+
   // create configure data
   static auto cfg = rocprofiler_tool_configure_result_t{
       sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini,
@@ -695,27 +702,48 @@ int tool_attach(rocprofiler_client_detach_t /*detach_func*/,
   return 0;
 }
 
-void tool_detach(void * /*user_data*/) {
+void tool_detach(void * user_data) {
   std::clog << "[rocprofiler-compute] In tool detach\n";
   rocprofiler_stop_context(get_client_ctx());
 
-  // auto *tool_data = static_cast<tool_data_t *>(user_data);
-  // generate_output(tool_data);
+  auto *tool_data = static_cast<tool_data_t *>(user_data);
+  generate_output(tool_data);
+
+  delete tool_data;
 }
 
 rocprofiler_tool_configure_attach_result_t *rocprofiler_configure_attach(
-    uint32_t /*version*/, const char * /*runtime_version*/,
-    uint32_t /*priority*/, rocprofiler_client_id_t * /*id*/) {
+    uint32_t version, const char * runtime_version,
+    uint32_t priority, rocprofiler_client_id_t * id) {
   // This function is called right after rocprofiler_configure with the same
   // parameters. The data returned is only used when attaching to a running
   // process.
+
+  // set the client name
+  id->name = "[rocprofiler-compute]";
+
+  // compute major/minor/patch version info
+  uint32_t major = version / 10000;
+  uint32_t minor = (version % 10000) / 100;
+  uint32_t patch = version % 100;
+
+  // generate info string
+  auto info = std::stringstream{};
+  info << id->name << " [" << __FUNCTION__ << "] (priority=" << priority
+       << ") is using rocprofiler-sdk v" << major << "." << minor << "."
+       << patch << " (" << runtime_version << ")";
+
+  std::clog << info.str() << std::endl;
+
+  // init tool data
+  auto *tool_data = create_tool_data(id);
 
   std::clog << "[rocprofiler-compute] [" << __FUNCTION__
             << "] Attach mode configuration called." << std::endl;
   // create configure data using experimental struct with attach/detach support
   static auto cfg = rocprofiler_tool_configure_attach_result_t{
       sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach,
-      &tool_detach, nullptr};
+      &tool_detach, static_cast<void *>(tool_data)};
 
   // return pointer to configure data
   return &cfg;
