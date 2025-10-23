@@ -43,7 +43,7 @@ function(hip_add_executable)
     add_dependencies(${ARG_ADD_TO_TARGET} ${ARG_NAME})
   endif()
 
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${ARG_NAME})
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${ARG_NAME})
 endfunction()
 
 # hip_add_library: Create HIP library with EXCLUDE_FROM_ALL
