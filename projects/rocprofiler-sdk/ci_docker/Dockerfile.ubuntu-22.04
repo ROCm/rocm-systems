@@ -10,6 +10,7 @@ ENV TZ=UTC
 RUN apt-get update && apt-get install -y \
     # Core build tools
     build-essential \
+    coreutils \
     cmake \
     python3 \
     python3-pip \
@@ -123,7 +124,8 @@ RUN chmod +x /usr/local/bin/restore-submodules-cache.sh
 
 # Install Python requirements for rocprofiler-sdk
 RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
+    python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt && \
+    python3 -m pip install cppheaderparser
 
 # Set environment variables used by CI
 ENV GIT_DISCOVERY_ACROSS_FILESYSTEM=1

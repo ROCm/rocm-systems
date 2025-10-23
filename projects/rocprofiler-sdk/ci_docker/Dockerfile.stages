@@ -43,33 +43,57 @@ RUN set -euo pipefail; \
       mkdir -p /etc/apt/keyrings && \
       UBUNTU_CODENAME=$(source /etc/os-release && echo ${UBUNTU_CODENAME:-$VERSION_CODENAME}); \
       case "$UBUNTU_CODENAME" in \
-        jammy) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb" ;; \
-        noble) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0/ubuntu/noble/amdgpu-install_7.0.70000-1_all.deb" ;; \
-        *) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb" ;; \
+        jammy) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0.2/ubuntu/jammy/amdgpu-install_7.0.2.70002-1_all.deb" ;; \
+        noble) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0.2/ubuntu/noble/amdgpu-install_7.0.2.70002-1_all.deb" ;; \
+        *) AMDGPU_DEB_URL="https://repo.radeon.com/amdgpu-install/7.0.2/ubuntu/jammy/amdgpu-install_7.0.2.70002-1_all.deb" ;; \
       esac; \
       wget -N -P /tmp/ "$AMDGPU_DEB_URL" && \
-      apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb && \
+      apt-get install -y /tmp/amdgpu-install*.deb && \
       apt-get update && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev; \
+      DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y rocm-openmp-sdk \
+          libva-amdgpu-dev \
+          rocm-llvm-dev \
+          rocm-opencl rocm-opencl-dev \
+          libgl1-mesa-dev; \
     elif grep -qi "rhel" /etc/os-release; then \
       dnf clean all || true; \
       dnf install -y perl-ExtUtils-MakeMaker python3-pip ca-certificates gzip tar || true; \
       if grep -qi 'VERSION_ID="8.10"' /etc/os-release; then \
-        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el8/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+        echo -e "[ROCm-7.0.2]\nname=ROCm7.0.2\nbaseurl=https://repo.radeon.com/rocm/el8/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/el/8/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+        dnf install dnf-plugins-core -y || true; \
+        dnf config-manager --set-enabled powertools; \
       else \
-        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el10/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+        echo -e "[ROCm-7.0.2]\nname=ROCm7.0.2\nbaseurl=https://repo.radeon.com/rocm/el10/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/el/10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
       fi; \
       dnf clean all; \
-      dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang elfutils-devel; \
+      dnf install -y rocm-openmp rocm-openmp-sdk \
+        rocm-llvm-devel \
+        hipify-clang hipcc \
+        rocm-opencl \
+        mesa-amdgpu-libGL-devel \
+        libva-devel; \
       dnf install -y libva-amdgpu-devel || true; \
+      dnf install -y rocm-opencl-devel || true; \
+      dnf install -y ocl-icd || true; \
+      python3.11 -m pip install CppHeaderParser || true; \
+      python3.6 -m pip install CppHeaderParser || true; \
+      /usr/bin/python3 -m pip install CppHeaderParser || true; \
       python3 -m pip install -U awscli; \
     else \
-      echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
+      echo -e "[ROCm-7.0.2]\nname=ROCm7.0.2\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
       echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
       zypper --gpg-auto-import-keys refresh || true; \
-      zypper --non-interactive install -y python3-pip ca-certificates gzip tar rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel libva-amdgpu-devel; \
+      zypper --non-interactive install -y \
+        rocm-openmp rocm-openmp-sdk \
+        rocm-llvm-devel \
+        hipify-clang hipcc \
+        libva-amdgpu-devel \
+        rocm-opencl rocm-opencl-devel \
+        mesa-amdgpu-libGL-devel Mesa-libGL-devel; \
+      python3.6 -m pip install CppHeaderParser || true; \
       python3 -m pip install -U awscli; \
       zypper clean --all || true; \
     fi
@@ -78,7 +102,7 @@ RUN set -euo pipefail; \
 RUN set -euo pipefail; \
     aws s3 cp "s3://therock-nightly-tarball/${TARBALL_KEY}" "/opt/rocm-${GPU_TYPE}.tar.gz" --no-sign-request; \
     TARBALL="/opt/rocm-${GPU_TYPE}.tar.gz"; \
-    DEST_DIR="/opt/rocm-7.0.0"; \
+    DEST_DIR="/opt/rocm-7.0.2"; \
     mkdir -p "${DEST_DIR}"; \
     EXTRACT_DIR="$(mktemp -d)"; \
     tar --no-same-owner --no-same-permissions --delay-directory-restore -xzf "${TARBALL}" -C "${EXTRACT_DIR}"; \
@@ -92,7 +116,7 @@ RUN set -euo pipefail; \
     cp -r "${SRC_DIR}"/* "${DEST_DIR}/"; \
     shopt -u dotglob; \
     rm -rf "${EXTRACT_DIR}" "${TARBALL}"; \
-    ln -s -f /opt/rocm-7.0.0 /opt/rocm
+    ln -s -f /opt/rocm-7.0.2 /opt/rocm
 
 
 # ----------------------------------------
@@ -229,18 +253,18 @@ RUN set -euo pipefail; \
       cd /workspace/projects/clr; \
       export HIP_DIR=/workspace/projects/hip; \
       export CLR_DIR=/workspace/projects/clr; \
+      export LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$LD_LIBRARY_PATH; \
+      export PATH=${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:$PATH; \
       cmake -G Ninja -B build-clr \
         -DHIP_COMMON_DIR=$HIP_DIR \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DHIP_PLATFORM=amd \
         -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
-        -DCMAKE_C_COMPILER=${LLVM_PATH}/bin/amdclang \
-        -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++ \
         -DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
+        -DHIP_LLVM_ROOT=${ROCM_PATH}/lib/llvm \
         -DHIP_CATCH_TEST=0 \
         -DCLR_BUILD_HIP=ON \
-        -DCLR_BUILD_OCL=ON \
-        -DHIP_LLVM_ROOT=${ROCM_PATH}/lib/llvm; \
+        -DCLR_BUILD_OCL=ON; \
       cmake --build build-clr --target all --parallel 16; \
       cmake --build build-clr --target install; \
       echo "CLR/HIP Runtime installed"; \
@@ -274,6 +298,8 @@ RUN set -euo pipefail; \
     if [ "${BUILD_ROCDECODE}" = "true" ]; then \
       echo "Building ROCDecode..."; \
       cd /workspace/rocDecode; \
+      export LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$LD_LIBRARY_PATH; \
+      export PATH=${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:$PATH; \
       cmake -G Ninja -B build-rocdecode \
         -DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
         -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
@@ -291,8 +317,11 @@ RUN set -euo pipefail; \
     if [ "${BUILD_ROCJPEG}" = "true" ]; then \
       echo "Building ROCJPEG..."; \
       cd /workspace/rocJPEG; \
+      export LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$LD_LIBRARY_PATH; \
+      export PATH=${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:$PATH; \
+      ls -lah ${ROCM_PATH}/lib; ls -lah ${ROCM_PATH}; ls -lah /opt; \
       cmake -G Ninja -B build-rocjpeg \
-        -DGPU_TARGETS="gfx942" \
+        -DGPU_TARGETS="gfx942;gfx950;gfx1101;gfx1201" \
         -DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
         -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
         -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++; \

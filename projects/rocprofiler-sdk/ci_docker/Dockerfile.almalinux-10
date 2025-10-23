@@ -28,6 +28,7 @@ RUN dnf update -y && dnf install -y \
     zlib-devel \
     openssl-devel \
     sqlite-devel \
+    elfutils-devel \
     # Additional development tools
     diffutils \
     patch \
@@ -55,7 +56,7 @@ RUN curl -L https://github.com/mozilla/sccache/releases/download/v0.7.4/sccache-
     rm -rf /tmp/sccache-*
 
 # Install additional Python tools
-RUN python3 -m pip install --upgrade pip setuptools wheel
+RUN python3 -m pip install --upgrade pip setuptools wheel cppheaderparser
 
 # Install AWS CLI for later stages
 RUN python3 -m pip install -U awscli
