@@ -137,6 +137,7 @@ def is_roofline_shown(
     panel: dict[str, Any],
     roof_plot: Optional[str],
     hidden_cols: list[str],
+    filter_panel_ids: set[int],
 ) -> bool:
     has_roofline_style = any(
         data_source.get(table_type, {}).get("cli_style") == "Roofline"
@@ -144,10 +145,14 @@ def is_roofline_shown(
         for table_type in data_source
     )
 
-    if not has_roofline_style or (
-        args.filter_metrics
-        and "4" not in args.filter_metrics
-        and "roof" not in args.filter_metrics
+    if (
+        not has_roofline_style
+        or (
+            args.filter_metrics
+            and "4" not in args.filter_metrics
+            and "roof" not in args.filter_metrics
+        )
+        or (filter_panel_ids and 4 not in filter_panel_ids)
     ):
         return False
 
@@ -453,7 +458,7 @@ def show_all(
 
     panel_alias = get_panel_alias()  # alias -> panel_id (string or int)
 
-    filter_panel_ids = set()
+    filter_panel_ids: set[int] = set()
     for bid in raw_filter_panel_ids:
         bid_s = str(bid)
 
@@ -486,30 +491,8 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        # Panel-level Filtering
-        if (
-            not args.filter_metrics
-            and filter_panel_ids
-            and panel_id > 100
-            and panel_id not in filter_panel_ids
-        ):
-            panel_table_ids = {
-                tbl_cfg["id"]
-                for ds in panel["data source"]
-                for _, tbl_cfg in ds.items()
-            }
-            if panel_table_ids.isdisjoint(filter_panel_ids):
-                for ds in panel["data source"]:
-                    for _, tbl_cfg in ds.items():
-                        table_id_str = f"{tbl_cfg['id'] // 100}.{tbl_cfg['id'] % 100}"
-                        console_log(
-                            f"Not showing table not selected during profiling: "
-                            f"{table_id_str} {tbl_cfg['title']}"
-                        )
-                continue
-
         if panel_id == 400 and is_roofline_shown(
-            args, runs, output, panel, roof_plot, hidden_cols
+            args, runs, output, panel, roof_plot, hidden_cols, filter_panel_ids
         ):
             continue
 
