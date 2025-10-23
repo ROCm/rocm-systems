@@ -31,18 +31,16 @@ from contextlib import contextmanager
 from utils.logger import (
     console_debug,
     console_warning,
+    console_error,
 )
 
-PYTHON_LIB_PATH = os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi"
-sys.path.insert(0, PYTHON_LIB_PATH)
-# If the python library is installed, it will overwrite the path above
+sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
 
 try:
     import amdsmi
 except ImportError as e:
     console_warning(f"Unhandled import error: {e}")
-    console_warning("Failed to import the amdsmi Python library.")
-    sys.exit(1)
+    console_error("Failed to import the amdsmi Python library.")
 
 
 @contextmanager
@@ -77,12 +75,7 @@ def get_device_handle() -> "amdsmi.ProcessorHandle | None":
 def get_mem_max_clock() -> float:
     """Get the maximum memory clock of the device."""
     try:
-        # Extract max memory clock frequency
-        amd_smi_mclk = amdsmi.amdsmi_get_gpu_od_volt_info(get_device_handle())[
-            "curr_sclk_range"
-        ]["upper_bound"]
-        # 100 Mhz -> 100
-        return amd_smi_mclk / 10**6
+        return amdsmi.amdsmi_get_clock_info(get_device_handle(), amdsmi.AmdSmiClkType.GFX)["max_clk"]
     except Exception as e:
         console_warning(f"Error getting memory clocks: {e}")
         return 0.0
@@ -91,14 +84,18 @@ def get_mem_max_clock() -> float:
 def get_gpu_model() -> str:
     """Get the GPU model name."""
     try:
-        board_info = amdsmi.amdsmi_get_gpu_board_info(get_device_handle())
-        gpu_model = board_info["product_name"]
-
-        console_debug(f"GPU Model: {gpu_model}")
-
-        return gpu_model
+        gpu_model_info = (
+            # board -> product_name
+            amdsmi.amdsmi_get_gpu_board_info(get_device_handle())["product_name"],
+            # asic -> market_name
+            amdsmi.amdsmi_get_gpu_asic_info(get_device_handle())["market_name"],
+            # vbios -> name
+            amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())["name"],
+        )
+        console_debug(f"gpu model info: {str(gpu_model_info)}")
+        return gpu_model_info
     except Exception as e:
-        console_warning(f"Error getting GPU model: {e}")
+        console_warning(f"Error getting gpu model info: {e}")
         return "N/A"
 
 
@@ -108,9 +105,7 @@ def get_gpu_vbios_part_number() -> str:
         vbios_part_number = amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())[
             "part_number"
         ]
-
         console_debug(f"GPU VBIOS Part Number: {vbios_part_number}")
-
         return vbios_part_number
     except Exception as e:
         console_warning(f"Error getting GPU VBIOS part number: {e}")
@@ -121,9 +116,7 @@ def get_gpu_compute_partition() -> str:
     """Get the GPU compute partition."""
     try:
         compute_partition = amdsmi.amdsmi_get_gpu_compute_partition(get_device_handle())
-
         console_debug(f"GPU Compute Partition: {compute_partition}")
-
         return compute_partition
     except Exception as e:
         console_warning(f"Error getting GPU compute partition: {e}")
@@ -134,9 +127,7 @@ def get_gpu_memory_partition() -> str:
     """Get the GPU memory partition."""
     try:
         memory_partition = amdsmi.amdsmi_get_gpu_memory_partition(get_device_handle())
-
         console_debug(f"GPU Memory Partition: {memory_partition}")
-
         return memory_partition
     except Exception as e:
         console_warning(f"Error getting GPU memory partition: {e}")

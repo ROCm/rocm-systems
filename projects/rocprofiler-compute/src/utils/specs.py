@@ -263,12 +263,12 @@ def extract_gpu_info() -> dict[str, Any]:
         result["memory_partition"] = get_gpu_memory_partition()
 
     # Apply defaults and warnings
-    if result["compute_partition"] == "N/A" or result["compute_partition"] is None:
+    if result["compute_partition"] == "N/A" or not result["compute_partition"]:
         console_warning("Cannot detect accelerator partition from amd-smi.")
         console_warning("Applying default accelerator partition: SPX")
         result["compute_partition"] = "SPX"
 
-    if result["memory_partition"] == "N/A" or result["memory_partition"] is None:
+    if result["memory_partition"] == "N/A" or not result["memory_partition"]:
         console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(

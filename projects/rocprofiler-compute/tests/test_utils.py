@@ -8706,23 +8706,11 @@ def test_get_mem_max_clock():
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
-        with mock.patch("amdsmi.amdsmi_get_gpu_od_volt_info") as mem_max_clock_mock:
-            mem_max_clock_mock.return_value = {
-                "curr_sclk_range": {
-                    "upper_bound": 200.0 * 10**6,
-                }
-            }
+        with mock.patch("amdsmi.amdsmi_get_clock_info") as mem_max_clock_mock:
+            mem_max_clock_mock.return_value = {"max_clk": 100}
             clk = get_mem_max_clock()
             mem_max_clock_mock.assert_called_once()
-            assert clk == 200.0
-
-        with mock.patch(
-            "amdsmi.amdsmi_get_gpu_od_volt_info",
-            side_effect=Exception("Mock exception"),
-        ) as mem_max_clock_mock:
-            clk = get_mem_max_clock()
-            mem_max_clock_mock.assert_called_once()
-            assert clk == 0.0
+            assert clk == 100
 
 
 def test_get_gpu_model():
@@ -8731,12 +8719,14 @@ def test_get_gpu_model():
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch("amdsmi.amdsmi_get_gpu_board_info") as device_name_mock:
-            device_name_mock.return_value = {
-                "product_name": "AMD MIXXX",
-            }
-            model = get_gpu_model()
-            device_name_mock.assert_called_once()
-            assert model == "AMD MIXXX"
+            with mock.patch("amdsmi.amdsmi_get_gpu_asic_info") as asic_name_mock:
+                with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_name_mock:
+                    device_name_mock.return_value = {"product_name": "AMD MIXXX"}
+                    asic_name_mock.return_value = {"market_name": "MIXXX"}
+                    vbios_name_mock.return_value = {"name": "mixxx"}
+                    model = get_gpu_model()
+                    device_name_mock.assert_called_once()
+                    assert model == ("AMD MIXXX", "MIXXX", "mixxx")
 
         with mock.patch(
             "amdsmi.amdsmi_get_gpu_board_info", side_effect=Exception("Mock exception")

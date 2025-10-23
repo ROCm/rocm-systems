@@ -200,7 +200,12 @@ class OmniSoC_Base:
         Falls back through multiple methods if the primary method fails.
         """
         with amdsmi_ctx():
-            gpu_model = get_gpu_model()
+            gpu_model = "N/A"
+            for model in mi_gpu_specs.get_all_gpu_models():
+                for amdsmi_gpu_model in get_gpu_model():
+                    if model.lower() in amdsmi_gpu_model.lower():
+                        gpu_model = model
+                        break
 
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
 
