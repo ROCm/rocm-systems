@@ -76,7 +76,7 @@ set(TBB_INCLUDE_DIR ${TBB_INCLUDEDIR})
 # The specific TBB libraries we need NB: This should _NOT_ be a cache variable
 set(_tbb_components tbb tbbmalloc_proxy tbbmalloc)
 
-if(NOT BUILD_TBB)
+if(NOT ROCPROFSYS_BUILD_TBB)
     find_package(TBB ${TBB_MIN_VERSION} COMPONENTS ${_tbb_components})
 endif()
 
@@ -92,10 +92,10 @@ elseif(STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."
     )
-elseif(NOT BUILD_TBB)
+elseif(NOT ROCPROFSYS_BUILD_TBB)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "TBB was not found. Either configure cmake to find TBB properly or set BUILD_TBB=ON to download and build"
+        "TBB was not found. Either configure cmake to find TBB properly or set ROCPROFSYS_BUILD_TBB=ON to download and build"
     )
 else()
     # If we didn't find a suitable version on the system, then download one from the web
@@ -237,7 +237,7 @@ target_compile_definitions(rocprofiler-systems-tbb INTERFACE ${TBB_DEFINITIONS})
 target_link_directories(rocprofiler-systems-tbb INTERFACE ${TBB_LIBRARY_DIRS})
 target_link_libraries(rocprofiler-systems-tbb INTERFACE ${TBB_LIBRARIES})
 
-rocprofiler_systems_message(STATUS "TBB include directory: ${TBB_INCLUDE_DIRS}")
-rocprofiler_systems_message(STATUS "TBB library directory: ${TBB_LIBRARY_DIRS}")
-rocprofiler_systems_message(STATUS "TBB libraries: ${TBB_LIBRARIES}")
-rocprofiler_systems_message(STATUS "TBB definitions: ${TBB_DEFINITIONS}")
+rocprofiler_systems_message(STATUS "TBB include directory: ${TBB_INCLUDE_DIRS}.")
+rocprofiler_systems_message(STATUS "TBB library directory: ${TBB_LIBRARY_DIRS}.")
+rocprofiler_systems_message(STATUS "TBB libraries: ${TBB_LIBRARIES}.")
+rocprofiler_systems_message(STATUS "TBB definitions: ${TBB_DEFINITIONS}.")
