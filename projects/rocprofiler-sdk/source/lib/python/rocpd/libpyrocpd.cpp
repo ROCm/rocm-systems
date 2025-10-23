@@ -529,42 +529,32 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             // (1) the process with the earliest start time
             // (2) find the process with the longest duration
             uint64_t min_start_time = std::numeric_limits<uint64_t>::max();
-            uint64_t max_fini_time  = 0;
+            uint64_t max_fini_time  = std::numeric_limits<uint64_t>::min();
             for(auto obj : {data.connection})
             {
                 auto* conn = rocpd::interop::get_connection(std::move(obj));
 
                 // min start
-                sqlite3_stmt* _stmt_min_start;
-                sqlite3_prepare_v2(
-                    conn, "SELECT MIN(start) FROM processes;", -1, &_stmt_min_start, nullptr);
-                uint64_t _min_start_time = std::numeric_limits<uint64_t>::max();
-                if(sqlite3_step(_stmt_min_start) == SQLITE_ROW)
+                sqlite3_stmt* _stmt_min_start_max_fini = nullptr;
+                uint64_t      _min_start_time          = std::numeric_limits<uint64_t>::max();
+                uint64_t      _max_fini_time           = std::numeric_limits<uint64_t>::min();
+
+                sqlite3_prepare_v2(conn,
+                                   "SELECT MIN(start), MAX(fini) FROM processes;",
+                                   -1,
+                                   &_stmt_min_start_max_fini,
+                                   nullptr);
+                if(sqlite3_step(_stmt_min_start_max_fini) == SQLITE_ROW)
                 {
                     _min_start_time =
-                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start, 0));
+                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start_max_fini, 0));
+                    _max_fini_time =
+                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start_max_fini, 1));
                 }
 
-                sqlite3_finalize(_stmt_min_start);
-                if(min_start_time > _min_start_time)
-                {
-                    min_start_time = _min_start_time;
-                }
-                //// max fini
-                sqlite3_stmt* _stmt_max_fini;
-                sqlite3_prepare_v2(
-                    conn, "SELECT MAX(fini) FROM processes;", -1, &_stmt_max_fini, nullptr);
-                uint64_t _max_fini_time = 0;
-                if(sqlite3_step(_stmt_max_fini) == SQLITE_ROW)
-                {
-                    _max_fini_time = static_cast<uint64_t>(sqlite3_column_int64(_stmt_max_fini, 0));
-                }
-
-                sqlite3_finalize(_stmt_max_fini);
-                if(max_fini_time < _max_fini_time)
-                {
-                    max_fini_time = _max_fini_time;
-                }
+                sqlite3_finalize(_stmt_min_start_max_fini);
+                min_start_time = std::min(min_start_time, _min_start_time);
+                max_fini_time  = std::max(max_fini_time, _max_fini_time);
             }
 
             auto otf2_session =

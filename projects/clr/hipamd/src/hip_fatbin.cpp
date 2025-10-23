@@ -502,8 +502,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // Create a list of all targets, which the current device can run
   // For example, gfx1030 can run gfx1030, gfx10-geneeric, amdgcnspirv
   std::set<std::string> unique_isa_names;
-  const std::string spirv_isa_name{"spirv64-amd-amdhsa--amdgcnspirv"};
-  unique_isa_names.insert(spirv_isa_name);  // Insert SPIRV ISA name
+  const std::string spirv_isa_name_empty{"spirv64-amd-amdhsa--amdgcnspirv"};
+  const std::string spirv_isa_name{"spirv64-amd-amdhsa-unknown-amdgcnspirv"};
+  unique_isa_names.insert(spirv_isa_name_empty);  // Insert SPIRV ISA name
+  unique_isa_names.insert(spirv_isa_name);
   for (auto device : devices) {
     std::string device_name = device->devices()[0]->isa().isaName();
     unique_isa_names.insert(device_name);
@@ -528,7 +530,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   hipError_t hip_status = hipErrorInvalidImage;
   do {
-    bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end();
+    bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end() ||
+                           code_obj_map.find(spirv_isa_name_empty) != code_obj_map.end();
     for (auto device : devices) {
       std::string device_name = device->devices()[0]->isa().isaName();
       auto generic_target_name = TargetToGeneric(device_name);   // Generic Code Object
@@ -581,7 +584,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
 
+        // Handle both SPIRV isa name
         auto spirv_isa_handle = code_obj_map.find(spirv_isa_name);
+        if (spirv_isa_handle == code_obj_map.end()) {
+          spirv_isa_handle = code_obj_map.find(spirv_isa_name_empty);
+        }
         if (auto comgr_status =
                 amd::Comgr::set_data(spirv_data.get(), spirv_isa_handle->second.second /* size */,
                                      reinterpret_cast<const char*>(spirv_isa_handle->second.first)

@@ -27,8 +27,7 @@
 
 #include "trace_callbacks.hpp"
 
-constexpr double WAVE_RATIO_TOLERANCE = 0.05;
-constexpr size_t NUM_KERNELS          = 5;
+constexpr size_t NUM_KERNELS = 5;
 
 namespace ATTTest
 {
@@ -73,7 +72,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
         "code object tracing service configure");
 
     std::vector<rocprofiler_thread_trace_parameter_t> params{};
-    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, 1});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, {1}});
 
     std::vector<rocprofiler_agent_id_t> agents{};
 
