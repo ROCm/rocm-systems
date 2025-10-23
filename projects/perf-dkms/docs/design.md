@@ -521,9 +521,18 @@ Bits   Field         Description
 24-31  wgp           Work Group Processor index (0-255)
 32-39  cu            Compute Unit index (0-255)
 40     aggregate     Aggregate across dimensions (future)
-41     sample_all    Sample all instances (future)
-42-63  reserved      Reserved for future use
+41-63  reserved      Reserved for future use
 ```
+
+### Default Behavior
+
+When dimensions are not specified (config1=0), the driver operates in **broadcast mode**: it reads all hardware instances and aggregates (sums) the results.
+
+When specific dimensions are provided, unspecified sub-dimensions default to 0. For example:
+- `se=2` is equivalent to `se=2,sa=0,wgp=0,cu=0` - targets SE 2, SA 0, WGP 0
+- `se=2,sa=1` is equivalent to `se=2,sa=1,wgp=0,cu=0` - targets SE 2, SA 1, WGP 0
+
+This allows hierarchical targeting of specific hardware units without requiring users to specify all levels of the hierarchy.
 
 ### Named Parameter Syntax
 
@@ -571,8 +580,7 @@ The driver exposes format attributes via sysfs that perf uses to parse parameter
 ├── sa             (config1:16-23)   - SA index
 ├── wgp            (config1:24-31)   - WGP index
 ├── cu             (config1:32-39)   - CU index
-├── aggregate      (config1:40)      - Aggregate flag
-└── sample_all     (config1:41)      - Sample all flag
+└── aggregate      (config1:40)      - Aggregate flag
 ```
 
 When a user specifies `se=2`, perf reads the `se` format file, sees it maps to `config1:8-15`, and encodes the value 2 into those bits of event->attr.config1.
@@ -583,22 +591,18 @@ The `pmu_dimension.h` header provides helper functions:
 
 ```c
 /* Extract dimensions from config1 field */
-static inline void pmu_extract_dimensions(u64 config1, 
+static inline void pmu_extract_dimensions(u64 config1,
                                           struct pmu_dimension_coords *dims)
 {
-    if (config1 == 0) {
-        dims->valid = false;
-        return;
-    }
-    
     dims->xcc = (config1 >> PMU_DIM_XCC_SHIFT) & PMU_DIM_XCC_MASK;
     dims->se = (config1 >> PMU_DIM_SE_SHIFT) & PMU_DIM_SE_MASK;
     dims->sa = (config1 >> PMU_DIM_SA_SHIFT) & PMU_DIM_SA_MASK;
     dims->wgp = (config1 >> PMU_DIM_WGP_SHIFT) & PMU_DIM_WGP_MASK;
     dims->cu = (config1 >> PMU_DIM_CU_SHIFT) & PMU_DIM_CU_MASK;
     dims->aggregate = (config1 >> PMU_DIM_AGGREGATE_SHIFT) & 1;
-    dims->sample_all = (config1 >> PMU_DIM_SAMPLE_ALL_SHIFT) & 1;
-    dims->valid = true;
+
+    /* Mark as valid if any dimension or flag is non-zero */
+    dims->valid = (config1 != 0);
 }
 
 /* Validate dimensions against hardware limits */
@@ -812,13 +816,6 @@ global_dim_limits.max_cu = arch->num_cu - 1;
 perf stat -e amdgpu_pmu/sq_waves,se=0,aggregate=1/ -a sleep 1
 ```
 Implementation: Allocate multiple counter instances, configure each for different SA/WGP within the SE, sum results.
-
-**Sample-All Mode** (config1 bit 41):  
-```bash
-# Sample all SEs and return per-SE breakdown
-perf stat -e amdgpu_pmu/sq_waves,sample_all=1/ -a sleep 1
-```
-Implementation: Allocate counters for all instances, return array of per-instance values in perf_event->count.
 
 **Per-CU Monitoring**:
 Currently focused on SE/SA/WGP. CU-level monitoring would require additional hardware support and more fine-grained GRBM_GFX_INDEX configuration.

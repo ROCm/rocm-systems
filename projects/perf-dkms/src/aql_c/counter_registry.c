@@ -24,7 +24,17 @@ struct pmu_dimension_coords;
 
 /* Base counter definitions - architecture agnostic */
 static const counter_def_t base_counters[] = {
-    /* GL2C Block Counters - L2 cache is per SE/SA */
+    /*
+     * GL2C Block Counters - DIM_SE_SA (L2 Cache per Shader Array)
+     *
+     * Dimension rationale: The GL2C (Graphics L2 Cache) is a hardware block that
+     * exists once per Shader Array (SA) in the GPU hierarchy. Each SE contains
+     * multiple SAs, and each SA has its own dedicated L2 cache instance. This
+     * hardware architecture means GL2C counters naturally vary across SE and SA
+     * dimensions, but not WGP or CU (which share the same L2 cache within an SA).
+     *
+     * Hardware topology: SE -> SA -> [GL2C instance] -> WGPs (share this cache)
+     */
     {COUNTER_GL2C_EA_RDREQ, "gl2c_ea_rdreq", HW_IP_BLOCK_GL2C, DIM_SE_SA},
     {COUNTER_GL2C_EA_RDREQ_128B, "gl2c_ea_rdreq_128b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
     {COUNTER_GL2C_EA_RDREQ_32B, "gl2c_ea_rdreq_32b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
@@ -35,7 +45,18 @@ static const counter_def_t base_counters[] = {
     {COUNTER_GL2C_HIT, "gl2c_hit", HW_IP_BLOCK_GL2C, DIM_SE_SA},
     {COUNTER_GL2C_MISS, "gl2c_miss", HW_IP_BLOCK_GL2C, DIM_SE_SA},
 
-    /* SQ Block Counters - Shader counters are per SE/SA/WGP */
+    /*
+     * SQ Block Counters - DIM_SE_SA_WGP (Shader Quad per Work Group Processor)
+     *
+     * Dimension rationale: The SQ (Shader Quad / Shader Engine Sequencer) contains
+     * shader execution resources that exist at the Work Group Processor (WGP) level.
+     * Each WGP has its own independent shader execution units, instruction buffers,
+     * and local data share (LDS). This hardware architecture means shader-related
+     * counters (instructions, waves, cycles) naturally vary across SE, SA, and WGP
+     * dimensions, providing the finest granularity for performance analysis.
+     *
+     * Hardware topology: SE -> SA -> WGP -> [SQ instance with CUs/SIMDs]
+     */
     {COUNTER_SQC_LDS_BANK_CONFLICT, "sqc_lds_bank_conflict", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
     {COUNTER_SQC_LDS_IDX_ACTIVE, "sqc_lds_idx_active", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
     {COUNTER_SQ_ACCUM_PREV, "sq_accum_prev", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
@@ -59,12 +80,30 @@ static const counter_def_t base_counters[] = {
     {COUNTER_SQ_WAVES, "sq_waves", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
     {COUNTER_SQ_WAVE_CYCLES, "sq_wave_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
 
-    /* TA Block Counters - Texture addresser is per SE/SA/WGP */
+    /*
+     * TA Block Counters - DIM_SE_SA_WGP (Texture Addresser per WGP)
+     *
+     * Dimension rationale: The TA (Texture Addresser) handles texture and buffer
+     * addressing for each Work Group Processor. Like the SQ, texture units exist
+     * at the WGP level, making TA counters naturally dimensional across SE/SA/WGP.
+     *
+     * Hardware topology: SE -> SA -> WGP -> [TA instance]
+     */
     {COUNTER_TA_BUFFER_LOAD_WAVEFRONTS, "ta_buffer_load_wavefronts", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
     {COUNTER_TA_BUFFER_STORE_WAVEFRONTS, "ta_buffer_store_wavefronts", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
     {COUNTER_TA_TA_BUSY, "ta_ta_busy", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
 
-    /* GRBM Block Counters - Global register bus manager, no dimension support */
+    /*
+     * GRBM Block Counters - DIM_NONE (Global, not per-dimension)
+     *
+     * Dimension rationale: The GRBM (Graphics Register Bus Manager) is a global
+     * hardware block that exists once per GPU, not per SE/SA/WGP. It manages the
+     * register bus and tracks global GPU activity. Since there is only one GRBM
+     * instance, these counters have no dimensional variation - they provide
+     * GPU-wide metrics that cannot be broken down by shader engine or other topology.
+     *
+     * Hardware topology: GPU -> [Single GRBM instance] (global, not replicated)
+     */
     {COUNTER_GRBM_COUNT, "grbm_count", HW_IP_BLOCK_GRBM, DIM_NONE},
     {COUNTER_GRBM_GUI_ACTIVE, "grbm_gui_active", HW_IP_BLOCK_GRBM, DIM_NONE},
 };

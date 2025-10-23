@@ -161,8 +161,14 @@ Bits 16-23:  sa
 Bits 24-31:  wgp
 Bits 32-39:  cu
 Bit 40:      aggregate (future)
-Bit 41:      sample_all (future)
 ```
+
+**Default Behavior**:
+When dimensions are not specified (no se=/sa=/wgp= parameters), the driver operates in broadcast mode: it reads all hardware instances and aggregates the results.
+
+When you specify dimensions, unspecified sub-dimensions default to 0:
+- `se=2` means `se=2,sa=0,wgp=0,cu=0`
+- `se=2,sa=1` means `se=2,sa=1,wgp=0,cu=0`
 
 ### Combining Multiple Events
 

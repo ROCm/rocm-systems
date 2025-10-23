@@ -112,6 +112,9 @@ void aql_pmu_get_stats(struct aql_perf_stats *stats);
 #define pmu_info(fmt, ...) \
     pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 
+#define pmu_warn(fmt, ...) \
+    pr_warn("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
+
 #define pmu_err(fmt, ...) \
     pr_err("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 

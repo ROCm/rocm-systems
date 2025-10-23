@@ -20,6 +20,7 @@
 #include "aql_c/counter_registry.h"
 #include "aql_c/packet_generation.h"
 #include "aql_c/pm4_packets.h"
+#include "aql_c/arch_creator_common.h"
 
 /* External KFD functions */
 extern int kfd_ioctl_submit_ib_packet(struct file *filep, struct kfd_process *p,
@@ -167,20 +168,10 @@ int aql_perf_create_start_packet(struct aql_measurement *measurement,
              block->name, event_id);
 
     /* Atomically allocate a counter from the block */
-    /* Use dimension-specific allocation if dimensions are specified */
-    if (measurement->dimension_specific && measurement->target_dims.valid) {
-        allocated_counter = aql_counter_try_allocate_dimension(block, event_id, measurement->event,
-                                                               &measurement->target_dims, arch);
-        if (!allocated_counter) {
-            aql_err("[PMU] Failed to allocate dimension-specific counter from block %s (all busy)", block->name);
-            return -EBUSY;
-        }
-    } else {
-        allocated_counter = aql_counter_try_allocate(block, event_id, measurement->event);
-        if (!allocated_counter) {
-            aql_err("[PMU] Failed to allocate counter from block %s (all busy)", block->name);
-            return -EBUSY;
-        }
+    allocated_counter = aql_counter_try_allocate(block, event_id, measurement->event);
+    if (!allocated_counter) {
+        aql_err("[PMU] Failed to allocate counter from block %s (all busy)", block->name);
+        return -EBUSY;
     }
 
     /* Build counter_info_t structure */
@@ -768,10 +759,66 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
                  measurement->gpu_id, measurement->allocated_counter);
     }
 
-    counter_value = result_buffer ? *result_buffer : -1;
+    if (!result_buffer) {
+        counter_value = -1;
+    } else if (measurement->dimension_specific) {
+        /*
+         * Dimension-specific counter: filter to return only the specific instance.
+         * The GPU read packet collects all instances in a flat array.
+         * Calculate the flat index for the target dimension and return only that value.
+         */
+        arch_t *arch = session->archs[gpu_idx];
+        uint32_t flat_idx = encode_dimension_index(
+            measurement->target_dims.se,
+            measurement->target_dims.sa,
+            measurement->target_dims.wgp,
+            arch->num_sa,
+            arch->num_wgp_per_sa
+        );
 
-    aql_info("[PMU] READ_SYNC: GPU %u, read counter_value=%llu from buffer (buffer=%p)",
-             measurement->gpu_id, counter_value, result_buffer);
+        counter_value = result_buffer[flat_idx];
+
+        aql_info("[PMU] READ_SYNC: GPU %u, dimension-specific read: SE=%u SA=%u WGP=%u -> flat_idx=%u, value=%llu",
+                 measurement->gpu_id,
+                 measurement->target_dims.se,
+                 measurement->target_dims.sa,
+                 measurement->target_dims.wgp,
+                 flat_idx, counter_value);
+    } else {
+        /*
+         * Non-dimension-specific counter: sum all instances.
+         * The result buffer contains values for all SE x SA x WGP instances.
+         */
+        arch_t *arch = session->archs[gpu_idx];
+        const counter_def_t *counter_def = lookup_counter_by_id((counter_id_t)measurement->counter_id);
+        block_info_t *block = counter_def ? arch->block_map.blocks[counter_def->hw_block] : NULL;
+
+        counter_value = 0;
+
+        if (block) {
+            /* Determine total number of instances based on block dimensions */
+            uint32_t num_instances = 1;
+            for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+                num_instances *= block->dimensions[dim_idx].size;
+            }
+
+            /* Sum all instances */
+            for (uint32_t i = 0; i < num_instances; i++) {
+                counter_value += result_buffer[i];
+            }
+
+            aql_info("[PMU] READ_SYNC: GPU %u, aggregated %u instances, total=%llu",
+                     measurement->gpu_id, num_instances, counter_value);
+        } else {
+            /* Fallback: read first value if block info unavailable */
+            counter_value = result_buffer[0];
+            aql_warn("[PMU] READ_SYNC: GPU %u, no block info, using first value=%llu",
+                     measurement->gpu_id, counter_value);
+        }
+    }
+
+    aql_info("[PMU] READ_SYNC: GPU %u, final counter_value=%llu (dimension_specific=%d)",
+             measurement->gpu_id, counter_value, measurement->dimension_specific);
 
     /* Update cached value */
     measurement->last_counter_value = counter_value;

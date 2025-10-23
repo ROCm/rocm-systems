@@ -27,11 +27,16 @@
  *   Bits 24-31  : WGP index (0-255)
  *   Bits 32-39  : CU index (0-255)
  *   Bit  40     : Aggregate flag (1 = aggregate across dimensions)
- *   Bit  41     : Sample all flag (1 = sample all instances)
- *   Bits 42-63  : Reserved (must be zero)
+ *   Bits 41-63  : Reserved (must be zero)
  *
  * This encoding allows perf to specify dimensions either via named parameters
  * (e.g., "se=2,sa=1") or raw config1 values (e.g., "config1=0x00010200").
+ *
+ * Default Behavior:
+ *   When dimensions are not specified (config1=0), the driver operates in
+ *   broadcast mode: all hardware instances are read and the results are
+ *   aggregated (summed). When specific dimensions are provided (e.g., se=2),
+ *   unspecified sub-dimensions default to 0 (e.g., se=2 means se=2,sa=0,wgp=0).
  */
 
 /* Bit field layout constants */
@@ -46,7 +51,6 @@
 #define PMU_DIM_CU_SHIFT        32
 #define PMU_DIM_CU_MASK         0xFF
 #define PMU_DIM_AGGREGATE_SHIFT 40
-#define PMU_DIM_SAMPLE_ALL_SHIFT 41
 
 /**
  * struct pmu_dimension_coords - Hardware dimension coordinates
@@ -61,7 +65,6 @@
  * @cu: Compute Unit index
  * @valid: True if coordinates were explicitly specified by user
  * @aggregate: True to aggregate counts across all matching instances
- * @sample_all: True to sample all instances (future feature)
  */
 struct pmu_dimension_coords {
 	u8 xcc;
@@ -71,7 +74,6 @@ struct pmu_dimension_coords {
 	u8 cu;
 	bool valid;
 	bool aggregate;
-	bool sample_all;
 };
 
 /**
@@ -105,6 +107,11 @@ struct pmu_dimension_limits {
  *
  * This function is called during event initialization to decode user-specified
  * dimensions from the perf event attributes.
+ *
+ * Default behavior: Unspecified dimensions default to 0. For example, if the
+ * user specifies only se=2, then sa, wgp, and cu will be 0 (i.e., se=2,sa=0,
+ * wgp=0,cu=0). If config1 is 0 (no dimensions specified), the driver uses
+ * broadcast mode and aggregates across all instances.
  */
 static inline void pmu_extract_dimensions(u64 config1,
 					  struct pmu_dimension_coords *dims)
@@ -115,7 +122,6 @@ static inline void pmu_extract_dimensions(u64 config1,
 	dims->wgp = (config1 >> PMU_DIM_WGP_SHIFT) & PMU_DIM_WGP_MASK;
 	dims->cu = (config1 >> PMU_DIM_CU_SHIFT) & PMU_DIM_CU_MASK;
 	dims->aggregate = (config1 >> PMU_DIM_AGGREGATE_SHIFT) & 1;
-	dims->sample_all = (config1 >> PMU_DIM_SAMPLE_ALL_SHIFT) & 1;
 
 	/* Mark as valid if any dimension or flag is non-zero */
 	dims->valid = (config1 != 0);
@@ -176,7 +182,6 @@ static inline u64 pmu_encode_dimensions(const struct pmu_dimension_coords *dims)
 	config1 |= ((u64)dims->wgp & PMU_DIM_WGP_MASK) << PMU_DIM_WGP_SHIFT;
 	config1 |= ((u64)dims->cu & PMU_DIM_CU_MASK) << PMU_DIM_CU_SHIFT;
 	config1 |= ((u64)dims->aggregate & 1) << PMU_DIM_AGGREGATE_SHIFT;
-	config1 |= ((u64)dims->sample_all & 1) << PMU_DIM_SAMPLE_ALL_SHIFT;
 
 	return config1;
 }

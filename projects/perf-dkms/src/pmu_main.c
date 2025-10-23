@@ -87,7 +87,6 @@ static struct device_attribute format_attr_##_name = \
  *   Bits 24-31 : WGP index
  *   Bits 32-39 : CU index
  *   Bit  40    : Aggregate flag
- *   Bit  41    : Sample all flag
  */
 PMU_FORMAT_ATTR(config, "config:0-63");      /* Counter ID */
 PMU_FORMAT_ATTR(config1, "config1:0-63");    /* Raw dimension encoding */
@@ -97,7 +96,6 @@ PMU_FORMAT_ATTR(sa, "config1:16-23");        /* SA index */
 PMU_FORMAT_ATTR(wgp, "config1:24-31");       /* WGP index */
 PMU_FORMAT_ATTR(cu, "config1:32-39");        /* CU index */
 PMU_FORMAT_ATTR(aggregate, "config1:40");    /* Aggregate across dimensions */
-PMU_FORMAT_ATTR(sample_all, "config1:41");   /* Sample all instances */
 
 static struct attribute *amdgpu_pmu_format_attrs[] = {
     &format_attr_config.attr,
@@ -108,7 +106,6 @@ static struct attribute *amdgpu_pmu_format_attrs[] = {
     &format_attr_wgp.attr,
     &format_attr_cu.attr,
     &format_attr_aggregate.attr,
-    &format_attr_sample_all.attr,
     NULL,
 };
 
@@ -218,9 +215,9 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
     /* Extract and validate dimensions from config1 if specified */
     if (config1 != 0) {
         pmu_extract_dimensions(config1, &dims);
-        pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d sample_all=%d valid=%d\n",
+        pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d valid=%d\n",
                   dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
-                  dims.aggregate, dims.sample_all, dims.valid);
+                  dims.aggregate, dims.valid);
 
         /* Validate dimensions against hardware limits */
         if (!pmu_validate_dimensions(&dims, &global_dim_limits)) {

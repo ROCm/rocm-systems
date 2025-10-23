@@ -19,6 +19,7 @@
 #include <linux/perf_event.h>
 #include "aql_c/aql_structures.h"
 #include "aql_c/packet_generation.h"
+#include "pmu_dimension.h"
 
 /* Forward declarations */
 struct file;
@@ -279,11 +280,6 @@ void aql_perf_free_counter_buffers(arch_t *arch, struct file *kfd_file,
 counter_reg_info_t* aql_counter_try_allocate(block_info_t *block,
                                              uint32_t event_id,
                                              struct perf_event *perf_event);
-counter_reg_info_t* aql_counter_try_allocate_dimension(block_info_t *block,
-                                                       uint32_t event_id,
-                                                       struct perf_event *perf_event,
-                                                       const struct pmu_dimension_coords *dims,
-                                                       arch_t *arch);
 void aql_counter_release(counter_reg_info_t *reg);
 int aql_build_counter_info(uint32_t counter_id,
                            arch_t *arch,
