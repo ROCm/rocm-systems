@@ -1,0 +1,12 @@
+cd projects/aqlprofile && ./build.sh && cd build && make install
+
+// build rocprofiler-sdk with samples
+./projects/rocprofiler-sdk/build/counter-collection-print-functional-counters &> out.txt
+
+claude -p "out.txt contains a file that prints out command and output buffer sizes in a format similar to this: Attempting to read counter SerializedAtomicRatio
+[aqlprofile_pmc_create_packets] Output buffer size: 5640 bytes
+[aqlprofile_pmc_create_packets] Command buffer sizes: start=768, stop=256, read=44800, total=45824 bytes. 
+
+Can you parse this file and take this data and create a CSV file containing the columns counter name, start packet, stop packet, read packet, output buffer. 
+
+After creating the CSV file, I need you to check the code in projects/rdc and determine which counters in this csv file are actually read by rdc. List those counter names and size information when finished. "
