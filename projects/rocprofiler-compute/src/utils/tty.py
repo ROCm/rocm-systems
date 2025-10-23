@@ -156,9 +156,8 @@ def is_roofline_shown(
     ):
         return False
 
-    print(f"\n{'=' * 80}", file=output)
+    print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
-    print("=" * 80, file=output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
@@ -491,7 +490,7 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        if panel_id == 400 and is_roofline_shown(
+        if panel_id == 400 and not is_roofline_shown(
             args, runs, output, panel, roof_plot, hidden_cols, filter_panel_ids
         ):
             continue
