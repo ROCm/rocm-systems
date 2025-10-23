@@ -1,0 +1,105 @@
+================================================================================
+RDC COUNTER ANALYSIS REPORT
+================================================================================
+
+Source: RdcRocpBase.cc (temp_field_map_k mapping)
+CSV File: counter_data.csv
+Date: 2025-10-23
+
+================================================================================
+COUNTERS USED BY RDC (36 found with complete buffer size data)
+================================================================================
+
+Counter Name                             Start    Stop     Read     Output
+                                         Packet   Packet   Packet   Buffer
+--------------------------------------------------------------------------------
+CPC_CPC_STAT_BUSY                        256      256      1024     72      
+CPC_CPC_STAT_IDLE                        256      256      1024     72      
+CPC_CPC_STAT_STALL                       256      256      1024     72      
+CPC_CPC_TCIU_BUSY                        256      256      1024     72      
+CPC_CPC_TCIU_IDLE                        256      256      1024     72      
+CPC_CPC_UTCL2IU_BUSY                     256      256      1024     72      
+CPC_CPC_UTCL2IU_IDLE                     256      256      1024     72      
+CPC_CPC_UTCL2IU_STALL                    256      256      1024     72      
+CPC_ME1_BUSY_FOR_PACKET_DECODE           256      256      1024     72      
+CPC_ME1_DC0_SPI_BUSY                     256      256      1024     72      
+CPC_UTCL1_STALL_ON_TRANSLATION           256      256      1024     72      
+CPF_CMP_UTCL1_STALL_ON_TRANSLATION       256      256      1024     72      
+CPF_CPF_STAT_BUSY                        256      256      1024     72      
+CPF_CPF_STAT_IDLE                        256      256      1024     72      
+CPF_CPF_STAT_STALL                       256      256      1024     72      
+CPF_CPF_TCIU_BUSY                        256      256      1024     72      
+CPF_CPF_TCIU_IDLE                        256      256      1024     72      
+CPF_CPF_TCIU_STALL                       256      256      1024     72      
+FETCH_SIZE                               1280     256      28160    3080    
+GPU_UTIL                                 256      256      1536     136     
+GRBM_COUNT                               256      256      1024     72      
+GRBM_GUI_ACTIVE                          256      256      1024     72      
+MeanOccupancyPerActiveCU                 256      256      6656     776     
+MfmaUtil                                 256      256      3072     328     
+OccupancyPercent                         256      256      3072     328     
+RDC_OPS_16_PER_SIMDCYCLE                 512      256      13056    1608    
+RDC_OPS_32_PER_SIMDCYCLE                 512      256      13056    1608    
+RDC_OPS_64_PER_SIMDCYCLE                 512      256      11264    1352    
+SIMD_UTILIZATION                         256      256      3072     328     
+SQ_WAVES                                 256      256      2560     264     
+TOTAL_16_OPS                             512      256      12544    1544    
+TOTAL_32_OPS                             512      256      12544    1544    
+TOTAL_64_OPS                             512      256      10496    1288    
+VALUBusy                                 256      256      3072     328     
+ValuPipeIssueUtil                        256      256      3072     328     
+WRITE_SIZE                               1024     256      18944    2056    
+
+================================================================================
+RDC COUNTERS NOT FOUND IN CSV (17 counters)
+================================================================================
+These counters are defined in RDC but don't have complete buffer size data:
+
+  - CPC_ADC_DISPATCH_ALLOC_DONE
+  - CPC_ADC_VALID_CHUNK_END
+  - CPC_ADC_VALID_CHUNK_NOT_AVAIL
+  - CPC_ALWAYS_COUNT
+  - CPC_CANE_BUSY
+  - CPC_CANE_STALL
+  - CPC_GD_BUSY
+  - CPC_LTE_ALL
+  - CPC_STALLED_BY_SE0_SPI
+  - CPC_STALLED_BY_SE1_SPI
+  - CPC_STALLED_BY_SE2_SPI
+  - CPC_STALLED_BY_SE3_SPI
+  - CPC_SYNC_FIFO_FULL
+  - CPC_SYNC_FIFO_FULL_LEVEL
+  - CPC_SYNC_WRREQ_FIFO_BUSY
+  - CPC_TG_SEND
+  - CPC_WALK_NEXT_CHUNK
+
+================================================================================
+SUMMARY STATISTICS
+================================================================================
+Total RDC counters defined:              53
+Found with buffer size data:             36 (67.9%)
+Missing buffer size data:                17 (32.1%)
+
+Buffer Size Ranges for Found Counters:
+  Start Packet:  256 - 1280 bytes
+  Stop Packet:   256 bytes (uniform)
+  Read Packet:   1024 - 28160 bytes
+  Output Buffer: 72 - 3080 bytes
+
+================================================================================
+NOTES
+================================================================================
+1. RDC counter mapping is defined in:
+   /root/rocm-systems/projects/rdc/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.cc
+
+2. Counters are used for profiling metrics including:
+   - GPU utilization (GPU_UTIL, GRBM_GUI_ACTIVE)
+   - Memory bandwidth (FETCH_SIZE, WRITE_SIZE)
+   - Compute operations (TOTAL_16/32/64_OPS)
+   - Pipeline utilization (ValuPipeIssueUtil, VALUBusy)
+   - Command processor stats (CPC_* and CPF_* counters)
+
+3. The 17 missing counters may not be supported on the current GPU architecture
+   or may require different profiling configurations.
+
+================================================================================

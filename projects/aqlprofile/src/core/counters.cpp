@@ -220,6 +220,7 @@ hsa_status_t _internal_aqlprofile_pmc_create_packets(
   for (auto& event : memorymgr->GetEvents())
     output_bytes += pm4_factory->GetBytesNeeded(event.block_name);
   memorymgr->CreateOutputBuf(output_bytes);
+  fprintf(stderr, "[aqlprofile_pmc_create_packets] Output buffer size: %zu bytes\n", output_bytes);
   // Generate read commands
   size_t data_size = pmc_builder->Read(&read_cmd, countersVec, memorymgr->GetOutputBuf());
   // Generate start commands
@@ -235,6 +236,8 @@ hsa_status_t _internal_aqlprofile_pmc_create_packets(
   size_t stop_size = aql_profile::CommandBufferMgr::Align(stop_cmd.Size());
   size_t read_size = aql_profile::CommandBufferMgr::Align(read_cmd.Size());
   memorymgr->CreateCmdBuf(start_size + stop_size + read_size);
+  fprintf(stderr, "[aqlprofile_pmc_create_packets] Command buffer sizes: start=%zu, stop=%zu, read=%zu, total=%zu bytes\n",
+          start_size, stop_size, read_size, start_size + stop_size + read_size);
 
   handle->handle = memorymgr->GetHandler();
   pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
