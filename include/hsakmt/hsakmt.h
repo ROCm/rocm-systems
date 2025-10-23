@@ -1212,16 +1212,44 @@ hsaKmtPcSamplingStop(
     HSAuint32 NodeId,
     HsaPcSamplingTraceId traceId
 );
+
 /**
-* Check if the HSA KMT Model is enabled
-*
-*  Arguments:
-*   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
-*
-*  Return:
-*   HSAKMT_STATUS_ERROR             - failed
-*   HSAKMT_STATUS_SUCCESS           - successfully complete
-*/
+ * Direct IO Read or write a file from/to GPU buffer
+ *
+ *  Arguments:
+ *   @MemoryAddress (IN) - Allocated buffer to read / write
+ *   @MemorySizeInBytes (IN) - Size in bytes to read / write. Should be page aligned
+ *   @fd (IN) - File descriptor of the file to be read / write
+ *   @file_offset (IN) - Offset from beginning of the file where read/write should happen
+ *   @AisFlags (IN) - Flag that indicates read / write operation
+ *
+ *  Return:
+ *   HSAKMT_STATUS_ERROR             - failed
+ *   HSAKMT_STATUS_SUCCESS           - successfully complete
+ */
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
+    void *MemoryAddress,
+    HSAuint64 MemorySizeInBytes,
+    HSAint32 fd,
+    HSAint64 file_offset,
+    HsaAisFlags AisFlags,
+    HSAuint64 *SizeCopiedInBytes,
+    HSAint32 *status
+);
+
+
+/**
+ * Check if the HSA KMT Model is enabled
+ * 
+ *  Arguments:
+ *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
+ * 
+ *  Return:
+ *   HSAKMT_STATUS_ERROR             - failed
+ *   HSAKMT_STATUS_SUCCESS           - successfully complete
+ */
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtModelEnabled(
