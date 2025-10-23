@@ -30,8 +30,8 @@ from contextlib import contextmanager
 
 from utils.logger import (
     console_debug,
-    console_warning,
     console_error,
+    console_warning,
 )
 
 sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
@@ -75,7 +75,9 @@ def get_device_handle() -> "amdsmi.ProcessorHandle | None":
 def get_mem_max_clock() -> float:
     """Get the maximum memory clock of the device."""
     try:
-        return amdsmi.amdsmi_get_clock_info(get_device_handle(), amdsmi.AmdSmiClkType.GFX)["max_clk"]
+        return amdsmi.amdsmi_get_clock_info(
+            get_device_handle(), amdsmi.AmdSmiClkType.GFX
+        )["max_clk"]
     except Exception as e:
         console_warning(f"Error getting memory clocks: {e}")
         return 0.0
