@@ -56,7 +56,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if (ROCPROFILER_VERSION >= 600)
+#    if(ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #    else
     return code_object.rocp_agent.handle;
@@ -164,7 +164,7 @@ rocpd_post_processing::get_memory_copy_callback() const
     };
 }
 
-#if (ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
+#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
 postprocessing_callback
 rocpd_post_processing::get_memory_allocate_callback() const
 {
@@ -679,7 +679,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
     parser.register_type_callback(entry_type::kernel_dispatch,
                                   get_kernel_dispatch_callback());
     parser.register_type_callback(entry_type::memory_copy, get_memory_copy_callback());
-#    if (ROCPROFILER_VERSION >= 600)
+#    if(ROCPROFILER_VERSION >= 600)
     parser.register_type_callback(entry_type::memory_alloc,
                                   get_memory_allocate_callback());
 #    endif

@@ -51,7 +51,7 @@ private:
 
     postprocessing_callback get_kernel_dispatch_callback() const;
     postprocessing_callback get_memory_copy_callback() const;
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     postprocessing_callback get_memory_allocate_callback() const;
 #endif
     postprocessing_callback get_region_callback() const;
