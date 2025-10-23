@@ -37,6 +37,7 @@ set_target_properties(
 set(OCCUPANCY ../sample/occupancy.hip)
 set_source_files_properties(${OCCUPANCY} PROPERTIES LANGUAGE HIP)
 add_executable(occupancy ${OCCUPANCY})
+target_compile_options(occupancy PRIVATE -g -O0)
 set_target_properties(
     occupancy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
@@ -45,6 +46,7 @@ set_target_properties(
 set(MAT_MUL_MAX ../sample/mat_mul_max.hip)
 set_source_files_properties(${MAT_MUL_MAX} PROPERTIES LANGUAGE HIP)
 add_executable(mat_mul_max ${MAT_MUL_MAX})
+target_compile_options(mat_mul_max PRIVATE -g -O0)
 set_target_properties(
     mat_mul_max
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
