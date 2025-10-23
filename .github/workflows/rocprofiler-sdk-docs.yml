@@ -87,14 +87,6 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: mi325
     steps:
-      - name: Install Latest Nightly ROCm
-        shell: bash
-        working-directory: /tmp
-        run: |
-          tar -xf ${{ env.ROCM_PATH }}-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
