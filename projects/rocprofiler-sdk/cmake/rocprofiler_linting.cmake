@@ -1,10 +1,12 @@
-include_guard(GLOBAL)
-
 # ----------------------------------------------------------------------------------------#
 #
 # Clang Tidy
 #
 # ----------------------------------------------------------------------------------------#
+
+include_guard(DIRECTORY)
+
+include(rocprofiler_utilities)
 
 if(ROCPROFILER_BUILD_DEVELOPER)
     set(_TIDY_REQUIRED REQUIRED)
@@ -12,37 +14,57 @@ else()
     set(_TIDY_REQUIRED)
 endif()
 
-if(NOT ROCPROFILER_CLANG_TIDY_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-tidy)
+# checks that clang-tidy is version >= 15.x.x and < 20.x.x
+function(_rocprofiler_check_clang_tidy_version _OUT _EXE)
     execute_process(
-        COMMAND $ENV{HOME}/.local/bin/clang-tidy --version
+        COMMAND ${_EXE} --version
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         OUTPUT_VARIABLE _CLANG_TIDY_OUT
         RESULT_VARIABLE _CLANG_TIDY_RET
         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_CLANG_TIDY_RET EQUAL 0 AND "${_CLANG_TIDY_OUT}" MATCHES
+                                   "version 1[5-9]\\.([0-9]+)\\.([0-9]+)")
+        set(${_OUT}
+            ON
+            PARENT_SCOPE)
+    else()
+        set(${_OUT}
+            OFF
+            PARENT_SCOPE)
+    endif()
+endfunction()
 
-    if(_CLANG_TIDY_RET EQUAL 0)
-        if("${_CLANG_TIDY_OUT}" MATCHES "version 1[5-9]\\.([0-9]+)\\.([0-9]+)")
-            set(ROCPROFILER_CLANG_TIDY_EXE
-                "$ENV{HOME}/.local/bin/clang-tidy"
-                CACHE FILEPATH "clang-tidy exe")
-        endif()
+_rocprofiler_get_python_user_bin(_PYTHON_USER_BIN)
+if(NOT ROCPROFILER_CLANG_TIDY_EXE
+   AND _PYTHON_USER_BIN
+   AND EXISTS "${_PYTHON_USER_BIN}/clang-tidy")
+    _rocprofiler_check_clang_tidy_version(_IS_VALID_CLANG_TIDY
+                                          "${_PYTHON_USER_BIN}/clang-tidy")
+    if(_IS_VALID_CLANG_TIDY)
+        set(ROCPROFILER_CLANG_TIDY_EXE
+            "${_PYTHON_USER_BIN}/clang-tidy"
+            CACHE FILEPATH "clang-tidy exe")
     endif()
 endif()
 
 find_program(
     ROCPROFILER_CLANG_TIDY_EXE ${_TIDY_REQUIRED}
-    NAMES clang-tidy-18
-          clang-tidy-17
-          clang-tidy-16
-          clang-tidy-15
-          clang-tidy-14
-          clang-tidy-13
-          clang-tidy-12
-          clang-tidy-11
-          clang-tidy
-    PATHS $ENV{HOME}/.local
-    HINTS $ENV{HOME}/.local
+    NAMES clang-tidy-19 clang-tidy-18 clang-tidy-17 clang-tidy-16 clang-tidy-15 clang-tidy
+    PATHS ${_PYTHON_USER_BIN}
+    HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
+
+_rocprofiler_check_clang_tidy_version(_IS_VALID_CLANG_TIDY
+                                      "${ROCPROFILER_CLANG_TIDY_EXE}")
+if(NOT _IS_VALID_CLANG_TIDY)
+    if(ROCPROFILER_BUILD_DEVELOPER)
+        message(
+            AUTHOR_WARNING
+                "[rocprofiler] clang-tidy version >= 15, < 20 not found. Please see rocprofiler-sdk CONTRIBUTING.md for instructions on installing clang-tidy"
+            )
+    endif()
+    unset(ROCPROFILER_CLANG_TIDY_EXE CACHE)
+endif()
 
 macro(ROCPROFILER_ACTIVATE_CLANG_TIDY)
     if(ROCPROFILER_ENABLE_CLANG_TIDY)

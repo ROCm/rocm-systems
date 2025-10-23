@@ -2010,6 +2010,7 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
       segment = agentInfo->fine_grain_pool;
       break;
     case kUncachedAtomics:
+    case kIoMemory:
       if (agentInfo->ext_fine_grain_pool.handle != 0) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Using extended fine grained access system memory pool");
@@ -2032,6 +2033,7 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
+
   hsa_amd_memory_pool_t pool =
       getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
   hsa_status_t stat = Hsa::memory_pool_allocate(pool, size, memFlags, &ptr);
@@ -2099,8 +2101,13 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
+  uint32_t memFlags = 0;
+  if (memSegment == kIoMemory) {
+    memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_status_t status = Hsa::memory_lock_to_pool(
-      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, 0, &deviceMemory);
+      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",
@@ -3013,7 +3020,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
 
     for (int i = mask.size() - 1; i >= 0; i--) {
-      ss << std::setfill('0') << std::setw(4) << mask[i];
+      ss << std::setfill('0') << std::setw(8) << mask[i];
     }
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Setting CU mask 0x%s for hardware queue %p",
             ss.str().c_str(), queue->base_address);

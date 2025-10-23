@@ -48,9 +48,11 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
 from utils.specs import MachineSpecs
 from utils.utils import (
+    METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     detect_rocprof,
+    get_panel_alias,
     get_submodules,
     is_tcc_channel_counter,
     mibench,
@@ -317,6 +319,16 @@ class OmniSoC_Base:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
+            if METRIC_ID_RE.match(block_id):
+                block_id = block_id
+            else:
+                alias = block_id
+                panel_alias_dict = get_panel_alias()
+                if alias not in panel_alias_dict:
+                    raise KeyError(f"Unknown panel alias: {alias!r}")
+                block_id = panel_alias_dict[alias]  # int
+                print(f"alias: {alias}, block id: {block_id}")
+
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
             # File id filtering
@@ -326,6 +338,7 @@ class OmniSoC_Base:
                     f"{config_root_dir}"
                 )
                 continue
+
             with open(config_filename_dict[file_id]) as stream:
                 file_config = yaml.safe_load(stream)
             if panel_id is None:
@@ -468,35 +481,35 @@ class OmniSoC_Base:
                 f"{get_submodules('rocprof_compute_profile')}"
             )
 
-        # Point to counter definition
-        old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-        os.environ["ROCPROFILER_METRICS_PATH"] = str(
-            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
-        )
-        sys.path.append(
-            str(
-                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent / "bin"
+            # Point to counter definition
+            old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
+            os.environ["ROCPROFILER_METRICS_PATH"] = str(
+                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
             )
-        )
-        from rocprofv3_avail_module import avail
+            sys.path.append(
+                str(
+                    Path(self.get_args().rocprofiler_sdk_library_path).parent
+                    / "python3/site-packages"
+                )
+            )
+            from rocprofv3 import avail
 
-        avail.loadLibrary.libname = str(
-            Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-            / "lib"
-            / "rocprofiler-sdk"
-            / "librocprofv3-list-avail.so"
-        )
-        counters = avail.get_counters()
-        rocprof_counters = {
-            counter.name
-            for counter in counters[list(counters.keys())[0]]
-            if hasattr(counter, "block") or hasattr(counter, "expression")
-        }
-        # Reset env. var.
-        if old_rocprofiler_metrics_path is None:
-            del os.environ["ROCPROFILER_METRICS_PATH"]
-        else:
-            os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
+            avail.loadLibrary.libname = str(
+                Path(args.rocprofiler_sdk_library_path).parent
+                / "rocprofiler-sdk"
+                / "librocprofv3-list-avail.so"
+            )
+            counters = avail.get_counters()
+            rocprof_counters = {
+                counter.name
+                for counter in counters[list(counters.keys())[0]]
+                if hasattr(counter, "block") or hasattr(counter, "expression")
+            }
+            # Reset env. var.
+            if old_rocprofiler_metrics_path is None:
+                del os.environ["ROCPROFILER_METRICS_PATH"]
+            else:
+                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         return rocprof_counters
 
@@ -711,6 +724,7 @@ class OmniSoC_Base:
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks
+                and "roof" not in self.get_args().filter_blocks
             )
         ):
             console_log("roofline", "Skipping roofline")

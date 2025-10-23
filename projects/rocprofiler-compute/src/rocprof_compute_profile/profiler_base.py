@@ -505,6 +505,7 @@ class RocProfCompute_Base:
         # PC sampling data is only collected when block "21" is specified
         if not (
             "21" in args.filter_blocks
+            and "pc_sampling" in args.filter_blocks
             and self.__profiler in ("rocprofv3", "rocprofiler-sdk")
         ):
             return

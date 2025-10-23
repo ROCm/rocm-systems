@@ -951,6 +951,7 @@
         "Unit_hipGraphNodeSetEnabled_Functional_KernelNode",
         "Unit_TexObjectCreate_TypePitch2D_IncompleteInit",
         "====================================================",
+        "Unit_hipEventRecord",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",

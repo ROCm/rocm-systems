@@ -7,7 +7,7 @@ Configuring runtime options
 ****************************************************
 
 The ``rocprof-sys.cfg`` file maintains a list of the
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ runtime
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ runtime
 options. To create this configuration
 file and view the current runtime options, use the ``rocprof-sys-avail`` executable.
 
