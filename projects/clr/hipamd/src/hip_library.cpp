@@ -232,9 +232,7 @@ hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKern
     HIP_RETURN(hipSuccess);
   }
 
-  ret = l->EnumerateKernels(kernels, numKernels);
-
-  HIP_RETURN(ret);
+  HIP_RETURN(l->EnumerateKernels(kernels, numKernels));
 }
 
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
@@ -243,7 +241,7 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (!hip::PlatformState::instance().GetLibraryFunction(kernel, library)) {
+  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -257,7 +255,7 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   }
 
   hipLibrary_t library;
-  if (!hip::PlatformState::instance().GetLibraryFunction(kernel, &library)) {
+  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, &library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 

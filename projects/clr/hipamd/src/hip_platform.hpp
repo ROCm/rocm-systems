@@ -116,7 +116,7 @@ class PlatformState {
   inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
     amd::ScopedLock lock(lock_);
     if (library_functions_.find(f) == library_functions_.end()) {
-      library_functions_.insert(std::make_pair(f,l));
+      library_functions_.insert(std::make_pair(f, l));
       return true;
     }
     return false;
@@ -130,7 +130,7 @@ class PlatformState {
     return false;
   }
 
-  inline bool GetLibraryFunction(const hipKernel_t f, hipLibrary_t* lib) {
+  inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
     amd::ScopedLock lock(lock_);
     if (library_functions_.find(f) != library_functions_.end()) {
       *lib = library_functions_[f];
