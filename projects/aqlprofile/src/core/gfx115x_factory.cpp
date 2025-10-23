@@ -26,9 +26,9 @@
 namespace aql_profile {
 
 // Gfx11.5 factory class
-const GpuBlockInfo* Gfx115Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {};
+const GpuBlockInfo* Gfx115xFactory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {};
 
-Gfx115Factory::Gfx115Factory(const AgentInfo* agent_info)
+Gfx115xFactory::Gfx115xFactory(const AgentInfo* agent_info)
     : Gfx11Factory(block_table_, sizeof(block_table_), agent_info) {
   for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i) {
     const GpuBlockInfo* base_table_ptr = Gfx11Factory::block_table_[i];
@@ -38,7 +38,16 @@ Gfx115Factory::Gfx115Factory(const AgentInfo* agent_info)
 
     // Overwrite block info for gfx11.5 specific changes
     switch (block_info->id) {
+      case Gl1aCounterBlockId:
+        block_info->instance_count = 4;
+        break;
+      case Gl1cCounterBlockId:
+        block_info->instance_count = 4;
+        break;
       case Gl2aCounterBlockId:
+        block_info->instance_count = 4;
+        break;
+      case Gl2cCounterBlockId:
         block_info->instance_count = 4;
         break;
       default:
@@ -47,7 +56,7 @@ Gfx115Factory::Gfx115Factory(const AgentInfo* agent_info)
   }
 }
 
-Gfx115Factory::~Gfx115Factory() {
+Gfx115xFactory::~Gfx115xFactory() {
   for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i) {
     if (block_table_[i] != NULL) {
       delete block_table_[i];
@@ -56,8 +65,8 @@ Gfx115Factory::~Gfx115Factory() {
   }
 }
 
-Pm4Factory* Pm4Factory::Gfx115Create(const AgentInfo* agent_info) {
-  auto p = new Gfx115Factory(agent_info);
+Pm4Factory* Pm4Factory::Gfx115xCreate(const AgentInfo* agent_info) {
+  auto p = new Gfx115xFactory(agent_info);
   if (p == NULL) throw aql_profile_exc_msg("Gfx115Factory allocation failed");
   return p;
 }
