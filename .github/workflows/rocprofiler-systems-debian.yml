@@ -134,11 +134,12 @@ jobs:
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
+
     - name: Install
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        cmake --build build --target install --parallel 2
+        cmake --build build --target install --parallel 2 && rm -rf ./build/external
 
     - name: CPack and Install
       working-directory: projects/rocprofiler-systems/
