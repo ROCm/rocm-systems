@@ -49,6 +49,10 @@ RUN dnf update -y && dnf install -y \
 RUN dnf install -y gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ && \
     dnf clean all
 
+# Enable PowerTools repository for additional packages
+RUN dnf install -y dnf-plugins-core; \
+    dnf config-manager --set-enabled powertools
+
 # Create symbolic links for GCC toolset 11 (matching CI setup)
 RUN ln -sf /opt/rh/gcc-toolset-11/root/usr/bin/gcc /usr/local/bin/gcc-11 && \
     ln -sf /opt/rh/gcc-toolset-11/root/usr/bin/g++ /usr/local/bin/g++-11 && \

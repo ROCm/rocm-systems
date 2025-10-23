@@ -62,8 +62,6 @@ RUN set -euo pipefail; \
       if grep -qi 'VERSION_ID="8.10"' /etc/os-release; then \
         echo -e "[ROCm-7.0.2]\nname=ROCm7.0.2\nbaseurl=https://repo.radeon.com/rocm/el8/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/el/8/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
-        dnf install dnf-plugins-core -y || true; \
-        dnf config-manager --set-enabled powertools; \
       else \
         echo -e "[ROCm-7.0.2]\nname=ROCm7.0.2\nbaseurl=https://repo.radeon.com/rocm/el10/7.0.2/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/graphics/7.0.2/el/10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
@@ -77,7 +75,6 @@ RUN set -euo pipefail; \
         libva-devel; \
       dnf install -y libva-amdgpu-devel || true; \
       dnf install -y rocm-opencl-devel || true; \
-      dnf install -y ocl-icd || true; \
       python3.11 -m pip install CppHeaderParser || true; \
       python3.6 -m pip install CppHeaderParser || true; \
       /usr/bin/python3 -m pip install CppHeaderParser || true; \
