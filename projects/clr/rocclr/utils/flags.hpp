@@ -141,8 +141,6 @@ release(uint, PAL_MALL_POLICY, 0,                                             \
         "2 = Allocations will always be put through the MALL")                \
 release(bool, GPU_ENABLE_WAVE32_MODE, true,                                   \
         "Enables Wave32 compilation in HW if available")                      \
-release(bool, GPU_ENABLE_LC, true,                                            \
-        "Enables LC path")                                                    \
 release(bool, GPU_ENABLE_HW_P2P, false,                                       \
         "Enables HW P2P path")                                                \
 release(bool, GPU_ENABLE_COOP_GROUPS, true,                                   \

@@ -216,7 +216,7 @@ bool UberTraceCaptureMgr::Init(Pal::IPlatform* platform) {
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x,
+void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x,
                                       size_t y, size_t z) {
   // Wait for the driver to be resumed in case it's been paused.
   WaitForDriverResume();

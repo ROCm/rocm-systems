@@ -51,12 +51,6 @@ extern void PalDeviceUnload();
 #include "blowfish/oclcrypt.hpp"
 #endif
 
-#if defined(WITH_COMPILER_LIB)
-#include "utils/bif_section_labels.hpp"
-#include "utils/libUtils.h"
-#include "spirv/spirvUtils.h"
-#endif
-
 #include <vector>
 #include <string>
 #include <cstring>
@@ -641,10 +635,6 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
 
   // Build all kernels
   std::string opt = "-cl-internal-kernel ";
-  if (!device->settings().useLightning_) {
-    opt += "-Wf,--force_disable_spir ";
-  }
-
   if (!extraOptions.empty()) {
     opt += extraOptions;
   }
@@ -786,29 +776,10 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-#if defined(USE_COMGR_LIBRARY)
   // Check if Lightning compiler was requested
-  if (settings_->useLightning_) {
-    constexpr bool kComgrVersioned = false;
-    std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
-    // Use Lightning only if it's available
-    settings_->useLightning_ = amd::Comgr::IsReady();
-    return settings_->useLightning_;
-  }
-#endif
-  return true;
-}
-
-bool Device::ValidateHsail() {
-#if defined(WITH_COMPILER_LIB)
-  // Check if HSAIL compiler was requested
-  if (!settings_->useLightning_) {
-    std::call_once(amd::Hsail::initialized, amd::Hsail::LoadLib);
-    // Use Hsail only if it's available
-    return amd::Hsail::IsReady();
-  }
-#endif
-  return true;
+  constexpr bool kComgrVersioned = false;
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+  return amd::Comgr::IsReady();
 }
 
 size_t GetMaxStackSize(const std::string& procName) {
@@ -1272,43 +1243,6 @@ bool ClBinary::setElfTarget() {
   return elfOut()->setTarget(elf_target, amd::Elf::CAL_PLATFORM);
 }
 
-#if defined(WITH_COMPILER_LIB)
-std::string ClBinary::getBIFSymbol(unsigned int symbolID) const {
-  size_t nSymbols = 0;
-  // Due to PRE & POST defines in bif_section_labels.hpp conflict with
-  // PRE & POST struct members in sp3-si-chip-registers.h
-  // unable to include bif_section_labels.hpp in device.hpp
-  //! @todo: resolve conflict by renaming defines,
-  // then include bif_section_labels.hpp in device.hpp &
-  // use oclBIFSymbolID instead of unsigned int as a parameter
-  const oclBIFSymbolID symID = static_cast<oclBIFSymbolID>(symbolID);
-  switch (format_) {
-    case BIF_VERSION2: {
-      nSymbols = sizeof(BIF20) / sizeof(oclBIFSymbolStruct);
-      const oclBIFSymbolStruct* symb = findBIFSymbolStruct(BIF20, nSymbols, symID);
-      assert(symb && "BIF20 symbol with symbolID not found");
-      if (symb) {
-        return std::string(symb->str[bif::PRE]) + std::string(symb->str[bif::POST]);
-      }
-      break;
-    }
-    case BIF_VERSION3: {
-      nSymbols = sizeof(BIF30) / sizeof(oclBIFSymbolStruct);
-      const oclBIFSymbolStruct* symb = findBIFSymbolStruct(BIF30, nSymbols, symID);
-      assert(symb && "BIF30 symbol with symbolID not found");
-      if (symb) {
-        return std::string(symb->str[bif::PRE]) + std::string(symb->str[bif::POST]);
-      }
-      break;
-    }
-    default:
-      assert(0 && "unexpected BIF type");
-      return "";
-  }
-  return "";
-}
-#endif
-
 void ClBinary::init(amd::option::Options* optionsObj) {
   // option has higher priority than environment variable.
   if ((flags_ & BinarySourceMask) != BinaryRemoveSource) {
@@ -1586,52 +1520,6 @@ bool ClBinary::loadLlvmBinary(std::string& llvmBinary,
 
   DevLogPrintfError("Cannot Load LLVM Binary: %s \n", llvmBinary.c_str());
   return false;
-}
-
-bool ClBinary::loadCompileOptions(std::string& compileOptions) const {
-  char* options = nullptr;
-  size_t sz;
-  compileOptions.clear();
-#if defined(WITH_COMPILER_LIB)
-  if (elfIn_->getSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclCompilerOptions).c_str(), &options,
-                        &sz)) {
-    if (sz > 0) {
-      compileOptions.append(options, sz);
-    }
-    return true;
-  }
-#endif
-  return false;
-}
-
-bool ClBinary::loadLinkOptions(std::string& linkOptions) const {
-  char* options = nullptr;
-  size_t sz;
-  linkOptions.clear();
-#if defined(WITH_COMPILER_LIB)
-  if (elfIn_->getSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclLinkerOptions).c_str(), &options,
-                        &sz)) {
-    if (sz > 0) {
-      linkOptions.append(options, sz);
-    }
-    return true;
-  }
-#endif
-  return false;
-}
-
-void ClBinary::storeCompileOptions(const std::string& compileOptions) {
-#if defined(WITH_COMPILER_LIB)
-  elfOut()->addSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclCompilerOptions).c_str(),
-                      compileOptions.c_str(), compileOptions.length());
-#endif
-}
-
-void ClBinary::storeLinkOptions(const std::string& linkOptions) {
-#if defined(WITH_COMPILER_LIB)
-  elfOut()->addSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclLinkerOptions).c_str(),
-                      linkOptions.c_str(), linkOptions.length());
-#endif
 }
 
 bool ClBinary::isSPIR() const {
