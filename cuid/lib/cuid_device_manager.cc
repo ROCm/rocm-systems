@@ -1,0 +1,38 @@
+#include "cuid_device_manager.h"
+#include "cuid_gpu.h"
+#include "cuid_cpu.h"
+#include "cuid_nic.h"
+#include "cuid_platform.h"
+#include "cuid.h"
+
+
+amdcuid_status_t CuidDeviceManager::init(amdcuid_device_type_set_t device_types) {
+    devices_.clear();
+    initialized_ = false;
+    if (device_types & AMDCUID_DEVICE_TYPE_SET_GPU) {
+        std::vector<DevicePtr> gpus;
+        amdcuid_status_t status = CuidGpu::discover(gpus);
+        if (status != AMDCUID_STATUS_SUCCESS) return status;
+        devices_.insert(devices_.end(), gpus.begin(), gpus.end());
+    }
+    if (device_types & AMDCUID_DEVICE_TYPE_SET_CPU) {
+        std::vector<DevicePtr> cpus;
+        amdcuid_status_t status = CuidCpu::discover(cpus);
+        if (status != AMDCUID_STATUS_SUCCESS) return status;
+        devices_.insert(devices_.end(), cpus.begin(), cpus.end());
+    }
+    // TOOD: add more type
+    initialized_ = true;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidDeviceManager::shutdown() {
+    devices_.clear();
+    initialized_ = false;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+CuidDeviceManager& CuidDeviceManager::instance() {
+    static CuidDeviceManager instance;
+    return instance;
+}
