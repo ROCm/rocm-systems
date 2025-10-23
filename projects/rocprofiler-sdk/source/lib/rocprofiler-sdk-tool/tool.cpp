@@ -29,6 +29,7 @@
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/pc_sampling_disassembler.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -841,7 +842,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
-               tool::get_config().advanced_thread_trace)
+               (tool::get_config().advanced_thread_trace ||
+                tool::get_config().pc_sampling_host_trap ||
+                tool::get_config().pc_sampling_stochastic))
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -867,7 +870,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     obj_data);
             }
             else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
-                    tool::get_config().advanced_thread_trace)
+                    (tool::get_config().advanced_thread_trace ||
+                     tool::get_config().pc_sampling_host_trap ||
+                     tool::get_config().pc_sampling_stochastic))
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -2751,6 +2756,24 @@ generate_output(cleanup_mode _cleanup_mode)
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
                           counters_output.get_generator());
+    }
+
+    // Disassemble all loaded code objects for PC sampling (build CodeFile/CodeLines)
+    if(tool::get_config().pc_sampling_stochastic || tool::get_config().pc_sampling_host_trap)
+    {
+        auto output_dir =
+            fs::path{tool::format_path(tool::get_config().output_path)} / "pc_sampling_disassembly";
+        rocprofiler::att_wrapper::pc_sampling::PcSamplingDisassembler disassembler(output_dir);
+
+        // Load code object dumps (previously written as *.out files) using metadata info
+        disassembler.load_code_objects(".", tool_metadata->get_code_object_load_info());
+
+        // Produce CodeLines for every instruction in each code object
+        disassembler.disassemble_all();
+
+        // (Future) hook: export CodeFile summaries (json/csv) here if desired.
+        std::cout << "PC sampling disassembly completed. Instructions decoded: "
+                  << disassembler.get_codefile()->isa_map.size() << std::endl;
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

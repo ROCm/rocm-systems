@@ -34,7 +34,7 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-using csv_encoder = rocprofiler::tool::csv::csv_encoder<8>;
+using csv_encoder = rocprofiler::tool::csv::csv_encoder<11>;  // added ServiceType, Issued, Stalled
 
 // Builds a json filetree by recursively inserting "path" into the json object.
 void
@@ -84,12 +84,16 @@ CodeFile::~CodeFile()
                                "Latency",
                                "Stall",
                                "Idle",
+                               "ServiceType",
+                               "Issued",
+                               "Stalled",
                                "Source");
 
         for(auto& [pc, line] : vec)
         {
             if(kernel_names.find(pc) != kernel_names.end())
             {
+                // kernel marker row (no instruction stats)
                 csv_encoder::write_row(ofs,
                                        pc.code_object_id,
                                        pc.address,
@@ -98,6 +102,9 @@ CodeFile::~CodeFile()
                                        0,
                                        0,
                                        0,
+                                       0,  // ServiceType
+                                       0,  // Issued
+                                       0,  // Stalled
                                        kernel_names.at(pc).demangled);
             }
             csv_encoder::write_row(ofs,
@@ -108,6 +115,9 @@ CodeFile::~CodeFile()
                                    line->latency,
                                    line->stall,
                                    line->idle,
+                                   static_cast<int>(line->service_type),
+                                   line->issued,
+                                   line->stalled,
                                    line->code_line->comment);
         }
 
@@ -138,7 +148,16 @@ CodeFile::~CodeFile()
             std::stringstream code;
             code << "[\"; " << kernel_names.at(line.first).name << "\",0," << (isa.line_number - 1)
                  << ",\"" << kernel_names.at(line.first).demangled << "\","
-                 << line.first.code_object_id << "," << line.first.address << ",0,0,0,0]";
+                 << line.first.code_object_id << "," << line.first.address
+                 << ",0,0,0,0,0,0,0";  // Hit, Latency, Stall, Idle, ServiceType, Issued, Stalled
+            // nested not_issued_reasons (all zeros for marker)
+            code << ",[";
+            for(size_t i = 0; i < CodeLine{}.not_issued_reasons.size(); ++i)
+            {
+                code << "0";
+                if(i + 1 < CodeLine{}.not_issued_reasons.size()) code << ",";
+            }
+            code << "]]";
             jcode.push_back(nlohmann::json::parse(code.str()));
         }
 
@@ -146,8 +165,16 @@ CodeFile::~CodeFile()
         code << "[\"" << isa.code_line->inst << "\",0," << isa.line_number << ",\""
              << isa.code_line->comment << "\"," << line.first.code_object_id << ","
              << line.first.address << "," << isa.hitcount << "," << isa.latency << "," << isa.stall
-             << "," << isa.idle << "]";
-
+             << "," << isa.idle << "," << static_cast<int>(isa.service_type) << "," << isa.issued
+             << "," << isa.stalled;
+        // nested not_issued_reasons
+        code << ",[";
+        for(size_t i = 0; i < isa.not_issued_reasons.size(); ++i)
+        {
+            code << isa.not_issued_reasons[i];
+            if(i + 1 < isa.not_issued_reasons.size()) code << ",";
+        }
+        code << "]]";
         jcode.push_back(nlohmann::json::parse(code.str()));
 
         auto&  comment  = isa.code_line->comment;
@@ -173,7 +200,13 @@ CodeFile::~CodeFile()
     nlohmann::json json;
     json["code"]    = jcode;
     json["version"] = TOOL_VERSION;
-    json["header"]  = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle";
+
+    {
+        std::stringstream header_ss;
+        header_ss << "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle, "
+                  << "ServiceType, Issued, Stalled, NotIssuedReasons";
+        json["header"] = header_ss.str();
+    }
 
     OutputFile(dir / "code.json") << json;
 

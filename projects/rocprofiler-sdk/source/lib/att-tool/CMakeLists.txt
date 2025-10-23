@@ -3,8 +3,16 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(ATT_TOOL_SOURCE_FILES att_lib_wrapper.cpp code.cpp filenames.cpp occupancy.cpp
-                          perfcounter.cpp profile_interface.cpp wave.cpp wstates.cpp)
+set(ATT_TOOL_SOURCE_FILES
+    att_lib_wrapper.cpp
+    code.cpp
+    filenames.cpp
+    occupancy.cpp
+    perfcounter.cpp
+    profile_interface.cpp
+    wave.cpp
+    wstates.cpp
+    pc_sampling_disassembler.cpp)
 
 set(ATT_TOOL_HEADER_FILES
     att_lib_wrapper.hpp
@@ -16,7 +24,8 @@ set(ATT_TOOL_HEADER_FILES
     profile_interface.hpp
     util.hpp
     wave.hpp
-    wstates.hpp)
+    wstates.hpp
+    pc_sampling_disassembler.hpp)
 
 add_library(rocprofiler-sdk-att-parser STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-att-parser ALIAS rocprofiler-sdk-att-parser)

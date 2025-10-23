@@ -24,6 +24,8 @@
 
 #include "att_lib_wrapper.hpp"
 
+#include <rocprofiler-sdk/pc_sampling.h>
+
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +35,13 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
+typedef enum code_line_service_type_t
+{
+    code_line_service_type_att                    = 0,
+    code_line_service_type_host_trap_pc_sampling  = 1,
+    code_line_service_type_stochastic_pc_sampling = 2
+} code_line_service_type_t;
+
 struct CodeLine
 {
     using Instruction = rocprofiler::sdk::codeobj::disassembly::Instruction;
@@ -45,6 +54,12 @@ struct CodeLine
     size_t latency{0};
     size_t stall{0};
     size_t idle{0};
+
+    code_line_service_type_t service_type{code_line_service_type_att};
+    size_t                   issued{0};
+    size_t                   stalled{0};
+    std::array<size_t, ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST - 2>
+        not_issued_reasons{};
 };
 
 class CodeFile
