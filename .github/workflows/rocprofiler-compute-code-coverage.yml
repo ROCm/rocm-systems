@@ -10,6 +10,9 @@ on:
         description: 'Runner configuration'
         required: false
         type: string
+    push:
+      branches:
+        - users/jamessiddeley-amd/improve-cdash
 
 env:
   ROCM_PATH: "/opt/rocm"

@@ -336,7 +336,11 @@ set_tests_properties(
     test_profile_misc
     test_profile_path
     test_profile_roofline
-    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1
+    test_profile_section
+    test_profile_pc_sampling
+    test_profile_sets_func
+    test_profile_live_attach_detach
+    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
 # ---------------------------
@@ -464,6 +468,7 @@ if(${ENABLE_COVERAGE})
             DEPENDS "${ALL_TESTS_STRING}"
             LABELS "coverage"
             ENVIRONMENT "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage"
+            TIMEOUT 600
     )
 endif()
 
