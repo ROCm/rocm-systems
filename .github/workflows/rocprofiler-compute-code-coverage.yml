@@ -17,7 +17,7 @@ on:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
+  ROCM_VERSION: "7.0.2"
 
 jobs:
   prepare_matrix:
@@ -83,34 +83,9 @@ jobs:
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
-      - name: Install ROCm ${{ env.ROCM_VERSION }}
-        shell: bash
+      - name: Install ROCm
         run: |
-          set -e
-
-          # Install ROCm using apt to avoid runtime errors with TheRock tarball
-          apt install -y rocm-dev rocprofiler-sdk
-
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
-          # Verify installation
-          if [ -f "${{ env.ROCM_PATH }}/bin/amdclang++" ]; then
-            echo "Compiler version:"
-            ${{ env.ROCM_PATH }}/bin/amdclang++ --version
-          else
-            echo "⚠️  Warning: amdclang++ not found at expected location"
-          fi
-
-          # Verify rocprofiler-sdk installation
-          echo "Searching for rocprofiler-sdk files:"
-          ROCPROF_LIB=$(find /opt/rocm* -name "librocprofv3-attach.so" 2>/dev/null | head -1)
-          if [ -n "$ROCPROF_LIB" ]; then
-            echo "✅ rocprofiler-sdk found at: $ROCPROF_LIB"
-          else
-            echo "❌ ERROR: librocprofv3-attach.so not found!"
-            exit 1
-          fi
-
+          apt install -y rocm-dev
           echo "✅ ROCm Installation Complete!"
 
       - name: Install Python Dependencies

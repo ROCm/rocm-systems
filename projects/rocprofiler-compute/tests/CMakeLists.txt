@@ -1,10 +1,10 @@
 set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
-if(CMAKE_HIP_COMPILER_ID MATCHES "Clang")
-    message(STATUS "Using a Clang-based HIP compiler: ${CMAKE_HIP_COMPILER_ID}")
+if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+    message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
     message(
         FATAL_ERROR
-        "A Clang-based compiler (like amdclang++) is required. Found: ${CMAKE_HIP_COMPILER_ID}"
+        "'amdclang++' compiler required to compile test binaries for ROCm platform."
     )
 endif()
 
