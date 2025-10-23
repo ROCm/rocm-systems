@@ -148,6 +148,8 @@ ARG BUILD_ROCR_RUNTIME=true
 ENV BUILD_ROCR_RUNTIME=${BUILD_ROCR_RUNTIME}
 ARG BUILD_AQLPROFILE=true
 ENV BUILD_AQLPROFILE=${BUILD_AQLPROFILE}
+ARG BUILD_CLR=true
+ENV BUILD_CLR=${BUILD_CLR}
 ARG BUILD_ROCDECODE=true
 ENV BUILD_ROCDECODE=${BUILD_ROCDECODE}
 ARG BUILD_ROCJPEG=true
@@ -218,6 +220,32 @@ RUN set -euo pipefail; \
       echo "aqlprofile installed"; \
     else \
       echo "Skipping aqlprofile"; \
+    fi
+
+# Build and install CLR/HIP Runtime (required by rocprofiler-sdk)
+RUN set -euo pipefail; \
+    if [ "${BUILD_CLR}" = "true" ]; then \
+      echo "Building CLR/HIP Runtime..."; \
+      cd /workspace/projects/clr; \
+      export HIP_DIR=/workspace/projects/hip; \
+      export CLR_DIR=/workspace/projects/clr; \
+      cmake -G Ninja -B build-clr \
+        -DHIP_COMMON_DIR=$HIP_DIR \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DHIP_PLATFORM=amd \
+        -DCMAKE_PREFIX_PATH="${ROCM_PATH};${LLVM_PATH}" \
+        -DCMAKE_C_COMPILER=${LLVM_PATH}/bin/amdclang \
+        -DCMAKE_CXX_COMPILER=${LLVM_PATH}/bin/amdclang++ \
+        -DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
+        -DHIP_CATCH_TEST=0 \
+        -DCLR_BUILD_HIP=ON \
+        -DCLR_BUILD_OCL=ON \
+        -DHIP_LLVM_ROOT=${ROCM_PATH}/lib/llvm; \
+      cmake --build build-clr --target all --parallel 16; \
+      cmake --build build-clr --target install; \
+      echo "CLR/HIP Runtime installed"; \
+    else \
+      echo "Skipping CLR/HIP Runtime"; \
     fi
 
 # Clone external repos for media dependencies

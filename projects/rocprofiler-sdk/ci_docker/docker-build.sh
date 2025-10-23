@@ -63,6 +63,7 @@ build_stage2_image() {
         --build-arg BUILD_ROCPROFILER_REGISTER="${BUILD_ROCPROFILER_REGISTER:-true}" \
         --build-arg BUILD_ROCR_RUNTIME="${BUILD_ROCR_RUNTIME:-true}" \
         --build-arg BUILD_AQLPROFILE="${BUILD_AQLPROFILE:-true}" \
+        --build-arg BUILD_CLR="${BUILD_CLR:-true}" \
         --build-arg ROCDECODE_REF="${ROCDECODE_REF:-release/rocm-rel-7.0}" \
         --build-arg ROCDECODE_REV="${ROCDECODE_REV:-}" \
         --build-arg ROCJPEG_REF="${ROCJPEG_REF:-release/rocm-rel-7.0}" \
