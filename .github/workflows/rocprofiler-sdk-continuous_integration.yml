@@ -626,7 +626,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        sudo sysctl -w vm.mmap_rnd_bits=28;
+        /usr/sbin/sysctl -w vm.mmap_rnd_bits=28;
         export PATH="$HOME/.local/bin:$PATH";
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}

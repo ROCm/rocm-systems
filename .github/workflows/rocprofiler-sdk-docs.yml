@@ -87,17 +87,6 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: mi325
     steps:
-      - name: Install os essentials
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          apt update
-          apt install -y software-properties-common
-          apt-add-repository ppa:git-core/ppa
-          apt-get update
-          apt-get install -y git
-          echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -106,7 +95,6 @@ jobs:
           set-safe-directory: true
 
       - name: Init/Update submodules
-        working-directory: projects/rocprofiler-sdk
         run: git submodule update --init --recursive --jobs 16
 
       - name: Create Docs Directory

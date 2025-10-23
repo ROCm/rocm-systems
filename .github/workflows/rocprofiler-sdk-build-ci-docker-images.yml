@@ -35,14 +35,17 @@ jobs:
       matrix:
         system:
           - { os: 'ubuntu-22.04', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-22.04', gpu: 'gfx950', rocdecode: true, rocjpeg: true }
           - { os: 'ubuntu-22.04', gpu: 'gfx110X', rocdecode: true, rocjpeg: true }
           - { os: 'ubuntu-22.04', gpu: 'gfx120X', rocdecode: true, rocjpeg: true }
           - { os: 'ubuntu-24.04', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
+          - { os: 'ubuntu-24.04', gpu: 'gfx950', rocdecode: true, rocjpeg: true }
           - { os: 'ubuntu-24.04', gpu: 'gfx110X', rocdecode: true, rocjpeg: true }
           - { os: 'ubuntu-24.04', gpu: 'gfx120X', rocdecode: true, rocjpeg: true }
           - { os: 'almalinux-8.10', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
           - { os: 'almalinux-10', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
           - { os: 'sles-15.7', gpu: 'gfx94X', rocdecode: true, rocjpeg: true }
+          - { os: 'sles-15.7', gpu: 'gfx950', rocdecode: true, rocjpeg: true }
 
     steps:
       - name: Checkout
