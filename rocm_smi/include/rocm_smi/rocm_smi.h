@@ -3265,6 +3265,29 @@ rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
                                                rsmi_od_volt_freq_data_t *odv);
 
 /**
+ *  @brief This function retrieves the gpu partition metrics information
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a
+ *  ::rsmi_gpu_metrics_t structure @p pgpu_metrics, this function will populate
+ *  @p pgpu_metrics. See ::rsmi_gpu_metrics_t for more details.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] pgpu_metrics a pointer to an ::rsmi_gpu_metrics_t structure
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind,
+                                                      rsmi_gpu_metrics_t *pgpu_metrics);
+
+/**
  *  @brief This function retrieves the gpu metrics information
  *
  *  @details Given a device index @p dv_ind and a pointer to a

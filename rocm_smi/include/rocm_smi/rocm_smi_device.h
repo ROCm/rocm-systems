@@ -156,6 +156,7 @@ enum DevInfoTypes {
   kDevMemPageBad,
   kDevNumaNode,
   kDevGpuMetrics,
+  kdevGpuPartitionMetrics,
   kDevPmMetrics,
   kDevRegMetrics,
   kDevBaseBoardTempMetrics,
@@ -215,7 +216,7 @@ class Device {
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
     int readDevInfo(DevInfoTypes type, std::size_t b_size,
                                       void *p_binary_data);
-    std::string get_sys_file_path_by_type(DevInfoTypes type) const;
+    std::string get_sys_file_path_by_type(DevInfoTypes type, bool getPathOnly = false) const;
     // Get the property from a file which may contain multiple properties.
     int readDevInfo(DevInfoTypes type, const std::string& property,
                                       std::string& value);
@@ -254,19 +255,31 @@ class Device {
     template <typename T> std::string readBootPartitionState(uint32_t dv_ind);
     rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx, AMDGpuVerbTypes_t verb_type);
 
-    void dev_set_gpu_metric(GpuMetricsBasePtr gpu_metrics_ptr) { m_gpu_metrics_ptr = std::move(gpu_metrics_ptr); };
-    GpuMetricsBasePtr& dev_get_gpu_metric() { return m_gpu_metrics_ptr; };
     const AMDGpuMetricsHeader_v1_t& dev_get_metrics_header() {return m_gpu_metrics_header; }
-    rsmi_status_t setup_gpu_metrics_reading();
-    rsmi_status_t dev_read_gpu_metrics_header_data();
-    rsmi_status_t dev_read_gpu_metrics_all_data();
-    rsmi_status_t run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_counter, AMDGpuDynamicMetricTblValues_t& values);
-    rsmi_status_t dev_log_gpu_metrics(std::ostringstream& outstream_metrics);
-    AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
+    auto setup_gpu_metrics_reading(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics)
+        -> rsmi_status_t;
+    auto dev_read_gpu_metrics_header_data(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics)
+        -> rsmi_status_t;
+    auto dev_read_gpu_metrics_all_data(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics)
+        -> rsmi_status_t;
+    auto run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_counter,
+                                        AMDGpuDynamicMetricTblValues_t &values,
+                                        DevInfoTypes type = DevInfoTypes::kDevGpuMetrics)
+        -> rsmi_status_t;
+    auto dev_log_gpu_metrics(std::ostringstream &outstream_metrics,
+                             DevInfoTypes type = DevInfoTypes::kDevGpuMetrics) -> rsmi_status_t;
+    auto dev_copy_internal_to_external_metrics(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics)
+        -> AMGpuMetricsPublicLatestTupl_t;
 
     static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
     void set_smi_device_id(uint32_t device_id) { m_device_id = device_id; }
     void set_smi_partition_id(uint32_t partition_id) { m_partition_id = partition_id; }
+    auto set_smi_dev_info_type(DevInfoTypes type) -> void { m_dev_info_type = type; }
+    auto get_smi_device_id(void) const -> uint32_t { return m_device_id; }
+    auto get_smi_partition_id(void) const -> uint32_t { return m_partition_id; }
+    auto is_smi_expecting_partition_metrics(void) const -> bool {
+        return m_dev_info_type == DevInfoTypes::kdevGpuPartitionMetrics;
+    }
     static const char* get_type_string(DevInfoTypes type);
     rsmi_status_t get_smi_device_identifiers(uint32_t device_id,
                   rsmi_device_identifiers_t *device_identifiers);
@@ -310,6 +323,7 @@ class Device {
     uint64_t m_gpu_metrics_updated_timestamp;
     uint32_t m_device_id;
     uint32_t m_partition_id;
+    DevInfoTypes m_dev_info_type{DevInfoTypes::kDevGpuMetrics};
 
     // New dynamic GPU metrics support
     bool m_is_dynamic_gpu_metrics_supported = false;

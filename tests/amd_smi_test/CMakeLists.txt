@@ -52,6 +52,11 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 add_executable(${TEST} ${tstSources} ${functionalSources})
 target_link_libraries(${TEST} ${AMD_SMI} GTest::gtest_main c stdc++ pthread)
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9")
+  target_link_libraries(${TEST} stdc++fs)
+endif()
+
 # Install tests
 install(
     TARGETS ${TEST}

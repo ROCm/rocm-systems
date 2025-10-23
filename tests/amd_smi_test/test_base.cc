@@ -282,7 +282,23 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
     }
   }
 
-  std::cout << std::setbase(10);
+  amdsmi_kfd_info_t kfd_info;
+  err = amdsmi_get_gpu_kfd_info(dv_ind, &kfd_info);
+  if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**KFD info: " << smi_amdgpu_get_status_string(err, false) << std::endl;
+    }
+    ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**KFD info: " << std::endl;
+      std::cout << "\t\t**GPU ID: " << std::dec << kfd_info.kfd_id << std::endl;
+      std::cout << "\t\t**Node ID: " << std::dec << kfd_info.node_id << std::endl;
+      std::cout << "\t\t**Partition ID: "
+                << std::dec << kfd_info.current_partition_id << std::endl;
+    }
+  }
 }
 void TestBase::Run(void) {
   std::string label;

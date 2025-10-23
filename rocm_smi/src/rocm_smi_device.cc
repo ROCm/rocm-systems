@@ -114,6 +114,7 @@ static const char *kDevXGMIErrorFName = "xgmi_error";
 static const char *kDevSerialNumberFName = "serial_number";
 static const char *kDevNumaNodeFName = "numa_node";
 static const char *kDevGpuMetricsFName = "gpu_metrics";
+static const char *kDevGpuPartitionMetricsFName = "xcp/xcp_metrics";
 static const char *kDevPmMetricsFName = "pm_metrics";   // PM log
 static const char *kDevRegMetricsFName = "reg_state";   // register table
 static const char *kDevBaseBoardTempMetricsFName = "board/baseboard_temp";
@@ -321,6 +322,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemPageBad, kDevMemPageBadFName},
     {kDevNumaNode, kDevNumaNodeFName},
     {kDevGpuMetrics, kDevGpuMetricsFName},
+    {kdevGpuPartitionMetrics, kDevGpuPartitionMetricsFName},
     {kDevPmMetrics, kDevPmMetricsFName},
     {kDevSocPstate, kDevSocPstateFName},
     {kDevXgmiPlpd, kDevXgmiPlpdFName},
@@ -498,6 +500,7 @@ Device::devInfoTypesStrings = {
   {kDevMemPageBad, "kDevMemPageBad"},
   {kDevNumaNode, "kDevNumaNode"},
   {kDevGpuMetrics, "kDevGpuMetrics"},
+  {kdevGpuPartitionMetrics, "kdevGpuPartitionMetrics"},
   {kDevPmMetrics, "kDevPmMetrics"},
   {kDevRegMetrics, "kDevRegMetrics"},
   {kDevBaseBoardTempMetrics, "kDevBaseBoardTempMetrics"},
@@ -747,10 +750,29 @@ int Device::openDebugFileStream(DevInfoTypes type, T *fs, const char *str) {
   return 0;
 }
 
-std::string Device::get_sys_file_path_by_type(DevInfoTypes type) const {
+/**
+ * @brief Get the sysfs file path for a given device attribute type.
+ *
+ * This function constructs the full path to a sysfs file corresponding to the specified
+ * device attribute type for this device instance. The path is constructed using the device's
+ * base path, appending "/device/" and the attribute name from kDevAttribNameMap.
+ *
+ * If getPathOnly is true, the constructed path is returned without checking for file existence.
+ * If getPathOnly is false, the function checks if the file exists; if not, an empty string is returned.
+ *
+ * @param type        The device attribute type (DevInfoTypes) for which to get the sysfs file path.
+ * @param getPathOnly If true, return the constructed path without checking for file existence.
+ *                    If false, return an empty string if the file does not exist.
+ * @return std::string The full sysfs file path, or an empty string if the file does not exist
+ *                     and getPathOnly is false.
+ */
+std::string Device::get_sys_file_path_by_type(DevInfoTypes type, bool getPathOnly) const {
   auto sysfs_path = path_;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
+  if (getPathOnly) {
+    return sysfs_path;
+  }
 
   if (access(sysfs_path.c_str(), F_OK) != 0) {
       sysfs_path.clear();
@@ -1133,7 +1155,6 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   // is the issue, so should remain.
   const std::string key = path_ + "/device/" + kDevAttribNameMap.at(type)
                                 + "#" + std::to_string(b_size);
-                                
   GpuMetricsCache* cache_ptr = nullptr;
   {
     std::lock_guard<std::mutex> map_lk(g_gpu_metrics_cache_map_mu);
@@ -1447,6 +1468,7 @@ int Device::readDevInfo(DevInfoTypes type, std::size_t b_size,
 
   switch (type) {
      case kDevGpuMetrics:
+     case kdevGpuPartitionMetrics:
       return readDevInfoBinary(type, b_size, p_binary_data);
       break;
 

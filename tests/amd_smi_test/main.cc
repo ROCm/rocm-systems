@@ -37,6 +37,7 @@
 #include "functional/process_info_read.h"
 #include "functional/gpu_busy_read.h"
 #include "functional/gpu_metrics_read.h"
+#include "functional/gpu_partition_metrics_read.h"
 #include "functional/err_cnt_read.h"
 #include "functional/power_read.h"
 #include "functional/power_read_write.h"
@@ -222,6 +223,10 @@ TEST(amdsmitstReadOnly, TestHWTopologyRead) {
 }
 TEST(amdsmitstReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
+  RunGenericTest(&tst);
+}
+TEST(amdsmitstReadOnly, TestGpuPartitionMetricsRead) {
+  TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadOnly, TestMetricsCounterRead) {

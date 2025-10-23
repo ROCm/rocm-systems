@@ -1,46 +1,23 @@
 /*
- * MIT License
- *
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
- *  Developed by:
- *
- *                  AMD ML Software Engineering
- *
- *                  Advanced Micro Devices, Inc.
- *
- *                  www.amd.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of Advanced Micro Devices, Inc,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
- *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- * OTHER DEALINGS IN THE SOFTWARE.
- *
- *
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 #include "rocm_smi/rocm_smi.h"
@@ -156,7 +133,7 @@ static inline std::optional<AMDGpuMetricAttributeValue_t> read_metric_value(Curs
 
 auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data,
                                               std::size_t size) noexcept -> rsmi_status_t {
-
+  std::ostringstream ss;
   rsmi_status_t status = RSMI_STATUS_SUCCESS;
   if (!data || (size < (sizeof(AMDGpuDynamicMetricsHeader_v1_t) + sizeof(uint32_t)))) {
       return RSMI_STATUS_INSUFFICIENT_SIZE;
@@ -178,6 +155,17 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data,
   if (attr_count == 0 || attr_count > size){
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
+  std::string m_header_version_str = std::to_string(static_cast<uint32_t>(hdr.m_format_revision))
+                                     + "." +
+                                     std::to_string(static_cast<uint32_t>(hdr.m_content_revision));
+  ss << __PRETTY_FUNCTION__
+     << " | Info: Dynamic GPU Metrics"
+     << " | Attr Count: " << attr_count
+     << " | Header Version: " << m_header_version_str
+     << " | Header Size: " << hdr.get_size()
+     << " | Total Size: " << size
+     << " |";
+  LOG_TRACE(ss);
 
   details::AMDGpuMetricSchemaType_t metrics_data;
   metrics_data.reserve(attr_count);
@@ -212,7 +200,6 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data,
     AMDGpuMetricAttributeInstance_t inst{};
     status = schema_lookup_instance(attr_id, attr_type, inst);
     if (status != RSMI_STATUS_SUCCESS){
-      std::ostringstream ss;
       ss << __PRETTY_FUNCTION__
         << " | Warn: schema lookup miss"
         << " | Attr ID: "   << static_cast<std::underlying_type_t<AMDGpuMetricAttributeId_t>>(attr_id)

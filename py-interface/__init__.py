@@ -184,6 +184,7 @@ from .amdsmi_interface import amdsmi_get_gpu_mem_overdrive_level
 from .amdsmi_interface import amdsmi_get_clk_freq
 from .amdsmi_interface import amdsmi_get_gpu_od_volt_info
 from .amdsmi_interface import amdsmi_get_gpu_metrics_info
+from .amdsmi_interface import amdsmi_get_gpu_partition_metrics_info
 from .amdsmi_interface import amdsmi_get_gpu_od_volt_curve_regions
 from .amdsmi_interface import amdsmi_is_gpu_power_management_enabled
 
