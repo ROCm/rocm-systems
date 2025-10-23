@@ -964,7 +964,7 @@ def patch_args(data):
     return data
 
 
-def get_args(cmd_args, inp_args, filter=[]):
+def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
@@ -994,38 +994,46 @@ def get_args(cmd_args, inp_args, filter=[]):
             return getattr(inp_args, key)
         return None
 
+    def is_filtered(key):
+        if filter:
+            for fitr in filter:
+                import re
+
+                if re.match(fitr, key):
+                    return True
+        return False
+
     for itr in set(cmd_keys + inp_keys):
+        # check for conflicting args between the two argument lists
         if (
             has_set_attr(cmd_args, itr)
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            should_raise = True
-            if filter:
-                is_filtered = False
-                for fitr in filter:
-                    import re
-
-                    if re.match(fitr, itr):
-                        is_filtered = True
-                        break
-
-                if not is_filtered:
-                    warning(
-                        f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
-                    )
-                    should_raise = False
-
-            # should raise error if not in filter list
-            if should_raise:
+            if is_filtered(itr):
                 raise RuntimeError(
-                    f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+                    f"Option '{itr}' has conflicting values: {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
                 )
             else:
-                # has preference towards command line args
-                data[itr] = get_attr(itr)
-        else:
-            data[itr] = get_attr(itr)
+                warning(
+                    f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
+                )
+
+        # if require_in_both was set, check for keys unique to each argument list
+        if require_in_both and (
+            has_set_attr(cmd_args, itr) != has_set_attr(inp_args, itr)
+        ):
+            if is_filtered(itr):
+                raise RuntimeError(
+                    f"Option '{itr}' was only present in one argument list : {getattr(cmd_args, itr, None)} vs {getattr(inp_args, itr, None)}"
+                )
+            else:
+                warning(
+                    f"Option '{itr}' was only present in one argument list, but will be used : {itr}={get_attr(itr)}"
+                )
+
+        # has preference towards command line args
+        data[itr] = get_attr(itr)
 
     return patch_args(dotdict(data))
 
@@ -1769,46 +1777,21 @@ def main(argv=None):
                 with open(fname, "rb") as ifs:
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Loading attach configuration from {fname}...")
-                    previous_args = pickle.load(ifs)
+                    prev_args = pickle.load(ifs)
 
-                # compare the previous arguments used to the current attachments's arguments
-                keys_to_ignore = [
-                    "input",
-                    "output_file",
-                    "output_directory",
-                    "output_format",
-                    "__dict__",
-                ]
-                prev_args_filtered = {
-                    k: v for k, v in previous_args.items() if k not in keys_to_ignore
-                }
-                curr_args_filtered = {
-                    k: v for k, v in args.items() if k not in keys_to_ignore
-                }
-
-                if prev_args_filtered != curr_args_filtered:
-                    # if args are not the same, error out with a message describing the difference
-                    different_keys = {
-                        k
-                        for k, v in prev_args_filtered.items()
-                        if k in curr_args_filtered and v != curr_args_filtered[k]
-                    }
-                    prev_diff = {
-                        k: v
-                        for k, v in prev_args_filtered.items()
-                        if k not in curr_args_filtered or k in different_keys
-                    }
-                    curr_diff = {
-                        k: v
-                        for k, v in curr_args_filtered.items()
-                        if k not in prev_args_filtered or k in different_keys
-                    }
-                    fatal_error(
-                        "Reattaching to a previously used PID with different rocprofv3 arguments has been detected. "
-                        "This is not allowed.\n"
-                        f"Unique to previous arguments: {prev_diff}\n"
-                        f"Unique to current arguments: {curr_diff}"
-                    )
+                # get_args will compare the arguments used to the previous attachments's arguments
+                args = get_args(
+                    args,
+                    dotdict(prev_args),
+                    filter=[
+                        ".*_trace",
+                        "^pc_sampling_.*$",
+                        "^att_.*$",
+                        "^(pmc|pmc_groups|output_config|extra_counters)$",
+                        "^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    ],
+                    require_in_both=True,
+                )
 
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
