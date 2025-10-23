@@ -261,7 +261,7 @@ detailed description of profiling filters available when using ROCm Compute Prof
 Filtering options
 -----------------
 
-``-b``, ``--block <block-name>``
+``-b``, ``--block <block-id|block-alias|metric-id>``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
