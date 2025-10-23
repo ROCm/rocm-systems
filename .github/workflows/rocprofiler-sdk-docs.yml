@@ -132,6 +132,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk/
         run:
+          git config --global --add safe.directory '/__w/rocm-systems/rocm-systems';
+          git config --global --add safe.directory '*';
           export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
           cmake -B build
             -DROCPROFILER_DEP_ROCMCORE=ON
