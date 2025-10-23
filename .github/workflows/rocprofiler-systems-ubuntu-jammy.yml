@@ -95,7 +95,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module avail
 
@@ -171,7 +170,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module use /opt/rocprofiler-systems/share/modulefiles
         module avail
@@ -182,7 +180,6 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
@@ -275,7 +272,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module avail
 
@@ -351,7 +347,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module use /opt/rocprofiler-systems/share/modulefiles
         module avail
@@ -362,7 +357,6 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
