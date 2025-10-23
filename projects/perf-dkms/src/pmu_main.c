@@ -208,8 +208,15 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
 
     /* GPU PMU doesn't support inherit (GPU counters aren't per-process) */
     if (event->attr.inherit) {
-        pmu_debug("Rejecting inherit flag - GPU counters can't inherit to children\n");
-        return -EOPNOTSUPP;
+        pmu_debug("Disabling inherit flag - GPU counters can't inherit to children\n");
+        event->attr.inherit = 0;
+    }
+
+    /* GPU counters are system-wide, not per-CPU. Only allow on CPU 0 to prevent
+     * multiple allocations when perf creates per-CPU events with -a flag */
+    if (event->cpu >= 0 && event->cpu != 0) {
+        pmu_debug("Rejecting event on CPU %d - GPU counters only supported on CPU 0\n", event->cpu);
+        return -EINVAL;
     }
 
     /* Extract and validate dimensions from config1 if specified */
@@ -569,7 +576,7 @@ static int __init amdgpu_pmu_init(void)
         .stop           = amdgpu_pmu_stop,
         .read           = amdgpu_pmu_read,
         .attr_groups    = amdgpu_pmu_attr_groups,
-        .capabilities   = PERF_PMU_CAP_NO_INTERRUPT,
+        .capabilities   = PERF_PMU_CAP_NO_INTERRUPT | PERF_PMU_CAP_NO_EXCLUDE,
     };
 
     /* Register PMU with perf subsystem */
