@@ -13,7 +13,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-compute-code-coverage.yml'
-      - 'projects/rocprofiler-compute/utils/run-ci.py'
+      - 'projects/rocprofiler-compute/tools/run-ci.py'
 
 env:
   ROCM_PATH: "/opt/rocm"
@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: projects/rocprofiler-compute
+          sparse-checkout: projects/rocprofiler-compute/
 
       - name: Install amdgpu and dependencies
         shell: bash
@@ -102,12 +102,13 @@ jobs:
           fi
 
           # Verify rocprofiler-sdk installation
-          if [ -f "${{ env.ROCM_PATH }}/lib/rocprofiler-sdk/librocprofv3-attach.so" ]; then
-            echo "✅ rocprofiler-sdk found at ${{ env.ROCM_PATH }}/lib/rocprofiler-sdk/"
+          echo "Searching for rocprofiler-sdk files:"
+          ROCPROF_LIB=$(find /opt/rocm* -name "librocprofv3-attach.so" 2>/dev/null | head -1)
+          if [ -n "$ROCPROF_LIB" ]; then
+            echo "✅ rocprofiler-sdk found at: $ROCPROF_LIB"
           else
-            echo "⚠️  Warning: librocprofv3-attach.so not found at expected location"
-            echo "Searching for rocprofiler-sdk files:"
-            find ${{ env.ROCM_PATH }} -name "librocprofv3-attach.so" 2>/dev/null || echo "Not found"
+            echo "❌ ERROR: librocprofv3-attach.so not found!"
+            exit 1
           fi
 
           echo "✅ ROCm Installation Complete!"
@@ -133,7 +134,7 @@ jobs:
           
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          python3 ./utils/run-ci.py \
+          python3 ./tools/run-ci.py \
             --build-name "${BUILD_NAME}" \
             --mode "Nightly" \
             --build-jobs 16 \
