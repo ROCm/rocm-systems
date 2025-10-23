@@ -36,22 +36,8 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
-  prepare-runner:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.2.0
-      with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: false
-
   ubuntu-jammy-external:
     runs-on: ubuntu-latest
-    needs: prepare-runner
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
     strategy:
@@ -204,7 +190,6 @@ jobs:
 
   ubuntu-jammy-external-rocm:
     runs-on: ubuntu-latest
-    needs: prepare-runner
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
     strategy:
@@ -381,7 +366,6 @@ jobs:
 
   ubuntu-jammy-codecov:
     runs-on: ubuntu-latest
-    needs: prepare-runner
 
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
