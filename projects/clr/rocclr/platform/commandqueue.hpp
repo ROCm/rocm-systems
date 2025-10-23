@@ -252,7 +252,10 @@ class HostQueue : public CommandQueue {
   Command* GetSubmissionBatch() const { return head_; }
 
   //! Get the current batch size
-  size_t GetSubmissionBatchSize() const { return size_; }
+  size_t GetSubmissionBatchSize() const {
+    ScopedLock sl(vdev()->execution());
+    return size_;
+  }
 
   //! Insert a command into the linked list of submitted commands
   void FormSubmissionBatch(Command* command) {
@@ -319,7 +322,7 @@ class HostQueue : public CommandQueue {
   size_t size_ = 0;  //!< The current batch size
 
   //! True if this command queue is active
-  bool isActive_;
+  std::atomic<bool>  isActive_;
   bool forceDestroy_ = false;  //!< Destroy the queue in the current state
 
   amd::SyncPolicy sync_policy_;  //!< Used for controlling stream synchronization

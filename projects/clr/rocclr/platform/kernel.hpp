@@ -169,6 +169,7 @@ class KernelParameters : protected HeapObject {
     samplerObjects_ = reinterpret_cast<amd::Sampler**>(values_ + samplerObjOffset_);
     queueObjOffset_ = samplerObjOffset_ + signature_.numSamplers() * sizeof(amd::Sampler*);
     queueObjects_ = reinterpret_cast<amd::DeviceQueue**>(values_ + queueObjOffset_);
+    execInfoOffset_ = totalSize_;
     address limit = reinterpret_cast<address>(&queueObjects_[signature_.numQueues()]);
     ::memset(values_, '\0', limit - values_);
   }
