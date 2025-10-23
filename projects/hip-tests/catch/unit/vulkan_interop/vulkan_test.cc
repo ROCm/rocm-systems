@@ -407,18 +407,18 @@ void VulkanTest::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 
   VK_CHECK_RESULT(vkCreateBuffer(_device, &buffer_create_info, nullptr, &buffer));
 
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(_device, buffer, &memRequirements);
+  VkMemoryRequirements memory_requirements;
+  vkGetBufferMemoryRequirements(_device, buffer, &memory_requirements);
 
   VkMemoryAllocateInfo alloc_info = {};
   alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  alloc_info.allocationSize = memRequirements.size;
-  alloc_info.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
+  alloc_info.allocationSize = memory_requirements.size;
+  alloc_info.memoryTypeIndex = FindMemoryType(memory_requirements.memoryTypeBits, properties);
 
   VkExportMemoryAllocateInfoKHR vulkan_export_memory_allocate_info = {};
 #ifdef _WIN64
-  WindowsSecurityAttributes winSecurityAttributes = {};
-  VkExportMemoryWin32HandleInfoKHR vulkanExportMemoryWin32HandleInfoKHR = {};
+  WindowsSecurityAttributes win_security_attributes = {};
+  VkExportMemoryWin32HandleInfoKHR vulkan_export_memory_win32_handle_info = {};
 #endif
 
   if (external) {
@@ -426,17 +426,17 @@ void VulkanTest::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
     vulkan_export_memory_allocate_info.handleTypes = _mem_handle_type;
 
 #ifdef _WIN64
-    vulkanExportMemoryWin32HandleInfoKHR.sType =
+    vulkan_export_memory_win32_handle_info.sType =
         VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
-    vulkanExportMemoryWin32HandleInfoKHR.pNext = NULL;
-    vulkanExportMemoryWin32HandleInfoKHR.pAttributes = &winSecurityAttributes;
-    vulkanExportMemoryWin32HandleInfoKHR.dwAccess =
+    vulkan_export_memory_win32_handle_info.pNext = NULL;
+    vulkan_export_memory_win32_handle_info.pAttributes = &win_security_attributes;
+    vulkan_export_memory_win32_handle_info.dwAccess =
         DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE;
-    vulkanExportMemoryWin32HandleInfoKHR.name = (LPCWSTR)NULL;
+    vulkan_export_memory_win32_handle_info.name = (LPCWSTR)NULL;
 
     vulkan_export_memory_allocate_info.pNext =
         _mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR
-        ? &vulkanExportMemoryWin32HandleInfoKHR
+        ? &vulkan_export_memory_win32_handle_info
         : NULL;
 #endif
 
