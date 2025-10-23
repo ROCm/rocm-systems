@@ -139,6 +139,14 @@ jobs:
       run: |
         cmake --build build --target install --parallel 2
 
+    - name: CPack and Install
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cd build
+        cpack -G STGZ
+        mkdir -p /opt/rocprofiler-systems
+        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
+
     - name: Test Install with Modulefile
       working-directory: projects/rocprofiler-systems/
       timeout-minutes: 15
