@@ -163,10 +163,9 @@ def is_roofline_shown(
     for run_path, workload in runs.items():
         if hasattr(workload, "roofline_metrics") and workload.roofline_metrics:
             print(
-                "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
+                "(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
                 file=output,
             )
-            print("-" * 80, file=output)
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
             if not kernel_top_df.empty:
@@ -490,7 +489,7 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        if panel_id == 400 and not is_roofline_shown(
+        if panel_id == 400 and is_roofline_shown(
             args, runs, output, panel, roof_plot, hidden_cols, filter_panel_ids
         ):
             continue
