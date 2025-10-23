@@ -33,6 +33,11 @@ ModuleGuard ModuleGuard::LoadModule(const char* fname) {
   return ModuleGuard{module};
 }
 
+ModuleGuard ModuleGuard::InitModule(const char* fname) {
+  HIP_CHECK(hipFree(nullptr));
+  return LoadModule(fname);
+}
+
 ModuleGuard ModuleGuard::LoadModuleDataFile(const char* fname) {
   const auto loaded_module = LoadModuleIntoBuffer(fname);
   hipModule_t module = nullptr;

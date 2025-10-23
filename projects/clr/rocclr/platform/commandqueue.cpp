@@ -72,7 +72,7 @@ bool HostQueue::terminate() {
       Command* lastCommand = getLastQueuedCommand(true);
       if (lastCommand != nullptr) {
         // Check if CPU batch wasn't flushed for completion with the last command
-        if (GetSubmissionBatch() != nullptr) {
+        if (GetSubmissionBatchSize() != 0) {
           auto command = new Marker(*this, false);
           if (command != nullptr) {
             ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Marker queued to ensure finish");
@@ -187,7 +187,7 @@ void HostQueue::finish(bool cpu_wait) {
           batchSize, cpu_wait, vdev()->isFenceDirty());
 
   // Force marker if the batch wasn't sent for CPU update or fence is dirty
-  if (nullptr == command || (GetSubmissionBatch() != nullptr) || vdev()->isFenceDirty()) {
+  if (nullptr == command || (batchSize != 0)|| vdev()->isFenceDirty()) {
     if (nullptr != command) {
       command->release();
     }
@@ -208,20 +208,18 @@ void HostQueue::finish(bool cpu_wait) {
             "await command completion",
             minBatchSize);
     command->awaitCompletion();
-
-    if (IS_HIP) {
-      ScopedLock sl(vdev()->execution());
-      ScopedLock l(lastCmdLock_);
-      // Runtime can clear the last command only if no other submissions occured
-      // during finish()
-      if (command == lastEnqueueCommand_) {
-        device_.removeFromActiveQueues(this);
-        lastEnqueueCommand_->release();
-        lastEnqueueCommand_ = nullptr;
-      }
+  }
+  if (IS_HIP) {
+    ScopedLock sl(vdev()->execution());
+    ScopedLock l(lastCmdLock_);
+    // Runtime can clear the last command only if no other submissions occured
+    // during finish()
+    if (command == lastEnqueueCommand_) {
+      device_.removeFromActiveQueues(this);
+      lastEnqueueCommand_->release();
+      lastEnqueueCommand_ = nullptr;
     }
   }
-
   // Release all HW queues, which are idle or nearly idle
   vdev()->ReleaseAllHwQueues();
 

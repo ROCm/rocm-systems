@@ -31,8 +31,8 @@ import yaml
 
 def test_modification_time():
     # Ensure hash map consistency
-    hash_path = Path("utils/autogen_hash.yaml")
-    with open(hash_path, "r") as f:
+    hash_path = Path("tools/autogen_hash.yaml")
+    with open(hash_path) as f:
         hash_map = yaml.safe_load(f)
     for file, hash in hash_map.items():
         file_hash = hashlib.sha256(Path(file).read_bytes()).hexdigest()

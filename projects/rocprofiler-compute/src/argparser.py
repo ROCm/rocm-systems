@@ -25,20 +25,41 @@
 
 import argparse
 import os
-import re
 from pathlib import Path
+from typing import Optional
+
+from utils.utils import METRIC_ID_RE
 
 
-def print_avail_arch(avail_arch: list):
-    ret_str = "List all available metrics for analysis on specified arch:"
+def validate_block(value: str) -> str:
+    if METRIC_ID_RE.match(value):
+        return value
+    raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
+
+
+def block_token_or_alias(s: str) -> str:
+    try:
+        return validate_block(s)
+    except argparse.ArgumentTypeError:
+        s = (s or "").strip()
+        if not s:
+            raise argparse.ArgumentTypeError("empty token for --block")
+        return s
+
+
+def print_avail_arch(avail_arch: list[str], args: str) -> str:
+    ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
-        ret_str += "\n   {}".format(arch)
+        ret_str += f"\n   {arch}"
     return ret_str
 
 
 def add_general_group(
-    parser, rocprof_compute_version, supported_archs, rocprof_compute_home
-):
+    parser: argparse.ArgumentParser,
+    rocprof_compute_home: Path,
+    supported_archs: dict[str, str],
+    rocprof_compute_version: dict[str, Optional[str]],
+) -> None:
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -62,25 +83,35 @@ def add_general_group(
         dest="list_metrics",
         metavar="",
         choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(supported_archs.keys()),
+        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+    )
+    general_group.add_argument(
+        "--list-blocks",
+        dest="list_blocks",
+        metavar="",
+        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
     )
     general_group.add_argument(
         "--config-dir",
         dest="config_dir",
         metavar="",
         help="Specify the directory of customized report section configs.",
-        default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
+        default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
     )
     # Nowhere to load specs from in db mode
-    if "database" not in parser.usage:
+    if parser.usage and "database" not in parser.usage:
         general_group.add_argument(
             "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
 
 
 def omniarg_parser(
-    parser, rocprof_compute_home, supported_archs, rocprof_compute_version
-):
+    parser: argparse.ArgumentParser,
+    rocprof_compute_home: Path,
+    supported_archs: dict[str, str],
+    rocprof_compute_version: dict[str, Optional[str]],
+) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
     # -----------------------------------------
@@ -88,7 +119,7 @@ def omniarg_parser(
     ## General Command Line Options
     ## ----------------------------
     add_general_group(
-        parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -104,8 +135,7 @@ def omniarg_parser(
         help="Profile the target application",
         usage="""
 
-`rocprof-compute profile --name <workload_name>
-[profile options] [roofline options] -- <profile_cmd>`
+`rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
 
 ---------------------------------------------------------------------------------
 Examples:
@@ -115,7 +145,7 @@ Examples:
 \trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
 ---------------------------------------------------------------------------------
-        """,
+        """,  # noqa: E501
         prog="tool",
         allow_abbrev=False,
         formatter_class=lambda prog: argparse.RawTextHelpFormatter(
@@ -125,7 +155,7 @@ Examples:
     profile_parser._optionals.title = "Help"
 
     add_general_group(
-        profile_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        profile_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
@@ -142,16 +172,37 @@ Examples:
         "--target", type=str, default=None, help=argparse.SUPPRESS
     )
     profile_group.add_argument(
+        "--attach-pid",
+        type=str,
+        dest="attach_pid",
+        metavar="",
+        default=None,
+        required=False,
+        help="\t\t\tProcess id to be attached for profiling.",
+    )
+    profile_group.add_argument(
+        "--attach-duration-msec",
+        type=str,
+        dest="attach_duration_msec",
+        metavar="",
+        default=None,
+        required=False,
+        help=(
+            "\t\t\tWhen --attach-pid is used, it specifies the attach duration "
+            "in milliseconds. If not set, detachment occurs when "
+            '"Enter" key is pressed.'
+        ),
+    )
+    profile_group.add_argument(
         "-p",
         "--path",
         metavar="",
         type=str,
         dest="path",
-        default=str(Path(os.getcwd()).joinpath("workloads")),
+        default=str(Path.cwd() / "workloads"),
         required=False,
         help=(
-            "\t\t\tSpecify path to save workload.\n\t\t\t"
-            "(DEFAULT: {}/workloads/<name>)".format(os.getcwd())
+            f"\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)"  # noqa: E501
         ),
     )
     profile_group.add_argument(
@@ -159,7 +210,7 @@ Examples:
         metavar="",
         type=str,
         dest="subpath",
-        default="gpu",
+        default="gpu_model",
         required=False,
         help=(
             "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
@@ -207,13 +258,6 @@ Examples:
         help="\t\t\tDispatch ID filtering.",
     )
 
-    def validate_block(value):
-        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
-        metric_id_pattern = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
-        if metric_id_pattern.match(value):
-            return value
-        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
-
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
@@ -223,15 +267,19 @@ Examples:
     profile_group.add_argument(
         "-b",
         "--block",
-        type=validate_block,
         dest="filter_blocks",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         required=False,
         default=[],
         help=(
             "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
             "(e.g. 12, 12.1, 12.1.1).\n"
+            "\t\t\tAlternatively, specify block id(s) for filtering "
+            "(e.g. 12, 13, 14).\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering "
+            "(e.g. lds, l1i, sl1d).\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set or --roof-only"
         ),
@@ -252,7 +300,6 @@ Examples:
             "\t\t\tCannot be used with --block or --roof-only"
         ),
     )
-
     profile_group.add_argument(
         "--join-type",
         metavar="",
@@ -294,11 +341,10 @@ Examples:
         required=False,
         metavar="",
         dest="format_rocprof_output",
-        choices=["json", "csv", "rocpd"],
+        choices=["csv", "rocpd"],
         default="csv",
         help="\t\t\tSet the format of output file of rocprof.",
     )
-
     profile_group.add_argument(
         "--pc-sampling-method",
         required=False,
@@ -310,7 +356,6 @@ Examples:
             "Support stochastic only >= MI300"
         ),
     )
-
     profile_group.add_argument(
         "--pc-sampling-interval",
         required=False,
@@ -324,13 +369,14 @@ Examples:
             "(DEFAULT: 1048576)."
         ),
     )
-
     profile_group.add_argument(
         "--rocprofiler-sdk-library-path",
         type=str,
         dest="rocprofiler_sdk_library_path",
         required=False,
-        default="/opt/rocm/lib/librocprofiler-sdk.so",
+        default=str(
+            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+        ),
         help="\t\t\tSet the path to rocprofiler SDK library.",
     )
     profile_group.add_argument(
@@ -389,9 +435,9 @@ Examples:
         "--device",
         metavar="",
         required=False,
-        default=-1,
+        default=0,
         type=int,
-        help="\t\t\tTarget GPU device ID. (DEFAULT: ALL)",
+        help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
     )
     roofline_group.add_argument(
         "--kernel-names",
@@ -400,7 +446,6 @@ Examples:
         action="store_true",
         help="\t\t\tInclude kernel names in roofline plot.",
     )
-
     roofline_group.add_argument(
         "-R",
         "--roofline-data-type",
@@ -468,12 +513,10 @@ Examples:
 
             \n\n-------------------------------------------------------------------------------
             \nExamples:
-            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "
-            "workloads/vcopy/mi200/"
-            "\n\trocprof-compute database --remove -H pavii1 -u temp -w "
-            "rocprofiler-compute_asw_sample_mi200"
-            "\n-------------------------------------------------------------------------------\n"
-        """,
+            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "workloads/vcopy/mi200/"
+            \n\trocprof-compute database --remove -H pavii1 -u temp -w "rocprofiler-compute_asw_sample_mi200"
+            \n-------------------------------------------------------------------------------\n
+        """,  # noqa: E501
         prog="tool",
         allow_abbrev=False,
         formatter_class=lambda prog: argparse.RawTextHelpFormatter(
@@ -483,7 +526,7 @@ Examples:
     db_parser._optionals.title = "Help"
 
     add_general_group(
-        db_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        db_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
@@ -494,7 +537,7 @@ Examples:
         required=False,
         dest="upload",
         action="store_true",
-        help="\t\t\t\tImport workload to rocprofiler-compute DB",
+        help="\t\tImport workload to rocprofiler-compute DB",
     )
     interaction_group.add_argument(
         "-r",
@@ -502,7 +545,7 @@ Examples:
         required=False,
         dest="remove",
         action="store_true",
-        help="\t\t\t\tRemove a workload from rocprofiler-compute DB",
+        help="\t\tRemove a workload from rocprofiler-compute DB",
     )
 
     connection_group.add_argument(
@@ -510,14 +553,14 @@ Examples:
         "--host",
         required=True,
         metavar="",
-        help="\t\t\t\tName or IP address of the server host.",
+        help="\t\tName or IP address of the server host.",
     )
     connection_group.add_argument(
         "-P",
         "--port",
         required=False,
         metavar="",
-        help="\t\t\t\tTCP/IP Port. (DEFAULT: 27018)",
+        help="\t\tTCP/IP Port. (DEFAULT: 27018)",
         default=27018,
     )
     connection_group.add_argument(
@@ -525,17 +568,17 @@ Examples:
         "--username",
         required=True,
         metavar="",
-        help="\t\t\t\tUsername for authentication.",
+        help="\t\tUsername for authentication.",
     )
     connection_group.add_argument(
         "-p",
         "--password",
         metavar="",
-        help="\t\t\t\tThe user's password. (will be requested later if it's not set)",
+        help="\t\tThe user's password. (will be requested later if it's not set)",
         default="",
     )
     connection_group.add_argument(
-        "-t", "--team", required=False, metavar="", help="\t\t\t\tSpecify Team prefix."
+        "-t", "--team", required=False, metavar="", help="\t\tSpecify Team prefix."
     )
     connection_group.add_argument(
         "-w",
@@ -544,8 +587,7 @@ Examples:
         metavar="",
         dest="workload",
         help=(
-            "\t\t\t\tSpecify name of workload (to remove) or path to workload "
-            "(to import)"
+            "\t\tSpecify name of workload (to remove) or path to workload (to import)"
         ),
     )
     connection_group.add_argument(
@@ -585,7 +627,7 @@ Examples:
     analyze_parser._optionals.title = "Help"
 
     add_general_group(
-        analyze_parser, rocprof_compute_version, supported_archs, rocprof_compute_home
+        analyze_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
@@ -636,6 +678,7 @@ Examples:
         dest="filter_metrics",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(
@@ -728,7 +771,6 @@ Examples:
             "\t\t\t   I64\n\t\t\t "
         ),
     )
-
     analyze_group.add_argument(
         "--pc-sampling-sorting-type",
         required=False,
@@ -806,7 +848,7 @@ Examples:
         nargs="+",
         help=(
             "\t\tSpecify which hidden column names should be included in cli output.\n"
-            "\t\tFor example, to show 'Description' column which is hidden by "
+            '\t\tFor example, to show "Description" column which is hidden by '
             "default in cli output,\n"
             "\t\tuse the option --include-cols Description."
         ),
@@ -837,8 +879,7 @@ Examples:
         type=str,
         metavar="",
         help="\t\tSpecify the specs to correct. e.g. "
-        "--specs-correction='specname1:specvalue1,"
-        "specname2:specvalue2'",
+        '--specs-correction="specname1:specvalue1,specname2:specvalue2"',
     )
     analyze_advanced_group.add_argument(
         "--list-nodes",

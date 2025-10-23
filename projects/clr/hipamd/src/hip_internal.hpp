@@ -256,7 +256,7 @@ const char* ihipGetErrorName(hipError_t hip_error);
              reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus() ==                         \
                  hipStreamCaptureStatusInvalidated) {                                              \
     return hipErrorStreamCaptureInvalidated;                                                       \
-  } else {                                                                                         \
+  } else if (stream == nullptr || stream == hipStreamLegacy) {                                     \
     CHECK_STREAM_CAPTURING()                                                                       \
   }
 
@@ -500,7 +500,7 @@ public:
     std::list<int> userEnabledPeers;
 
     /// True if this device is active
-    bool isActive_;
+    std::atomic<bool>  isActive_;
 
 
     MemoryPool* default_mem_pool_;  //!< Default memory pool for this device

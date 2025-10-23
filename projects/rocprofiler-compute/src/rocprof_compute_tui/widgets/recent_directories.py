@@ -23,8 +23,6 @@
 
 ##############################################################################
 
-from typing import List
-
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
@@ -34,7 +32,7 @@ from textual.widgets import Button, Label, ListItem, ListView
 class RecentDirectoriesScreen(ModalScreen):
     """Modal screen to display recent directories."""
 
-    def __init__(self, recent_dirs: List[str]) -> None:
+    def __init__(self, recent_dirs: list[str]) -> None:
         super().__init__()
         self.recent_dirs = recent_dirs
 

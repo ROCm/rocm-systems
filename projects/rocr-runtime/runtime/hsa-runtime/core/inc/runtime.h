@@ -51,11 +51,12 @@
 #include <tuple>
 #include <utility>
 #include <thread>
-#include <sys/un.h>
-
 #if defined(__linux__)
+#include <sys/un.h>
 #include <xf86drm.h>
 #include <amdgpu.h>
+#else
+#include <hsakmt/drm/amdgpu.h>
 #endif
 
 #include "core/inc/hsa_ext_interface.h"
@@ -232,6 +233,7 @@ class Runtime {
   /// @param [in] size Copy size in bytes.
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
+  #undef CopyMemory
   hsa_status_t CopyMemory(void* dst, const void* src, size_t size);
 
   /// @brief Non-blocking memory copy from src to dst.
@@ -302,6 +304,7 @@ class Runtime {
   /// @param [in] count Number of uint32_t element to be set.
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
+  #undef FillMemory
   hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
 
   /// @brief Set agents as the whitelist to access ptr.
@@ -517,7 +520,8 @@ class Runtime {
 
   static bool IsGPUDriver(DriverType driver_type) {
     return driver_type == core::DriverType::KFD
-#ifdef HSAKMT_VIRTIO_ENABLED
+
+#if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
         || driver_type == core::DriverType::KFD_VIRTIO
 #endif
         ;
@@ -875,12 +879,11 @@ class Runtime {
   };
 
   struct MappedHandle {
-    MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
+    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
-        : mem_handle(mem_handle), address_handle(address_handle),
-          offset(offset), size(size), drm_fd(drm_fd),
-          drm_cpu_addr(drm_cpu_addr), shareable_handle(shareable_handle) {}
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+
+    MappedHandle() {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
@@ -911,9 +914,8 @@ class Runtime {
   void InitIPCDmaBufSupport();
   bool ipc_dmabuf_supported_;
   int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
-                       amdgpu_bo_import_result *res,
                        unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize);
+                       void **importAddress, HSAuint64 *importSize, bool isdmabufSysmem);
 };
 
 }  // namespace core

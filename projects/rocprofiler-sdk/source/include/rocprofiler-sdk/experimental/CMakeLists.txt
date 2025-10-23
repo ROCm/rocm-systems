@@ -1,4 +1,8 @@
-set(ROCPROFILER_EXPERIMENTAL_HEADER_FILES counters.h thread_trace.h)
+#
+# Experimental components of the ROCProfiler SDK API.
+#
+
+set(ROCPROFILER_EXPERIMENTAL_HEADER_FILES counters.h registration.h thread_trace.h)
 
 install(
     FILES ${ROCPROFILER_EXPERIMENTAL_HEADER_FILES}

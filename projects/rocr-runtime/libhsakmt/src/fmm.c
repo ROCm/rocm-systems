@@ -1061,9 +1061,7 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 }
 
 static HSAKMT_STATUS fmm_register_mem_svm_api(void *address,
-					      uint64_t size,
-					      bool coarse_grain,
-					      bool ext_coherent)
+					      uint64_t size, HsaMemFlags flags)
 {
 	struct kfd_ioctl_svm_args *args;
 	size_t s_attr;
@@ -1080,10 +1078,11 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(void *address,
 	args->size = aligned_size;
 	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
 	args->nattr = 2;
-	args->attrs[0].type = coarse_grain ?
+	args->attrs[0].type = flags.ui32.CoarseGrain ?
 			      HSA_SVM_ATTR_CLR_FLAGS : HSA_SVM_ATTR_SET_FLAGS;
 	args->attrs[0].value = HSA_SVM_FLAG_COHERENT;
-	args->attrs[1].type = ext_coherent ? HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS ;
+	args->attrs[1].type = flags.ui32.ExtendedCoherent ?
+							HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS;
 	args->attrs[1].value = HSA_SVM_FLAG_EXT_COHERENT;
 	pr_debug("Registering to SVM %p size: %ld\n", (void*)aligned_addr,
 		 aligned_size);
@@ -2024,6 +2023,9 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 
 	if (mflags.ui32.Uncached || svm.disable_cache)
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
+
+	if (mflags.ui32.ExtendedCoherent)
+		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT;
 
 	ioc_flags |= fmm_translate_hsa_to_ioc_flags(mflags);
 
@@ -3669,7 +3671,17 @@ int hsakmt_fmm_unmap_from_gpu(void *address)
 	return ret;
 }
 
-bool hsakmt_fmm_get_handle(void *address, uint64_t *handle)
+/*
+ * Get memory @handle [OUT] for a given @address [IN]
+ *  @size_offset [IN/OUT] If specified, then address can in fact be a range.
+ *  And size_offset [IN] is provided to validate that [offset of address] +
+ *  @size_offset [IN] is within the range of the object. If within range,
+ *  then @size_offset [OUT] is set to the offset of the address from the
+ *  base of the object.
+ *
+ * Returns true if the handle is found, false otherwise.
+ */
+bool hsakmt_fmm_get_handle(void *address, uint64_t *handle, uint64_t *size_offset)
 {
 	uint32_t i;
 	manageable_aperture_t *aperture;
@@ -3706,10 +3718,25 @@ bool hsakmt_fmm_get_handle(void *address, uint64_t *handle)
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	/* Find the object to retrieve the handle */
-	object = vm_find_object_by_address(aperture, address, 0);
+	if (!size_offset)
+		object = vm_find_object_by_address(aperture, address, 0);
+	else
+		object = vm_find_object_by_address_range(aperture, address);
 	if (object && handle) {
 		*handle = object->handles[0];
 		found = true;
+		if (size_offset) {
+			/* If size_offset is set, then validate if address + size
+			 * is within range. If within range then return offset
+			 * of the address from base */
+			HSAuint64 offset = VOID_PTRS_SUB(address, object->start);
+
+			if (offset + *size_offset > object->size)
+				found = false;
+			else
+				*size_offset = offset;
+
+		}
 	}
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
@@ -3720,8 +3747,7 @@ bool hsakmt_fmm_get_handle(void *address, uint64_t *handle)
 static HSAKMT_STATUS fmm_register_user_memory(void *addr,
 						HSAuint64 size,
 						vm_object_t **obj_ret,
-						bool coarse_grain,
-						bool ext_coherent)
+						HsaMemFlags flags)
 {
 	manageable_aperture_t *aperture = svm.dgpu_aperture;
 	HSAuint32 page_offset = (HSAuint64)addr & (PAGE_SIZE-1);
@@ -3746,8 +3772,8 @@ static HSAKMT_STATUS fmm_register_user_memory(void *addr,
 			 &aligned_addr, KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
 			 KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
 			 KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-			 (coarse_grain ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_COHERENT) |
-			 (ext_coherent ? KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT : 0),
+			 (flags.ui32.CoarseGrain ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_COHERENT) |
+			 (flags.ui32.ExtendedCoherent ? KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT : 0),
 			 0,
 			 &obj);
 	if (!svm_addr)
@@ -3785,8 +3811,7 @@ static HSAKMT_STATUS fmm_register_user_memory(void *addr,
 HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 				  uint32_t *gpu_id_array,
 				  uint32_t gpu_id_array_size,
-				  bool coarse_grain,
-				  bool ext_coherent)
+				  HsaMemFlags flags)
 {
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object = NULL;
@@ -3795,7 +3820,7 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	if (coarse_grain && ext_coherent)
+	if (flags.ui32.CoarseGrain && flags.ui32.ExtendedCoherent)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
 	object = vm_find_object(address, size_in_bytes, &aperture);
@@ -3806,19 +3831,12 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 
 		/* Register a new user ptr */
 		if (hsakmt_is_svm_api_supported) {
-			ret = fmm_register_mem_svm_api(address,
-							size_in_bytes,
-							coarse_grain,
-							ext_coherent);
+			ret = fmm_register_mem_svm_api(address, size_in_bytes, flags);
 			if (ret == HSAKMT_STATUS_SUCCESS)
 				return ret;
 			pr_debug("SVM failed, falling back to old registration\n");
 		}
-		ret = fmm_register_user_memory(address,
-					       size_in_bytes,
-					       &object,
-					       coarse_grain,
-					       ext_coherent);
+		ret = fmm_register_user_memory(address, size_in_bytes, &object, flags);
 
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			return ret;
@@ -4545,7 +4563,6 @@ static void fmm_clear_aperture(manageable_aperture_t *app)
 void hsakmt_fmm_clear_all_mem(void)
 {
 	uint32_t i;
-	void *map_addr;
 
 	/* Close render node FDs. The child process needs to open new ones */
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
@@ -4558,6 +4575,14 @@ void hsakmt_fmm_clear_all_mem(void)
 		}
 		drm_render_fds[i] = 0;
 	}
+
+	hsakmt_fmm_clear_all_aperture();
+}
+
+void hsakmt_fmm_clear_all_aperture(void)
+{
+	uint32_t i;
+	void *map_addr;
 
 	fmm_clear_aperture(&mem_handle_aperture);
 	fmm_clear_aperture(&cpuvm_aperture);

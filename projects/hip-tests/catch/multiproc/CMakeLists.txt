@@ -23,7 +23,7 @@ if(UNIX)
                       --genco ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
                       -I${HIP_PATH}/include/ -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                      --rocm-path=${ROCM_PATH})
+                      --hip-path=${HIP_PATH})
     set_property(GLOBAL APPEND PROPERTY
                  G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
 endif()

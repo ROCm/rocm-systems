@@ -1,62 +1,46 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-# -------------------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------- #
 #
 # openmp tests
 #
-# -------------------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------- #
 
-if(ROCmVersion_DIR)
-    set(_rocm_root "${ROCmVersion_DIR}")
-elseif(DEFINED ENV{ROCM_PATH})
-    set(_rocm_root "$ENV{ROCM_PATH}")
-else()
-    set(_rocm_root "/opt/rocm")
-endif()
-
-set(_rocm_llvm_lib "${_rocm_root}/lib/llvm/lib")
-
-set(_rocm_ld_env
-    "LD_PRELOAD=libomptarget.so"
-    "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}"
-)
-
-if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
+if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
     message(
         FATAL_ERROR
-        "libomptarget.so not found in ${_rocm_llvm_lib}. "
-        "Verify that ROCm is installed correctly and that _rocm_root "
-        "(${_rocm_root}) points at the right location."
+        "libomptarget.so not found in \"${ROCM_LLVM_LIB_PATH}\". "
+        "Verify that ROCm is installed correctly and that ROCM_PATH "
+        "(${ROCM_PATH}) points at the right location."
     )
+endif()
+
+set(_ompt_environment
+    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_PROFILE=ON"
+    "ROCPROFSYS_TIME_OUTPUT=OFF"
+    "ROCPROFSYS_USE_OMPT=ON"
+    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
+    "${_test_openmp_env}"
+    "${_test_library_path}"
+)
+
+# Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    list(APPEND _ompt_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
     set(_OMPT_PASS_REGEX "\\|_omp_")
+    set(_OMPVV_TARGET_PASS_REGEX "_+omp_offloading")
 else()
     set(_OMPT_PASS_REGEX "")
+    set(_OMPVV_OFFLOAD_PASS_REGEX "")
 endif()
 
 rocprofiler_systems_add_test(
+    SKIP_RUNTIME
     NAME openmp-cg
     TARGET openmp-cg
     LABELS "openmp"
@@ -65,7 +49,7 @@ rocprofiler_systems_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_COUT_OUTPUT=ON"
+      "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     RUNTIME_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
@@ -81,7 +65,7 @@ rocprofiler_systems_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+      "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
 )
@@ -93,7 +77,7 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "openmp;openmp-target"
     ENVIRONMENT
-        "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
+      "${_ompt_environment};ROCPROFSYS_ROCM_DOMAINS=hip_api,hsa_api,kernel_dispatch"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -101,21 +85,75 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "openmp;openmp-target"
-    ENVIRONMENT "${_rocm_ld_env}"
-    ARGS --label-substrings
-         Z4vmulIiEvPT_S1_S1_i_l51.kd
-         Z4vmulIfEvPT_S1_S1_i_l51.kd
-         Z4vmulIdEvPT_S1_S1_i_l51.kd
-         -c
-         4
-         4
-         4
-         -d
-         0
-         0
-         0
-         -p
+    ARGS
+      --label-substrings
+      Z4vmulIiEvPT_S1_S1_i_l51.kd
+      Z4vmulIfEvPT_S1_S1_i_l51.kd
+      Z4vmulIdEvPT_S1_S1_i_l51.kd
+      -c 4 4 4
+      -d 0 0 0
+      -p
 )
+
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST openmp-target-sampling)
+    set_property(TEST openmp-target-sampling APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME openmp-target-sampling
+        ROCPD_FILE "rocpd.db"
+        LABELS "openmp;openmp-target;rocpd"
+        ARGS --validation-rules
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/kernel-rules.json"
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/sdk-metrics-rules.json"
+    )
+endif()
+
+# OpenMP tests generated using OMPVV binaries
+if(ROCPROFSYS_OMPVV_HOST_TESTS)
+    foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
+        rocprofiler_systems_add_test(
+            SKIP_RUNTIME
+            NAME ${HOST_TEST_NAME}
+            TARGET ${HOST_TEST_NAME}-exec
+            LABELS "openmp;ompvv"
+            REWRITE_ARGS
+              -e -v 2 --instrument-loops
+            RUNTIME_ARGS
+              -e -v 1 --label return args -E ^GOMP
+            SAMPLING_TIMEOUT 300
+            REWRITE_TIMEOUT 300
+            ENVIRONMENT
+              "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+            REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
+            REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
+        )
+    endforeach()
+
+    set(_ompvv_offload_environment
+        "${_ompt_environment}"
+        "ROCPROFSYS_USE_SAMPLING=ON"
+        "ROCPROFSYS_SAMPLING_FREQ=50"
+        "ROCPROFSYS_COUT_OUTPUT=ON"
+        "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api"
+    )
+
+    foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
+        rocprofiler_systems_add_test(
+            SKIP_RUNTIME
+            NAME ${OFFLOAD_TEST_NAME}
+            TARGET ${OFFLOAD_TEST_NAME}-exec
+            GPU ON
+            LABELS "openmp;ompvv;openmp-target"
+            REWRITE_ARGS -e -v 2
+            SAMPLING_TIMEOUT 300
+            REWRITE_TIMEOUT 300
+            ENVIRONMENT
+              "${_ompvv_offload_environment}"
+            REWRITE_RUN_PASS_REGEX
+              "${_OMPVV_OFFLOAD_PASS_REGEX}"
+        )
+    endforeach()
+endif()
 
 set(_ompt_sampling_environ
     "${_ompt_environment}"

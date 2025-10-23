@@ -260,6 +260,8 @@ global:
 	hsa_amd_enable_logging;
 	hsa_amd_signal_wait_all;
 	hsa_amd_portable_export_dmabuf_v2;
+	hsa_amd_ais_file_write;
+	hsa_amd_ais_file_read;
 local:
     *;
 };

@@ -467,6 +467,9 @@ void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_d
 
 // ================================================================================================
 hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsigned int flags) {
+  if (flags != hipEventWaitDefault && flags != hipEventWaitExternal) {
+    return hipErrorInvalidValue;
+  }
   hipError_t status = hipSuccess;
   if (event == nullptr) {
     return hipErrorInvalidHandle;
@@ -483,7 +486,16 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   }
 
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
-  if (eventStream != nullptr && eventStream->IsEventCaptured(event) == true) {
+  if (flags == hipEventWaitExternal) {
+    auto lastCapturedNodes = waitStream->GetLastCapturedNodes();
+    hip::GraphNode* pGraphNode = waitStream->GetCaptureGraph()->AddExternalEventWaitNode(
+                                      reinterpret_cast<hip::GraphNode*>(lastCapturedNodes.data()),
+                                      lastCapturedNodes.size(),
+                                      event);
+    waitStream->SetLastCapturedNode(pGraphNode);
+    return hipSuccess;
+  }
+  else if (eventStream != nullptr && eventStream->IsEventCaptured(event) == true) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
             "[hipGraph] Current capture node StreamWaitEvent on stream : %p, Event %p", stream,
             event);
@@ -501,9 +513,6 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     }
     waitStream->AddCrossCapturedNode(e->GetNodesPrevToRecorded());
   } else {
-    if (flags != 0) {
-      return hipErrorInvalidValue;
-    }
     if (eventStream != nullptr) {
       if (eventStream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
         // If stream is capturing but event is not recorded on event's stream.
@@ -869,7 +878,8 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  constexpr bool wait = false;
+  hip::Stream* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -903,7 +913,8 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   getStreamPerThread(stream);
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  constexpr bool wait = false;
+  hip::Stream* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -919,6 +930,20 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
     }
   }
 
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  HIP_INIT_API(hipStreamCopyAttributes, dst, src);
+
+  getStreamPerThread(src);
+  getStreamPerThread(dst);
+
+  constexpr bool wait = false;
+  hip::Stream* src_stream = hip::getStream(src, wait);
+  hip::Stream* dst_stream = hip::getStream(dst, wait);
+  // Currently, SyncPolicy is the only stream attribute we can set during runtime
+  dst_stream->SetSyncPolicy(src_stream->GetSyncPolicy());
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

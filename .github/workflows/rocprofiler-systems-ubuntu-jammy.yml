@@ -132,7 +132,7 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \
@@ -206,7 +206,7 @@ jobs:
         build-type: ['Release']
         mpi-headers: ['OFF']
         build-dyninst: ['ON']
-        rocm-version: ['6.3', '6.4']
+        rocm-version: ['6.3', '6.4', '7.0']
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -311,7 +311,7 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \

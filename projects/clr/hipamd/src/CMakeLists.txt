@@ -96,7 +96,6 @@ if(NOT WIN32)
 endif()
 
 target_sources(amdhip64 PRIVATE
-  fixme.cpp
   hip_activity.cpp
   hip_code_object.cpp
   hip_context.cpp
@@ -118,6 +117,7 @@ target_sources(amdhip64 PRIVATE
   hip_peer.cpp
   hip_platform.cpp
   hip_profile.cpp
+  hip_storage.cpp
   hip_stream_ops.cpp
   hip_stream.cpp
   hip_surface.cpp
@@ -127,7 +127,8 @@ target_sources(amdhip64 PRIVATE
   hip_api_trace.cpp
   hip_table_interface.cpp
   hip_table_interface_c.cpp
-  hip_comgr_helper.cpp)
+  hip_comgr_helper.cpp
+  hip_library.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)

@@ -25,14 +25,15 @@
 
 import argparse
 import importlib
-import os
 import socket
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import config
 from argparser import omniarg_parser
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
@@ -48,6 +49,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
+    get_panel_alias,
     get_submodules,
     get_version,
     get_version_display,
@@ -57,25 +59,21 @@ from utils.utils import (
 
 
 class RocProfCompute:
-    def __init__(self):
-        self.__args = None
+    def __init__(self) -> None:
+        self.__args: Optional[argparse.Namespace] = None
         self.__profiler_mode = None
         self.__analyze_mode = None
-        self.__soc_name = (
-            set()
-        )  # gpu name, or in case of analyze mode, all loaded gpu name(s)
-        self.__soc = dict()  # set of key, value pairs. Where arch->OmniSoc() obj
-        self.__version = {
-            "ver": None,
-            "ver_pretty": None,
-        }
-        self.__options = {}
+        self.__soc: dict[str, OmniSoC_Base] = {}
+        self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
-        self.__mspec: MachineSpecs = None  # to be initalized in load_soc_specs()
+        self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
+
         setup_console_handler()
         self.set_version()
         self.parse_args()
+        assert self.__args is not None
         self.__mode = self.__args.mode
+
         gui_value = getattr(self.__args, "gui", None)
         self.__loglevel = setup_logging_priority(
             self.__args.verbose, self.__args.quiet, self.__mode, gui_value
@@ -90,11 +88,11 @@ class RocProfCompute:
         elif self.__mode == "analyze":
             self.detect_analyze()
 
-        console_debug("Execution mode = %s" % self.__mode)
+        console_debug(f"Execution mode = {self.__mode}")
 
-    def print_graphic(self):
-        """Log program name as ascii art to terminal."""
-        ascii_art = r"""
+    def print_graphic(self) -> None:
+        print(
+            r"""
                                  __                                       _
  _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
 | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
@@ -102,37 +100,31 @@ class RocProfCompute:
 |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                |_|                                           |_|
 """
-        print(ascii_art)
+        )
 
-    def get_mode(self):
+    def get_mode(self) -> Optional[str]:
         return self.__mode
 
-    def set_version(self):
+    def set_version(self) -> None:
         vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
         self.__version["ver_pretty"] = get_version_display(
             vData["version"], vData["sha"], vData["mode"]
         )
-        return
 
-    def detect_profiler(self):
+    def detect_profiler(self) -> None:
         profiler_mode = detect_rocprof(self.__args)
-        if str(profiler_mode).endswith("rocprof"):
-            self.__profiler_mode = "rocprofv1"
-        elif str(profiler_mode).endswith("rocprofv2"):
-            self.__profiler_mode = "rocprofv2"
-        elif str(profiler_mode).endswith("rocprofv3"):
+        if str(profiler_mode).endswith("rocprofv3"):
             self.__profiler_mode = "rocprofv3"
         elif str(profiler_mode) == "rocprofiler-sdk":
             self.__profiler_mode = "rocprofiler-sdk"
         else:
             console_error(
-                "Incompatible profiler: %s. Supported profilers include: %s"
-                % (profiler_mode, get_submodules("rocprof_compute_profile"))
+                f"Incompatible profiler: {profiler_mode}. Supported profilers "
+                f"include: {get_submodules('rocprof_compute_profile')}"
             )
-        return
 
-    def detect_analyze(self):
+    def detect_analyze(self) -> None:
         if self.__args.gui:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
@@ -141,9 +133,8 @@ class RocProfCompute:
             self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
-        return
 
-    def sanitize(self):
+    def sanitize(self) -> None:
         block = False
         if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
             hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
@@ -152,6 +143,8 @@ class RocProfCompute:
 
         if self.__args.list_metrics is not None and block:
             console_error("Cannot use --list-metrics with --blocks")
+        if self.__args.list_blocks is not None and block:
+            console_error("Cannot use --list-blocks with --blocks")
         if (
             hasattr(self.__args, "list_available_metrics")
             and self.__args.list_available_metrics
@@ -159,21 +152,19 @@ class RocProfCompute:
             console_error("Cannot use --list-available-metrics with --blocks")
 
     @demarcate
-    def load_soc_specs(self, sysinfo: dict = None):
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         """Load OmniSoC instance for RocProfCompute run"""
         self.__mspec = generate_machine_specs(self.__args, sysinfo)
-        if self.__args.specs:
+        if self.__args and self.__args.specs:
             print(self.__mspec)
             sys.exit(0)
 
         arch = self.__mspec.gpu_arch
-
-        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + arch)
-        soc_class = getattr(soc_module, arch + "_soc")
+        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
+        soc_class = getattr(soc_module, f"{arch}_soc")
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
-        return
 
-    def parse_args(self):
+    def parse_args(self) -> None:
         parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -190,23 +181,24 @@ class RocProfCompute:
         self.__args = parser.parse_args()
 
         if (
-            "format_rocprof_output" in self.__args
+            hasattr(self.__args, "format_rocprof_output")
             and self.__args.format_rocprof_output != "rocpd"
         ):
             console_warning(
-                (
-                    f"The option --format-rocprof-output currently set to "
-                    f"{self.__args.format_rocprof_output} will default to rocpd "
-                    "in a future release."
-                )
+                f"The option --format-rocprof-output currently set to "
+                f"{self.__args.format_rocprof_output} will default to rocpd "
+                "in a future release."
             )
 
-        if self.__args.mode == None:
+        if self.__args.mode is None:
             if self.__args.specs:
                 print(generate_machine_specs(self.__args))
                 sys.exit(0)
             elif self.__args.list_metrics is not None:
                 self.list_metrics()
+                sys.exit(0)
+            elif self.__args.list_blocks is not None:
+                self.list_blocks()
                 sys.exit(0)
             elif self.__args.config_dir:
                 parser.print_help(sys.stderr)
@@ -219,44 +211,29 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
         elif self.__args.mode == "profile":
-            # Add --name to workload path if --path is not given
-            if self.__args.path == str(Path(os.getcwd()) / "workloads"):
-                self.__args.path = str(Path(self.__args.path) / self.__args.name)
-            # Add node name to workload path
-            if self.__args.subpath == "node_name":
-                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-            # Or, add gpu model name to workload path
-            elif self.__args.subpath == "gpu_model":
-                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
-
-            # Create workload directory if it does not exist
-            p = Path(self.__args.path)
-            if not p.exists():
-                try:
-                    p.mkdir(parents=True, exist_ok=False)
-                except FileExistsError:
-                    console_error("Directory already exists.")
-
+            self.handle_profile_args()
         elif self.__args.mode == "analyze":
-            # block all filters during spatial-multiplexing
-            if self.__args.spatial_multiplexing:
-                self.__args.gpu_id = None
-                self.__args.gpu_kernel = None
-                self.__args.gpu_dispatch_id = None
-                self.__args.nodes = None
+            self.handle_analyze_args()
 
-        return
+    def handle_profile_args(self) -> None:
+        # Handle list operations first - these are independent and exit immediately
+        if getattr(self.__args, "list_sets", False):
+            return
+        if getattr(self.__args, "list_available_metrics", False):
+            return
+
+    def handle_analyze_args(self) -> None:
+        """Handle analyze-specific argument processing"""
+        # Block all filters during spatial-multiplexing
+        if self.__args.spatial_multiplexing:
+            self.__args.gpu_id = None
+            self.__args.gpu_kernel = None
+            self.__args.gpu_dispatch_id = None
+            self.__args.nodes = None
 
     @demarcate
-    def list_metrics(self):
-        self.load_soc_specs()
-
-        for_current_arch = False
-        if (
-            hasattr(self.__args, "list_available_metrics")
-            and self.__args.list_available_metrics
-        ):
-            for_current_arch = True
+    def list_metrics(self) -> None:
+        for_current_arch = getattr(self.__args, "list_available_metrics", False)
 
         arch = (
             self.__mspec.gpu_arch
@@ -266,27 +243,49 @@ class RocProfCompute:
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
             ac.panel_configs = file_io.load_panel_configs([
-                Path(self.__args.config_dir) / arch
+                str(Path(self.__args.config_dir) / arch)
             ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
-            parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
-                prefix = ""
-                if "." not in str(key):
-                    prefix = ""
-                elif str(key).count(".") == 1:
-                    prefix = "\t"
-                else:
-                    prefix = "\t\t"
-                print(prefix + key, "->", value)
+                prefix = "\t" * min(key.count("."), 2)
+                print(f"{prefix}{key} -> {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
 
     @demarcate
-    def list_sets(self):
+    def list_blocks(self) -> None:
+        for_current_arch = getattr(self.__args, "list_available_metrics", False)
+
+        arch = (
+            self.__mspec.gpu_arch
+            if (for_current_arch or self.__args.list_blocks is None)
+            else self.__args.list_blocks
+        )
+        if arch in self.__supported_archs.keys():
+            ac = schema.ArchConfig()
+            ac.panel_configs = file_io.load_panel_configs([
+                str(Path(self.__args.config_dir) / arch)
+            ])
+            sys_info = (
+                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
+            )
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+
+            print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            for key, value in ac.metric_list.items():
+                if key.count(".") > 0:
+                    continue
+                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
+            sys.exit(0)
+        else:
+            console_error("Unsupported arch")
+
+    @demarcate
+    def list_sets(self) -> None:
         sets_info = parse_sets_yaml(self.__mspec.gpu_arch)
 
         if not sets_info:
@@ -334,8 +333,57 @@ class RocProfCompute:
 
         sys.exit(0)
 
+        profiler_classes = {
+            "rocprofv3": (
+                "rocprof_compute_profile.profiler_rocprof_v3",
+                "rocprof_v3_profiler",
+            ),
+            "rocprofiler-sdk": (
+                "rocprof_compute_profile.profiler_rocprofiler_sdk",
+                "rocprofiler_sdk_profiler",
+            ),
+        }
+
+        if self.__profiler_mode not in profiler_classes:
+            console_error("Unsupported profiler")
+
+        module_name, class_name = profiler_classes[self.__profiler_mode]
+        module = importlib.import_module(module_name)
+        profiler_class = getattr(module, class_name)
+
+        return profiler_class(
+            self.__args,
+            self.__profiler_mode,
+            self.__soc[self.__mspec.gpu_arch],
+        )
+
+    def create_profiler(self) -> object:
+        profiler_classes = {
+            "rocprofv3": (
+                "rocprof_compute_profile.profiler_rocprof_v3",
+                "rocprof_v3_profiler",
+            ),
+            "rocprofiler-sdk": (
+                "rocprof_compute_profile.profiler_rocprofiler_sdk",
+                "rocprofiler_sdk_profiler",
+            ),
+        }
+
+        if self.__profiler_mode not in profiler_classes:
+            console_error("Unsupported profiler")
+
+        module_name, class_name = profiler_classes[self.__profiler_mode]
+        module = importlib.import_module(module_name)
+        profiler_class = getattr(module, class_name)
+
+        return profiler_class(
+            self.__args,
+            self.__profiler_mode,
+            self.__soc[self.__mspec.gpu_arch],
+        )
+
     @demarcate
-    def run_profiler(self):
+    def run_profiler(self) -> None:
         self.print_graphic()
         self.load_soc_specs()
 
@@ -346,80 +394,58 @@ class RocProfCompute:
         elif self.__args.name is None:
             sys.exit("Either --list-name or --name is required")
 
-        if self.__args.name.find("/") != -1:
-            console_error("'/' not permitted in profile name")
+        if "/" in self.__args.name:
+            console_error('"/" is not permitted in profile name')
 
         # instantiate desired profiler
-        if self.__profiler_mode == "rocprofv1":
-            from rocprof_compute_profile.profiler_rocprof_v1 import rocprof_v1_profiler
-
-            profiler = rocprof_v1_profiler(
-                self.__args,
-                self.__profiler_mode,
-                self.__soc[self.__mspec.gpu_arch],
-            )
-        elif self.__profiler_mode == "rocprofv2":
-            from rocprof_compute_profile.profiler_rocprof_v2 import rocprof_v2_profiler
-
-            profiler = rocprof_v2_profiler(
-                self.__args,
-                self.__profiler_mode,
-                self.__soc[self.__mspec.gpu_arch],
-            )
-        elif self.__profiler_mode == "rocprofv3":
-            from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
-
-            profiler = rocprof_v3_profiler(
-                self.__args,
-                self.__profiler_mode,
-                self.__soc[self.__mspec.gpu_arch],
-            )
-        elif self.__profiler_mode == "rocprofiler-sdk":
-            from rocprof_compute_profile.profiler_rocprofiler_sdk import (
-                rocprofiler_sdk_profiler,
-            )
-
-            profiler = rocprofiler_sdk_profiler(
-                self.__args,
-                self.__profiler_mode,
-                self.__soc[self.__mspec.gpu_arch],
-            )
-        else:
-            console_error("Unsupported profiler")
-
-        # -----------------------
-        # run profiling workflow
-        # -----------------------
-
+        profiler = self.create_profiler()
         profiler.sanitize()
+
+        # Add --name to workload path if --path is not given
+        if self.__args.path == str(Path.cwd() / "workloads"):
+            if not hasattr(self.__args, "name") or not self.__args.name:
+                console_error("-n/--name is required")
+            self.__args.path = str(Path(self.__args.path) / self.__args.name)
+            # Add node name to workload path
+            if self.__args.subpath == "node_name":
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add gpu model name to workload path
+            elif self.__args.subpath == "gpu_model":
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+
+        # Create workload directory if it does not exist
+        p = Path(self.__args.path)
+        if not p.exists():
+            try:
+                p.mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                console_error("Directory already exists.")
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)
 
         profiler.pre_processing()
         console_debug('starting "run_profiling" and about to start rocprof\'s workload')
+
         time_start_prof = time.time()
         profiler.run_profiling(self.__version["ver"], config.PROJECT_NAME)
         time_end_prof = time.time()
+
+        prof_duration = time_end_prof - time_start_prof
         console_debug(
-            (
-                'finished "run_profiling" and finished rocprof\'s workload, '
-                "time taken was {} m {} sec"
-            ).format(
-                int((time_end_prof - time_start_prof) / 60),
-                str((time_end_prof - time_start_prof) % 60),
-            )
-        )
-        profiler.post_processing()
-        time_end_post = time.time()
-        console_debug(
-            'time taken for "post_processing" was {} seconds'.format(
-                int(time_end_post - time_end_prof)
-            )
+            f'finished "run_profiling" and finished rocprof\'s workload, '
+            f"time taken was {int(prof_duration / 60)} m {prof_duration % 60} sec"
         )
 
+        profiler.post_processing()
+        time_end_post = time.time()
+
+        post_duration = int(time_end_post - time_end_prof)
+        console_debug(f'time taken for "post_processing" was {post_duration} seconds')
+        self.__soc[self.__mspec.gpu_arch].post_profiling()
+
     @demarcate
-    def update_db(self):
+    def update_db(self) -> None:
         self.print_graphic()
 
         console_warning(
@@ -444,10 +470,9 @@ class RocProfCompute:
         return
 
     @demarcate
-    def run_analysis(self):
+    def run_analysis(self) -> None:
         self.print_graphic()
-
-        console_log("Analysis mode = %s" % self.__analyze_mode)
+        console_log(f"Analysis mode = {self.__analyze_mode}")
 
         if self.__analyze_mode == "cli":
             from rocprof_compute_analyze.analysis_cli import cli_analysis
@@ -467,7 +492,7 @@ class RocProfCompute:
 
             analyzer = db_analysis(self.__args, self.__supported_archs)
         else:
-            console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
+            console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
 
         # -----------------------
         # run analysis workflow
@@ -475,23 +500,24 @@ class RocProfCompute:
         analyzer.sanitize()
 
         # Load required SoC(s) from input
-        for d in analyzer.get_args().path:
-            # FIXME
-            # sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))
-            sysinfo_path = (
-                Path(d[0])
-                if analyzer.get_args().nodes is None
-                and analyzer.get_args().spatial_multiplexing is not True
-                else file_io.find_1st_sub_dir(d[0])
-            )
-            sys_info = file_io.load_sys_info(sysinfo_path / "sysinfo.csv")
+        for path_list in analyzer.get_args().path:
+            base_path = path_list[0] if isinstance(path_list, list) else path_list
 
-            sys_info = sys_info.to_dict("list")
-            sys_info = {key: value[0] for key, value in sys_info.items()}
-            self.load_soc_specs(sys_info)
+            # Determine sysinfo path
+            if (
+                analyzer.get_args().nodes is None
+                and not analyzer.get_args().spatial_multiplexing
+            ):
+                sysinfo_path = base_path
+            else:
+                sysinfo_path = file_io.find_1st_sub_dir(base_path)
+
+            sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+            sys_info_dict = {
+                key: value[0] for key, value in sys_info.to_dict("list").items()
+            }
+            self.load_soc_specs(sys_info_dict)
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()
         analyzer.run_analysis()
-
-        return

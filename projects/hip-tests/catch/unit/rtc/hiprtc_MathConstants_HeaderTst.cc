@@ -28,9 +28,8 @@ THE SOFTWARE.
  * string and compile using the api mentioned above.
  */
 
-#include <hip/hiprtc.h>
-#include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
+#include <hip/hiprtc.h>
 
 static constexpr auto mathConstants_string{
     R"(
@@ -166,11 +165,7 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
   const char* compiler_option = complete_CO.c_str();
   for (int scenario = 0; scenario < 2; scenario++) {
     hiprtcProgram prog;
-    const char** compiler_options = new const char*[2];
-    for (int i = 0; i < 2; i++) {
-      compiler_options[0] = compiler_option;
-      compiler_options[1] = "";
-    }
+    std::array<const char*, 2> compiler_options = {compiler_option, ""};
     HIPRTC_CHECK(hiprtcCreateProgram(&prog, mathConstants_string, kername, 0, NULL, NULL));
     if (scenario == 0) {
       hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
@@ -184,7 +179,7 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
         REQUIRE(false);
       }
     } else {
-      hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
+      hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options.data())};
       if (!(compileResult == HIPRTC_SUCCESS)) {
         WARN("hiprtcCompileProgram() api failed!!");
         size_t logSize;

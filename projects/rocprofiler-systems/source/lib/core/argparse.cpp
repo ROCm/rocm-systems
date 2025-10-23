@@ -87,10 +87,10 @@ get_realpath(const std::string& _path)
 
 enum update_mode : int
 {
-    UPD_REPLACE = 0x1,
-    UPD_PREPEND = 0x2,
-    UPD_APPEND  = 0x3,
-    UPD_WEAK    = 0x4,
+    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
+    UPD_PREPEND = 1 << 0,  // 0x01
+    UPD_APPEND  = 1 << 1,  // 0x02
+    UPD_WEAK    = 1 << 2,  // 0x04
 };
 
 template <typename Tp>
@@ -100,9 +100,15 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
 {
     _data.updated.emplace(_env_var);
 
-    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
-    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
-    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
+    auto _prepend  = (_mode & UPD_PREPEND) != 0;
+    auto _append   = (_mode & UPD_APPEND) != 0;
+    auto _weak_upd = (_mode & UPD_WEAK) != 0;
+
+    // if both flags are set, prefer append
+    if(_prepend && _append)
+    {
+        _prepend = false;
+    }
 
     auto _key = join("", _env_var, "=");
     for(auto& itr : _data.current)
@@ -126,11 +132,11 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
                     free(itr);
                     if(_prepend)
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
                                        .c_str());
                     else
                         itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
                                        .c_str());
                 }
             }
@@ -165,27 +171,33 @@ remove_env(parser_data& _data, std::string_view _env_var)
 }
 
 std::string
+get_rocprofsys_root(void)
+{
+    char*       _tmp = realpath("/proc/self/exe", nullptr);
+    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
+
+    if(_tmp) free(_tmp);
+
+    auto _pos = _exe.find_last_of('/');
+    auto _dir = std::string{ "./" };
+
+    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
+
+    return rocprofsys::common::join("/", _dir, "..");
+}
+
+std::string
 get_internal_libpath(const std::string& _lib)
 {
-    auto _exe = filepath::realpath("/proc/self/exe", nullptr, false);
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = filepath::get_cwd();
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return filepath::realpath(rocprofsys::common::join("/", _dir, "..", "lib", _lib),
-                              nullptr, false);
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "lib", _lib);
 }
+
 std::string
 get_internal_script_path(void)
 {
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir =
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems");
-
-    return _script_dir;
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 }  // namespace
@@ -238,6 +250,9 @@ init_parser(parser_data& _data)
 
     auto _libexecpath = get_realpath(get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
+
+    auto _rootpath = get_realpath(get_rocprofsys_root());
+    update_env(_data, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
 
     return _data;
 }
@@ -561,18 +576,20 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                                   "rcclp",      "amd-smi", "rocm", "mutex-locks",
                                   "spin-locks", "rw-locks" };
 
-#if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
+    (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
 
-#if !defined(ROCPROFSYS_USE_OMPT)
+#if !defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM)
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
     _backend_choices.erase("amd-smi");
     _backend_choices.erase("rocm");
     _backend_choices.erase("rcclp");
+    _backend_choices.erase("ompt");
 #endif
 
     if(gpu::device_count() == 0)
@@ -581,6 +598,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("rcclp");
         _backend_choices.erase("amd-smi");
         _backend_choices.erase("rocm");
+        _backend_choices.erase("ompt");
 
 #if defined(ROCPROFSYS_USE_ROCM)
         update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);

@@ -164,6 +164,7 @@ rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle, rdc_gpu_group_t groupI
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_group_gpu_add(groupId, gpuIndex);
 }
 
+// TODO: rewrite get_all to allow different types
 rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
                                 uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count) {
   if (!p_rdc_handle || !count) {

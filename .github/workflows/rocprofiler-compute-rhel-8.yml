@@ -48,6 +48,7 @@ jobs:
           yum makecache
           yum -y install git
           yum -y install python39
+          yum -y install python39-devel
           yum -y install cmake3
           yum -y install which
           yum -y install glibc-langpack-en

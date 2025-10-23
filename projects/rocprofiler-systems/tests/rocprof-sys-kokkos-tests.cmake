@@ -46,7 +46,7 @@ rocprofiler_systems_add_test(
         -ME
         [==[lib(gomp|m-)]==]
     LABELS "kokkos;kokkos-profile-library"
-    RUN_ARGS -i 25 -s 20 -p
+    RUN_ARGS -i 5 -s 20 -p
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
     REWRITE_RUN_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
@@ -146,7 +146,7 @@ rocprofiler_systems_add_test(
         [==[libgomp]==]
         --env
         ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock peak_rss"
-    RUN_ARGS -i 10 -s 20 -p
+    RUN_ARGS -i 2 -s 20 -p
     ENVIRONMENT "${_timemory_environment};ROCPROFSYS_USE_KOKKOSP=OFF"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
 )

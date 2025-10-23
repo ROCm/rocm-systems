@@ -26,9 +26,9 @@ etc.
 
 ## Contributing
 
-The default branch is `amd-mainline` but the only branch that should target that branch in a pull requests is the `amd-staging` branch.
+The default branch is `develop`.
 
-> _**All pull-requests should target the `amd-staging` branch**_
+> _**All pull-requests should target the `develop` branch**_
 
 ### Creating a feature branch
 
@@ -36,26 +36,24 @@ The default branch is `amd-mainline` but the only branch that should target that
 # fetch any updates
 git fetch origin
 
-# switch to staging branch
-git checkout amd-staging
+# switch to development branch
+git checkout develop
 
-# update your copy of the staging branch
+# update your copy of the development branch
 git pull --rebase
 
-# create your feature branch off of amd-staging
+# create your feature branch off of develop branch
 git checkout -b <feature-branch>
 ```
 
-In the event, your local clone of the repo has a `amd-staging` branch that diverges from the upstream branch,
-do a hard reset of your local branch to match the upstream branch: `git reset --hard origin/amd-staging`.
-Theoretically, you should never need to do this for `amd-mainline` but this can be applied to that
-branch as well.
+In the event, your local clone of the repo has a `develop` branch that diverges from the upstream branch,
+do a hard reset of your local branch to match the upstream branch: `git reset --hard origin/develop`.
 
-### Pulling in updates to `amd-staging` to your feature branch
+### Pulling in updates to `develop` to your feature branch
 
-Linear histories are preferred so if another PR is merged into `amd-staging` while your PR is still open, please
+Linear histories are preferred so if another PR is merged into `develop` while your PR is still open, please
 select the "Update with rebase" option (i.e. try to avoid a merge commit). From the command line, the git command
-would be `git pull --rebase origin amd-staging`.
+would be `git pull --rebase origin develop`.
 
 ## Build and Installation
 
