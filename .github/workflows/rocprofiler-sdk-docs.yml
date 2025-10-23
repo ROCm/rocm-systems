@@ -103,6 +103,13 @@ jobs:
           apt-add-repository ppa:git-core/ppa
           apt-get update
           apt-get install -y git
+          echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
+          if [ -x /usr/local/bin/git ]; then
+            echo "Overriding stale /usr/local/bin/git -> /usr/bin/git"
+            ln -sf /usr/bin/git /usr/local/bin/git
+          fi
+          type -a git
+          git --version
       - name: Checkout
         uses: actions/checkout@v4
         with:
