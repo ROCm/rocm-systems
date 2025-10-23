@@ -55,24 +55,21 @@ DxcoreLoader::~DxcoreLoader() {
 }
 
 bool DxcoreLoader::Initialize() {
-    std::call_once(init_flag_, [this]() {
-        // Attempt to load libdxcore.so
-        dlerror(); // Clear error
-        dxcore_handle_ = dlopen("libdxcore.so", RTLD_LAZY);
+    dlerror(); // Clear error
+    dxcore_handle_ = dlopen("libdxcore.so", RTLD_LAZY);
 
-        if (!dxcore_handle_) {
-            pr_err("[DxcoreLoader] Cannot load libdxcore.so: %s\n", dlerror());
-            return;
-        }
+    if (!dxcore_handle_) {
+        pr_err("[DxcoreLoader] Cannot load libdxcore.so: %s\n", dlerror());
+        return false;
+    }
 
-        pr_info("[DxcoreLoader] libdxcore.so loaded successfully\n");
-        if (!LoadDxcoreApis()) {
-            // If API loading failed, close the handle to indicate failure
-            dlclose(dxcore_handle_);
-            dxcore_handle_ = nullptr;
-            return;
-        }
-    });
+    pr_info("[DxcoreLoader] libdxcore.so loaded successfully\n");
+    if (!LoadDxcoreApis()) {
+        // If API loading failed, close the handle to indicate failure
+        dlclose(dxcore_handle_);
+        dxcore_handle_ = nullptr;
+        return false;
+    }
 
     return IsLoaded();
 }
