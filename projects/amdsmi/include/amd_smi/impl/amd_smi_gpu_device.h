@@ -72,6 +72,7 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
 // New methods for -e feature
     std::string bdf_to_string() const;     // -e feature
     std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
+    std::vector<uint64_t> get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const;
 
  private:
     uint32_t gpu_id_;

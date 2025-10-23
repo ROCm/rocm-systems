@@ -36,6 +36,7 @@ import pwd
 from enum import Enum
 from pathlib import Path
 from typing import List, Set, Union
+from functools import lru_cache
 
 # Import amdsmi library
 from amdsmi_init import *
@@ -1017,7 +1018,6 @@ class AMDSMIHelpers():
         """This function will format output with unit based on the logger output format
 
         params:
-            args - argparser args to pass to subcommand
             logger (AMDSMILogger) - Logger to print out output
             value - the value to be formatted
             unit - the unit to be formatted with the value
@@ -1040,6 +1040,9 @@ class AMDSMIHelpers():
                     return {"value": value, "unit": unit}
                 else:
                     return value
+            if logger.is_csv_format():
+                # For CSV, return the raw value (number or "N/A"), not a string
+                return value
             if logger.is_human_readable_format():
                 if unit:
                     return f"{value} {unit}".rstrip()
@@ -1136,19 +1139,21 @@ class AMDSMIHelpers():
         for i in self.progressbar(range(timeInSeconds), title, 40, add_newline=add_newline):
             time.sleep(1)
 
-    def _user_name(self, uid: int) -> str:
-        try:
-            return pwd.getpwuid(uid).pw_name
-        except Exception:
-            # In containers, the UID may not resolve to a name
-            return str(uid)
-
-    def _group_name(self, gid: int) -> str:
-        try:
+    @lru_cache(maxsize=128)
+    def _cached_group_name(self, gid: int) -> str:
+        try: 
             return grp.getgrgid(gid).gr_name
-        except Exception:
-            # In containers, the GID may not resolve to a name
+        except Exception: 
+            # In containers, the UID may not resolve to a name
             return str(gid)
+
+    @lru_cache(maxsize=128)
+    def _cached_user_name(self, uid: int) -> str:
+        try: 
+            return pwd.getpwuid(uid).pw_name
+        except Exception: 
+            # In containers, the GID may not resolve to a name
+            return str(uid)
 
     # Attempt to grab file info
     def _stat_info(self, path: str) -> dict:
@@ -1157,8 +1162,8 @@ class AMDSMIHelpers():
             return {
                 "uid": st.st_uid,
                 "gid": st.st_gid,
-                "user": self._user_name(st.st_uid),
-                "group": self._group_name(st.st_gid),
+                "user": self._cached_user_name(st.st_uid),
+                "group": self._cached_group_name(st.st_gid),
             }
         except Exception as e:
             return {"error": str(e)}
@@ -1171,29 +1176,36 @@ class AMDSMIHelpers():
         except OSError as e:
             return False, e.errno, e.strerror
 
-    # Check kfd and dri for EACCES/EPERM
-    def check_required_groups(self):
+    def check_required_groups(self, check_render=True, check_video=True):
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
+        
+        Args:
+            check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
+            check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
+        
+        Returns:
+            bool: True if all checked devices are accessible, False if any permission errors found
         """
 
         # Skip check if running as root.
         if os.geteuid() == 0:
-            return
+            return True
 
         paths_to_check = []
-        if os.path.exists("/dev/kfd"):
+        
+        # Only add paths for device types that are flagged for checking
+        if check_render and os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
-
-        # Render group correspond to /dev/dri/renderD*
-        paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
+            paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
 
         # Video group corresponds to /dev/dri/card*
-        paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
+        if check_video:
+            paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
 
         if not paths_to_check:
-            return
+            return True
 
         denied = []
 
@@ -1206,27 +1218,100 @@ class AMDSMIHelpers():
                 denied.append((path, err, msg, self._stat_info(path)))
 
         if denied:
+            # Collect unique group info from denied devices
+            required_groups = {"kfd": [], "renderD": [], "card": []}
+            device_types = {"kfd": [], "renderD": [], "card": []}
+
+            for path, err, msg, si in denied:
+                if "error" not in si:
+                    # Categorize devices and collect unique group info
+                    if "/dev/kfd" in path:
+                        device_types["kfd"].append(path)
+                        required_groups["kfd"].append(si)
+                    elif "/dev/dri/renderD" in path:
+                        device_types["renderD"].append(path)
+                        required_groups["renderD"].append(si)
+                    elif "/dev/dri/card" in path:
+                        device_types["card"].append(path)
+                        required_groups["card"].append(si)
+
+            # Deduplicate group info by converting to tuple for hashing
+            for device_type in required_groups:
+                unique_groups = list(dict.fromkeys(
+                    tuple(sorted(d.items())) for d in required_groups[device_type]
+                ))
+                required_groups[device_type] = [dict(item) for item in unique_groups]
+
             lines = []
             lines.append("Permission needed to access required GPU device node(s):")
-            for path, err, msg, si in denied:
-                if "error" in si:
-                    lines.append(f"  - {path}: {os.strerror(err)}; stat failed: {si['error']}")
+
+            # Collect all unique groups for usermod command
+            all_groups = set()
+
+            # Show summary of denied devices by type with ownership info
+            if device_types["kfd"]:
+                lines.append("  • /dev/kfd: Permission denied")
+                if len(required_groups["kfd"]) > 1:
+                    lines.append("    - Required group(s):")
                 else:
+                    lines.append("    - Required group:")
+                for group_info in required_groups["kfd"]:
                     lines.append(
-                        "  - {p}: {err}; owner={user}({uid}):{group}({gid});".format(
-                            p=path,
-                            err=os.strerror(err),
-                            user=si["user"],
-                            uid=si["uid"],
-                            group=si["group"],
-                            gid=si["gid"],
+                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
+                            user=group_info["user"],
+                            uid=group_info["uid"],
+                            group=group_info["group"],
+                            gid=group_info["gid"],
                         )
                     )
+                    all_groups.add(group_info["group"])
 
-            lines.append("")
-            lines.append("You can try:")
-            lines.append("  • Add your user to the group that owns these devices:")
-            lines.append("      sudo usermod -aG <group> \"$USER\"\n")
+            if device_types["renderD"]:
+                lines.append(f"  • /dev/dri/renderD*: {len(device_types['renderD'])} device(s) denied")
+                if len(required_groups["renderD"]) > 1:
+                    lines.append("    - Required group(s):")
+                else:
+                    lines.append("    - Required group:")
+                for group_info in required_groups["renderD"]:
+                    lines.append(
+                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
+                            user=group_info["user"],
+                            uid=group_info["uid"],
+                            group=group_info["group"],
+                            gid=group_info["gid"],
+                        )
+                    )
+                    all_groups.add(group_info["group"])
+
+            if device_types["card"]:
+                lines.append(f"  • /dev/dri/card*: {len(device_types['card'])} device(s) denied")
+                if len(required_groups["card"]) > 1:
+                    lines.append("    - Required group(s):")
+                else:
+                    lines.append("    - Required group:")
+                for group_info in required_groups["card"]:
+                    lines.append(
+                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
+                            user=group_info["user"],
+                            uid=group_info["uid"],
+                            group=group_info["group"],
+                            gid=group_info["gid"],
+                        )
+                    )
+                    all_groups.add(group_info["group"])
+
+            # Generate usermod command with all unique groups
+            groups_for_usermod = ",".join(sorted(all_groups))
+
+            lines.extend([
+                "",
+                "To resolve this issue, try the following:",
+                "  • Add your user to the required group(s):",
+            f"      sudo usermod -aG {groups_for_usermod} \"$USER\"",
+                "  • Log out and log back in for the group changes to take effect",
+                "  • Alternatively, run this command with sudo/admin privileges",
+                ""
+            ])
             print("\n".join(lines))
             return False
 
@@ -1619,6 +1704,31 @@ class AMDSMIHelpers():
 
         return ranges
 
+    def build_xcp_dict(self, key, violation_status, num_partition):
+        if not isinstance(violation_status[key], list):
+            if "active_" in key:
+               if violation_status[key] != "N/A":
+                   if violation_status[key] is True:
+                       violation_status[key] = "ACTIVE"
+                   elif violation_status[key] is False:
+                       violation_status[key] = "NOT ACTIVE"
+            ret = violation_status[key]
+        elif isinstance(violation_status[key], list):
+            for row in violation_status[key]:
+                for element in row:
+                    if element != "N/A":
+                        if "active_" in key:
+                            if element is True:
+                                row[row.index(element)] = "ACTIVE"
+                            elif element is False:
+                                row[row.index(element)] = "NOT ACTIVE"
+                        elif ("per_" in key) or ("acc_" in key):
+                            row[row.index(element)] = element
+                    else:
+                        continue
+            ret = {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
+        return ret
+
     @staticmethod
     def average_flattened_ints(data, context="data"):
         """Calculate the average of flattened integers from a list or tuple
@@ -1637,3 +1747,70 @@ class AMDSMIHelpers():
         # Flatten nested lists and filter integers
         flat = [v for value in data for v in (value if isinstance(value, list) else [value]) if isinstance(v, int)]
         return round(sum(flat) / len(flat)) if flat else "N/A"
+
+    def _get_metric_version_and_partition_info(self, gpu_metrics_info, is_partition_metrics, gpu_id, gpu_handle):
+        """
+        Helper method to compute metric version, partition ID, and num_partition for dynamic metrics.
+        Handles logging updates internally for reusability.
+        
+        Args:
+            gpu_metrics_info (dict): GPU metrics info from amdsmi_get_gpu_metrics_info.
+            is_partition_metrics (bool): Whether this is for partition metrics.
+            gpu_id (int): GPU ID for logging.
+            gpu_handle: GPU device handle for KFD info retrieval.
+        
+        Returns:
+            dict: {
+                'metric_version': float or "N/A",
+                'partition_id': int or "N/A",
+                'num_partition': int or "N/A",
+                'num_xcp': int or "N/A"  # Alias for num_partition
+            }
+        """
+        # Compute metric version from header revisions
+        metric_version = "N/A"
+        format_rev = gpu_metrics_info.get('common_header.format_revision', "N/A")
+        content_rev = gpu_metrics_info.get('common_header.content_revision', "N/A")
+        if format_rev != "N/A" and content_rev != "N/A":
+            try:
+                metric_version = float(f"{format_rev}.{content_rev}")
+            except ValueError:
+                metric_version = "N/A"  # Fallback if conversion fails
+        
+        # Retrieve partition ID from KFD info
+        partition_id = "N/A"
+        try:
+            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(gpu_handle)
+            partition_id = kfd_info.get('current_partition_id', "N/A")
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get current partition ID for GPU %s | %s", gpu_id, e.get_error_info())
+        
+        # Determine num_partition with fallback logic for dynamic metrics
+        num_partition = gpu_metrics_info.get('num_partition', "N/A")
+        if metric_version != "N/A" and num_partition == "N/A":
+            # Workaround: Default to 1 for newer metric versions if num_partition is missing
+            # (Confirmed with driver team; applies to GPU and partition metrics)
+            if not is_partition_metrics and metric_version >= 1.9:
+                num_partition = 1
+            elif is_partition_metrics and metric_version >= 1.1:
+                num_partition = 1
+            elif partition_id != "N/A" and partition_id > 0:
+                # Fallback to partition_id if partitions exist but num_partition is unavailable
+                num_partition = partition_id
+            # Else: Remains "N/A" if no conditions match
+        
+        # Alias num_xcp for XCP metrics usage
+        num_xcp = num_partition
+        
+        # Debug logging
+        logging.debug(
+            "GPU %s | Metric version: %s, num_partition: %s, partition_id: %s, num_xcp: %s",
+            gpu_id, metric_version, num_partition, partition_id, num_xcp
+        )
+        
+        return {
+            'metric_version': metric_version,
+            'partition_id': partition_id,
+            'num_partition': num_partition,
+            'num_xcp': num_xcp
+        }    

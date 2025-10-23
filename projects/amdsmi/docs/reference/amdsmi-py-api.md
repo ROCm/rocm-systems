@@ -1316,9 +1316,7 @@ Description: Get the AFIDs from CPER buffer
 
 Input parameters:
 
-* `cper_afid_data`: Either
-          - raw bytes or bytearray of a single CPER record, or
-          - a list of dicts each with keys "bytes" (List[int]) and "size" (int).
+* `cper_afid_data`: raw bytes of a single CPER record.
 
 Output: Tuple[List[int], int]: A tuple containing:
           - A list of extracted AFIDs.

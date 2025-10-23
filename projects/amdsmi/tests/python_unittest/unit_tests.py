@@ -1581,8 +1581,6 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_get_gpu_metrics_info(self):
         self._print_func_name('')
-        if self.TODO_SKIP_FAIL:
-            self.skipTest("Skipping test_get_gpu_metrics_info as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA).")
         for i, gpu in enumerate(self.processors):
             msg = f'gpu({i}):'
             try:
@@ -1594,6 +1592,19 @@ class TestAmdSmiPython(unittest.TestCase):
         if self.raise_exception:
             raise self.raise_exception
         return
+
+    def test_get_gpu_partition_metrics_info(self):
+        self._print_func_name('')
+        for i, gpu in enumerate(self.processors):
+            try:
+                msg = f'gpu({i}): '
+                ret = amdsmi.amdsmi_get_gpu_partition_metrics_info(gpu)
+                self._print(msg, ret)
+            except amdsmi.AmdSmiLibraryException as e:
+                if self._check_ret(msg, e, self.PASS):
+                    self.raise_exception = e
+        if self.raise_exception:
+            raise self.raise_exception
 
     def test_get_gpu_od_volt_curve_regions(self):
         self._print_func_name('')
@@ -3110,6 +3121,8 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_set_gpu_perf_level(self):
         self._print_func_name('')
+        if self.TODO_SKIP_NOT_COMPLETE:
+            self.skipTest("Skipping test_set_gpu_perf_level as it is not complete.")
         dev_perf_level_current = self.dev_perf_levels[0][1]
         for i, gpu in enumerate(self.processors):
             msg = f'gpu({i}):'

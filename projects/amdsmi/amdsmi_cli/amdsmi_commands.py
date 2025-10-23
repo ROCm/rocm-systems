@@ -217,7 +217,9 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        _group_in_groups = self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
@@ -246,7 +248,7 @@ class AMDSMICommands():
             node_id = kfd_info['node_id']
             partition_id = kfd_info['current_partition_id']
         except amdsmi_exception.AmdSmiLibraryException as e:
-            kfd_id = node_id = "N/A"
+            kfd_id = node_id = partition_id = "N/A"
             logging.debug("Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info())
 
         # CSV format is intentionally aligned with Host
@@ -273,9 +275,6 @@ class AMDSMICommands():
                     "hip_uuid":   "N/A",
                 }
 
-            # __Override__ hip_uuid if the group check failed
-            if not _group_in_groups:
-               enumeration_info["hip_uuid"] = "N/A"
             # now store all the fields exactly once:
             if enumeration_info['drm_render'] == "N/A":
                 self.logger.store_output(args.gpu, 'render', enumeration_info['drm_render'])
@@ -455,7 +454,7 @@ class AMDSMICommands():
             current_platform_values += [args.partition]
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
@@ -905,16 +904,24 @@ class AMDSMICommands():
                     logging.debug("Failed to get cpu affinity for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
-                    cpusockets = amdsmi_interface.amdsmi_get_cpu_affinity_with_scope(args.gpu, amdsmi_interface.AmdSmiAffinityScope.SOCKET_SCOPE)
-                    cpusockets = {f'socket_{i}': socket for i, socket in enumerate(set(cpusockets))}
+                    socket_set = amdsmi_interface.amdsmi_get_cpu_affinity_with_scope(args.gpu, amdsmi_interface.AmdSmiAffinityScope.SOCKET_SCOPE)
+                    socket_set = [f"{cpus:016X}" for cpus in socket_set]
+                    socket_set = {f'cpu_list_{i}': f"{cpus}" for i, cpus in enumerate(socket_set)}
+                    socket_bitmask_ranges = self.helpers.get_bitmask_ranges(socket_set)
+                    socket_affinity = {}
+                    for key in socket_set:
+                        socket_affinity[key] = {
+                            "bitmask": socket_set[key],
+                            "cpu_cores_affinity": socket_bitmask_ranges.get(key, "N/A")
+                        }
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    cpusockets = {}
+                    socket_affinity = "N/A"
                     logging.debug("Failed to get socket affinity for gpu %s | %s", gpu_id, e.get_error_info())
 
                 static_dict['numa'] = { 'node' : numa_node_number,
                                         'affinity' : numa_affinity,
                                         'cpu_affinity' : cpu_affinity,
-                                        'socket_affinity' : cpusockets if cpusockets else "N/A"}
+                                        'socket_affinity' : socket_affinity}
         if args.vram:
             vram_info_dict = {"type" : "N/A",
                               "vendor" : "N/A",
@@ -1428,31 +1435,6 @@ class AMDSMICommands():
         self.logger.print_output()
 
 
-    def build_xcp_dict(self, key, violation_status, num_partition):
-        if not isinstance(violation_status[key], list):
-            if "active_" in key:
-               if violation_status[key] != "N/A":
-                   if violation_status[key] is True:
-                       violation_status[key] = "ACTIVE"
-                   elif violation_status[key] is False:
-                       violation_status[key] = "NOT ACTIVE"
-            ret = violation_status[key]
-        elif isinstance(violation_status[key], list):
-            for row in violation_status[key]:
-                for element in row:
-                    if element != "N/A":
-                        if "active_" in key:
-                            if element is True:
-                                row[row.index(element)] = "ACTIVE"
-                            elif element is False:
-                                row[row.index(element)] = "NOT ACTIVE"
-                        elif ("per_" or "acc_") in key:
-                            row[row.index(element)] = element
-                    else:
-                        continue
-            ret = {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
-        return ret
-
     def metric_gpu(self, args, multiple_devices=False, watching_output=False, gpu=None,
                 usage=None, watch=None, watch_time=None, iterations=None, power=None,
                 clock=None, temperature=None, ecc=None, ecc_blocks=None, pcie=None,
@@ -1586,7 +1568,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # Handle watch logic, will only enter this block once
@@ -1658,6 +1640,7 @@ class AMDSMICommands():
         # Add timestamp and store values for specified arguments
         values_dict = {}
 
+        is_partition_metrics = False  # True if we get the metrics from xcp_metrics file (amdsmi_get_gpu_partition_metrics_info)
         #get metric info only once per gpu, this will speed up data output
         try:
             # Get GPU Metrics table
@@ -1666,19 +1649,10 @@ class AMDSMICommands():
             logging.debug("#3 - Unable to load GPU Metrics table for %s | %s", gpu_id, e.get_error_info())
             gpu_metric = amdsmi_interface._NA_amdsmi_get_gpu_metrics_info()
 
-        # Workaround for XCP (partition) metrics not providing num_partition in v1.0
-        # Confirmed with driver team that we can default to 1 if num_partition is not defined.
-        # Pending partitions exist, ie. partition_id > 0. See logic below.
-        try:
-            partition_id = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)['current_partition_id']
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Failed to get current partition id for gpu %s | %s", gpu_id, e.get_error_info())
-            partition_id = "N/A"
-
-        num_partition = gpu_metric['num_partition']
-        if num_partition == "N/A":
-            num_partition = 1  # Workaround for XCP metrics not providing num_partition in v1.0
-            logging.debug(f"num_partition is N/A and partition_id: {partition_id} (greater > 0).\nModified num_partition: {num_partition} to adjust for XCP metrics.")
+        # Workaround for XCP (partition) metrics not providing num_partition in v1.9+/v1.1+
+        # Provides original formatting for earlier metric versions
+        partition_metric_info = self.helpers._get_metric_version_and_partition_info(gpu_metric, is_partition_metrics, gpu_id, args.gpu)
+        num_partition = partition_metric_info['num_partition']
 
         if self.logger.is_json_format():
             values_dict['gpu'] = int(gpu_id)
@@ -2663,30 +2637,30 @@ class AMDSMICommands():
                     throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
                     throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
                     throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit'] #deprecated
-                    throttle_status['gfx_clk_below_host_limit_power_accumulated'] = self.build_xcp_dict('acc_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
-                    throttle_status['gfx_clk_below_host_limit_thermal_accumulated'] = self.build_xcp_dict('acc_gfx_clk_below_host_limit_thm', violation_status, num_partition)
-                    throttle_status['total_gfx_clk_below_host_limit_accumulated'] = self.build_xcp_dict('acc_gfx_clk_below_host_limit_total', violation_status, num_partition)
-                    throttle_status['low_utilization_accumulated'] = self.build_xcp_dict('acc_low_utilization', violation_status, num_partition)
-                    throttle_status['prochot_violation_status'] = self.build_xcp_dict('active_prochot_thrm', violation_status, num_partition)
-                    throttle_status['ppt_violation_status'] = self.build_xcp_dict('active_ppt_pwr', violation_status, num_partition)
-                    throttle_status['socket_thermal_violation_status'] = self.build_xcp_dict('active_socket_thrm', violation_status, num_partition)
-                    throttle_status['vr_thermal_violation_status'] = self.build_xcp_dict('active_vr_thrm', violation_status, num_partition)
-                    throttle_status['hbm_thermal_violation_status'] = self.build_xcp_dict('active_hbm_thrm', violation_status, num_partition)
-                    throttle_status['gfx_clk_below_host_limit_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit', violation_status, num_partition) # deprecated
-                    throttle_status['gfx_clk_below_host_limit_power_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
-                    throttle_status['gfx_clk_below_host_limit_thermal_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit_thm', violation_status, num_partition)
-                    throttle_status['total_gfx_clk_below_host_limit_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit_total', violation_status, num_partition)
-                    throttle_status['low_utilization_violation_status'] = self.build_xcp_dict('active_low_utilization', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_power_accumulated'] = self.helpers.build_xcp_dict('acc_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_thermal_accumulated'] = self.helpers.build_xcp_dict('acc_gfx_clk_below_host_limit_thm', violation_status, num_partition)
+                    throttle_status['total_gfx_clk_below_host_limit_accumulated'] = self.helpers.build_xcp_dict('acc_gfx_clk_below_host_limit_total', violation_status, num_partition)
+                    throttle_status['low_utilization_accumulated'] = self.helpers.build_xcp_dict('acc_low_utilization', violation_status, num_partition)
+                    throttle_status['prochot_violation_status'] = self.helpers.build_xcp_dict('active_prochot_thrm', violation_status, num_partition)
+                    throttle_status['ppt_violation_status'] = self.helpers.build_xcp_dict('active_ppt_pwr', violation_status, num_partition)
+                    throttle_status['socket_thermal_violation_status'] = self.helpers.build_xcp_dict('active_socket_thrm', violation_status, num_partition)
+                    throttle_status['vr_thermal_violation_status'] = self.helpers.build_xcp_dict('active_vr_thrm', violation_status, num_partition)
+                    throttle_status['hbm_thermal_violation_status'] = self.helpers.build_xcp_dict('active_hbm_thrm', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_violation_status'] = self.helpers.build_xcp_dict('active_gfx_clk_below_host_limit', violation_status, num_partition) # deprecated
+                    throttle_status['gfx_clk_below_host_limit_power_violation_status'] = self.helpers.build_xcp_dict('active_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_thermal_violation_status'] = self.helpers.build_xcp_dict('active_gfx_clk_below_host_limit_thm', violation_status, num_partition)
+                    throttle_status['total_gfx_clk_below_host_limit_violation_status'] = self.helpers.build_xcp_dict('active_gfx_clk_below_host_limit_total', violation_status, num_partition)
+                    throttle_status['low_utilization_violation_status'] = self.helpers.build_xcp_dict('active_low_utilization', violation_status, num_partition)
                     throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
                     throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
                     throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
                     throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
                     throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
                     throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit'] # deprecated
-                    throttle_status['gfx_clk_below_host_limit_power_violation_activity'] = self.build_xcp_dict('per_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
-                    throttle_status['gfx_clk_below_host_limit_thermal_violation_activity'] = self.build_xcp_dict('per_gfx_clk_below_host_limit_thm', violation_status, num_partition)
-                    throttle_status['total_gfx_clk_below_host_limit_violation_activity'] = self.build_xcp_dict('per_gfx_clk_below_host_limit_total', violation_status, num_partition)
-                    throttle_status['low_utilization_violation_activity'] = self.build_xcp_dict('per_low_utilization', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_power_violation_activity'] = self.helpers.build_xcp_dict('per_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_thermal_violation_activity'] = self.helpers.build_xcp_dict('per_gfx_clk_below_host_limit_thm', violation_status, num_partition)
+                    throttle_status['total_gfx_clk_below_host_limit_violation_activity'] = self.helpers.build_xcp_dict('per_gfx_clk_below_host_limit_total', violation_status, num_partition)
+                    throttle_status['low_utilization_violation_activity'] = self.helpers.build_xcp_dict('per_low_utilization', violation_status, num_partition)
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     values_dict['throttle'] = throttle_status
@@ -2705,7 +2679,7 @@ class AMDSMICommands():
                                     value[k][index] = self.helpers.unit_format(self.logger, activity, activity_unit)
                                 value[k] = '[' + ", ".join(value[k]) + ']'
                         elif value != "N/A":
-                            value = self.helpers.unit_format(self.logger, value, activity_unit)
+                            throttle_status[key] = self.helpers.unit_format(self.logger, value, activity_unit)
                     if self.logger.is_json_format():
                         if isinstance(value, (list, dict)):
                             for k, v in value.items():
@@ -3115,7 +3089,6 @@ class AMDSMICommands():
             return # Skip printing when there are multiple devices
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
-
 
     def metric(self, args, multiple_devices=False, watching_output=False, gpu=None,
                 usage=None, watch=None, watch_time=None, iterations=None, power=None,
@@ -3641,7 +3614,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(12)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         p2p_status_cache = {}
@@ -4534,6 +4507,10 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
+
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.set_gpu)
         if handled_multiple_gpus:
@@ -5072,10 +5049,6 @@ class AMDSMICommands():
         if core:
             args.core = core
 
-        if not self.group_check_printed:
-            self.helpers.check_required_groups()
-            self.group_check_printed = True
-
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
@@ -5282,7 +5255,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # Handle multiple GPUs
@@ -5652,7 +5625,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # If all arguments are False, the print all values
@@ -5736,6 +5709,7 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("#5 - Unable to load GPU Metrics table for %s | %s", gpu_id, e.get_error_info())
 
+        is_partition_metrics = False  # True if we get the metrics from xcp_metrics file (amdsmi_get_gpu_partition_metrics_info)
         #get metric info only once per gpu, this will speed up data output
         try:
             # Get GPU Metrics table
@@ -5747,25 +5721,15 @@ class AMDSMICommands():
             gpu_metrics_info = amdsmi_interface._NA_amdsmi_get_gpu_metrics_info()
             logging.debug("Unable to load GPU Metrics table for %s | %s", gpu_id, e.get_error_info())
 
-        # Workaround for XCP (partition) metrics not providing num_partition in v1.0
-        # Confirmed with driver team that we can default to 1 if num_partition is not defined.
-        # Pending partitions exist, ie. partition_id > 0. See logic below.
-        try:
-            partition_id = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)['current_partition_id']
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Failed to get current partition id for gpu %s | %s", gpu_id, e.get_error_info())
-            partition_id = "N/A"
+        # Workaround for XCP (partition) metrics not providing num_partition in v1.9+/v1.1+
+        # Provides original formatting for earlier metric versions
+        partition_metric_info = self.helpers._get_metric_version_and_partition_info(gpu_metrics_info, is_partition_metrics, gpu_id, args.gpu)
+        partition_id = partition_metric_info['partition_id']
+        num_partition = partition_metric_info['num_partition']
 
-        num_partition = gpu_metrics_info['num_partition']
-        if num_partition == "N/A":
-            num_partition = partition_id
-
-        num_xcp = num_partition  # used later for XCP metrics
+        # Update logger for XCP display (only if applicable)
         self.logger.table_header += 'XCP'.rjust(5, ' ')
-        self.logger.store_output(args.gpu, 'xcp', partition_id)  # Starting with partition_id.
-                                                                 # Outputs which have xcp details
-                                                                 # will update this value via num_xcp.
-                                                                 # This value will help map to primary device.
+        self.logger.store_output(args.gpu, 'xcp', partition_id)  # Store partition_id initially; can be updated via num_xcp
 
         # Store the pcie_bw values due to possible increase in bandwidth due to repeated gpu_metrics calls
         if args.pcie:
@@ -6005,7 +5969,7 @@ class AMDSMICommands():
                                                            "unit" : freq_unit}
             except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['dclock'] = "N/A"
-                logging.debug("Failed to get vclock on gpu %s | %s", gpu_id, e)
+                logging.debug("Failed to get dclock on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'DCLOCK'.rjust(10)
 
@@ -6348,7 +6312,7 @@ class AMDSMICommands():
                     self.logger.store_multiple_device_output()
                     current_xcp += 1
             else:
-                self.logger.store_output(args.gpu, 'xcp', num_xcp)
+                self.logger.store_output(args.gpu, 'xcp', partition_id)
                 self.logger.store_output(args.gpu, 'values', monitor_values)
 
         # Store typical output for all commands (XCP data will be handled separately, eg. violation status)
@@ -6414,7 +6378,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(7)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         # Populate the possible gpus and their bdfs
@@ -6753,7 +6717,7 @@ class AMDSMICommands():
             args.accelerator = accelerator
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         ###########################################
@@ -7118,7 +7082,7 @@ class AMDSMICommands():
                                                     message)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=True)
             self.group_check_printed = True
 
         if not args.cper:
@@ -7174,7 +7138,7 @@ class AMDSMICommands():
 
         # check groups first
         if not self.group_check_printed:
-            self.helpers.check_required_groups()
+            self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
         processors = amdsmi_interface.amdsmi_get_processor_handles()
@@ -7381,6 +7345,11 @@ class AMDSMICommands():
         if len(devices) == 0:
             print("No GPUs on machine")
             return
+
+        # Check that KFD permissions are available
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
 
         device = devices[i]
         listener = amdsmi_interface.AmdSmiEventReader(device,

@@ -3352,13 +3352,27 @@ amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle,
                     reinterpret_cast<metrics_table_header_t*>(header_value));
 }
 
+amdsmi_status_t  amdsmi_get_gpu_partition_metrics_info(
+        amdsmi_processor_handle processor_handle,
+        amdsmi_gpu_metrics_t *pgpu_metrics) {
+    AMDSMI_CHECK_INIT();
+    if (pgpu_metrics != nullptr) {
+        *pgpu_metrics = amdsmi_gpu_metrics_t{};  // Use a default initializer for the struct
+    } else {
+        return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
+    }
+    return rsmi_wrapper(rsmi_dev_gpu_partition_metrics_info_get, processor_handle, 0,
+                       reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
+}
+
 amdsmi_status_t  amdsmi_get_gpu_metrics_info(
         amdsmi_processor_handle processor_handle,
         amdsmi_gpu_metrics_t *pgpu_metrics) {
     AMDSMI_CHECK_INIT();
-    // nullptr api supported
     if (pgpu_metrics != nullptr) {
         *pgpu_metrics = amdsmi_gpu_metrics_t{};  // Use a default initializer for the struct
+    } else {
+        return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
     }
     return rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0,
                        reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
@@ -4468,11 +4482,14 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     }
 
     int power_limit = 0;
-    status = smi_amdgpu_get_power_cap(gpu_device, &power_limit);
-    if (status == AMDSMI_STATUS_SUCCESS) {
+    amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, &power_limit);
+    if (status2 == AMDSMI_STATUS_SUCCESS) {
         info->power_limit = power_limit;
     }
 
+    // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
+    // Getting power cap values may not be supported on all virtualized systems and should
+    // not return a failure when the metrics values are ascertainable.
     return status;
 }
 
@@ -5182,27 +5199,12 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
 
         case AMDSMI_AFFINITY_SCOPE_SOCKET:
         {
-            std::vector<uint32_t> sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(node_id);
-
-            if(sockets[0] == std::numeric_limits<int32_t>::max()){
+            uint32_t drm_card = gpu_device->get_card_id();
+            std::vector<uint64_t> bitmask = gpu_device->get_bitmask_from_local_cpulist(drm_card, cpu_set_size);
+            if(bitmask[0] == std::numeric_limits<int32_t>::max()){
                 return AMDSMI_STATUS_REFCOUNT_OVERFLOW;
             } else {
-            for (uint32_t idx : sockets) {
-                cpu_set[idx] = idx;
-            }
-
-            std::sort(cpu_set, cpu_set + cpu_set_size);
-
-            // Discard duplicates
-            uint32_t temp_size = 0;
-            for (uint32_t i = 0; i < cpu_set_size; ++i) {
-                if (i == 0 || cpu_set[i] != cpu_set[i - 1]) {
-                    cpu_set[temp_size++] = cpu_set[i];
-                }
-            }
-
-            // Update the size to the temp size after discarding duplicates
-            cpu_set_size = temp_size;
+                std::memcpy(cpu_set, bitmask.data(), cpu_set_size * sizeof(uint64_t));
             }
             break;
         }
