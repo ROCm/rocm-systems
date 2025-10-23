@@ -572,6 +572,8 @@ struct Info : public amd::EmbeddedObject {
   uint32_t localMemSizePerCU_;
   //! Number of banks of local memory
   uint32_t localMemBanks_;
+  //! LDS alignment
+  uint32_t ldsAlignment_;
   //! Number of available async queues
   uint32_t numAsyncQueues_;
   //! Number of available real time queues
@@ -1541,6 +1543,9 @@ class Isa {
   /// @returns This Isa's number of banks of local memory.
   uint32_t localMemBanks() const { return localMemBanks_; }
 
+  /// @returns This Isa's LDS alignment
+  uint32_t ldsAlignment() const { return ldsAlignment_; }
+
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
@@ -1563,7 +1568,7 @@ class Isa {
                 bool runtimePalSupported, uint32_t versionMajor, uint32_t versionMinor,
                 uint32_t versionStepping, Feature sramecc, Feature xnack, uint32_t simdPerCU,
                 uint32_t simdWidth, uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks)
+                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
         hsailId_(hsailId),
         runtimeRocSupported_(runtimeRocSupported),
@@ -1578,7 +1583,8 @@ class Isa {
         simdInstructionWidth_(simdInstructionWidth),
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
-        localMemBanks_(localMemBanks) {}
+        localMemBanks_(localMemBanks),
+        ldsAlignment_(ldsAlignment) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
@@ -1605,6 +1611,7 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
+  uint32_t ldsAlignment_;          //!< LDS alignment.
 };  // class Isa
 
 /*! \addtogroup Runtime
