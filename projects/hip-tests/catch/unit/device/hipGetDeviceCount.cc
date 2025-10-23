@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceCount_NegTst") {
+TEST_CASE("Unit_hipGetDeviceCount_NegTst", "[emulation][device]") {
   REQUIRE_FALSE(hipGetDeviceCount(nullptr) == hipSuccess);
 }
 
@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipGetDeviceCount_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
+TEST_CASE("Unit_hipGetDeviceCount_HideDevices", "[emulation][device]") {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("This test requires more than 2 GPUs. Skipping.");
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Print_Out_Device_Count") {
+TEST_CASE("Print_Out_Device_Count", "[emulation][device]") {
   std::cout << "Device Count: " << HipTest::getDeviceCount() << std::endl;
 }
 

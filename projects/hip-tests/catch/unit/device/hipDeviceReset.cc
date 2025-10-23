@@ -46,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
+TEST_CASE("Unit_hipDeviceReset_Positive_Basic", "[emulation][device]") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);
@@ -111,7 +111,7 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
+TEST_CASE("Unit_hipDeviceReset_Positive_Threaded", "[emulation][device]") {
   HIP_CHECK(hipSetDevice(0));
   INFO("Current device is: " << 0);
 

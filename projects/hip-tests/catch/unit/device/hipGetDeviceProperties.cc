@@ -148,7 +148,7 @@ static void validateDeviceMacro(int* archProp_h, hipDeviceProp_t* prop) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceProperties_ArchPropertiesTst") {
+TEST_CASE("Unit_hipGetDeviceProperties_ArchPropertiesTst", "[emulation][device]") {
   int *archProp_h, *archProp_d;
   archProp_h = new int[NUM_OF_ARCHPROP];
   hipDeviceProp_t prop;
@@ -195,7 +195,7 @@ TEST_CASE("Unit_hipGetDeviceProperties_ArchPropertiesTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceProperties_NegTst") {
+TEST_CASE("Unit_hipGetDeviceProperties_NegTst", "[emulation][device]") {
   hipDeviceProp_t prop;
 
   SECTION("props is nullptr") {
@@ -225,7 +225,7 @@ TEST_CASE("Unit_hipGetDeviceProperties_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Print_Out_Properties") {
+TEST_CASE("Print_Out_Properties", "[emulation][device]") {
   constexpr int w = 42;
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
@@ -354,7 +354,7 @@ TEST_CASE("Print_Out_Properties") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Print_Out_Properties_6.0") {
+TEST_CASE("Print_Out_Properties_6.0", "[emulation][device]") {
   constexpr int w = 42;
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 

@@ -43,7 +43,7 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceCanAccessPeer_positive") {
+TEST_CASE("Unit_hipDeviceCanAccessPeer_positive", "[emulation][multigpu][p2p][device]") {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
@@ -87,7 +87,7 @@ TEST_CASE("Unit_hipDeviceCanAccessPeer_positive") {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceCanAccessPeer_negative") {
+TEST_CASE("Unit_hipDeviceCanAccessPeer_negative", "[emulation][multigpu][p2p][device]") {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {

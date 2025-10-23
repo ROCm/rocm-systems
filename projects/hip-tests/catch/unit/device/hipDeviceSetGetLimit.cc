@@ -54,7 +54,7 @@ void DeviceSetLimitTest(hipLimit_t limit) {
  * ------------------------
  *  - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipDeviceSetLimit_Positive_StackSize") { DeviceSetLimitTest(hipLimitStackSize); }
+TEST_CASE("Unit_hipDeviceSetLimit_Positive_StackSize", "[emulation][device]") { DeviceSetLimitTest(hipLimitStackSize); }
 
 #if HT_NVIDIA
 
@@ -71,7 +71,7 @@ __device__ __managed__ bool stop = false;
  * ------------------------
  *  - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipDeviceSetLimit_Positive_PrintfFifoSize") {
+TEST_CASE("Unit_hipDeviceSetLimit_Positive_PrintfFifoSize", "[emulation][device]") {
   DeviceSetLimitTest(hipLimitPrintfFifoSize);
 }
 
@@ -91,7 +91,7 @@ __global__ void PrintfKernel() {
  * ------------------------
  *  - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipDeviceSetLimit_Negative_PrintfFifoSize") {
+TEST_CASE("Unit_hipDeviceSetLimit_Negative_PrintfFifoSize", "[emulation][device]") {
   PrintfKernel<<<1, 1>>>();
   HIP_CHECK_ERROR(hipDeviceSetLimit(hipLimitPrintfFifoSize, 1024), hipErrorInvalidValue);
   stop = true;
@@ -110,7 +110,7 @@ TEST_CASE("Unit_hipDeviceSetLimit_Negative_PrintfFifoSize") {
  * ------------------------
  *  - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipDeviceSetLimit_Positive_MallocHeapSize") {
+TEST_CASE("Unit_hipDeviceSetLimit_Positive_MallocHeapSize", "[emulation][device]") {
   DeviceSetLimitTest(hipLimitMallocHeapSize);
 }
 
@@ -130,7 +130,7 @@ __global__ void MallocKernel() {
  * ------------------------
  *  - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipDeviceSetLimit_Negative_MallocHeapSize") {
+TEST_CASE("Unit_hipDeviceSetLimit_Negative_MallocHeapSize", "[emulation][device]") {
   MallocKernel<<<1, 1>>>();
   HIP_CHECK_ERROR(hipDeviceSetLimit(hipLimitMallocHeapSize, 1024), hipErrorInvalidValue);
   stop = true;
@@ -151,7 +151,7 @@ TEST_CASE("Unit_hipDeviceSetLimit_Negative_MallocHeapSize") {
  * ------------------------
  *  - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipDeviceSetLimit_Negative_Parameters") {
+TEST_CASE("Unit_hipDeviceSetLimit_Negative_Parameters", "[emulation][device]") {
   HIP_CHECK_ERROR(hipDeviceSetLimit(static_cast<hipLimit_t>(-1), 1024), hipErrorUnsupportedLimit);
 }
 
@@ -179,7 +179,7 @@ TEST_CASE("Unit_hipDeviceSetLimit_Negative_Parameters") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetLimit_Negative_Parameters") {
+TEST_CASE("Unit_hipDeviceGetLimit_Negative_Parameters", "[emulation][device]") {
   SECTION("nullptr") {
     HIP_CHECK_ERROR(hipDeviceGetLimit(nullptr, hipLimitStackSize), hipErrorInvalidValue);
   }
@@ -222,7 +222,7 @@ bool isSetScratchLimitSupported() {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_Negative") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_Negative", "[emulation][device]") {
   size_t value = 0;
   SECTION("With hipLimitRange") {
     HIP_CHECK_ERROR(hipDeviceGetLimit(&value, hipLimitRange), hipErrorInvalidValue);
@@ -252,7 +252,7 @@ TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent", "[emulation][device]") {
   if (!isSetScratchLimitSupported()) {
     HipTest::HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
@@ -292,7 +292,7 @@ TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease", "[emulation][device]") {
   if (!isSetScratchLimitSupported()) {
     HipTest::HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
@@ -371,7 +371,7 @@ __global__ void addOneKernelUseScratch(int* arr) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch", "[emulation][device]") {
   if (!isSetScratchLimitSupported()) {
     HipTest::HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
@@ -454,7 +454,7 @@ void getMinMaxCurrentAndSetCurrent() {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_MultiDevice") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_MultiDevice", "[emulation][multigpu][device]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -490,7 +490,7 @@ TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_MultiDevice") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_InThread") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_InThread", "[emulation][device]") {
   if (!isSetScratchLimitSupported()) {
     HipTest::HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
@@ -516,7 +516,7 @@ TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_InThread") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_InChildProcess") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_InChildProcess", "[multiprocess][device]") {
   if (!isSetScratchLimitSupported()) {
     HipTest::HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
@@ -562,7 +562,7 @@ void getScratchCurrent(size_t checkValue) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads", "[emulation][device]") {
   if (!isSetScratchLimitSupported()) {
     HipTest::HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."

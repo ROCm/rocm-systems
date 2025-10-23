@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipSetDevice_BasicSetGet") {
+TEST_CASE("Unit_hipSetDevice_BasicSetGet", "[emulation][device]") {
   int numDevices = 0;
   int device{};
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -73,7 +73,7 @@ TEST_CASE("Unit_hipSetDevice_BasicSetGet") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetSetDevice_MultiThreaded") {
+TEST_CASE("Unit_hipGetSetDevice_MultiThreaded", "[emulation][device]") {
   auto maxThreads = std::thread::hardware_concurrency();
   auto deviceCount = HipTest::getDeviceCount();
 
@@ -126,7 +126,7 @@ TEST_CASE("Unit_hipGetSetDevice_MultiThreaded") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipSetGetDevice_Positive_Threaded_Basic") {
+TEST_CASE("Unit_hipSetGetDevice_Positive_Threaded_Basic", "[emulation][device]") {
   class HipSetGetDeviceThreadedTest : public ThreadedZigZagTest<HipSetGetDeviceThreadedTest> {
    public:
     void TestPart1() { HIP_CHECK(hipSetDevice(0)); }
@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipSetGetDevice_Positive_Threaded_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipSetGetDevice_Negative") {
+TEST_CASE("Unit_hipSetGetDevice_Negative", "[emulation][device]") {
   SECTION("Get Device - nullptr") { HIP_CHECK_ERROR(hipGetDevice(nullptr), hipErrorInvalidValue); }
 
   SECTION("Set Device - -1") { HIP_CHECK_ERROR(hipSetDevice(-1), hipErrorInvalidDevice); }
@@ -243,7 +243,7 @@ TEST_CASE("Unit_hipSetGetDevice_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGet_Negative") {
+TEST_CASE("Unit_hipDeviceGet_Negative", "[emulation][device]") {
   // TODO enable after EXSWCPHIPT-104 is fixed
 #if HT_NVIDIA
   HIP_CHECK(hipInit(0));

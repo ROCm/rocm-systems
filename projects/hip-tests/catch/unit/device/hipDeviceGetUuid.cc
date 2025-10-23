@@ -61,7 +61,7 @@ std::atomic<int> tState{1};  // 0:fail, 1:pass, 2:skip
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetUuid_Positive") {
+TEST_CASE("Unit_hipDeviceGetUuid_Positive", "[emulation][device]") {
   hipDevice_t device;
   hipUUID uuid{0};
   bool uuidValid = false;
@@ -99,7 +99,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetUuid_Negative") {
+TEST_CASE("Unit_hipDeviceGetUuid_Negative", "[emulation][device]") {
   int numDevices = 0;
   hipDevice_t device;
   hipUUID uuid;
@@ -145,7 +145,7 @@ static inline std::vector<int> parseVisibleDevices() {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
+TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo", "[emulation][device]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   assert(deviceCount > 0);
@@ -219,7 +219,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
  */
 // Guarding it against NVIDIA as this test is faling on it.
 #if HT_AMD
-TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties") {
+TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties", "[emulation][device]") {
   int deviceCount = 0;
   hipDevice_t device;
   hipDeviceProp_t prop;
@@ -307,7 +307,7 @@ auto getUUIDlistWithoutRocmInfo() {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
+TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES", "[emulation][device]") {
   std::map<int, std::vector<char>> uuid_map;
 #ifdef __linux__
   uuid_map = getUUIDlistFromRocmInfo();
@@ -536,7 +536,7 @@ void setEnv() {
  *  - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_UUID_setEnv_Thread") {
+TEST_CASE("Unit_UUID_setEnv_Thread", "[emulation][device]") {
   // Create Thread one
   std::thread t1(setEnv);
   t1.join();
