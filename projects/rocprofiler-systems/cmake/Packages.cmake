@@ -214,109 +214,6 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# ROCpd
-#
-# ----------------------------------------------------------------------------------------#
-
-function(ROCPROFILER_SYSTEMS_CONFIGURE_ROCPD)
-    find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
-
-    if(rocprofiler-sdk-rocpd_FOUND)
-        get_target_property(
-            ROCPD_INCLUDE_DIRS
-            rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-            INTERFACE_INCLUDE_DIRECTORIES
-        )
-
-        set(ROCPD_HAS_SQL_H FALSE)
-        if(ROCPD_INCLUDE_DIRS)
-            foreach(INCLUDE_DIR ${ROCPD_INCLUDE_DIRS})
-                if(EXISTS "${INCLUDE_DIR}/sql.h")
-                    set(ROCPD_HAS_SQL_H TRUE)
-                    break()
-                endif()
-            endforeach()
-        endif()
-
-        if(ROCPD_HAS_SQL_H)
-            set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
-
-            rocprofiler_systems_target_compile_definitions(
-                rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
-            )
-
-            target_link_libraries(
-                rocprofiler-systems-rocm
-                INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-            )
-
-            message(
-                STATUS
-                "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
-            )
-        else()
-            message(
-                STATUS
-                "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
-            )
-        endif()
-    else()
-        message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
-    endif()
-
-    if(NOT rocprofiler-sdk-rocpd_FOUND OR NOT ROCPD_HAS_SQL_H)
-        set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
-
-        rocprofiler_systems_target_compile_definitions(
-            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
-        )
-
-        set(SCHEMA_FILES
-            "rocpd_tables.sql"
-            "rocpd_views.sql"
-            "data_views.sql"
-            "marker_views.sql"
-            "summary_views.sql"
-        )
-
-        set(SCHEMA_SOURCE_DIR
-            "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
-        )
-        set(SCHEMA_BINARY_DIR
-            "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
-        )
-        set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
-
-        file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
-
-        foreach(SCHEMA_FILE ${SCHEMA_FILES})
-            file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
-
-            # Escape quotes and backslashes for C++ string literal
-            string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
-            string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
-            string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
-
-            get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
-            string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
-
-            configure_file(
-                "${TEMPLATE_FILE}"
-                "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp"
-                @ONLY
-            )
-        endforeach()
-
-        target_include_directories(
-            rocprofiler-systems-headers
-            INTERFACE
-                $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
-        )
-    endif()
-endfunction()
-
-# ----------------------------------------------------------------------------------------#
-#
 # ROCm
 #
 # ----------------------------------------------------------------------------------------#
@@ -333,8 +230,97 @@ if(ROCPROFSYS_USE_ROCM)
 
     find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
+endif()
 
-    rocprofiler_systems_configure_rocpd()
+# ----------------------------------------------------------------------------------------#
+#
+# ROCpd
+#
+# ----------------------------------------------------------------------------------------#
+
+function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
+    rocprofiler_systems_target_compile_definitions(
+        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
+    )
+
+    set(SCHEMA_FILES
+        "rocpd_tables.sql"
+        "rocpd_views.sql"
+        "data_views.sql"
+        "marker_views.sql"
+        "summary_views.sql"
+    )
+
+    set(SCHEMA_SOURCE_DIR
+        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
+    )
+    set(SCHEMA_BINARY_DIR
+        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
+    )
+    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
+
+    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
+
+    foreach(SCHEMA_FILE ${SCHEMA_FILES})
+        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
+
+        string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
+        string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
+        string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
+
+        get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
+        string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
+
+        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
+    endforeach()
+
+    target_include_directories(
+        rocprofiler-systems-headers
+        INTERFACE
+            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
+    )
+endfunction()
+
+set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
+find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
+
+if(rocprofiler-sdk-rocpd_FOUND)
+    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
+
+    get_target_property(
+        ROCPD_INCLUDE_DIRS
+        rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
+        INTERFACE_INCLUDE_DIRECTORIES
+    )
+
+    if(ROCPD_INCLUDE_DIRS)
+        foreach(INCLUDE_DIR ${ROCPD_INCLUDE_DIRS})
+            if(EXISTS "${INCLUDE_DIR}/sql.h")
+                set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
+        set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
+
+        rocprofiler_systems_target_compile_definitions(
+            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
+        )
+
+        target_link_libraries(
+            rocprofiler-systems-rocm
+            INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
+        )
+
+        message(STATUS "rocprofiler-sdk-rocpd found - using latest schema files")
+    endif()
+endif()
+
+if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
+    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
+    rocprofsys_configure_rocpd_schema_files()
 endif()
 
 # ----------------------------------------------------------------------------------------#
