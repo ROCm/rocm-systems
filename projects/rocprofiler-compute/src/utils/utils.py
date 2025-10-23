@@ -975,6 +975,7 @@ def pc_sampling_prof(
             "ROCPROF_PC_SAMPLING_UNIT": unit,
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": method,
+            "ROCPROF_KERNEL_TRACE": "1",
         }
         new_env = os.environ.copy()
         for key, value in options.items():
@@ -986,6 +987,7 @@ def pc_sampling_prof(
         )
     else:
         options = [
+            "--kernel-trace",
             "--pc-sampling-beta-enabled",
             "--pc-sampling-method",
             method,
