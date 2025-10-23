@@ -348,7 +348,10 @@ SQLite3 connectivity.
 Generating rocpd Output
 +++++++++++++++++++++++
 
-To generate profiling data in the rocpd format, add ``ROCPROFSYS_USE_ROCPD=ON`` to your profiling configuration.
+To generate profiling data in the rocpd format, add ``ROCPROFSYS_USE_ROCPD=ON``
+to your profiling configuration.
+Below is an example of using ``rocprof-sys-sample``; however, this configuration
+can also be used with the other ``rocprof-sys`` executables.
 
 .. code-block:: shell
 
