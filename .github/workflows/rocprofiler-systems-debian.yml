@@ -69,7 +69,7 @@ jobs:
         command: |
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libopenmpi-dev
+          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin
 
     - name: Install ROCm Packages
       if: ${{ matrix.rocm-version > 0 }}
@@ -85,7 +85,7 @@ jobs:
         wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/jammy/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
-        apt-get install -y rocm-dev
+        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
 
     - name: Configure, Build and Test
       timeout-minutes: 115
@@ -127,7 +127,7 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;jpegdecode;videodecode" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
           -DUSE_CLANG_OMP=OFF \
           $CMAKE_PREFIX_PATH_ARG \
