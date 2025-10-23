@@ -30,7 +30,8 @@
 
 /**
  * Benchmarks how fast the parser can process samples on a single threaded case
- * Current: 5600X with -Ofast, up to >140 million samples/s or ~9GB/s R/W (18GB/s bidirectional)
+ * Current: 5600X with -O3 -ffast-math, up to >140 million samples/s or ~9GB/s R/W (18GB/s
+ * bidirectional)
  */
 template <typename PcSamplingRecordT>
 static bool

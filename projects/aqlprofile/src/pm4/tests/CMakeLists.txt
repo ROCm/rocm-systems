@@ -19,7 +19,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 gtest_add_tests(
     TARGET command-builder-test
     SOURCES ${AQLPROFILE_COMMAND_BUILDER_SOURCES}
@@ -43,7 +44,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET pmc-builder-test
@@ -68,7 +70,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 gtest_add_tests(
     TARGET gfx9-command-builder-test
     SOURCES ${AQLPROFILE_GFX9_COMMAND_BUILDER_SOURCES}
@@ -92,7 +95,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET spm-builder-test
@@ -117,7 +121,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET trace-config-test
@@ -142,7 +147,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)  
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})  
 gtest_add_tests(
     TARGET sqtt-builder-test
     SOURCES ${AQLPROFILE_SQTT_BUILDER_SOURCES}

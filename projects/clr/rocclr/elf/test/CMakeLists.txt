@@ -55,7 +55,7 @@ target_include_directories(elf_test
   PRIVATE
     $<TARGET_PROPERTY:amdrocclr_static,INTERFACE_INCLUDE_DIRECTORIES>)
 
-add_definitions(-DUSE_COMGR_LIBRARY -DCOMGR_DYN_DLL -DWITH_LIGHTNING_COMPILER -DDEBUG)
+add_definitions(-DCOMGR_DYN_DLL -DDEBUG)
 
 target_link_libraries(elf_test PRIVATE amdrocclr_static)
 
