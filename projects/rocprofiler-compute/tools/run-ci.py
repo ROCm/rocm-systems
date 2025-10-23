@@ -107,11 +107,11 @@ set(CTEST_BUILD_NAME "{args.build_name}")
 set(CTEST_SOURCE_DIRECTORY "{source_dir}")
 set(CTEST_BINARY_DIRECTORY "{binary_dir}")
 
-# Build configuration
+# Build config
 set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
 set(CTEST_BUILD_CONFIGURATION "Release")
 
-# Configure CMake command with all required options
+# Config CMake command with all required options
 set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURCE_DIRECTORY}} -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH={os.environ.get('ROCM_PATH', '/opt/rocm')} -DENABLE_TESTS=ON -DINSTALL_TESTS=ON -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS={args.pytest_numprocs}")
 
 message(STATUS "CMake configure command: ${{CTEST_CONFIGURE_COMMAND}}")
@@ -119,7 +119,7 @@ message(STATUS "CMake configure command: ${{CTEST_CONFIGURE_COMMAND}}")
 message(STATUS "Starting {args.mode} dashboard...")
 ctest_start({args.mode})
 
-# Configure step
+# Config step
 message(STATUS "Configuring project...")
 ctest_configure(
     RETURN_VALUE configure_result
@@ -178,7 +178,6 @@ else()
     message(STATUS "Skipping coverage step")
 endif()
 
-# Submit to CDash
 message(STATUS "Submitting to CDash...")
 ctest_submit(
     RETRY_COUNT 3
@@ -196,7 +195,6 @@ else()
     message(STATUS "Build name: {args.build_name}")
 endif()
 
-# Summary
 message(STATUS "")
 message(STATUS "========================================")
 message(STATUS "Dashboard Summary")
@@ -296,24 +294,17 @@ def main():
         action="store_true",
         help="Generate dashboard script but don't execute",
     )
-    # --- Start of Change ---
-    # Add a dedicated argument for pytest parallelism
     parser.add_argument(
         "--pytest-numprocs",
         type=int,
         default=4,
         help="Number of parallel processes for pytest",
     )
-    # Remove the generic cmake_args and ctest_args parsing
-    # --- End of Change ---
 
     args, unknown = parser.parse_known_args()
 
-    # --- Start of Change ---
-    # Simplified argument handling
     args.cmake_args = []
     args.ctest_args = []
-    # --- End of Change ---
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
 

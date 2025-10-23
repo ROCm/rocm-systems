@@ -10,10 +10,6 @@ on:
         description: 'Runner configuration'
         required: false
         type: string
-  pull_request:
-    paths:
-      - '.github/workflows/rocprofiler-compute-code-coverage.yml'
-      - 'projects/rocprofiler-compute/tools/run-ci.py'
 
 env:
   ROCM_PATH: "/opt/rocm"
