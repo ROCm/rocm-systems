@@ -42,11 +42,11 @@ jobs:
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v1.2.0
       with:
-          tool-cache: false
+          tool-cache: true
           android: true
           dotnet: true
           haskell: true
-          large-packages: false
+          large-packages: true
           swap-storage: false
 
   debian:
