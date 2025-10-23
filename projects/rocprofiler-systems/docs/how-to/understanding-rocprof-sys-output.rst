@@ -331,14 +331,16 @@ format. To output in `rocpd` format, ROCProfiler-SDK version 1.0.0 or later is r
 Features of rocpd format
 -----------------------------------------------
 
-- **Comprehensive Data Model**: Consolidates all profiling artifacts including
+* **Comprehensive Data Model**: Consolidates all profiling artifacts including
 execution traces, performance counters, hardware metrics, and contextual metadata
 within a single SQLite3 database file (`.db` extension).
-- **Standards-Compliant Access**: Supports querying through industry-standard SQL
+
+* **Standards-Compliant Access**: Supports querying through industry-standard SQL
 interfaces including command-line tools (``sqlite3`` CLI), programming language
 bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management
 applications.
-- **Advanced Analytics Integration**: Facilitates sophisticated post-processing
+
+* **Advanced Analytics Integration**: Facilitates sophisticated post-processing
 workflows through custom analytical scripts, automated reporting systems, and
 integration with third-party visualization and analysis frameworks that provide
 SQLite3 connectivity.
@@ -346,7 +348,7 @@ SQLite3 connectivity.
 Generating rocpd Output
 +++++++++++++++++++++++
 
-To generate profiling data in the rocpd format, add "ROCPROFSYS_USE_ROCPD=ON" to your profiling configuration.
+To generate profiling data in the rocpd format, add ``ROCPROFSYS_USE_ROCPD=ON`` to your profiling configuration.
 
 .. code-block:: shell
 
@@ -365,7 +367,7 @@ output formats for specialized analysis and visualization workflows. For example
 (Open Trace Format 2) OTF2, Perfetto Protocol Buffers (PFTrace), and
 Comma-Separated Values (CSV) tables.
 
-See `rocpd tool documentation <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/docs/how-to/using-rocpd-output-format.rst>`_
+See `Converting rocpd to Other Formats <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocpd-output-format.html#converting-rocpd-to-other-formats>`_
 for additional information on these conversion tools.
 
 Native Perfetto output
