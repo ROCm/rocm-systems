@@ -17,6 +17,7 @@ on:
 
 env:
   ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
 
 jobs:
   prepare_matrix:
@@ -65,48 +66,27 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute
 
-      - name: Install system dependencies
+      - name: Install amdgpu and dependencies
         shell: bash
         run: |
+          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ matrix.system.code-name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y amd-smi-lib libdw-dev libopenmpi-dev
-          echo "✅ System dependencies Installed!"
+          echo "✅ amdgpu and dependencies Installed!"
 
-      - name: Install ROCm from TheRock tarball
+      - name: Install ROCm 7.0.0
         shell: bash
         run: |
           set -e
-          echo "Checking for ROCm tarballs in /opt..."
-          ls -la /opt/*.tar.gz || echo "No tarballs found in /opt/"
 
-          # Find the tarball
-          TARBALL=$(ls /opt/rocm-*.tar.gz 2>/dev/null | head -n 1)
+          # Install ROCm using apt to avoid runtime errors with TheRock tarball
+          apt-get install -y rocm-dev rocprofiler-sdk
 
-          if [ -z "${TARBALL}" ]; then
-            echo "❌ Error: No ROCm tarball found in /opt/"
-            echo "Available files in /opt/:"
-            ls -la /opt/
-            exit 1
-          fi
-
-          echo "Found ROCm tarball: ${TARBALL}"
-
-          # Extract version from tarball filename
-          TARBALL_ROCM_VERSION=$(basename ${TARBALL} | grep -oP '(?<=rocm-)\d+\.\d+\.\d+(?=-)')
-          echo "Tarball ROCm version: ${TARBALL_ROCM_VERSION}"
-
-          # Create target directory
-          ROCM_INSTALL_DIR="${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}"
-          mkdir -p ${ROCM_INSTALL_DIR}
-
-          # Extract tarball
-          echo "Extracting ${TARBALL} to ${ROCM_INSTALL_DIR}..."
-          tar -xzf ${TARBALL} -C ${ROCM_INSTALL_DIR} --strip-components=1
-
-          # Create symlink
-          ln -sf ${ROCM_INSTALL_DIR} ${{ env.ROCM_PATH }}
-
-          echo "ROCm installed to: ${{ env.ROCM_PATH }} -> ${ROCM_INSTALL_DIR}"
+          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
           # Verify installation
           if [ -f "${{ env.ROCM_PATH }}/bin/amdclang++" ]; then
@@ -116,7 +96,16 @@ jobs:
             echo "⚠️  Warning: amdclang++ not found at expected location"
           fi
 
-          echo "✅ ROCm Installation Complete (from TheRock tarball)!"
+          # Verify rocprofiler-sdk installation
+          if [ -f "${{ env.ROCM_PATH }}/lib/rocprofiler-sdk/librocprofv3-attach.so" ]; then
+            echo "✅ rocprofiler-sdk found at ${{ env.ROCM_PATH }}/lib/rocprofiler-sdk/"
+          else
+            echo "⚠️  Warning: librocprofv3-attach.so not found at expected location"
+            echo "Searching for rocprofiler-sdk files:"
+            find ${{ env.ROCM_PATH }} -name "librocprofv3-attach.so" 2>/dev/null || echo "Not found"
+          fi
+
+          echo "✅ ROCm Installation Complete (from apt)!"
 
       - name: Install Python Dependencies
         working-directory: projects/rocprofiler-compute
