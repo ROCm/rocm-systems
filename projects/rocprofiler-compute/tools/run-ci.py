@@ -112,7 +112,7 @@ set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
 set(CTEST_BUILD_CONFIGURATION "Release")
 
 # Configure CMake command with all required options
-set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURCE_DIRECTORY}} -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH={os.environ.get('ROCM_PATH', '/opt/rocm')} -DCMAKE_HIP_COMPILER={os.environ.get('ROCM_PATH', '/opt/rocm')}/bin/amdclang++ -DENABLE_TESTS=ON -DINSTALL_TESTS=ON -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS={args.pytest_numprocs}")
+set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURCE_DIRECTORY}} -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH={os.environ.get('ROCM_PATH', '/opt/rocm')} -DCMAKE_CXX_COMPILER={os.environ.get('ROCM_PATH', '/opt/rocm')}/bin/amdclang++ -DCMAKE_HIP_COMPILER={os.environ.get('ROCM_PATH', '/opt/rocm')}/bin/amdclang++ -DENABLE_TESTS=ON -DINSTALL_TESTS=ON -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS={args.pytest_numprocs}")
 
 message(STATUS "CMake configure command: ${{CTEST_CONFIGURE_COMMAND}}")
 
