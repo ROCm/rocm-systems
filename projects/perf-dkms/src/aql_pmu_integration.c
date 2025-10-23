@@ -15,6 +15,7 @@
 
 #include "aql_perf.h"
 #include "amdgpu_pmu.h"
+#include "pmu_dimension.h"
 
 /* Global AQL session - initialized during module load */
 static struct aql_perf_session *global_aql_session = NULL;
@@ -191,7 +192,7 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
  *
  * Returns: 0 on success, negative error code on failure
  */
-int aql_pmu_event_init(struct perf_event *event)
+int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coords *dims)
 {
     struct aql_measurement *measurement;
     uint32_t gpu_id;
@@ -224,11 +225,22 @@ int aql_pmu_event_init(struct perf_event *event)
         return PTR_ERR(measurement);
     }
 
+    /* Store dimension information in measurement if specified */
+    if (dims && dims->valid) {
+        measurement->target_dims = *dims;
+        measurement->dimension_specific = true;
+        aql_debug("Initialized hardware event for GPU %u with dimensions: "
+                  "xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d",
+                  gpu_id, dims->xcc, dims->se, dims->sa, dims->wgp, dims->cu,
+                  dims->aggregate);
+    } else {
+        measurement->dimension_specific = false;
+        aql_debug("Initialized hardware event for GPU %u (no dimensions, event config=0x%llx)",
+                  gpu_id, event->attr.config);
+    }
+
     /* Store measurement in event's hardware config */
     event->hw.config_base = (unsigned long)measurement;
-
-    aql_debug("Initialized hardware event for GPU %u (event config=0x%llx)",
-              gpu_id, event->attr.config);
 
     mutex_unlock(&aql_pmu_mutex);
     return 0;

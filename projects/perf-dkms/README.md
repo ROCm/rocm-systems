@@ -28,6 +28,7 @@ This kernel module bridges AMD GPU hardware performance counters with the Linux 
 - ✅ GFX12/RDNA3 hardware support
 - ✅ Multi-GPU architecture support
 - ✅ Hardware block counter definitions (SQ, CPC, GL2C, etc.)
+- ✅ **Dimension-Specific Monitoring** - Monitor specific SE/SA/WGP hardware units
 - ✅ Standard perf tool compatibility
 - ✅ DKMS-compatible installation
 
@@ -176,6 +177,90 @@ perf stat -I 1000 -e amdgpu_pmu/sq_waves/ sleep 10
 # Export to JSON
 perf stat -j -e amdgpu_pmu/sq_waves/ sleep 2
 ```
+
+## Dimension-Specific Monitoring
+
+The amdgpu_pmu driver supports monitoring specific GPU hardware dimensions (Shader Engines, Shader Arrays, Work Group Processors) for fine-grained performance analysis.
+
+### Quick Examples
+
+```bash
+# Monitor specific Shader Engine (SE)
+perf stat -e amdgpu_pmu/sq_waves,se=0/ -a sleep 1
+
+# Monitor SE and Shader Array (SA)
+perf stat -e amdgpu_pmu/sq_waves,se=1,sa=0/ -a sleep 1
+
+# Monitor full dimension hierarchy
+perf stat -e amdgpu_pmu/sq_waves,se=2,sa=1,wgp=3/ -a sleep 1
+
+# Compare activity across all Shader Engines
+perf stat -e amdgpu_pmu/sq_waves,se=0/ \
+          -e amdgpu_pmu/sq_waves,se=1/ \
+          -e amdgpu_pmu/sq_waves,se=2/ \
+          -e amdgpu_pmu/sq_waves,se=3/ \
+          -a ./my_gpu_app
+```
+
+### Hardware Dimensions
+
+AMD GPUs are organized hierarchically:
+
+- **SE** (Shader Engine): Top-level parallel units, typically 4 per GPU
+- **SA** (Shader Array): Subdivisions within SE, typically 2 per SE
+- **WGP** (Work Group Processor): Compute units, typically 4 per SA
+- **CU** (Compute Unit): Individual SIMD units
+
+For GFX12: 4 SE × 2 SA × 4 WGP = 32 unique addressable locations
+
+### Available Parameters
+
+- `se=N` - Shader Engine index (0-3 typical)
+- `sa=N` - Shader Array index (0-1 typical)
+- `wgp=N` - Work Group Processor index (0-3 typical)
+- `cu=N` - Compute Unit index (0-63 typical)
+- `xcc=N` - XCC index (usually 0)
+
+### Supported Counters
+
+Not all counters support dimension targeting:
+
+- **SQ Counters** (SE/SA/WGP): `sq_waves`, `sq_insts_valu`, `sq_busy_cycles`
+- **TA Counters** (SE/SA/WGP): `ta_busy`, `ta_total_wavefronts`
+- **GL2C Counters** (SE/SA): `gl2c_hit`, `gl2c_miss`
+- **Global Counters** (no dimensions): `grbm_count`, `grbm_busy`
+
+### Use Cases
+
+**Load Balancing Analysis**: Check if work is evenly distributed across SEs
+```bash
+perf stat -e amdgpu_pmu/sq_waves,se=0/ \
+          -e amdgpu_pmu/sq_waves,se=1/ \
+          -e amdgpu_pmu/sq_waves,se=2/ \
+          -e amdgpu_pmu/sq_waves,se=3/ \
+          -a ./workload
+```
+
+**Hotspot Detection**: Identify which hardware unit is most active
+```bash
+perf record -e amdgpu_pmu/sq_busy_cycles,se=0/ \
+            -e amdgpu_pmu/sq_busy_cycles,se=1/ \
+            -a sleep 10
+```
+
+**Memory Analysis**: Monitor cache behavior per Shader Array
+```bash
+perf stat -e amdgpu_pmu/gl2c_hit,se=0,sa=0/ \
+          -e amdgpu_pmu/gl2c_miss,se=0,sa=0/ \
+          -a ./memory_test
+```
+
+### Documentation
+
+For detailed information, see:
+- **User Guide**: `docs/user_guide_dimensions.md` - Complete usage guide with examples
+- **Design Doc**: `docs/design.md` - Technical implementation details
+- **Tests**: `test/dimension_test.sh` - Integration test examples
 
 ## Architecture Support
 

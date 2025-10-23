@@ -726,6 +726,71 @@ counter_reg_info_t* aql_counter_try_allocate(block_info_t *block,
 }
 
 /**
+ * aql_counter_try_allocate_dimension - Atomically allocate counter for specific dimension
+ * @block: Hardware block to allocate counter from
+ * @event_id: Event ID to monitor
+ * @perf_event: Perf event pointer to associate with this counter
+ * @dims: Dimension coordinates (must be valid and dimension_specific must be true)
+ * @arch: Architecture info (for dimension limits)
+ *
+ * Allocates a counter targeting a specific hardware dimension (SE/SA/WGP).
+ * For now, this allocates one counter per dimension specification (no aggregate mode).
+ *
+ * Returns: Pointer to allocated counter_reg_info_t, or NULL if all counters busy
+ *
+ * TODO: Add support for aggregate mode (allocate multiple counters, sum results)
+ * TODO: Add support for sample_all mode (allocate all dimension instances)
+ */
+counter_reg_info_t* aql_counter_try_allocate_dimension(block_info_t *block,
+                                                       uint32_t event_id,
+                                                       struct perf_event *perf_event,
+                                                       const struct pmu_dimension_coords *dims,
+                                                       arch_t *arch)
+{
+    counter_reg_info_t *reg;
+    uint32_t flat_index;
+
+    if (!block || !dims || !arch) {
+        aql_err("[PMU] aql_counter_try_allocate_dimension: Invalid parameters");
+        return NULL;
+    }
+
+    /*
+     * Calculate flat index for this dimension using encode_dimension_index helper.
+     * This maps hierarchical SE/SA/WGP coordinates to a linear index.
+     *
+     * For now, we allocate a single counter instance. The flat_index is stored
+     * in allocation.instance_id to track which dimension this counter targets.
+     *
+     * TODO: Aggregate mode would allocate multiple counters (one per instance)
+     * and sum their results. Sample_all would do similar but return per-instance data.
+     */
+    flat_index = encode_dimension_index(dims->se, dims->sa, dims->wgp,
+                                        arch->num_sa, arch->num_wgp_per_sa);
+
+    aql_debug("[PMU] aql_counter_try_allocate_dimension: SE=%u SA=%u WGP=%u -> flat_index=%u",
+              dims->se, dims->sa, dims->wgp, flat_index);
+
+    /* Allocate counter using standard allocation path */
+    reg = aql_counter_try_allocate(block, event_id, perf_event);
+    if (!reg) {
+        return NULL;
+    }
+
+    /*
+     * Store dimension-specific information in the allocation structure.
+     * The instance_id field is repurposed to track the flat dimension index.
+     * This allows the packet generation code to configure GRBM_GFX_INDEX appropriately.
+     */
+    reg->allocation.instance_id = flat_index;
+
+    aql_info("[PMU] aql_counter_try_allocate_dimension: SUCCESS - allocated dimension-specific counter, "
+             "SE=%u SA=%u WGP=%u flat_index=%u", dims->se, dims->sa, dims->wgp, flat_index);
+
+    return reg;
+}
+
+/**
  * aql_counter_release - Atomically release a counter back to free pool
  * @reg: Counter register info to release
  *
@@ -856,5 +921,6 @@ EXPORT_SYMBOL_GPL(aql_perf_session_put);
 EXPORT_SYMBOL_GPL(aql_perf_allocate_counter_buffers);
 EXPORT_SYMBOL_GPL(aql_perf_free_counter_buffers);
 EXPORT_SYMBOL_GPL(aql_counter_try_allocate);
+EXPORT_SYMBOL_GPL(aql_counter_try_allocate_dimension);
 EXPORT_SYMBOL_GPL(aql_counter_release);
 EXPORT_SYMBOL_GPL(aql_build_counter_info);

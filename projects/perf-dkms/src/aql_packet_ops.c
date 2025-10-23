@@ -167,10 +167,20 @@ int aql_perf_create_start_packet(struct aql_measurement *measurement,
              block->name, event_id);
 
     /* Atomically allocate a counter from the block */
-    allocated_counter = aql_counter_try_allocate(block, event_id, measurement->event);
-    if (!allocated_counter) {
-        aql_err("[PMU] Failed to allocate counter from block %s (all busy)", block->name);
-        return -EBUSY;
+    /* Use dimension-specific allocation if dimensions are specified */
+    if (measurement->dimension_specific && measurement->target_dims.valid) {
+        allocated_counter = aql_counter_try_allocate_dimension(block, event_id, measurement->event,
+                                                               &measurement->target_dims, arch);
+        if (!allocated_counter) {
+            aql_err("[PMU] Failed to allocate dimension-specific counter from block %s (all busy)", block->name);
+            return -EBUSY;
+        }
+    } else {
+        allocated_counter = aql_counter_try_allocate(block, event_id, measurement->event);
+        if (!allocated_counter) {
+            aql_err("[PMU] Failed to allocate counter from block %s (all busy)", block->name);
+            return -EBUSY;
+        }
     }
 
     /* Build counter_info_t structure */

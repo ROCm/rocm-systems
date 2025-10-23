@@ -20,9 +20,13 @@
 #include "kfd_test.h"
 #include "aql_perf.h"
 #include "aql_c/counter_registry.h"
+#include "pmu_dimension.h"
 
 /* Global PMU instance */
 static struct amdgpu_pmu *amdgpu_pmu_instance;
+
+/* Global dimension limits - populated from GPU architecture during init */
+static struct pmu_dimension_limits global_dim_limits = {0};
 
 /* Module parameters */
 bool debug_enable = true;
@@ -42,18 +46,69 @@ static void amdgpu_pmu_start(struct perf_event *event, int flags);
 static void amdgpu_pmu_stop(struct perf_event *event, int flags);
 static void amdgpu_pmu_read(struct perf_event *event);
 
-/* Sysfs attribute functions */
-static ssize_t amdgpu_pmu_format_show(struct device *dev,
-                                    struct device_attribute *attr,
-                                    char *buf)
-{
-    return sprintf(buf, "config:0-63\n");
-}
+/*
+ * PMU_FORMAT_ATTR - Define a perf format attribute
+ *
+ * This macro creates the necessary boilerplate for exposing perf event
+ * format attributes via sysfs. Format attributes tell userspace tools
+ * like perf how to encode event parameters into the config/config1/config2
+ * fields of struct perf_event_attr.
+ *
+ * The format string uses the syntax "field:start-end" or "field:bit" to
+ * describe which bits of the config field are used for this parameter.
+ *
+ * Example:
+ *   PMU_FORMAT_ATTR(se, "config1:8-15")
+ *   Creates /sys/bus/event_source/devices/amdgpu_pmu/format/se
+ *   with contents "config1:8-15"
+ *
+ * This allows perf to parse: perf stat -e amdgpu_pmu/event,se=2/
+ */
+#define PMU_FORMAT_ATTR(_name, _format) \
+static ssize_t __pmu_format_##_name##_show(struct device *dev, \
+					    struct device_attribute *attr, \
+					    char *page) \
+{ \
+	return sprintf(page, _format "\n"); \
+} \
+static struct device_attribute format_attr_##_name = \
+	__ATTR(_name, 0444, __pmu_format_##_name##_show, NULL)
 
-static DEVICE_ATTR(format, 0444, amdgpu_pmu_format_show, NULL);
+/*
+ * Format Attributes - Define how perf encodes event parameters
+ *
+ * These attributes tell the perf tool how to encode named parameters
+ * into the config and config1 fields of struct perf_event_attr.
+ *
+ * config1 bit layout (defined in pmu_dimension.h):
+ *   Bits  0-7  : XCC index
+ *   Bits  8-15 : SE index
+ *   Bits 16-23 : SA index
+ *   Bits 24-31 : WGP index
+ *   Bits 32-39 : CU index
+ *   Bit  40    : Aggregate flag
+ *   Bit  41    : Sample all flag
+ */
+PMU_FORMAT_ATTR(config, "config:0-63");      /* Counter ID */
+PMU_FORMAT_ATTR(config1, "config1:0-63");    /* Raw dimension encoding */
+PMU_FORMAT_ATTR(xcc, "config1:0-7");         /* XCC index */
+PMU_FORMAT_ATTR(se, "config1:8-15");         /* SE index */
+PMU_FORMAT_ATTR(sa, "config1:16-23");        /* SA index */
+PMU_FORMAT_ATTR(wgp, "config1:24-31");       /* WGP index */
+PMU_FORMAT_ATTR(cu, "config1:32-39");        /* CU index */
+PMU_FORMAT_ATTR(aggregate, "config1:40");    /* Aggregate across dimensions */
+PMU_FORMAT_ATTR(sample_all, "config1:41");   /* Sample all instances */
 
 static struct attribute *amdgpu_pmu_format_attrs[] = {
-    &dev_attr_format.attr,
+    &format_attr_config.attr,
+    &format_attr_config1.attr,
+    &format_attr_xcc.attr,
+    &format_attr_se.attr,
+    &format_attr_sa.attr,
+    &format_attr_wgp.attr,
+    &format_attr_cu.attr,
+    &format_attr_aggregate.attr,
+    &format_attr_sample_all.attr,
     NULL,
 };
 
@@ -130,17 +185,21 @@ void amdgpu_pmu_free_event_idx(struct amdgpu_pmu *pmu, int idx)
 static int amdgpu_pmu_event_init(struct perf_event *event)
 {
     struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
+    struct pmu_dimension_coords dims = {0};
+    const counter_def_t *counter;
+    u64 config = event->attr.config;
+    u64 config1 = event->attr.config1;
     int ret;
 
-    pmu_debug("event_init: config=0x%llx\n", event->attr.config);
+    pmu_debug("event_init: config=0x%llx config1=0x%llx\n", config, config1);
 
     /* Check if event is for our PMU */
     if (event->attr.type != event->pmu->type)
         return -ENOENT;
 
     /* Check if event configuration is supported */
-    if (!amdgpu_pmu_is_valid_event(event->attr.config)) {
-        pmu_err("Unsupported event config: 0x%llx\n", event->attr.config);
+    if (!amdgpu_pmu_is_valid_event(config)) {
+        pmu_err("Unsupported event config: 0x%llx\n", config);
         return -EINVAL;
     }
 
@@ -156,23 +215,51 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
         return -EOPNOTSUPP;
     }
 
-    // /* We don't support exclude filters */
-    // if (event->attr.exclude_user || event->attr.exclude_kernel ||
-    //     event->attr.exclude_hv || event->attr.exclude_idle) {
-    //     pmu_err("Exclude filters not supported\n");
-    //     return -EOPNOTSUPP;
-    // }
+    /* Extract and validate dimensions from config1 if specified */
+    if (config1 != 0) {
+        pmu_extract_dimensions(config1, &dims);
+        pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d sample_all=%d valid=%d\n",
+                  dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
+                  dims.aggregate, dims.sample_all, dims.valid);
+
+        /* Validate dimensions against hardware limits */
+        if (!pmu_validate_dimensions(&dims, &global_dim_limits)) {
+            pmu_err("Dimension out of range: xcc=%u se=%u sa=%u wgp=%u cu=%u (max: %u/%u/%u/%u/%u)\n",
+                    dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
+                    global_dim_limits.max_xcc, global_dim_limits.max_se,
+                    global_dim_limits.max_sa, global_dim_limits.max_wgp,
+                    global_dim_limits.max_cu);
+            return -EINVAL;
+        }
+
+        /* Get counter definition and validate it supports requested dimensions */
+        counter = lookup_counter_by_id((counter_id_t)config);
+        if (counter) {
+            ret = pmu_validate_counter_dimensions(counter, &dims);
+            if (ret != 0) {
+                pmu_err("Counter '%s' does not support requested dimensions "
+                        "(supported: 0x%x, requested: xcc=%u se=%u sa=%u wgp=%u cu=%u)\n",
+                        counter->name, counter->supported_dimensions,
+                        dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu);
+                return ret;
+            }
+        }
+    }
 
     /* Initialize AQL hardware counter */
-    ret = aql_pmu_event_init(event);
+    ret = aql_pmu_event_init(event, dims.valid ? &dims : NULL);
     if (ret != 0) {
         pmu_err("AQL hardware counter initialization failed for config=0x%llx: %d\n",
-                event->attr.config, ret);
+                config, ret);
         return ret;
     }
 
     /* Successfully initialized hardware counter */
-    pmu_debug("Using AQL hardware counter for event config=0x%llx\n", event->attr.config);
+    if (dims.valid) {
+        pmu_debug("Using AQL hardware counter for event config=0x%llx with dimensions\n", config);
+    } else {
+        pmu_debug("Using AQL hardware counter for event config=0x%llx (no dimensions)\n", config);
+    }
     atomic64_inc(&pmu->hardware_events);
     atomic64_inc(&pmu->total_events);
 
@@ -509,6 +596,39 @@ static int __init amdgpu_pmu_init(void)
         amdgpu_pmu_cleanup_event_attrs();
         kfree(pmu);
         return ret;
+    }
+
+    /* Initialize dimension limits from GPU architecture */
+    {
+        struct aql_perf_session *session = aql_pmu_get_session();
+        if (session && session->num_gpus > 0 && session->archs && session->archs[0]) {
+            arch_t *arch = session->archs[0];
+
+            /* Populate dimension limits from first GPU architecture
+             * Note: For multi-GPU systems, we use the first GPU's limits.
+             * In practice, all GPUs should have the same architecture.
+             */
+            global_dim_limits.max_xcc = (arch->num_xcc > 0) ? arch->num_xcc - 1 : 0;
+            global_dim_limits.max_se = (arch->num_se > 0) ? arch->num_se - 1 : 0;
+            global_dim_limits.max_sa = (arch->num_sa > 0) ? arch->num_sa - 1 : 0;
+            global_dim_limits.max_wgp = (arch->num_wgp_per_sa > 0) ? arch->num_wgp_per_sa - 1 : 0;
+            global_dim_limits.max_cu = (arch->num_cu > 0) ? arch->num_cu - 1 : 0;
+
+            pmu_info("Dimension limits: XCC=0-%u, SE=0-%u, SA=0-%u, WGP=0-%u, CU=0-%u\n",
+                     global_dim_limits.max_xcc, global_dim_limits.max_se,
+                     global_dim_limits.max_sa, global_dim_limits.max_wgp,
+                     global_dim_limits.max_cu);
+
+            aql_pmu_put_session(session);
+        } else {
+            pmu_warn("Could not get GPU architecture for dimension limits\n");
+            /* Set conservative defaults */
+            global_dim_limits.max_xcc = 0;
+            global_dim_limits.max_se = 3;   /* Most GPUs have 4 or fewer SEs */
+            global_dim_limits.max_sa = 1;   /* Most GPUs have 2 or fewer SAs */
+            global_dim_limits.max_wgp = 3;  /* Most GPUs have 4 or fewer WGPs */
+            global_dim_limits.max_cu = 63;  /* Most GPUs have 64 or fewer CUs */
+        }
     }
 
     pmu_info("PMU Stub module loaded successfully\n");

@@ -16,6 +16,7 @@
 
 /* Forward declarations */
 struct aql_perf_stats;
+struct pmu_dimension_coords;
 
 /* Module information */
 #define MODULE_NAME "amdgpu_pmu"
@@ -97,7 +98,7 @@ void amdgpu_pmu_cleanup_sysfs(struct amdgpu_pmu *pmu);
 int aql_pmu_init(void);
 void aql_pmu_cleanup(void);
 bool aql_pmu_is_available(void);
-int aql_pmu_event_init(struct perf_event *event);
+int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coords *dims);
 void aql_pmu_event_destroy(struct perf_event *event);
 int aql_pmu_event_start(struct perf_event *event);
 int aql_pmu_event_stop(struct perf_event *event);

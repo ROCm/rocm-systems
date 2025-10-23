@@ -246,7 +246,38 @@ int generate_start_packet(pm4_buffer_t *buffer, const arch_t *arch,
 
   /* 5. Configure each counter */
   for (size_t i = 0; i < collection->counter_count; i++) {
-    ret = generate_counter_config(buffer, arch, &collection->counters[i]);
+    counter_info_t *counter = &collection->counters[i];
+    block_info_t *block = arch->block_map.blocks[counter->block_id];
+    counter_reg_info_t *reg_info = &block->counter_reg_info[counter->counter_index];
+
+    /*
+     * Check if this is a dimension-specific counter allocation.
+     * If instance_id is non-zero, it contains the flat dimension index.
+     * We need to set GRBM_GFX_INDEX before configuring this counter.
+     */
+    if (reg_info->allocation.instance_id != 0) {
+      /* Decode flat index back to SE/SA/WGP coordinates */
+      dimension_coords_t coords = decode_dimension_index(
+          reg_info->allocation.instance_id,
+          arch->num_sa,
+          arch->num_wgp_per_sa);
+
+      /* Set GRBM_GFX_INDEX to target specific dimension */
+      ret = pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
+                               coords.wgp << 2, /* instance_index (WGP shifted by 2) */
+                               coords.sa,
+                               coords.se);
+      if (ret < 0)
+        return ret;
+    } else {
+      /* Non-dimension-specific counter: use broadcast mode */
+      ret = generate_grbm_broadcast(buffer, arch);
+      if (ret < 0)
+        return ret;
+    }
+
+    /* Configure the counter with GRBM_GFX_INDEX already set */
+    ret = generate_counter_config(buffer, arch, counter);
     if (ret < 0)
       return ret;
   }
@@ -333,50 +364,95 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
     counter_reg_info_t *reg_info =
         &block->counter_reg_info[counter->counter_index];
 
-    /* Iterate through GPU topology based on block dimensions */
-    bool has_se_dimension = false;
-    uint32_t num_se = arch->num_se;
-    uint32_t num_sa = arch->num_sa;
-    uint32_t num_wgp = arch->num_wgp_per_sa;
+    /*
+     * Check if this is a dimension-specific counter.
+     * If instance_id is non-zero, only read from that specific dimension.
+     * Otherwise, iterate through all dimensions as before.
+     */
+    if (reg_info->allocation.instance_id != 0) {
+      /* Dimension-specific counter: read only from specified dimension */
+      dimension_coords_t coords = decode_dimension_index(
+          reg_info->allocation.instance_id,
+          arch->num_sa,
+          arch->num_wgp_per_sa);
 
-    /* Extract dimension sizes from block dimensions */
-    for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
-      dimension_t *dim = &block->dimensions[dim_idx];
-      if (dim->dim == HARDWARE_DIM_SE) {
-        num_se = dim->size;
-      } else if (dim->dim == HARDWARE_DIM_SA) {
-        num_sa = dim->size;
-      } else if (dim->dim == HARDWARE_DIM_WGP) {
-        num_wgp = dim->size;
+      /* Set GRBM index to target specific dimension */
+      ret = pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
+                               coords.wgp << 2, /* instance_index */
+                               coords.sa,
+                               coords.se);
+      if (ret < 0)
+        return ret;
+
+      /* Copy counter data to memory (single instance) */
+      pm4_copy_data_flags_t flags = {
+          .bits = {.src_sel = 0,      /* Non-priv registers */
+                   .dst_sel = 2,      /* TC_L2 memory */
+                   .src_temporal = 3, /* LU cache policy */
+                   .dst_temporal = 3, /* LU cache policy */
+                   .count_sel = 0,    /* 32-bit data */
+                   .wr_confirm = 0}};
+
+      ret = pm4_append_copy_data(buffer, current_addr, reg_info->register_addr_lo,
+                                 flags);
+      if (ret < 0)
+        return ret;
+
+      current_addr += sizeof(uint32_t);
+
+      /* If 64-bit counter, copy high 32 bits */
+      if (reg_info->register_addr_hi != 0) {
+        ret = pm4_append_copy_data(buffer, current_addr,
+                                   reg_info->register_addr_hi, flags);
+        if (ret < 0)
+          return ret;
+        current_addr += sizeof(uint32_t);
       }
-    }
+    } else {
+      /* Non-dimension-specific: iterate through GPU topology based on block dimensions */
+      bool has_se_dimension = false;
+      uint32_t num_se = arch->num_se;
+      uint32_t num_sa = arch->num_sa;
+      uint32_t num_wgp = arch->num_wgp_per_sa;
 
-    for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
-      dimension_t *dim = &block->dimensions[dim_idx];
+      /* Extract dimension sizes from block dimensions */
+      for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+        dimension_t *dim = &block->dimensions[dim_idx];
+        if (dim->dim == HARDWARE_DIM_SE) {
+          num_se = dim->size;
+        } else if (dim->dim == HARDWARE_DIM_SA) {
+          num_sa = dim->size;
+        } else if (dim->dim == HARDWARE_DIM_WGP) {
+          num_wgp = dim->size;
+        }
+      }
 
-      /* For now, handle SE/SA/WGP dimensions specifically */
-      if (dim->dim == HARDWARE_DIM_SE) {
-        has_se_dimension = true;
-        /* SE-dependent block - iterate through SE x SA x WGP using block-specific dimensions */
-        for (uint32_t se = 0; se < num_se; se++) {
-          for (uint32_t sa = 0; sa < num_sa; sa++) {
-            for (uint32_t wgp = 0; wgp < num_wgp; wgp++) {
-              /* Set GRBM index for specific location */
-              ret =
-                  pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
-                                     wgp << 2, /* instance_index */
-                                     sa, se);
-              if (ret < 0)
-                return ret;
+      for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+        dimension_t *dim = &block->dimensions[dim_idx];
 
-              /* Copy counter data to memory */
-              pm4_copy_data_flags_t flags = {
-                  .bits = {.src_sel = 0,      /* Non-priv registers */
-                           .dst_sel = 2,      /* TC_L2 memory */
-                           .src_temporal = 3, /* LU cache policy */
-                           .dst_temporal = 3, /* LU cache policy */
-                           .count_sel = 0,    /* 32-bit data */
-                           .wr_confirm = 0}};
+        /* For now, handle SE/SA/WGP dimensions specifically */
+        if (dim->dim == HARDWARE_DIM_SE) {
+          has_se_dimension = true;
+          /* SE-dependent block - iterate through SE x SA x WGP using block-specific dimensions */
+          for (uint32_t se = 0; se < num_se; se++) {
+            for (uint32_t sa = 0; sa < num_sa; sa++) {
+              for (uint32_t wgp = 0; wgp < num_wgp; wgp++) {
+                /* Set GRBM index for specific location */
+                ret =
+                    pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
+                                       wgp << 2, /* instance_index */
+                                       sa, se);
+                if (ret < 0)
+                  return ret;
+
+                /* Copy counter data to memory */
+                pm4_copy_data_flags_t flags = {
+                    .bits = {.src_sel = 0,      /* Non-priv registers */
+                             .dst_sel = 2,      /* TC_L2 memory */
+                             .src_temporal = 3, /* LU cache policy */
+                             .dst_temporal = 3, /* LU cache policy */
+                             .count_sel = 0,    /* 32-bit data */
+                             .wr_confirm = 0}};
 
               ret = pm4_append_copy_data(
                   buffer, flags, reg_info->register_addr_lo,
@@ -392,24 +468,25 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
       }
     }
 
-    /* For global blocks (no SE dimension), read once */
-    if (!has_se_dimension) {
-      /* No SE dimension found - global block */
-      pm4_copy_data_flags_t flags = {
-          .bits = {.src_sel = 0,      /* Non-priv registers */
-                   .dst_sel = 2,      /* TC_L2 memory */
-                   .src_temporal = 3, /* LU cache policy */
-                   .dst_temporal = 3, /* LU cache policy */
-                   .count_sel = 0,    /* 32-bit data */
-                   .wr_confirm = 0}};
+      /* For global blocks (no SE dimension), read once */
+      if (!has_se_dimension) {
+        /* No SE dimension found - global block */
+        pm4_copy_data_flags_t flags = {
+            .bits = {.src_sel = 0,      /* Non-priv registers */
+                     .dst_sel = 2,      /* TC_L2 memory */
+                     .src_temporal = 3, /* LU cache policy */
+                     .dst_temporal = 3, /* LU cache policy */
+                     .count_sel = 0,    /* 32-bit data */
+                     .wr_confirm = 0}};
 
-      ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
-                                 reg_info->register_addr_hi, current_addr);
-      if (ret < 0)
-        return ret;
+        ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
+                                   reg_info->register_addr_hi, current_addr);
+        if (ret < 0)
+          return ret;
 
-      current_addr += 8; /* 64-bit counter value */
-    }
+        current_addr += 8; /* 64-bit counter value */
+      }
+    } /* End of else block for non-dimension-specific counters */
   }
 
   /* 5. Restore broadcast mode */

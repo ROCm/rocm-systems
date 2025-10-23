@@ -187,8 +187,9 @@ struct aql_perf_packet {
     size_t packet_size;
 };
 
-/* Forward declaration for counter_reg_info_t */
+/* Forward declarations */
 typedef struct counter_reg_info counter_reg_info_t;
+struct pmu_dimension_coords;
 
 /* Per-measurement tracking structure */
 struct aql_measurement {
@@ -204,6 +205,10 @@ struct aql_measurement {
 
     /* Allocated counter from block (NULL if not allocated) */
     counter_reg_info_t* allocated_counter;
+
+    /* Dimension-specific monitoring support */
+    struct pmu_dimension_coords target_dims;  /* Target hardware dimensions */
+    bool dimension_specific;                  /* True if targeting specific dimensions */
 
     /* Work queue support for atomic context handling */
     struct workqueue_struct *work_queue;
@@ -274,6 +279,11 @@ void aql_perf_free_counter_buffers(arch_t *arch, struct file *kfd_file,
 counter_reg_info_t* aql_counter_try_allocate(block_info_t *block,
                                              uint32_t event_id,
                                              struct perf_event *perf_event);
+counter_reg_info_t* aql_counter_try_allocate_dimension(block_info_t *block,
+                                                       uint32_t event_id,
+                                                       struct perf_event *perf_event,
+                                                       const struct pmu_dimension_coords *dims,
+                                                       arch_t *arch);
 void aql_counter_release(counter_reg_info_t *reg);
 int aql_build_counter_info(uint32_t counter_id,
                            arch_t *arch,
