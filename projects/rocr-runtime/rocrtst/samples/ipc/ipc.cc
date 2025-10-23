@@ -54,7 +54,7 @@
 
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
-#include "common/common.h"
+
 
 static const uint32_t kShmemID = 1594685;
 
@@ -67,6 +67,29 @@ static const uint32_t kShmemID = 1594685;
     std::cout << msg << std::endl; \
     return (err); \
   } \
+}
+
+bool isEmuModeEnabled() {
+  auto checkMode = []{ 
+    const char* path = "/sys/module/amdgpu/parameters/emu_mode";
+    FILE* file = fopen(path, "r");
+    if (!file) {
+      std::cout << "Failed to open file." << std::endl;
+      return false;
+    }
+
+    int emu_mode = 0;
+    if (fscanf(file, "%d", &emu_mode) != 1) {
+      std::cout << "Failed to parse as a decimal." << std::endl;
+      fclose(file);
+      return false;
+    }
+    fclose(file);
+    return emu_mode != 0;
+  };
+
+  static bool emu_mode = checkMode(); 
+  return emu_mode;
 }
 
 struct callback_args {
@@ -134,7 +157,7 @@ static hsa_status_t FindDevicePool(hsa_amd_memory_pool_t pool, void* data) {
   if (err == HSA_STATUS_INFO_BREAK) {
     args->gpu_pool = pool;
 
-    if (rocrtst::isEmuModeEnabled()) {
+    if (isEmuModeEnabled()) {
       args->gpu_mem_granule = 4;
     } else {
       err = hsa_amd_memory_pool_get_info(args->gpu_pool,

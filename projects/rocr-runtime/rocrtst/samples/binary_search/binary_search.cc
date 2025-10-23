@@ -53,7 +53,6 @@
 #include <climits>
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
-#include "common/common.h"
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -61,6 +60,29 @@
               __FILE__ << ". Call returned " << err << std::endl; \
     return (err); \
   } \
+}
+
+bool isEmuModeEnabled() {
+  auto checkMode = []{ 
+    const char* path = "/sys/module/amdgpu/parameters/emu_mode";
+    FILE* file = fopen(path, "r");
+    if (!file) {
+      std::cout << "Failed to open file." << std::endl;
+      return false;
+    }
+
+    int emu_mode = 0;
+    if (fscanf(file, "%d", &emu_mode) != 1) {
+      std::cout << "Failed to parse as a decimal." << std::endl;
+      fclose(file);
+      return false;
+    }
+    fclose(file);
+    return emu_mode != 0;
+  };
+
+  static bool emu_mode = checkMode(); 
+  return emu_mode;
 }
 
 static const uint32_t kBinarySearchLength = isEmuModeEnabled() ? 16 : 512;
