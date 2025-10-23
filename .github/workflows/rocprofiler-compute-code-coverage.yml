@@ -1,5 +1,5 @@
-name: rocprofiler-compute Nightly Coverage
-run-name: rocprofiler-compute-nightly-coverage
+name: rocprofiler-compute Code Coverage
+run-name: rocprofiler-compute-code-coverage
 
 on:
   schedule:
@@ -12,7 +12,7 @@ on:
         type: string
   pull_request:
     paths:
-      - '.github/workflows/rocprofiler-compute-nightly-coverage.yml'
+      - '.github/workflows/rocprofiler-compute-code-coverage.yml'
       - 'projects/rocprofiler-compute/utils/run-ci.py'
 
 env:
@@ -129,7 +129,7 @@ jobs:
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
           
-          BUILD_NAME="${{ matrix.system.gpu }}-${{ matrix.system.os-release }}-${{ matrix.system.arch }}-nightly-$(date +%Y%m%d)"
+          BUILD_NAME="${{ matrix.system.gpu }}-${{ matrix.system.os-release }}-${{ matrix.system.arch }}-coverage-$(date +%Y%m%d)"
           
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \

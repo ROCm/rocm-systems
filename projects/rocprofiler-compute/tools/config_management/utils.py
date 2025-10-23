@@ -1,4 +1,7 @@
-# Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,4 +21,32 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-target_compile_definitions(rocclr PUBLIC WITH_COMPILER_LIB HSAIL_DYN_DLL)
+##############################################################################
+
+from pathlib import Path
+from typing import Optional, Union
+
+import yaml
+
+
+def str_representer(dumper, data):
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+yaml.add_representer(str, str_representer)
+
+
+def load_yaml(filepath: Union[str, Path]) -> dict:
+    with open(filepath) as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_yaml(
+    data: dict, filepath: Union[str, Path], header: Optional[str] = None
+) -> None:
+    with open(filepath, "w") as f:
+        if header:
+            f.write(header)
+        yaml.dump(data, f, sort_keys=False)

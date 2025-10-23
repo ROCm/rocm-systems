@@ -114,7 +114,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
         rocprofiler_systems_add_test(
             SKIP_RUNTIME
             NAME ${HOST_TEST_NAME}
-            TARGET ${HOST_TEST_NAME}
+            TARGET ${HOST_TEST_NAME}-exec
             LABELS "openmp;ompvv"
             REWRITE_ARGS
               -e -v 2 --instrument-loops
@@ -141,7 +141,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
         rocprofiler_systems_add_test(
             SKIP_RUNTIME
             NAME ${OFFLOAD_TEST_NAME}
-            TARGET ${OFFLOAD_TEST_NAME}
+            TARGET ${OFFLOAD_TEST_NAME}-exec
             GPU ON
             LABELS "openmp;ompvv;openmp-target"
             REWRITE_ARGS -e -v 2
