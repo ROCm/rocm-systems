@@ -202,28 +202,6 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
     return line_info.dump();
 }
 
-std::string
-generate_hw_counter_json(int64_t _tid, const backtrace_metrics& metrics)
-{
-    nlohmann::json extdata;
-
-    if(!metrics.get_hw_counters().empty())
-    {
-        auto _labels      = backtrace_metrics::get_hw_counter_labels(_tid);
-        auto _hw_cnt_vals = metrics.get_hw_counters();
-
-        nlohmann::json hw_counters;
-        for(size_t i = 0; i < _labels.size(); ++i)
-        {
-            hw_counters[_labels.at(i)] = _hw_cnt_vals.at(i);
-        }
-
-        extdata["hw_counters"] = hw_counters;
-    }
-
-    return extdata.dump();
-}
-
 template <typename Category>
 std::string
 get_track_name(const thread_info& _thread_info)
@@ -336,7 +314,6 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
-            auto _extdata    = generate_hw_counter_json(_tid, itr.m_metrics);
 
             trace_cache::get_buffer_storage().store(
                 trace_cache::entry_type::backtrace_region_sample,
@@ -344,7 +321,7 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
                 static_cast<uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), _extdata.c_str());
+                _line_info.c_str(), "{}");
         }
     }
 
