@@ -43,6 +43,15 @@ OUTPUT_FORMAT="csv json rocpd"
 rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
 mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
 
+# Check for permissions. We need to be able to ptrace any process in the system.
+# Technically, this could also be allowed by being root or having CAP_SYS_PTRACE, but we generally
+# don't expect that in a test environment and therefore don't check for those states.
+if [ -e /proc/sys/kernel/yama/ptrace_scope ] && [ $(cat /proc/sys/kernel/yama/ptrace_scope) != "0" ]; then
+    echo "ptrace_scope is not 0, so test cannot be completed. This test is skipped."
+    touch ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/skipped
+    exit 0
+fi
+
 echo "Starting attachment test (${OUTPUT_FORMAT} format)..."
 
 # Start the test application in the background
