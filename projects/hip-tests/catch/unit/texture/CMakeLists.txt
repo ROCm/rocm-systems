@@ -88,19 +88,6 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     tex3DGrad.cc
 )
 
-set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
-function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
-  set(ARCH_CHECK -1 PARENT_SCOPE)
-  string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
-  foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
-    string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
-    if (CMAKE_MATCH_COUNT EQUAL 1)
-      if (CMAKE_MATCH_1 IN_LIST gfx90a_AND_ABOVE_TARGETS)
-        set(ARCH_CHECK 1 PARENT_SCOPE)
-      endif()         # CMAKE_MATCH_1
-    endif()        # CMAKE_MATCH_COUNT
-  endforeach()   # OFFLOAD_ARCH_LIST
-endfunction()  # CheckAcceptedArchs
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
                    COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17 ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
@@ -111,11 +98,15 @@ add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
 
 if(HIP_PLATFORM MATCHES "amd")
-  if (DEFINED OFFLOAD_ARCH_STR)
-    CheckRejectedArchs(${OFFLOAD_ARCH_STR})
-  else()
-    set(ARCH_CHECK -1)
-  endif()
+  set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
+  set(ARCH_CHECK -1)
+  foreach(ARCH_STR IN LISTS ARCH_LIST)
+    check_arch(ARCH_STR)
+    if (${IS_CORRECT_ARCH} GREATER_EQUAL 0)
+      set(ARCH_CHECK 1)
+      return()
+    endif()
+  endforeach()
   if(${ARCH_CHECK} EQUAL -1)
     message(STATUS "Adding test: ${NOT_FOR_gfx90a_AND_ABOVE_TEST}")
     set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
