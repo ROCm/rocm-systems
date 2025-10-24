@@ -137,7 +137,10 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        cmake --build build --target install --parallel 2 && rm -rf ./build/external
+        du /tmp -d 1 -h && du /build/rocprof-sys-tests-output -d 1 -h && df -h
+        rm -fr /tmp/* build/rpocfsys-tests-output/*
+        cmake --build build --target install --parallel 2
+        rm -fr /opt/rocprofiler-systems/
 
     - name: CPack and Install
       working-directory: projects/rocprofiler-systems/
