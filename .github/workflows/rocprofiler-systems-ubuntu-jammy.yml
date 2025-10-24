@@ -81,6 +81,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module avail
 
@@ -156,6 +157,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module use /opt/rocprofiler-systems/share/modulefiles
         module avail
@@ -166,6 +168,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
@@ -257,6 +260,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module avail
 
@@ -313,14 +317,22 @@ jobs:
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
+    - name: Test Clean Up
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        du /tmp -d 1 -h
+        du build/rocprof-sys-tests-output -d 1 -h
+        df -h
+        rm -fr /tmp/* build/rocprof-sys-tests-output/*
+
     - name: Install
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        du /tmp -d 1 -h && du /build/rocprof-sys-tests-output -d 1 -h && df -h
-        rm -fr /tmp/* build/rpocfsys-tests-output/*
         cmake --build build --target install --parallel 2
-        rm -fr /opt/rocprofiler-systems-dev/ /tmp/*
+        rm -fr /opt/rocprofiler-systems-dev/
 
     - name: CPack and Install
       working-directory: projects/rocprofiler-systems/
@@ -335,6 +347,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module use /opt/rocprofiler-systems/share/modulefiles
         module avail
@@ -345,6 +358,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
