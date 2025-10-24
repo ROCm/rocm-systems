@@ -19,7 +19,7 @@ The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tre
 
 .. note::
   
-  The rocprofiler-sdk repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-sdk>`_.
+  The ROCprofiler-SDK repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-sdk>`_.
 
 ROCprofiler-SDK uses a companion library called `AQLprofile <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/index.html>`__ that generates profiling command packets (AQL/PM4) for performance counters and SQ thread trace. See the `AQLprofile docs <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/index.html>`__ for more info.
 
