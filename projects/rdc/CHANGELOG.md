@@ -10,7 +10,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - CPU partition format support (c0.0, c1.0) for monitoring AMD EPYC processors
 - Mixed GPU/CPU monitoring in single `rdci dmon` command
 
-### Changed
+### Optimized
 
 - Improved profiler metrics path detection for counter definitions.
 
