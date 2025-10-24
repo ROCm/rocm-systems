@@ -203,6 +203,40 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
   }
 #endif
 }
+
+TEST_CASE("UnitHipMemcpyHtoAAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  auto host_src = std::make_unique<std::vector<int>>(N);
+  auto host_dst = std::make_unique<std::vector<int>>(N);
+  constexpr size_t kCopySize = N * sizeof(int);
+  size_t offset = GENERATE(0, N * sizeof(int) / 2);
+
+  std::iota(host_src->begin(), host_src->end(), 0);
+
+  auto channel_desc = hipCreateChannelDesc<int>();
+  hipArray_t dst_array = nullptr;
+  HIP_CHECK(hipMallocArray(&dst_array, &channel_desc, kCopySize));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyHtoAAsync(dst_array, offset, host_src->data(), kCopySize - offset, nullptr));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamSynchronize(nullptr));
+
+  HIP_CHECK(hipMemcpyAtoH(host_dst->data(), dst_array, offset, kCopySize - offset));
+
+  for (size_t i = 0; i < offset / sizeof(int); ++i) {
+    REQUIRE((*host_src)[i] == (*host_dst)[i]);
+  }
+
+  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
 /**
  * End doxygen group MemoryTest.
  * @}

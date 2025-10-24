@@ -1287,7 +1287,7 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
   if (hostPtr == nullptr || sizeBytes == 0 ||
       flags & ~(hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterCoarseGrained |
-                hipExtHostRegisterUncached)) {
+                hipExtHostRegisterUncached | hipHostRegisterIoMemory)) {
     return hipErrorInvalidValue;
   } else {
     unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
@@ -1296,6 +1296,11 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
         return hipErrorInvalidValue;
       }
       memFlags |= ROCCLR_MEM_HSA_UNCACHED;
+    } else if (flags & hipHostRegisterIoMemory) {
+      if (IS_WINDOWS) {
+        return hipErrorInvalidValue;
+      }
+      memFlags |= ROCCLR_MEM_IO_MEMORY;
     }
 
     amd::Memory* mem =

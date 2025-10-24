@@ -45,5 +45,15 @@
 #ifndef ROCRTST_SUITES_TEST_COMMON_MAIN_H_
 #define ROCRTST_SUITES_TEST_COMMON_MAIN_H_
 
+#define RUN_IF_NOT_EMU_MODE(test)                                                                  \
+  {                                                                                                \
+    if (rocrtst::isEmuModeEnabled()) {                                                             \
+      std::cout << "Skipping test in Emulator mode." << std::endl;                                 \
+      return;                                                                                      \
+    }                                                                                              \
+    test;                                                                                          \
+  }
+
+
 #endif  // ROCRTST_SUITES_TEST_COMMON_MAIN_H_
 

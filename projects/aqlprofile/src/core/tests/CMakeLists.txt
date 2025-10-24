@@ -70,7 +70,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 
 gtest_add_tests(
@@ -104,7 +105,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET command-buffer-test
@@ -162,7 +164,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET pm4-factory-test
@@ -231,7 +234,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET aql-profile-v2-test

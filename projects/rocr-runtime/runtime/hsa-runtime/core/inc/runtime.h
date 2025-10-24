@@ -879,12 +879,11 @@ class Runtime {
   };
 
   struct MappedHandle {
-    MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
+    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
-        : mem_handle(mem_handle), address_handle(address_handle),
-          offset(offset), size(size), drm_fd(drm_fd),
-          drm_cpu_addr(drm_cpu_addr), shareable_handle(shareable_handle) {}
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+
+    MappedHandle() {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
@@ -915,9 +914,8 @@ class Runtime {
   void InitIPCDmaBufSupport();
   bool ipc_dmabuf_supported_;
   int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
-                       amdgpu_bo_import_result *res,
                        unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize);
+                       void **importAddress, HSAuint64 *importSize, bool isdmabufSysmem);
 };
 
 }  // namespace core

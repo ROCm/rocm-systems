@@ -115,10 +115,6 @@ else()
   set(ISDEBUG 1)
 endif()
 
-if(${EMULATOR_BUILD})
-add_definitions(-DROCRTST_EMULATOR_BUILD=1)
-endif()
-
 find_path(BITCODE_DIR NAMES "opencl.bc" "opencl.amdgcn.bc"
   PATHS
     "${ROCM_DIR}/amdgcn/bitcode"

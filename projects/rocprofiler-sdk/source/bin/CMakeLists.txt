@@ -4,8 +4,6 @@
 
 rocprofiler_activate_clang_tidy()
 
-add_subdirectory(rocprofv3_avail_module)
-
 # Adding main rocprofv3
 configure_file(rocprofv3.py ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3 @ONLY)
 
