@@ -583,9 +583,11 @@ Roofline options
 
   For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
 
-To distinguish different kernels in your ``.pdf`` roofline plot use
-``--kernel-names``. This will give each kernel a unique marker identifiable from
-the plot's key.
+Each kernel in your ``.pdf`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline PDF includes an integrated multi-subplot layout with:
+
+1. **Roofline Plot** - Shows performance ceilings and kernel arithmetic intensity points
+2. **Plot Points & Values Table** - Displays AI values, performance metrics, memory/compute bound status, and cache levels for each kernel
+3. **Full Kernel Names Table** - Lists complete kernel names with their corresponding plot markers
 
 
 Roofline only
