@@ -152,7 +152,11 @@ TEST_CASE("Unit_hipDeviceSetLimit_Negative_MallocHeapSize") {
  *  - HIP_VERSION >= 5.3
  */
 TEST_CASE("Unit_hipDeviceSetLimit_Negative_Parameters") {
+#if HT_AMD
   HIP_CHECK_ERROR(hipDeviceSetLimit(static_cast<hipLimit_t>(-1), 1024), hipErrorUnsupportedLimit);
+#else
+  HIP_CHECK_ERROR(hipDeviceSetLimit(static_cast<hipLimit_t>(-1), 1024), hipErrorInvalidValue);
+#endif
 }
 
 /**
@@ -186,7 +190,11 @@ TEST_CASE("Unit_hipDeviceGetLimit_Negative_Parameters") {
 
   SECTION("unsupported limit") {
     size_t val;
+#if HT_AMD
     HIP_CHECK_ERROR(hipDeviceGetLimit(&val, static_cast<hipLimit_t>(-1)), hipErrorUnsupportedLimit);
+#else
+    HIP_CHECK_ERROR(hipDeviceGetLimit(&val, static_cast<hipLimit_t>(-1)), hipErrorInvalidValue);
+#endif
   }
 }
 
