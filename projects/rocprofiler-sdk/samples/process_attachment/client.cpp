@@ -34,6 +34,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <future>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -302,21 +303,48 @@ int main(int argc, char* argv[])
     {
         std::cout << "Profiling for " << duration_seconds << " seconds..." << std::endl;
         
-        // Monitor target process while profiling
-        for(int i = 0; i < duration_seconds; ++i)
-        {
-            if(!process_exists(target_pid))
-            {
-                std::cout << "Target process " << target_pid << " has exited" << std::endl;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Monitor target process using async task for robust timing
+        auto monitor_task = std::async(std::launch::async, [target_pid, duration_seconds]() {
+            auto start_time = std::chrono::steady_clock::now();
+            auto next_progress_time = start_time + std::chrono::seconds(10);
             
-            // Show progress every 10 seconds
-            if((i + 1) % 10 == 0)
+            while(true)
             {
-                std::cout << "Profiling... " << (i + 1) << "/" << duration_seconds << " seconds" << std::endl;
+                // Check if target process still exists
+                if(!process_exists(target_pid))
+                {
+                    std::cout << "Target process " << target_pid << " has exited" << std::endl;
+                    return false;  // Process exited
+                }
+                
+                // Check elapsed time and show progress
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                
+                // Show progress every 10 seconds
+                if(now >= next_progress_time)
+                {
+                    std::cout << "Profiling... " << elapsed << "/" << duration_seconds << " seconds" << std::endl;
+                    next_progress_time = now + std::chrono::seconds(10);
+                }
+                
+                // Sleep briefly to avoid busy waiting
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
+        });
+        
+        // Wait for the specified duration or until the task completes
+        auto status = monitor_task.wait_for(std::chrono::seconds(duration_seconds));
+        
+        if(status == std::future_status::timeout)
+        {
+            // Duration elapsed normally
+            std::cout << "Profiling duration completed" << std::endl;
+        }
+        else
+        {
+            // Task completed early (process likely exited)
+            monitor_task.get();  // Get result to ensure any exceptions are propagated
         }
     }
     else
