@@ -759,7 +759,7 @@ hipError_t capturehipMemcpy(hipStream_t stream, void* dst, const void* src, size
   std::vector<hip::GraphNode*> pDependencies = s->GetLastCapturedNodes();
   size_t numDependencies = s->GetLastCapturedNodes().size();
   hip::Graph* graph = s->GetCaptureGraph();
-  hip::GraphNode* node = new hip::GraphMemcpyNode1D(dst, src, sizeBytes, kind);
+  hip::GraphNode* node = nullptr;
   hipError_t status = ihipGraphAddMemcpyNode1D(&node, graph, pDependencies.data(), numDependencies,
                                                dst, src, sizeBytes, kind, true, s->DeviceId());
   if (status != hipSuccess) {
