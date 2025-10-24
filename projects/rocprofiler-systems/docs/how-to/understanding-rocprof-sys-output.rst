@@ -345,6 +345,11 @@ workflows through custom analytical scripts, automated reporting systems, and
 integration with third-party visualization and analysis frameworks that provide
 SQLite3 connectivity.
 
+* **Python AI/ML Workloads**: The ``rocpd`` output format is the recommended choice
+for profiling AI workloads. It is the only output format that can capture profiling
+data from child processes, making it essential for comprehensive analysis of complex
+AI applications that spawn multiple processes during execution.
+
 Generating rocpd Output
 +++++++++++++++++++++++
 
