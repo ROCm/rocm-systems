@@ -32,8 +32,8 @@ namespace rocprofsys
 
 struct agent_manager
 {
-    static agent_manager& get_instance();
-
+    agent_manager() = default;
+    agent_manager(std::vector<std::shared_ptr<agent>> agents);
     agent_manager(const agent_manager&)            = delete;
     agent_manager& operator=(const agent_manager&) = delete;
     agent_manager(agent_manager&&)                 = delete;
@@ -57,7 +57,9 @@ private:
     std::vector<std::shared_ptr<agent>> _agents;
     size_t                              _gpu_agents_cnt{ 0 };
     size_t                              _cpu_agents_cnt{ 0 };
-    agent_manager() = default;
 };
+
+agent_manager&
+get_agent_manager_instance();
 
 }  // namespace rocprofsys

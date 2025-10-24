@@ -127,18 +127,29 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
           -DUSE_CLANG_OMP=OFF \
           $CMAKE_PREFIX_PATH_ARG \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
+    - name: Test Clean Up
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        du /tmp -d 1 -h
+        du build/rocprof-sys-tests-output -d 1 -h
+        df -h
+        rm -fr /tmp/* build/rocprof-sys-tests-output/*
+
     - name: Install
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
         cmake --build build --target install --parallel 2
+        rm -rf /opt/rocprofiler-systems
 
     - name: CPack and Install
       working-directory: projects/rocprofiler-systems/
