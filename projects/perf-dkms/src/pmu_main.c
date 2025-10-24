@@ -138,9 +138,42 @@ static struct attribute_group amdgpu_pmu_events_group = {
     .attrs = NULL,  /* Set during init */
 };
 
+/* CPU mask attribute - shows which CPUs (GPUs) are available */
+static ssize_t cpumask_show(struct device *dev,
+                             struct device_attribute *attr,
+                             char *buf)
+{
+    int num_gpus = aql_pmu_get_gpu_count();
+    cpumask_var_t mask;
+    ssize_t ret;
+
+    if (!zalloc_cpumask_var(&mask, GFP_KERNEL))
+        return -ENOMEM;
+
+    /* Set bits 0 to num_gpus-1 */
+    for (int i = 0; i < num_gpus && i < nr_cpu_ids; i++)
+        cpumask_set_cpu(i, mask);
+
+    ret = cpumap_print_to_pagebuf(true, buf, mask);
+    free_cpumask_var(mask);
+    return ret;
+}
+
+static DEVICE_ATTR_RO(cpumask);
+
+static struct attribute *amdgpu_pmu_cpumask_attrs[] = {
+    &dev_attr_cpumask.attr,
+    NULL,
+};
+
+static struct attribute_group amdgpu_pmu_cpumask_group = {
+    .attrs = amdgpu_pmu_cpumask_attrs,
+};
+
 static const struct attribute_group *amdgpu_pmu_attr_groups[] = {
     &amdgpu_pmu_format_group,
     &amdgpu_pmu_events_group,
+    &amdgpu_pmu_cpumask_group,
     NULL,
 };
 
@@ -212,11 +245,24 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
         event->attr.inherit = 0;
     }
 
-    /* GPU counters are system-wide, not per-CPU. Only allow on CPU 0 to prevent
-     * multiple allocations when perf creates per-CPU events with -a flag */
-    if (event->cpu >= 0 && event->cpu != 0) {
-        pmu_debug("Rejecting event on CPU %d - GPU counters only supported on CPU 0\n", event->cpu);
+    /* Require explicit CPU specification to map to GPU.
+     * Users must use perf -C <cpu> where CPU number maps to GPU ID.
+     * Example: perf stat -C 0 -e amdgpu_pmu/sq_waves/ (monitors GPU 0)
+     *          perf stat -C 1 -e amdgpu_pmu/sq_waves/ (monitors GPU 1) */
+    if (event->cpu < 0) {
+        pmu_err("GPU PMU requires explicit CPU with -C flag (CPU maps to GPU ID)\n");
+        pmu_err("Example: perf stat -C 0 -e amdgpu_pmu/event/ (for GPU 0)\n");
         return -EINVAL;
+    }
+
+    /* Map CPU ID to GPU ID using modulo for systems with more CPUs than GPUs */
+    {
+        int num_gpus = aql_pmu_get_gpu_count();
+        int gpu_id = (num_gpus > 0) ? (event->cpu % num_gpus) : 0;
+        pmu_debug("Mapping CPU %d to GPU %d (num_gpus=%d)\n",
+                  event->cpu, gpu_id, num_gpus);
+        /* Store GPU ID for later use in add/start/stop/read callbacks */
+        event->hw.idx = gpu_id;
     }
 
     /* Extract and validate dimensions from config1 if specified */
@@ -275,37 +321,35 @@ static int amdgpu_pmu_add(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
-    pmu_info("add: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%lx\n",
-             event->attr.config, flags, hwc->config_base);
+    pmu_debug("add: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        pmu_debug("add: AQL hardware event detected, hwc->config_base=0x%lx\n", hwc->config_base);
         /* AQL hardware event - start measurement if requested */
         if (flags & PERF_EF_START) {
-            pmu_debug("add: Starting AQL hardware event immediately (PERF_EF_START flag set)\n");
             int ret = aql_pmu_event_start(event);
             if (ret) {
                 pmu_err("add: Failed to start AQL hardware event: %d\n", ret);
                 return ret;
             }
             hwc->state = 0;
-            pmu_debug("add: AQL hardware event started successfully, state=0\n");
         } else {
             hwc->state = PERF_HES_STOPPED;
-            pmu_debug("add: AQL hardware event added but not started, state=PERF_HES_STOPPED\n");
         }
 
         /* Set initial counter value */
         local64_set(&event->count, 0);
 
-        pmu_debug("add: Added AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        pmu_debug("add: Added AQL hardware event successfully\n");
         return 0;
     }
 
-    /* Only AQL hardware events are supported */
-    pmu_err("add: Non-AQL event detected, config=0x%llx\n", event->attr.config);
-    return -EINVAL;
+    /* Event not initialized (config_base=0) - perf may be cloning/reusing event structure.
+     * Return success but mark as stopped to prevent retry loop. */
+    pmu_debug("add: Event not initialized, marking as stopped\n");
+    hwc->state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
+    local64_set(&event->count, 0);
+    return 0;
 }
 
 /* PMU callback: Remove event from PMU */
@@ -313,29 +357,27 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
-    pmu_info("del: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%lx\n",
-             event->attr.config, flags, hwc->config_base);
+    pmu_debug("del: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        pmu_debug("del: Removing AQL hardware event\n");
-        /* AQL hardware event - stop and cleanup */
+        /* AQL hardware event - stop measurement */
         if (flags & PERF_EF_UPDATE) {
-            pmu_debug("del: Reading final count (PERF_EF_UPDATE flag set)\n");
             amdgpu_pmu_read(event);
         }
 
-        /* Destroy handles stopping internally - don't call stop separately
-         * to avoid duplicate work items and use-after-free */
-        pmu_debug("del: Destroying AQL hardware event\n");
-        aql_pmu_event_destroy(event);
+        /* Stop the event but DON'T destroy it - the event may be re-added later.
+         * Only event_destroy should free the measurement structure. */
+        aql_pmu_event_stop(event);
 
-        pmu_debug("del: Removed AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        /* Mark event as stopped */
+        hwc->state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
+
+        pmu_debug("del: Removed AQL hardware event successfully\n");
         return;
     }
 
-    /* Only AQL hardware events are supported */
-    pmu_err("del: Non-AQL event detected, config=0x%llx\n", event->attr.config);
+    pmu_debug("del: Event not initialized (config_base=0)\n");
 }
 
 /* PMU callback: Start event */

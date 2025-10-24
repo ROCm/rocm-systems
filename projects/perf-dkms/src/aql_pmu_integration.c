@@ -129,7 +129,11 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
     uint32_t cpu = event->cpu;
     uint32_t gpu_id;
 
+    aql_debug("select_gpu: cpu=%d, num_gpus=%u",
+              cpu, session ? session->num_gpus : 0);
+
     if (!session || session->num_gpus == 0) {
+        aql_err("select_gpu: no session or no GPUs");
         return U32_MAX;
     }
 
@@ -248,6 +252,7 @@ void aql_pmu_event_destroy(struct perf_event *event)
     aql_debug("Destroying hardware event for GPU %u", measurement->gpu_id);
     aql_perf_measurement_destroy(measurement);
 
+    /* Clear config_base so add/del/start/stop know the event is destroyed */
     event->hw.config_base = 0;
 
     mutex_unlock(&aql_pmu_mutex);
@@ -332,6 +337,18 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
     aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
 
     return counter_value;
+}
+
+/**
+ * aql_pmu_get_gpu_count - Get number of available GPUs
+ *
+ * Returns: Number of GPUs in the global AQL session, or 0 if not initialized
+ */
+int aql_pmu_get_gpu_count(void)
+{
+    if (!global_aql_session)
+        return 0;
+    return global_aql_session->num_gpus;
 }
 
 /**
