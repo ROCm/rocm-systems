@@ -2,7 +2,7 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
-## RDC for ROCm 7.1.0
+## RDC 1.2.0 for ROCm 7.1.0
 
 ### Added
 
