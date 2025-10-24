@@ -21,7 +21,7 @@ THE SOFTWARE.
 #include <vector>
 
 #if !defined(USE_PREBUILT_CATCH)
-  using namespace Catch;
+using namespace Catch;
 #endif
 
 

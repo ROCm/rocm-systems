@@ -38,7 +38,7 @@ THE SOFTWARE.
 
 using namespace std;
 #if !defined(USE_PREBUILT_CATCH)
-  using namespace Catch;
+using namespace Catch;
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -28,7 +28,7 @@ THE SOFTWARE.
 #include <limits>
 
 #if !defined(USE_PREBUILT_CATCH)
-  using namespace Catch;
+using namespace Catch;
 #endif
 
 __global__ void fp16_arith_gpu(float* a, float* b, float* c) {

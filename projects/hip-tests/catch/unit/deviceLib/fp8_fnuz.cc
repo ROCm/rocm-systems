@@ -30,6 +30,10 @@ THE SOFTWARE.
 #define __gfx94plus_local__
 #endif
 
+#if !defined(USE_PREBUILT_CATCH)
+using namespace Catch;
+#endif
+
 /*
  * This catch test is meant for FP8 FNUZ conversion checking
  * tests only supported on gfx942 archs.
