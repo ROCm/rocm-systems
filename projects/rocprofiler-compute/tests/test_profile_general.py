@@ -844,9 +844,15 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 @pytest.mark.roofline
 def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
     """
-    Test empirical_roofline() when no kernels match the filter (num_kernels == 0).
-    When no kernels are found, the roofline plot should only show the performance
-    ceilings without kernel markers or the integrated kernel names table.
+    Test roofline behavior when kernel filter doesn't match any
+    kernels during initial profiling.
+
+    When profiling with a non-matching kernel filter, no counter
+    data is collected, so roofline generation is skipped with a
+    warning (but returns success code 0).
+
+    This is different from filtering existing profiling data with
+    a non-matching kernel name, which produces an explicit error.
     """
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
@@ -861,8 +867,17 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+
+    # Should succeed (returncode=0) but skip roofline with warnings
+    assert returncode == 0, f"Expected success (returncode=0), got {returncode}"
+
+    # Verify roofline was skipped - no PDF generated
+    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
+    assert len(pdf_files) == 0, (
+        "No roofline PDF should be generated when no kernels match"
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1279,7 +1294,6 @@ def test_roofline_bound_status_calculation():
             "mfma": [[1, 100], [500, 500], 500],
         }
 
-
         status1 = roofline_instance._determine_kernel_bound_status(
             ai_value=1.0,
             performance=100.0,
@@ -1351,12 +1365,12 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
         file_size = pdf_file.stat().st_size
 
         # PDF should be larger than 10KB (has content) but less than 50MB (reasonable)
-        assert (
-            file_size > 10000
-        ), f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
-        assert (
-            file_size < 50000000
-        ), f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+        assert file_size > 10000, (
+            f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
+        )
+        assert file_size < 50000000, (
+            f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+        )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
