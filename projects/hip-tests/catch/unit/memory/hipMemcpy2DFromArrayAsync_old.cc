@@ -343,63 +343,58 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Negative") {
 }
 
 /**
- * Test Description
- * ------------------------
- *  - This testcase copies the data from host to device and launches
- *  hipMemcpy2DFromArrayAsync within the graph to trigger
- *  capturehipMemcpy2DFromArrayAsync internal api and verifies data in host.
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy2DFromArrayAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_capturehipMemcpy2DFromArrayAsync") {
+* Test Description
+* ------------------------
+*  - This testcase copies the data from host to device and launches
+*  hipMemcpy2DFromArrayAsync within the graph to trigger
+*  capturehipMemcpy2DFromArrayAsync internal api and verifies data in host.
+* Test source
+* ------------------------
+*  - unit/memory/hipMemcpy2DFromArrayAsync_old.cc
+* Test requirements
+* ------------------------
+*  - HIP_VERSION >= 6.0
+*/
+TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Capture") {
   CHECK_IMAGE_SUPPORT
-  int rows, cols;
-  rows = GENERATE(3, 4, 100);
-  cols = GENERATE(3, 4, 100);
-  // Allocate and initialize host memory
-  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
-  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < cols; j++) {
-      A_h[i * cols + j] = i * cols + j;
+
+  constexpr int kTestSizes[] = {3, 4, 100};
+  int num_rows = GENERATE_REF(from_range(std::begin(kTestSizes), std::end(kTestSizes)));
+  int num_cols = GENERATE_REF(from_range(std::begin(kTestSizes), std::end(kTestSizes)));
+
+  auto host_src = std::make_unique<int[]>(num_rows * num_cols);
+  auto host_dst = std::make_unique<int[]>(num_rows * num_cols);
+
+  for (int row = 0; row < num_rows; ++row) {
+    for (int col = 0; col < num_cols; ++col) {
+      host_src[row * num_cols + col] = row * num_cols + col;
     }
   }
-  hipArray_t A_d = nullptr;
-  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
-  HIP_CHECK(hipMallocArray(&A_d, &desc, cols, rows, hipArrayDefault));
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, cols * sizeof(int), cols * sizeof(int), rows,
-                               hipMemcpyHostToDevice));
 
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
-  hipStream_t stream;
+  hipArray_t device_array = nullptr;
+  hipChannelFormatDesc channel_desc = hipCreateChannelDesc<int>();
+  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, num_cols, num_rows, hipArrayDefault));
+  HIP_CHECK(hipMemcpy2DToArray(device_array, 0, 0, host_src.get(), num_cols * sizeof(int),
+                               num_cols * sizeof(int), num_rows, hipMemcpyHostToDevice));
+
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpy2DFromArrayAsync(B_h, sizeof(int) * cols, A_d, 0, 0, sizeof(int) * cols, rows,
-                                      hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  // End Capture
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpy2DFromArrayAsync(host_dst.get(), sizeof(int) * num_cols, device_array, 0, 0,
+                                      sizeof(int) * num_cols, num_rows, hipMemcpyDeviceToHost,
+                                      stream));
+  END_CAPTURE(stream);
 
-  // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < cols; j++) {
-      REQUIRE(B_h[i * cols + j] == (i * cols + j));
+  for (int row = 0; row < num_rows; ++row) {
+    for (int col = 0; col < num_cols; ++col) {
+      REQUIRE(host_dst[row * num_cols + col] == (row * num_cols + col));
     }
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFreeArray(A_d));
-  free(A_h);
-  free(B_h);
+  HIP_CHECK(hipFreeArray(device_array));
 }

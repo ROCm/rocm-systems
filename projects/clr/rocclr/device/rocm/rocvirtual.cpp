@@ -442,10 +442,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   // Peep signal +2 ahead to see if its done
   auto temp_id = (current_id_ + 2) % signal_list_.size();
 
-  // If GPU is still busy with processing or if timestamps havent been saved out,
-  // then add more signals to avoid more frequent stalls
-  if (Hsa::signal_load_relaxed(signal_list_[temp_id]->signal_) > 0 ||
-      !signal_list_[temp_id]->flags_.done_) {
+  // If GPU is still busy with processing, then add more signals to avoid more frequent stalls
+  if (Hsa::signal_load_relaxed(signal_list_[temp_id]->signal_) > 0) {
     std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
     if ((signal != nullptr) && CreateSignal(signal.get())) {
       // Find valid new index
@@ -464,7 +462,6 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     // Make sure the previous operation on the current signal is done
     WaitCurrent();
 
-    size_t next = (current_id_ + 1) % signal_list_.size();
     // Have to wait the next signal in the queue to avoid a race condition between
     // a GPU waiter(which may be not triggered yet) and CPU signal reset below
     WaitNext();
