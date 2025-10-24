@@ -449,7 +449,6 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_db_connector
         test_utils
         test_autogen_config
     )
