@@ -184,7 +184,7 @@ class HostQueue : public CommandQueue {
       }
     }
 
-    void Release() const { delete virtualDevice_; }
+    void Release() const { virtualDevice_->release(); }
 
     //! Get virtual device for the current thread
     device::VirtualDevice* vdev() const { return virtualDevice_; }

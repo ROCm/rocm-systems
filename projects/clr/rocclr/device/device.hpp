@@ -1253,7 +1253,7 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
   VirtualDevice(amd::Device& device)
