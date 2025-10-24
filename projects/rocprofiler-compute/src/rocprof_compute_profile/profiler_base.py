@@ -506,6 +506,7 @@ class RocProfCompute_Base:
         print(args.filter_blocks)
         if not (
             "21" in args.filter_blocks
+            and "pc_sampling" in args.filter_blocks
             and self.__profiler in ("rocprofv3", "rocprofiler-sdk")
         ):
             return
