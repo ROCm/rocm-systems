@@ -136,6 +136,6 @@ function(hip_add_device_code)
       VERBATIM COMMAND_EXPAND_LISTS)
 
     add_custom_target(${ARG_TARGET} DEPENDS ${OUTPUT_PATH})
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_DEVICE_CODE_FILES ${OUTPUT_PATH})
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${OUTPUT_PATH})
   endif()
 endfunction()
