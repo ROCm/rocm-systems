@@ -159,6 +159,60 @@ PcSamplingDisassembler::disassemble_all()
         disassemble_one(obj);
 }
 
+CodeLine&
+PcSamplingDisassembler::get(pcinfo_t _pc)
+{
+    auto& isa_map = codefile->isa_map;
+    if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
+
+    // Attempt to disassemble full kernel
+    if(_pc.code_object_id != 0u) try
+        {
+            rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator symbol_table;
+            for(auto& [vaddr, symbol] : codefile->table->getSymbolMap(_pc.code_object_id))
+                symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.code_object_id});
+
+            auto addr_range = symbol_table.find_codeobj_in_range(_pc.address);
+            try
+            {
+                auto symbol = codefile->table->getSymbolMap(_pc.code_object_id).at(addr_range.addr);
+                // auto pair   = KernelName{symbol.name, demangle(symbol.name)};
+                // TODO: cover demangling later
+                auto pair = KernelName{symbol.name, symbol.name};
+                codefile->kernel_names.emplace(pcinfo_t{addr_range.addr, _pc.code_object_id}, pair);
+            } catch(...)
+            {
+                ROCP_INFO << "Missing kernelSymbol at " << _pc.code_object_id << ':'
+                          << addr_range.addr;
+            }
+
+            for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
+            {
+                pcinfo_t info{.address = addr, .code_object_id = addr_range.id};
+                auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);
+
+                cline.line_number            = isa_map.size() + codefile->kernel_names.size() - 1;
+                codefile->line_numbers[info] = cline.line_number;
+
+                cline.code_line = codefile->table->get(addr_range.id, addr);
+                addr += cline.code_line->size;
+                if(cline.code_line->size == 0u) throw std::invalid_argument("Line has 0 bytes!");
+            }
+
+            if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
+        } catch(std::exception& e)
+        {}
+
+    auto& cline = *(isa_map.emplace(_pc, std::make_unique<CodeLine>()).first->second);
+
+    cline.line_number           = isa_map.size();
+    codefile->line_numbers[_pc] = cline.line_number;
+
+    cline.code_line = codefile->table->get(_pc.code_object_id, _pc.address);
+
+    return cline;
+}
+
 }  // namespace pc_sampling
 }  // namespace att_wrapper
 }  // namespace rocprofiler

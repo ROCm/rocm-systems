@@ -2761,19 +2761,25 @@ generate_output(cleanup_mode _cleanup_mode)
     // Disassemble all loaded code objects for PC sampling (build CodeFile/CodeLines)
     if(tool::get_config().pc_sampling_stochastic || tool::get_config().pc_sampling_host_trap)
     {
-        auto output_dir =
-            fs::path{tool::format_path(tool::get_config().output_path)} / "pc_sampling_disassembly";
+        // Retry and compare the results.
+        auto output_dir = fs::path{tool::format_path(tool::get_config().output_path)} /
+                          tool::format_path(tool::get_config().output_file) /
+                          "pc_sampling_aggregated";
+        ;
         rocprofiler::att_wrapper::pc_sampling::PcSamplingDisassembler disassembler(output_dir);
 
         // Load code object dumps (previously written as *.out files) using metadata info
         disassembler.load_code_objects(".", tool_metadata->get_code_object_load_info());
 
-        // Produce CodeLines for every instruction in each code object
-        disassembler.disassemble_all();
-
-        // (Future) hook: export CodeFile summaries (json/csv) here if desired.
-        std::cout << "PC sampling disassembly completed. Instructions decoded: "
-                  << disassembler.get_codefile()->isa_map.size() << std::endl;
+        // Aggregate PC samples and attribute to the disassembled code lines
+        if(tool::get_config().pc_sampling_stochastic)
+        {
+            disassembler.aggregate_pc_samples(pc_sampling_stochastic_output.get_generator());
+        }
+        else if(tool::get_config().pc_sampling_host_trap)
+        {
+            disassembler.aggregate_pc_samples(pc_sampling_host_trap_output.get_generator());
+        }
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
