@@ -222,15 +222,15 @@ set(CPACK_DEBIAN_DEV_PACKAGE_PROVIDES "hsakmt-roct,hsakmt-roct-dev,hsa-ext-rocr-
 #TODO: hsa-ext-rocr-dev can be added to conflicts list and remove CPACK_DEBIAN_DEV_PACKAGE_BREAKS
 set(CPACK_DEBIAN_DEV_PACKAGE_CONFLICTS "hsakmt-roct,hsakmt-roct-dev")
 # package dependencies
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev, rocm-core")
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 # Setting devel package dependendent version
-set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core, hsa-rocr")
+set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "libdrm-amdgpu-dev, rocm-core, hsa-rocr")
 
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "libdrm-amdgpu-amdgpu1 | libdrm-amdgpu1, libnuma1, libelf1")
-set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core-asan, libdrm-amdgpu-amdgpu1 | libdrm-amdgpu1, libnuma1, libelf1")
+set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev, rocm-core-asan, libdrm-amdgpu-amdgpu1 | libdrm-amdgpu1, libnuma1, libelf1")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_RECOMMENDS "libdrm-amdgpu-amdgpu1")
@@ -291,13 +291,13 @@ if (${EL7_DISTRO} STREQUAL "TRUE")
   set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-amdgpu-devel")
   string(APPEND CPACK_RPM_DEV_PACKAGE_REQUIRES ", libdrm-amdgpu-devel")
 else()
-  set(CPACK_RPM_BINARY_PACKAGE_REQUIRES "(libdrm-amdgpu or libdrm or libdrm_amdgpu1), (libnuma1 or numactl-libs)")
-  set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "(libdrm-amdgpu or libdrm or libdrm_amdgpu1), (libnuma1 or numactl-libs), (libdrm-amdgpu-devel or libdrm-devel)")
+  set(CPACK_RPM_BINARY_PACKAGE_REQUIRES "(libdrm-amdgpu or libdrm_amdgpu1), (libnuma1 or numactl-libs)")
+  set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "(libdrm-amdgpu or libdrm_amdgpu1), (libnuma1 or numactl-libs), libdrm-amdgpu-devel")
   set(CPACK_RPM_USER_BINARY_SPECFILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/hsa-rocr.spec.in")
   set(CPACK_RPM_PACKAGE_RECOMMENDS "libdrm-amdgpu, libdrm-amdgpu-devel")
 
-  set(CPACK_RPM_PACKAGE_REQUIRES "(libdrm-amdgpu-devel or libdrm-devel)")
-  string(APPEND CPACK_RPM_DEV_PACKAGE_REQUIRES ", (libdrm-amdgpu-devel or libdrm-devel)")
+  set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-amdgpu-devel")
+  string(APPEND CPACK_RPM_DEV_PACKAGE_REQUIRES ", libdrm-amdgpu-devel")
   set(CPACK_RPM_DEV_PACKAGE_RECOMMENDS "libdrm-amdgpu-devel")
   set(CPACK_RPM_ASAN_PACKAGE_RECOMMENDS "libdrm-amdgpu-devel")
 
