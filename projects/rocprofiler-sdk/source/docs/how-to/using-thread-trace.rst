@@ -130,7 +130,7 @@ For AMD Radeon, the ``simd-select`` parameter is a SIMD ID defaulting to 3. For 
   rocprofv3 --att --att-simd-select 0x0 -- <application_path>
 
 Migrating from rocprofv1/v2 thread trace
-===========
+===========================================
 
 If you're familiar with rocprofv1/v2 ATT (Advanced Thread Trace) parameters, this section maps the old configuration format to the new rocprofv3 command-line options.
 
@@ -215,7 +215,7 @@ If you're familiar with rocprofv1/v2 ATT (Advanced Thread Trace) parameters, thi
 - **Kernel filtering:** Use --kernel-include-regex and --kernel-exclude-regex for kernel name filtering in rocprofv3.
 
 Parameter usage examples
-===========
+========================
 
 This section provides examples of using various thread trace parameters.
 
@@ -302,7 +302,7 @@ This section provides examples of using various thread trace parameters.
     -- <application_path>
 
 Using input file
-===========
+================
 
 As explained in the preceding section, you can specify parameters on the command line or use a JSON input file:
 
