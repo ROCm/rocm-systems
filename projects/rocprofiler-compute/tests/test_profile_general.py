@@ -871,10 +871,8 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
         config, workload_dir, options, check_success=False, roof=True
     )
 
-    # Should succeed (returncode=0) but skip roofline with warnings
     assert returncode == 0, f"Expected success (returncode=0), got {returncode}"
 
-    # Verify roofline was skipped - no PDF generated
     pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
     assert len(pdf_files) == 0, (
         "No roofline PDF should be generated when no kernels match"
