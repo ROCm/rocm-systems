@@ -117,7 +117,7 @@ set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURC
 message(STATUS "CMake configure command: ${{CTEST_CONFIGURE_COMMAND}}")
 
 message(STATUS "Starting {args.mode} dashboard...")
-ctest_start({args.mode})
+ctest_start({args.mode}{"" if not args.track else f" TRACK {args.track}"})
 
 # Config step
 message(STATUS "Configuring project...")
@@ -299,6 +299,11 @@ def main():
         type=int,
         default=4,
         help="Number of parallel processes for pytest",
+    )
+    parser.add_argument(
+        "--track",
+        default=None,
+        help="CDash track name",
     )
 
     args, unknown = parser.parse_known_args()
