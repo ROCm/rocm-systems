@@ -58,6 +58,11 @@ struct CodeLine
     code_line_service_type_t service_type{code_line_service_type_att};
     size_t                   issued{0};
     size_t                   stalled{0};
+    // No need to reserve slots for ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NONE
+    // and ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST, so the total number
+    // of elements in the array is ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST - 2.
+    // To access the number of samples for a specific stall reason,
+    // use the index (rocprofiler_pc_sampling_instruction_not_issued_reason_t enum value - 1).
     std::array<size_t, ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST - 2>
         not_issued_reasons{};
 };
