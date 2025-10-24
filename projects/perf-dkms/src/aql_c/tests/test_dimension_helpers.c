@@ -58,7 +58,6 @@ static void test_extract_basic_dimensions(void)
     ASSERT(dims.wgp == 3, "WGP should be 3");
     ASSERT(dims.cu == 0, "CU should be 0");
     ASSERT(dims.aggregate == false, "Aggregate should be false");
-    ASSERT(dims.sample_all == false, "Sample_all should be false");
 
     PASS();
 }
@@ -86,7 +85,7 @@ static void test_extract_all_dimensions(void)
 }
 
 /**
- * Test aggregate and sample_all flags
+ * Test aggregate flag
  */
 static void test_extract_flags(void)
 {
@@ -100,22 +99,13 @@ static void test_extract_flags(void)
     ASSERT(dims.valid == true, "Dimensions should be valid");
     ASSERT(dims.se == 1, "SE should be 1");
     ASSERT(dims.aggregate == true, "Aggregate should be true");
-    ASSERT(dims.sample_all == false, "Sample_all should be false");
 
-    /* Test case: sample_all flag */
-    config1 = (1ULL << 41);  /* sample_all=1 */
+    /* Test case: aggregate flag alone */
+    config1 = (1ULL << 40);  /* aggregate=1 */
     pmu_extract_dimensions(config1, &dims);
 
     ASSERT(dims.valid == true, "Dimensions should be valid");
-    ASSERT(dims.aggregate == false, "Aggregate should be false");
-    ASSERT(dims.sample_all == true, "Sample_all should be true");
-
-    /* Test both flags */
-    config1 = (1ULL << 40) | (1ULL << 41);
-    pmu_extract_dimensions(config1, &dims);
-
     ASSERT(dims.aggregate == true, "Aggregate should be true");
-    ASSERT(dims.sample_all == true, "Sample_all should be true");
 
     PASS();
 }

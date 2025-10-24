@@ -146,12 +146,13 @@ static ssize_t cpumask_show(struct device *dev,
     int num_gpus = aql_pmu_get_gpu_count();
     cpumask_var_t mask;
     ssize_t ret;
+    int i;
 
     if (!zalloc_cpumask_var(&mask, GFP_KERNEL))
         return -ENOMEM;
 
     /* Set bits 0 to num_gpus-1 */
-    for (int i = 0; i < num_gpus && i < nr_cpu_ids; i++)
+    for (i = 0; i < num_gpus && i < nr_cpu_ids; i++)
         cpumask_set_cpu(i, mask);
 
     ret = cpumap_print_to_pagebuf(true, buf, mask);

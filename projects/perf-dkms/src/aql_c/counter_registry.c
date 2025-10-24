@@ -264,7 +264,10 @@ int pmu_validate_counter_dimensions(const counter_def_t* counter,
     if (dims->aggregate)
         return 0;
 
-    /* Build a bitmap of requested dimensions */
+    /* Build a bitmap of requested dimensions.
+     * Note: We check != 0 because dimension value 0 is indistinguishable from
+     * "not specified" in the current config1 encoding. This means se=0 cannot
+     * be explicitly requested (it's the default). This is a known limitation. */
     if (dims->xcc != 0)
         requested_dims |= DIM_XCC;
     if (dims->se != 0)
