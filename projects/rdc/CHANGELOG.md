@@ -17,7 +17,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 ### Fixed
 
 - Group management issues with listing created/non-created groups
-- ECC_UNCORRECT field behavior
+- ECC_UNCORRECT field behavior.
 
 ## RDC for ROCm 7.0.0
 
