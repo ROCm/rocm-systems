@@ -12,7 +12,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
-- Improved profiler metrics path detection for counter definitions
+- Improved profiler metrics path detection for counter definitions.
 
 ### Resolved issues
 
