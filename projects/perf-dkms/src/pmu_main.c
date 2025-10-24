@@ -25,9 +25,6 @@
 /* Global PMU instance */
 static struct amdgpu_pmu *amdgpu_pmu_instance;
 
-/* Global dimension limits - populated from GPU architecture during init */
-static struct pmu_dimension_limits global_dim_limits = {0};
-
 /* Module parameters */
 bool debug_enable = true;
 module_param(debug_enable, bool, 0644);
@@ -212,6 +209,66 @@ void amdgpu_pmu_free_event_idx(struct amdgpu_pmu *pmu, int idx)
     }
 }
 
+/**
+ * get_gpu_dimension_limits - Get dimension limits for a specific GPU
+ * @gpu_id: GPU identifier
+ * @limits: Output structure for dimension limits
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+static int get_gpu_dimension_limits(uint32_t gpu_id, struct pmu_dimension_limits *limits)
+{
+    struct aql_perf_session *session;
+    arch_t *arch;
+    uint32_t gpu_index;
+    int ret = 0;
+
+    if (!limits)
+        return -EINVAL;
+
+    session = aql_pmu_get_session();
+    if (!session) {
+        pmu_err("Cannot get dimension limits: no AQL session\n");
+        return -ENODEV;
+    }
+
+    /* Find GPU index from GPU ID */
+    for (gpu_index = 0; gpu_index < session->num_gpus; gpu_index++) {
+        if (session->gpu_ids[gpu_index] == gpu_id)
+            break;
+    }
+
+    if (gpu_index >= session->num_gpus) {
+        pmu_err("GPU %u not found in session\n", gpu_id);
+        ret = -ENODEV;
+        goto out;
+    }
+
+    /* Get architecture for this specific GPU */
+    if (!session->archs || !session->archs[gpu_index]) {
+        pmu_err("No architecture information for GPU %u\n", gpu_id);
+        ret = -ENODEV;
+        goto out;
+    }
+
+    arch = session->archs[gpu_index];
+
+    /* Populate dimension limits from this GPU's architecture */
+    limits->max_xcc = (arch->num_xcc > 0) ? arch->num_xcc - 1 : 0;
+    limits->max_se = (arch->num_se > 0) ? arch->num_se - 1 : 0;
+    limits->max_sa = (arch->num_sa > 0) ? arch->num_sa - 1 : 0;
+    limits->max_wgp = (arch->num_wgp_per_sa > 0) ? arch->num_wgp_per_sa - 1 : 0;
+    limits->max_cu = (arch->num_cu > 0) ? arch->num_cu - 1 : 0;
+
+    pmu_debug("GPU %u dimension limits: XCC=0-%u, SE=0-%u, SA=0-%u, WGP=0-%u, CU=0-%u\n",
+              gpu_id, limits->max_xcc, limits->max_se, limits->max_sa,
+              limits->max_wgp, limits->max_cu);
+
+out:
+    aql_pmu_put_session(session);
+    return ret;
+}
+
 /* PMU callback: Initialize event */
 static int amdgpu_pmu_event_init(struct perf_event *event)
 {
@@ -268,18 +325,28 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
 
     /* Extract and validate dimensions from config1 if specified */
     if (config1 != 0) {
+        struct pmu_dimension_limits gpu_limits;
+        uint32_t gpu_id = event->hw.idx;
+
         pmu_extract_dimensions(config1, &dims);
         pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d valid=%d\n",
                   dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
                   dims.aggregate, dims.valid);
 
-        /* Validate dimensions against hardware limits */
-        if (!pmu_validate_dimensions(&dims, &global_dim_limits)) {
-            pmu_err("Dimension out of range: xcc=%u se=%u sa=%u wgp=%u cu=%u (max: %u/%u/%u/%u/%u)\n",
-                    dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
-                    global_dim_limits.max_xcc, global_dim_limits.max_se,
-                    global_dim_limits.max_sa, global_dim_limits.max_wgp,
-                    global_dim_limits.max_cu);
+        /* Get dimension limits for the specific GPU this event targets */
+        ret = get_gpu_dimension_limits(gpu_id, &gpu_limits);
+        if (ret != 0) {
+            pmu_err("Failed to get dimension limits for GPU %u: %d\n", gpu_id, ret);
+            return ret;
+        }
+
+        /* Validate dimensions against this GPU's hardware limits */
+        if (!pmu_validate_dimensions(&dims, &gpu_limits)) {
+            pmu_err("Dimension out of range for GPU %u: xcc=%u se=%u sa=%u wgp=%u cu=%u (max: %u/%u/%u/%u/%u)\n",
+                    gpu_id, dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
+                    gpu_limits.max_xcc, gpu_limits.max_se,
+                    gpu_limits.max_sa, gpu_limits.max_wgp,
+                    gpu_limits.max_cu);
             return -EINVAL;
         }
 
@@ -645,37 +712,20 @@ static int __init amdgpu_pmu_init(void)
         return ret;
     }
 
-    /* Initialize dimension limits from GPU architecture */
+    /* Verify GPU architecture is available for dimension validation */
     {
         struct aql_perf_session *session = aql_pmu_get_session();
-        if (session && session->num_gpus > 0 && session->archs && session->archs[0]) {
-            arch_t *arch = session->archs[0];
-
-            /* Populate dimension limits from first GPU architecture
-             * Note: For multi-GPU systems, we use the first GPU's limits.
-             * In practice, all GPUs should have the same architecture.
-             */
-            global_dim_limits.max_xcc = (arch->num_xcc > 0) ? arch->num_xcc - 1 : 0;
-            global_dim_limits.max_se = (arch->num_se > 0) ? arch->num_se - 1 : 0;
-            global_dim_limits.max_sa = (arch->num_sa > 0) ? arch->num_sa - 1 : 0;
-            global_dim_limits.max_wgp = (arch->num_wgp_per_sa > 0) ? arch->num_wgp_per_sa - 1 : 0;
-            global_dim_limits.max_cu = (arch->num_cu > 0) ? arch->num_cu - 1 : 0;
-
-            pmu_info("Dimension limits: XCC=0-%u, SE=0-%u, SA=0-%u, WGP=0-%u, CU=0-%u\n",
-                     global_dim_limits.max_xcc, global_dim_limits.max_se,
-                     global_dim_limits.max_sa, global_dim_limits.max_wgp,
-                     global_dim_limits.max_cu);
-
-            aql_pmu_put_session(session);
-        } else {
-            pmu_warn("Could not get GPU architecture for dimension limits\n");
-            /* Set conservative defaults */
-            global_dim_limits.max_xcc = 0;
-            global_dim_limits.max_se = 3;   /* Most GPUs have 4 or fewer SEs */
-            global_dim_limits.max_sa = 1;   /* Most GPUs have 2 or fewer SAs */
-            global_dim_limits.max_wgp = 3;  /* Most GPUs have 4 or fewer WGPs */
-            global_dim_limits.max_cu = 63;  /* Most GPUs have 64 or fewer CUs */
+        if (!session || session->num_gpus == 0 || !session->archs || !session->archs[0]) {
+            pmu_err("GPU architecture unavailable - cannot validate dimensions\n");
+            perf_pmu_unregister(&pmu->pmu);
+            amdgpu_pmu_cleanup_event_attrs();
+            if (session)
+                aql_pmu_put_session(session);
+            kfree(pmu);
+            return -ENODEV;
         }
+        pmu_info("GPU architecture loaded - %u GPU(s) available\n", session->num_gpus);
+        aql_pmu_put_session(session);
     }
 
     pmu_info("PMU Stub module loaded successfully\n");
