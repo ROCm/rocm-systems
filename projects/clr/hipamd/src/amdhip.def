@@ -518,3 +518,5 @@ hipLibraryGetKernel
 hipLibraryGetKernelCount
 hipStreamCopyAttributes
 hipMipmappedArrayGetMemoryRequirements
+hipMemSetMemPool
+hipMemGetMemPool

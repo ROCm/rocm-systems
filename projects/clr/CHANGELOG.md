@@ -44,6 +44,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryUnload`        Unload library
     - `hipLibraryGetKernel`     Get a kernel from library
     - `hipLibraryGetKernelCount` Get kernel count in library
+    - `hipMemSetMemPool`        Sets the current memory pool for a memory location and allocation type
+    - `hipMemGetMemPool`        Gets the current memory pool for a memory location and of a particular allocation type
 * Changed HIP APIs
     - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
     - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
