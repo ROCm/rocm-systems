@@ -600,7 +600,9 @@ ncclResult_t mscclEnqueueCheck(
     count, dataType, root, peer, op, func, comm, stream,
     &threadLocalStatus.savedSchedulerParams.back()));
 
-  size_t nBytes = count * ncclTypeSize(dataType);
+#ifdef ENABLE_MSCCLPP
+  const size_t nBytes = count * ncclTypeSize(dataType);
+#endif
 
   switch (threadLocalStatus.groupStatus) {
     case mscclNoGroup:
