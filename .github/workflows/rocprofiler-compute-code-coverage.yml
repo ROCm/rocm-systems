@@ -12,7 +12,7 @@ on:
         type: string
   pull_request:
     paths:
-      - '.github/workflows/rocprofiler-compute-nightly-coverage.yml'
+      - '.github/workflows/rocprofiler-compute-code-coverage.yml'
       - 'projects/rocprofiler-compute/utils/run-ci.py'
 
 env:
