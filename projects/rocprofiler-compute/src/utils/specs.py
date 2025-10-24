@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
 import re
 import socket
@@ -42,6 +41,12 @@ from typing import Any, Optional, TypeVar
 import pandas as pd
 
 import config
+from utils.amdsmi_interface import (
+    amdsmi_ctx,
+    get_gpu_compute_partition,
+    get_gpu_memory_partition,
+    get_gpu_vbios_part_number,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -252,57 +257,18 @@ def extract_gpu_info() -> dict[str, Any]:
         "memory_partition": None,
     }
 
-    # Load amd-smi static data for GPU 0
-    static_output = run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
-    if static_output is None:
-        return result
-
-    try:
-        static_data = json.loads(static_output)
-    except json.JSONDecodeError as e:
-        console_warning(f"Failed to parse amd-smi static output: {e}")
-        return result
-
-    # Extract GPU data
-    gpu_list = (
-        static_data
-        if isinstance(static_data, list)
-        else static_data.get("gpu_data", [])
-    )
-    gpu_data = gpu_list[0] if gpu_list else {}
-    result["vbios"] = gpu_data.get("vbios", {}).get("part_number")
-
-    # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
-    partition_output = run(
-        ["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False
-    )
-    partition_data = {}
-
-    if partition_output:
-        try:
-            partition_data = json.loads(partition_output)
-        except json.JSONDecodeError:
-            partition_data = {}
-
-    current_partition = partition_data.get("current_partition", [{}])[0]
-
-    # Extract partition values with gpu_data fallback (amd-smi < 26.0.0)
-    result["compute_partition"] = (
-        current_partition.get("accelerator_type")
-        or gpu_data.get("partition", {}).get("accelerator_partition")
-        or gpu_data.get("partition", {}).get("compute_partition")
-    )
-    result["memory_partition"] = current_partition.get("memory") or gpu_data.get(
-        "partition", {}
-    ).get("memory_partition")
+    with amdsmi_ctx():
+        result["vbios"] = get_gpu_vbios_part_number()
+        result["compute_partition"] = get_gpu_compute_partition()
+        result["memory_partition"] = get_gpu_memory_partition()
 
     # Apply defaults and warnings
-    if not result["compute_partition"]:
+    if result["compute_partition"] == "N/A" or not result["compute_partition"]:
         console_warning("Cannot detect accelerator partition from amd-smi.")
         console_warning("Applying default accelerator partition: SPX")
         result["compute_partition"] = "SPX"
 
-    if not result["memory_partition"]:
+    if result["memory_partition"] == "N/A" or not result["memory_partition"]:
         console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
@@ -891,12 +857,8 @@ def run(cmd: list[str], exit_on_error: bool = False) -> str:
             'Try passing a path to an existing workload results in "analyze" mode.'
         )
 
-    if exit_on_error:
-        if cmd[0] == "amd-smi":
-            if p.returncode != 2 and p.returncode != 0:  # type: ignore
-                console_error("No GPU detected. Unable to load amd-smi")
-        elif p.returncode != 0:  # type: ignore
-            console_error(f"Command {cmd} failed with non-zero exit code")
+    if exit_on_error and p.returncode != 0:  # type: ignore
+        console_error(f"Command {cmd} failed with non-zero exit code")
     return p.stdout.decode("utf-8")  # type: ignore
 
 

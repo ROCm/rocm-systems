@@ -1253,7 +1253,7 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
   VirtualDevice(amd::Device& device)
@@ -2003,7 +2003,10 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
-  virtual const uint32_t getPreferredNumaNode() const { return 0; }
+  virtual uint32_t getPreferredNumaNode() const {
+    return static_cast<uint32_t>(-1); //!< PAL doesn't support it
+  }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

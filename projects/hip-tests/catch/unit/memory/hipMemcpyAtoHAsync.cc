@@ -73,6 +73,30 @@ TEST_CASE("Unit_hipMemcpyAtoHAsync_Basic") {
 #endif
 }
 
+TEST_CASE("Unit_hipMemcpyAtoHAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr int kRows = 1;
+  constexpr int kCols = 1;
+  auto host_data = std::make_unique<int[]>(kRows * kCols);
+
+  hipArray_t device_array = nullptr;
+  hipChannelFormatDesc channel_desc = hipCreateChannelDesc<int>();
+  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, kCols, kRows, hipArrayDefault));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(
+      hipMemcpyAtoHAsync(host_data.get(), device_array, 0, sizeof(int) * kCols * kRows, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipFreeArray(device_array));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
 /**
  * End doxygen group MemoryTest.
  * @}
