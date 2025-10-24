@@ -25,19 +25,11 @@
 #include "devkernel.hpp"
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
-#if defined(WITH_COMPILER_LIB)
-#include "utils/bif_section_labels.hpp"
-#include "utils/libUtils.h"
-#endif
 #include "comgrctx.hpp"
 
 #include <map>
 #include <string>
 #include <sstream>
-
-#if defined(WITH_COMPILER_LIB)
-#include "hsailctx.hpp"
-#endif
 
 namespace amd::device {
 
@@ -50,8 +42,6 @@ static constexpr clk_value_type_t ClkValueMapType[6][6] = {
     {T_FLOAT, T_FLOAT2, T_FLOAT3, T_FLOAT4, T_FLOAT8, T_FLOAT16},
     {T_DOUBLE, T_DOUBLE2, T_DOUBLE3, T_DOUBLE4, T_DOUBLE8, T_DOUBLE16},
 };
-
-#if defined(USE_COMGR_LIBRARY)
 
 // ================================================================================================
 amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
@@ -593,7 +583,6 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
 
   return status;
 }
-#endif
 
 // ================================================================================================
 Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& prog)
@@ -673,15 +662,6 @@ bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters,
 
 // ================================================================================================
 Kernel::~Kernel() { delete signature_; }
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-std::string Kernel::openclMangledName(const std::string& name) {
-  const oclBIFSymbolStruct* bifSym = findBIF30SymStruct(symOpenclKernel);
-  assert(bifSym && "symbol not found");
-  return std::string("&") + bifSym->str[bif::PRE] + name + bifSym->str[bif::POST];
-}
-#endif
 
 // ================================================================================================
 void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
@@ -772,300 +752,6 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
 }
 
 // ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline uint32_t GetOclArgumentTypeOCL(const aclArgData* argInfo, bool* isHidden) {
-  if (argInfo->argStr[0] == '_' && argInfo->argStr[1] == '.') {
-    *isHidden = true;
-    if (strcmp(&argInfo->argStr[2], "global_offset_0") == 0) {
-      return amd::KernelParameterDescriptor::HiddenGlobalOffsetX;
-    } else if (strcmp(&argInfo->argStr[2], "global_offset_1") == 0) {
-      return amd::KernelParameterDescriptor::HiddenGlobalOffsetY;
-    } else if (strcmp(&argInfo->argStr[2], "global_offset_2") == 0) {
-      return amd::KernelParameterDescriptor::HiddenGlobalOffsetZ;
-    } else if (strcmp(&argInfo->argStr[2], "printf_buffer") == 0) {
-      return amd::KernelParameterDescriptor::HiddenPrintfBuffer;
-    } else if (strcmp(&argInfo->argStr[2], "hostcall_buffer") == 0) {
-      return amd::KernelParameterDescriptor::HiddenHostcallBuffer;
-    } else if (strcmp(&argInfo->argStr[2], "vqueue_pointer") == 0) {
-      return amd::KernelParameterDescriptor::HiddenDefaultQueue;
-    } else if (strcmp(&argInfo->argStr[2], "aqlwrap_pointer") == 0) {
-      return amd::KernelParameterDescriptor::HiddenCompletionAction;
-    }
-    return amd::KernelParameterDescriptor::HiddenNone;
-  }
-  switch (argInfo->type) {
-    case ARG_TYPE_POINTER:
-      return amd::KernelParameterDescriptor::MemoryObject;
-    case ARG_TYPE_QUEUE:
-      return amd::KernelParameterDescriptor::QueueObject;
-    case ARG_TYPE_VALUE:
-      return (argInfo->arg.value.data == DATATYPE_struct)
-                 ? amd::KernelParameterDescriptor::ReferenceObject
-                 : amd::KernelParameterDescriptor::ValueObject;
-    case ARG_TYPE_IMAGE:
-      return amd::KernelParameterDescriptor::ImageObject;
-    case ARG_TYPE_SAMPLER:
-      return amd::KernelParameterDescriptor::SamplerObject;
-    case ARG_TYPE_ERROR:
-    default:
-      return amd::KernelParameterDescriptor::HiddenNone;
-  }
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline clk_value_type_t GetOclTypeOCL(const aclArgData* argInfo, size_t size = 0) {
-  uint sizeType;
-  uint numElements;
-  if (argInfo->type == ARG_TYPE_QUEUE) {
-    return T_QUEUE;
-  } else if (argInfo->type == ARG_TYPE_POINTER || argInfo->type == ARG_TYPE_IMAGE) {
-    return T_POINTER;
-  } else if (argInfo->type == ARG_TYPE_VALUE) {
-    switch (argInfo->arg.value.data) {
-      case DATATYPE_i8:
-      case DATATYPE_u8:
-        sizeType = 0;
-        numElements = size;
-        break;
-      case DATATYPE_i16:
-      case DATATYPE_u16:
-        sizeType = 1;
-        numElements = size / 2;
-        break;
-      case DATATYPE_i32:
-      case DATATYPE_u32:
-        sizeType = 2;
-        numElements = size / 4;
-        break;
-      case DATATYPE_i64:
-      case DATATYPE_u64:
-        sizeType = 3;
-        numElements = size / 8;
-        break;
-      case DATATYPE_f16:
-        sizeType = 4;
-        numElements = size / 2;
-        break;
-      case DATATYPE_f32:
-        sizeType = 4;
-        numElements = size / 4;
-        break;
-      case DATATYPE_f64:
-        sizeType = 5;
-        numElements = size / 8;
-        break;
-      case DATATYPE_struct:
-      case DATATYPE_opaque:
-      case DATATYPE_ERROR:
-      default:
-        return T_VOID;
-    }
-
-    switch (numElements) {
-      case 1:
-        return ClkValueMapType[sizeType][0];
-      case 2:
-        return ClkValueMapType[sizeType][1];
-      case 3:
-        return ClkValueMapType[sizeType][2];
-      case 4:
-        return ClkValueMapType[sizeType][3];
-      case 8:
-        return ClkValueMapType[sizeType][4];
-      case 16:
-        return ClkValueMapType[sizeType][5];
-      default:
-        return T_VOID;
-    }
-  } else if (argInfo->type == ARG_TYPE_SAMPLER) {
-    return T_SAMPLER;
-  } else {
-    return T_VOID;
-  }
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline size_t GetArgAlignmentOCL(const aclArgData* argInfo) {
-  switch (argInfo->type) {
-    case ARG_TYPE_POINTER:
-      return sizeof(void*);
-    case ARG_TYPE_VALUE:
-      switch (argInfo->arg.value.data) {
-        case DATATYPE_i8:
-        case DATATYPE_u8:
-          return 1;
-        case DATATYPE_u16:
-        case DATATYPE_i16:
-        case DATATYPE_f16:
-          return 2;
-        case DATATYPE_u32:
-        case DATATYPE_i32:
-        case DATATYPE_f32:
-          return 4;
-        case DATATYPE_i64:
-        case DATATYPE_u64:
-        case DATATYPE_f64:
-          return 8;
-        case DATATYPE_struct:
-          return 128;
-        case DATATYPE_ERROR:
-        default:
-          return -1;
-      }
-    case ARG_TYPE_IMAGE:
-      return sizeof(cl_mem);
-    case ARG_TYPE_SAMPLER:
-      return sizeof(cl_sampler);
-    default:
-      return -1;
-  }
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline size_t GetArgPointeeAlignmentOCL(const aclArgData* argInfo) {
-  if (argInfo->type == ARG_TYPE_POINTER) {
-    return argInfo->arg.pointer.align;
-  }
-  return 1;
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline bool GetReadOnlyOCL(const aclArgData* argInfo) {
-  if (argInfo->type == ARG_TYPE_POINTER) {
-    return (argInfo->arg.pointer.type == ACCESS_TYPE_RO) ? true : false;
-  } else if (argInfo->type == ARG_TYPE_IMAGE) {
-    return (argInfo->arg.image.type == ACCESS_TYPE_RO) ? true : false;
-  }
-  return false;
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-inline static int GetArgSizeOCL(const aclArgData* argInfo) {
-  switch (argInfo->type) {
-    case ARG_TYPE_POINTER:
-      return sizeof(void*);
-    case ARG_TYPE_VALUE:
-      switch (argInfo->arg.value.data) {
-        case DATATYPE_i8:
-        case DATATYPE_u8:
-        case DATATYPE_struct:
-          return 1 * argInfo->arg.value.numElements;
-        case DATATYPE_u16:
-        case DATATYPE_i16:
-        case DATATYPE_f16:
-          return 2 * argInfo->arg.value.numElements;
-        case DATATYPE_u32:
-        case DATATYPE_i32:
-        case DATATYPE_f32:
-          return 4 * argInfo->arg.value.numElements;
-        case DATATYPE_i64:
-        case DATATYPE_u64:
-        case DATATYPE_f64:
-          return 8 * argInfo->arg.value.numElements;
-        case DATATYPE_ERROR:
-        default:
-          return -1;
-      }
-    case ARG_TYPE_IMAGE:
-    case ARG_TYPE_SAMPLER:
-    case ARG_TYPE_QUEUE:
-      return sizeof(void*);
-    default:
-      return -1;
-  }
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline cl_kernel_arg_address_qualifier GetOclAddrQualOCL(const aclArgData* argInfo) {
-  if (argInfo->type == ARG_TYPE_POINTER) {
-    switch (argInfo->arg.pointer.memory) {
-      case PTR_MT_UAV_CONSTANT:
-      case PTR_MT_CONSTANT_EMU:
-      case PTR_MT_CONSTANT:
-        return CL_KERNEL_ARG_ADDRESS_CONSTANT;
-      case PTR_MT_UAV:
-      case PTR_MT_GLOBAL:
-      case PTR_MT_SCRATCH_EMU:
-        return CL_KERNEL_ARG_ADDRESS_GLOBAL;
-      case PTR_MT_LDS_EMU:
-      case PTR_MT_LDS:
-        return CL_KERNEL_ARG_ADDRESS_LOCAL;
-      case PTR_MT_ERROR:
-      default:
-        LogError("Unsupported address type");
-        return CL_KERNEL_ARG_ADDRESS_PRIVATE;
-    }
-  } else if ((argInfo->type == ARG_TYPE_IMAGE) || (argInfo->type == ARG_TYPE_QUEUE)) {
-    return CL_KERNEL_ARG_ADDRESS_GLOBAL;
-  }
-
-  // default for all other cases
-  return CL_KERNEL_ARG_ADDRESS_PRIVATE;
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline cl_kernel_arg_access_qualifier GetOclAccessQualOCL(const aclArgData* argInfo) {
-  if (argInfo->type == ARG_TYPE_IMAGE) {
-    switch (argInfo->arg.image.type) {
-      case ACCESS_TYPE_RO:
-        return CL_KERNEL_ARG_ACCESS_READ_ONLY;
-      case ACCESS_TYPE_WO:
-        return CL_KERNEL_ARG_ACCESS_WRITE_ONLY;
-      default:
-        return CL_KERNEL_ARG_ACCESS_READ_WRITE;
-    }
-  }
-  return CL_KERNEL_ARG_ACCESS_NONE;
-}
-#endif
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-static inline cl_kernel_arg_type_qualifier GetOclTypeQualOCL(const aclArgData* argInfo) {
-  cl_kernel_arg_type_qualifier rv = CL_KERNEL_ARG_TYPE_NONE;
-  if (argInfo->type == ARG_TYPE_POINTER) {
-    if (argInfo->arg.pointer.isVolatile) {
-      rv |= CL_KERNEL_ARG_TYPE_VOLATILE;
-    }
-    if (argInfo->arg.pointer.isRestrict) {
-      rv |= CL_KERNEL_ARG_TYPE_RESTRICT;
-    }
-    if (argInfo->arg.pointer.isPipe) {
-      rv |= CL_KERNEL_ARG_TYPE_PIPE;
-    }
-    if (argInfo->isConst) {
-      rv |= CL_KERNEL_ARG_TYPE_CONST;
-    }
-    switch (argInfo->arg.pointer.memory) {
-      case PTR_MT_CONSTANT:
-      case PTR_MT_UAV_CONSTANT:
-      case PTR_MT_CONSTANT_EMU:
-        rv |= CL_KERNEL_ARG_TYPE_CONST;
-        break;
-      default:
-        break;
-    }
-  }
-  return rv;
-}
-#endif
-
-// ================================================================================================
-#if defined(USE_COMGR_LIBRARY)
 bool Kernel::GetAttrCodePropMetadata() {
   amd_comgr_metadata_node_t kernelMetaNode;
   if (!prog().getKernelMetadata(name(), &kernelMetaNode)) {
@@ -1313,89 +999,8 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
   params.insert(params.end(), hiddenParams.begin(), hiddenParams.end());
   createSignature(params, numParams, amd::KernelSignature::ABIVersion_2);
 }
-#endif  // defined(USE_COMGR_LIBRARY)
 
 // ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-void Kernel::InitParameters(const aclArgData* aclArg, uint32_t argBufferSize) {
-  // Iterate through the arguments and insert into parameterList
-  device::Kernel::parameters_t params;
-  device::Kernel::parameters_t hiddenParams;
-  amd::KernelParameterDescriptor desc;
-  size_t offset = 0;
-  size_t offsetStruct = argBufferSize;
-
-  for (uint i = 0; aclArg->struct_size != 0; i++, aclArg++) {
-    size_t size = GetArgSizeOCL(aclArg);
-    size_t alignment = GetArgAlignmentOCL(aclArg);
-    bool isHidden = false;
-    desc.info_.oclObject_ = GetOclArgumentTypeOCL(aclArg, &isHidden);
-
-    // Allocate the hidden arguments, but abstraction layer will skip them
-    if (isHidden) {
-      offset = amd::alignUp(offset, alignment);
-      desc.offset_ = offset;
-      desc.size_ = size;
-      offset += size;
-      hiddenParams.push_back(desc);
-      continue;
-    }
-
-    desc.name_ = aclArg->argStr;
-    desc.typeName_ = aclArg->typeStr;
-    desc.type_ = GetOclTypeOCL(aclArg, size);
-
-    desc.addressQualifier_ = GetOclAddrQualOCL(aclArg);
-    desc.accessQualifier_ = GetOclAccessQualOCL(aclArg);
-    desc.typeQualifier_ = GetOclTypeQualOCL(aclArg);
-    desc.info_.arrayIndex_ = GetArgPointeeAlignmentOCL(aclArg);
-    desc.size_ = size;
-
-    // Check if HSAIL expects data by reference and allocate it behind
-    if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
-      desc.offset_ = offsetStruct;
-      // Align the offset reference
-      offset = amd::alignUp(offset, sizeof(size_t));
-      patchReferences_.insert({desc.offset_, offset});
-      offsetStruct += size;
-      // Adjust the offset of arguments
-      offset += sizeof(size_t);
-    } else {
-      // These objects have forced data size to uint64_t
-      if ((desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) ||
-          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::SamplerObject) ||
-          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::QueueObject)) {
-        offset = amd::alignUp(offset, sizeof(uint64_t));
-        desc.offset_ = offset;
-        offset += sizeof(uint64_t);
-      } else {
-        offset = amd::alignUp(offset, alignment);
-        desc.offset_ = offset;
-        offset += size;
-      }
-    }
-    // Update read only flag
-    desc.info_.readOnly_ = GetReadOnlyOCL(aclArg);
-
-    params.push_back(desc);
-
-    if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
-      flags_.imageEna_ = true;
-      if (desc.accessQualifier_ != CL_KERNEL_ARG_ACCESS_READ_ONLY) {
-        flags_.imageWriteEna_ = true;
-      }
-    }
-  }
-  // Save the number of OCL arguments
-  uint32_t numParams = params.size();
-  // Append the hidden arguments to the OCL arguments
-  params.insert(params.end(), hiddenParams.begin(), hiddenParams.end());
-  createSignature(params, numParams, amd::KernelSignature::ABIVersion_1);
-}
-#endif
-
-// ================================================================================================
-#if defined(USE_COMGR_LIBRARY)
 void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
   size_t HIPPrintfInfoID = 0;
   for (auto str : printfInfoStrings) {
@@ -1501,76 +1106,4 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
     // ]
   }
 }
-#endif  // defined(USE_COMGR_LIBRARY)
-
-// ================================================================================================
-#if defined(WITH_COMPILER_LIB)
-void Kernel::InitPrintf(const aclPrintfFmt* aclPrintf) {
-  uint index = 0, HIPIndex = 0;
-  for (; aclPrintf->struct_size != 0; aclPrintf++) {
-    if (amd::IS_HIP) {
-      index = HIPIndex++;
-      printf_.resize(HIPIndex);
-    } else {
-      index = aclPrintf->ID;
-      if (printf_.size() <= index) {
-        printf_.resize(index + 1);
-      }
-    }
-
-    PrintfInfo& info = printf_[index];
-    const std::string& pfmt = aclPrintf->fmtStr;
-    bool need_nl = true;
-    for (size_t pos = 0; pos < pfmt.size(); ++pos) {
-      char symbol = pfmt[pos];
-      need_nl = true;
-      if (symbol == '\\') {
-        switch (pfmt[pos + 1]) {
-          case 'a':
-            pos++;
-            symbol = '\a';
-            break;
-          case 'b':
-            pos++;
-            symbol = '\b';
-            break;
-          case 'f':
-            pos++;
-            symbol = '\f';
-            break;
-          case 'n':
-            pos++;
-            symbol = '\n';
-            need_nl = false;
-            break;
-          case 'r':
-            pos++;
-            symbol = '\r';
-            break;
-          case 'v':
-            pos++;
-            symbol = '\v';
-            break;
-          case '7':
-            if (pfmt[pos + 2] == '2') {
-              pos += 2;
-              symbol = '\72';
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      info.fmtString_.push_back(symbol);
-    }
-    if (need_nl && !amd::IS_HIP) {
-      info.fmtString_ += "\n";
-    }
-    uint32_t* tmp_ptr = const_cast<uint32_t*>(aclPrintf->argSizes);
-    for (uint i = 0; i < aclPrintf->numSizes; i++, tmp_ptr++) {
-      info.arguments_.push_back(*tmp_ptr);
-    }
-  }
-}
-#endif  // defined(WITH_COMPILER_LIB)
 }  // namespace amd::device

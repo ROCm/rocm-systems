@@ -562,7 +562,7 @@ class Device : public NullDevice {
 
   virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0);
 
-  const uint32_t getPreferredNumaNode() const { return preferred_numa_node_; }
+  virtual uint32_t getPreferredNumaNode() const final { return preferred_numa_node_; }
 
   const bool isFineGrainSupported() const;
 
