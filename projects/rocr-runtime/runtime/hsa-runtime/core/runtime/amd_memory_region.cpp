@@ -538,7 +538,7 @@ hsa_status_t MemoryRegion::Migrate(uint32_t flag, const void* ptr) const {
 }
 
 hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
-                                void* host_ptr, size_t size,
+                                void* host_ptr, size_t size, uint32_t flags,
                                 void** agent_ptr) const {
   if (!IsSystem()) {
     return HSA_STATUS_ERROR;
@@ -581,9 +581,15 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
     *agent_ptr = host_ptr;
     return HSA_STATUS_SUCCESS;
   }
+  HsaMemFlags local_mem_flag = mem_flag_;
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) {
+    local_mem_flag.ui32.Uncached = 1;
+    local_mem_flag.ui32.CoarseGrain = 0;
+    local_mem_flag.ui32.ExtendedCoherent = 0;
+  }
 
   // Call kernel driver to register and pin the memory.
-  if (owner()->driver().RegisterMemory(host_ptr, size, const_cast<HsaMemFlags&>(mem_flag_)) ==
+  if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
       HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
     if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &map_flag_,

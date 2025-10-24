@@ -20,16 +20,10 @@
 
 #pragma once
 
-#if defined(WITH_COMPILER_LIB)
-#include "aclTypes.h"
-#endif
 #include "platform/context.hpp"
 #include "platform/object.hpp"
 #include "platform/memory.hpp"
-
-#if defined(USE_COMGR_LIBRARY)
 #include "amd_comgr/amd_comgr.h"
-#endif  // defined(USE_COMGR_LIBRARY)
 
 namespace amd {
 namespace hsa {
@@ -120,16 +114,11 @@ class Program : public amd::HeapObject {
 
   bool runInitFiniKernel(const std::vector<const Kernel*>& kernels) const;
 
-#if defined(WITH_COMPILER_LIB)
-  static amd::Monitor buildLock_;  //!< Global build lock for HSAIL which isn't thread-safe
-#endif
-
  protected:
   union {
     struct {
       uint32_t isNull_ : 1;           //!< Null program no memory allocations
       uint32_t internal_ : 1;         //!< Internal blit program
-      uint32_t isLC_ : 1;             //!< LC was used for the program compilation
       uint32_t hasGlobalStores_ : 1;  //!< Program has writable program scope variables
       uint32_t isHIP_ : 1;            //!< Determine if the program is for HIP
       uint32_t coLoaded_ : 1;         //!< Has the code objected been loaded
@@ -143,30 +132,20 @@ class Program : public amd::HeapObject {
   amd::Elf::ElfSections elfSectionType_;  //!< LLVM IR binary code is in SPIR format
   std::string compileOptions_;            //!< compile/build options.
   std::string linkOptions_;               //!< link options.
-                             //!< the option arg passed in to clCompileProgram(), clLinkProgram(),
-                             //! or clBuildProgram(), whichever is called last
-#if defined(WITH_COMPILER_LIB)
-  aclBinaryOptions binOpts_;  //!< Binary options to create aclBinary
-  aclBinary* binaryElf_;      //!< Binary for the new compiler library
-#endif
-
+                                          //!< the option arg passed in to clCompileProgram(), clLinkProgram(),
+                                          //!< or clBuildProgram(), whichever is called last
   std::string lastBuildOptionsArg_;
   mutable std::string buildLog_;  //!< build log.
   int32_t buildStatus_;           //!< build status.
   int32_t buildError_;            //!< build error
 
-#if defined(WITH_COMPILER_LIB)
-  aclTargetInfo info_;  //!< The info target for this binary.
-#endif
   size_t globalVariableTotalSize_;
   amd::option::Options* programOptions_;
 
 
-#if defined(USE_COMGR_LIBRARY)
   amd_comgr_metadata_node_t metadata_ = {};                             //!< COMgr metadata
   uint32_t codeObjectVer_;                                              //!< version of code object
   std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
-#endif
   //! Sanitizer lock - lock when launching init/fini kernels
   static amd::Monitor initFiniLock_;
 
@@ -249,19 +228,11 @@ class Program : public amd::HeapObject {
 
   size_t globalVariableTotalSize() const { return globalVariableTotalSize_; }
 
-#if defined(WITH_COMPILER_LIB)
-  //! Returns the aclBinary associated with the program
-  aclBinary* binaryElf() const { return static_cast<aclBinary*>(binaryElf_); }
-#endif
-
   //! Returns TRUE if the program just compiled
   bool isNull() const { return isNull_; }
 
   //! Returns TRUE if the program used internally by runtime
   bool isInternal() const { return internal_; }
-
-  //! Returns TRUE if Lightning compiler was used for this program
-  bool isLC() const { return isLC_; }
 
   //! Global variables are a part of the code segment
   bool hasGlobalStores() const { return hasGlobalStores_; }
@@ -272,7 +243,6 @@ class Program : public amd::HeapObject {
   //! Returns TRUE if the program is a trap handler for debugger support
   bool isTrapHandler() const { return trapHandler_; }
 
-#if defined(USE_COMGR_LIBRARY)
   amd_comgr_metadata_node_t metadata() const { return metadata_; }
 
   //! Get the kernel metadata
@@ -286,7 +256,6 @@ class Program : public amd::HeapObject {
   }
 
   const uint32_t codeObjectVer() const { return codeObjectVer_; }
-#endif
 
   //! Check if program is HIP based
   const bool isHIP() const { return (isHIP_ == 1); }
@@ -324,18 +293,18 @@ class Program : public amd::HeapObject {
    *
    *  \return True if we successefully compiled a GPU program
    */
-  virtual bool compileImpl(const std::string& sourceCode,  //!< the program's source code
-                           const std::vector<const std::string*>& headers,
-                           const char** headerIncludeNames,
-                           amd::option::Options* options  //!< compile options's object
+  bool compileImpl(const std::string& sourceCode,  //!< the program's source code
+                   const std::vector<const std::string*>& headers,
+                   const char** headerIncludeNames,
+                   amd::option::Options* options  //!< compile options's object
   );
 
   //! Link the device program.
-  virtual bool linkImpl(amd::option::Options* options);
+  bool linkImpl(amd::option::Options* options);
 
   //! Link the device programs.
-  virtual bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                        bool createLibrary);
+  bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
+                bool createLibrary);
 
   virtual bool createBinary(amd::option::Options* options) = 0;
 
@@ -347,15 +316,9 @@ class Program : public amd::HeapObject {
   //! Initialize Binary
   virtual bool initClBinary();
 
-  virtual bool saveBinaryAndSetType(type_t type) = 0;
-
   //! Release the Binary
   void releaseClBinary();
 
-#if defined(WITH_COMPILER_LIB)
-  //! return target info
-  virtual const aclTargetInfo& info() = 0;
-#endif
   virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
                              bool internalKernel) {
     return true;
@@ -402,44 +365,13 @@ class Program : public amd::HeapObject {
     return false;
   }
 
-#if defined(USE_COMGR_LIBRARY)
   bool getSymbolsFromCodeObj(std::vector<std::string>* var_names,
                              amd_comgr_symbol_type_t sym_type) const;
-#endif
   bool getUndefinedVarInfo(std::string var_name, void** var_addr, size_t* var_size);
   bool defineUndefinedVars();
 
  private:
-  //! Compile the device program with LC path
-  bool compileImplLC(const std::string& sourceCode, const std::vector<const std::string*>& headers,
-                     const char** headerIncludeNames, amd::option::Options* options);
 
-  //! Compile the device program with HSAIL path
-  bool compileImplHSAIL(const std::string& sourceCode,
-                        const std::vector<const std::string*>& headers,
-                        const char** headerIncludeNames, amd::option::Options* options);
-
-  //! Link the device programs with LC path
-  bool linkImplLC(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                  bool createLibrary);
-
-  //! Link the device programs with HSAIL path
-  bool linkImplHSAIL(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                     bool createLibrary);
-
-  //! Link the device program with LC path
-  bool linkImplLC(amd::option::Options* options);
-
-  //! Link the device program with HSAIL path
-  bool linkImplHSAIL(amd::option::Options* options);
-
-  //! Load the device program with LC path
-  bool loadLC();
-
-  //! Load the device program with HSAIL path
-  bool loadHSAIL();
-
-#if defined(USE_COMGR_LIBRARY)
   //! Dump the log data object to the build log, if a log data object is present
   void extractBuildLog(amd_comgr_data_set_t dataSet);
   //! Dump the code object data
@@ -477,7 +409,6 @@ class Program : public amd::HeapObject {
 
   //! Create the map for the kernel name and its metadata for fast access
   bool createKernelMetadataMap(void* binary, size_t binSize);
-#endif
 
   bool trySubstObjFile(const char* SubstCfgFile, const std::string& sourceCode,
                        const amd::option::Options* options);
@@ -488,8 +419,6 @@ class Program : public amd::HeapObject {
   //! Disable operator=
   Program& operator=(const Program&);
 };
-
-#if defined(USE_COMGR_LIBRARY)
 
 class ComgrBinaryData {
  public:
@@ -502,7 +431,5 @@ class ComgrBinaryData {
   amd_comgr_data_t binaryData_;
   bool created_;
 };
-
-#endif
 
 }  // namespace amd::device

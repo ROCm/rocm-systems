@@ -19,11 +19,10 @@
  THE SOFTWARE. */
 
 #if !defined(_WIN32) && !defined(__CYGWIN__)
-
+#include <unistd.h>
+#include <sys/syscall.h>
 #include "os/os.hpp"
 #include "thread/thread.hpp"
-#include "utils/util.hpp"
-#include "utils/flags.hpp"
 
 #include <iostream>
 #include <stdarg.h>
@@ -49,11 +48,6 @@
 #ifndef DT_GNU_HASH
 #define DT_GNU_HASH 0x6ffffef5
 #endif  // DT_GNU_HASH
-
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
-#include <numa.h>
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
-
 #include <atomic>
 #include <vector>
 #include <string>
@@ -326,20 +320,6 @@ void Os::currentStackInfo(address* base, size_t* size) {
 }
 
 void Os::setCurrentThreadName(const char* name) { ::prctl(PR_SET_NAME, name); }
-
-void Os::setPreferredNumaNode(uint32_t node) {
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
-  if (AMD_CPU_AFFINITY && (numa_available() >= 0)) {
-    bitmask* bm = numa_allocate_cpumask();
-    numa_node_to_cpus(node, bm);
-    if (numa_sched_setaffinity(0, bm) < 0) {
-      assert(0 && "failed to set affinity");
-    }
-
-    numa_free_cpumask(bm);
-  }
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
-}
 
 void* Thread::entry(Thread* thread) {
   sigset_t set;
@@ -978,6 +958,106 @@ void Os::CxaDemangle(const std::string& name, std::string* result) {
   *result = (status == 0 && demangled != nullptr) ? demangled : name;
   free(demangled);
 }
+
+namespace numa {
+
+// ================================================================================================
+NumaPolicy::NumaPolicy(const uint32_t numa_node_count) :
+  node_map_((numa_node_count + kBitsPerUInt64 - 1) / kBitsPerUInt64, 0) { }
+
+// ================================================================================================
+bool NumaPolicy::GetMemPolicy() {
+  int policy = 0;
+  if (syscall(__NR_get_mempolicy, &policy, node_map_.data(),
+      node_map_.size() * kBitsPerUInt64, nullptr, 0) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+        "syscall(__NR_get_mempolicy, size=%zu) failed to query policy",
+        node_map_.size() * kBitsPerUInt64);
+    return false;
+  }
+  if (policy < static_cast<int>(Policy::kDefault) || policy > static_cast<int>(Policy::kMax)) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_get_mempolicy) returned wrong policy %d", policy);
+    return false;
+  }
+  policy_ = static_cast<Policy>(policy);
+  return true;
+}
+
+// ================================================================================================
+bool NumaPolicy::IsPolicySetAt(uint32_t node_index) const {
+  const uint32_t i = node_index / kBitsPerUInt64;
+  if (i < node_map_.size()) {
+    return ((node_map_[i] >> (node_index % kBitsPerUInt64)) & 1) ?
+        true: false;
+  } else {
+    return false;
+  }
+}
+
+// ================================================================================================
+NumaNode::~NumaNode() {
+  if (affinity_) {
+    delete static_cast<std::vector<uint64_t> *>(affinity_);
+    affinity_ = nullptr;
+  }
+}
+
+// ================================================================================================
+bool NumaNode::GetAffinity() {
+  const std::string path = "/sys/devices/system/node/node" + std::to_string(node_index_) +
+      "/cpumap";
+  std::ifstream file(path);
+  if (!file) {
+    std::cerr << "Failed to open " << path << "\n";
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "%s cannot be opened", path);
+    return false;
+  }
+  std::string line;
+  std::getline(file, line);
+  file.close();
+
+  // To remove commas and whitespace
+  line.erase(std::remove_if(line.begin(), line.end(),
+             [](unsigned char x) { return std::isspace(x) || x == ','; }), line.end());
+
+  constexpr uint32_t kHexsPerUInt64 = 2 * sizeof(uint64_t);
+  auto affinity = new std::vector<uint64_t>((line.size() + kHexsPerUInt64 - 1) / kHexsPerUInt64);
+  auto iter = affinity->begin();
+  // To parse from the end (little-endian layout)
+  for (int i = line.size(); i > 0; i -= kHexsPerUInt64) {
+    uint32_t start = (i >= kHexsPerUInt64) ? i - kHexsPerUInt64 : 0;
+    uint32_t len = (i >= kHexsPerUInt64) ? kHexsPerUInt64 : i;
+
+    const std::string chunk = line.substr(start, len);
+    const uint64_t value = std::stoul(chunk, nullptr, 16);
+    *(iter++) = value;
+    if (len == kHexsPerUInt64) {
+      size_ += kBitsPerUInt64;
+    } else {
+      // Last one
+      size_ = kBitsPerUInt64 - __builtin_clzl(value);
+    }
+  }
+  affinity_ = affinity;
+  return true;
+}
+
+// ================================================================================================
+bool NumaNode::SchedSetAffinity() {
+  if (!GetAffinity()) {
+    return false;
+  }
+  if (syscall(__NR_sched_setaffinity, 0, size_,
+              static_cast<std::vector<uint64_t>*>(affinity_)->data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_sched_setaffinity, size=%u) failed", size_);
+    return false;
+  }
+  return true;
+}
+
+}  // namespace numa
 
 }  // namespace amd
 

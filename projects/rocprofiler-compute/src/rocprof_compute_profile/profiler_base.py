@@ -503,8 +503,10 @@ class RocProfCompute_Base:
                 console_error("Profiler not supported")
 
         # PC sampling data is only collected when block "21" is specified
+        print(args.filter_blocks)
         if not (
             "21" in args.filter_blocks
+            and "pc_sampling" in args.filter_blocks
             and self.__profiler in ("rocprofv3", "rocprofiler-sdk")
         ):
             return
