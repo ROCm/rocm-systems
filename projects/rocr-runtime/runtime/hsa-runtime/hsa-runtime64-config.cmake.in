@@ -51,9 +51,8 @@ if( NOT _is_hsa_runtime_dynamic )
   set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}")
 
   find_dependency(hsakmt 1.0)
-  if (UNIX)
-    find_dependency(LibElf)
-  endif()
+  find_dependency(LibElf)
+
 endif()
 
 include( "${CMAKE_CURRENT_LIST_DIR}/@CORE_RUNTIME_NAME@Targets.cmake" )

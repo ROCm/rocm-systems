@@ -50,11 +50,8 @@
 #include <unistd.h>
 #endif
 
-#include <algorithm>
 #ifdef _WIN32
-#define WIN32_NO_STATUS
 #include <Windows.h>
-#undef WIN32_NO_STATUS
 #endif
 
 #include <stdio.h>
@@ -970,7 +967,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
         maxGroupsPerEngine < 16 &&
                               lanes_per_group * maxGroupsPerEngine < 256) {
       uint64_t groups_per_interleave = (256 + lanes_per_group - 1) / lanes_per_group;
-      maxGroupsPerEngine = Min(groups_per_interleave, uint64_t(16ul));
+      maxGroupsPerEngine = Min(groups_per_interleave, 16ul);
     }
 
     // Populate all engines at max group occupancy, then clip down to device limits.

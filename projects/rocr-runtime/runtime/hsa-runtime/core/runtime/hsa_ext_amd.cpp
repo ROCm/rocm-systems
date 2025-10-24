@@ -835,14 +835,12 @@ hsa_status_t hsa_amd_agent_iterate_memory_pools(
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
-#if defined(__linux__)
   case core::Agent::kAmdAieDevice:
     return reinterpret_cast<const AMD::AieAgent *>(agent)->VisitRegion(
         false,
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
-#endif
   case core::Agent::kAmdGpuDevice:
     return reinterpret_cast<const AMD::GpuAgentInt *>(agent)->VisitRegion(
         false,
