@@ -111,7 +111,7 @@ jobs:
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
 
-          BUILD_NAME="ROCm/rocprofiler-compute-${{ github.ref_name }}-${{ matrix.system.gpu }}-ubuntu-${{ matrix.system.os-release }}"
+          BUILD_NAME="ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}"
           SITE_NAME="${{ matrix.system.runner }}"
 
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
@@ -120,7 +120,6 @@ jobs:
             --build-name "${BUILD_NAME}" \
             --site "${SITE_NAME}" \
             --mode "Nightly" \
-            --track "GPU-${{ matrix.system.gpu }}" \
             --build-jobs 16 \
             --pytest-numprocs 8 \
             --install
