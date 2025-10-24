@@ -28,18 +28,6 @@
 #include <vector>
 #include <string>
 
-#if defined(__linux__)
-#include <sched.h>
-#endif
-
-#ifdef _WIN32
-#include <Basetsd.h>  // For KAFFINITY
-#endif                // _WIN32
-
-// Smallest supported VM page size.
-#define MIN_PAGE_SHIFT 12
-#define MIN_PAGE_SIZE (1UL << MIN_PAGE_SHIFT)
-
 namespace amd {
 
 /*! \addtogroup Os Operating System Abstraction
@@ -61,43 +49,6 @@ class Os : AllStatic {
 #endif
 
   enum MemProt { MEM_PROT_NONE = 0, MEM_PROT_READ, MEM_PROT_RW, MEM_PROT_RWX };
-
-  class ThreadAffinityMask {
-    friend class Os;
-
-   private:
-#if defined(__linux__)
-    cpu_set_t mask_;
-#else  // _WIN32
-#if !defined(_WIN32)
-    typedef uint KAFFINITY;
-#endif
-    KAFFINITY mask_[512 / sizeof(KAFFINITY)];
-#endif
-
-   public:
-    ThreadAffinityMask() { init(); }
-
-    inline void init();
-    inline void set(uint cpu);
-    inline void clear(uint cpu);
-    inline bool isSet(uint cpu) const;
-    inline bool isEmpty() const;
-    inline uint countSet() const;
-
-    inline uint getFirstSet() const;
-    inline uint getNextSet(uint cpu) const;
-
-#if defined(__linux__)
-    inline void set(const cpu_set_t& mask);
-    inline void clear(const cpu_set_t& mask);
-    inline void adjust(cpu_set_t& mask) const;
-    inline cpu_set_t& getNative() { return mask_; }
-#else
-    inline void set(size_t group, KAFFINITY affinity);
-    inline void adjust(size_t group, KAFFINITY& affinity) const;
-#endif
-  };
 
   static FileDesc FDescInit() {
 #if defined(__linux__)
@@ -176,10 +127,8 @@ class Os : AllStatic {
   static void currentStackInfo(address* base, size_t* size);
 
   //! Return the value of the current stack pointer.
-  static NOT_WIN64(inline) address currentStackPtr();
-  //! Set the value of the current stack pointer.
-  static WIN64_ONLY(inline) void WINDOWS_ONLY(__stdcall /*callee cleanup*/)
-      setCurrentStackPtr(address sp);
+  static address currentStackPtr();
+
   //! Touches all stack pages between [bottom,top[
   static void touchStackPages(address bottom, address top);
 
@@ -188,14 +137,8 @@ class Os : AllStatic {
 
   //! Create a native thread and link it to the given OsThread.
   static const void* createOsThread(Thread* osThread);
-  //! Set the thread's affinity to the given cpu ordinal.
-  static void setThreadAffinity(const void* handle, unsigned int cpu);
-  //! Set the thread's affinity to the given cpu mask.
-  static void setThreadAffinity(const void* handle, const ThreadAffinityMask& mask);
   //! Set the currently running thread's name.
   static void setCurrentThreadName(const char* name);
-  //! Set current threads affinity to that of main thread
-  static bool setThreadAffinityToMainThread();
 
   //! Check if the thread is alive
   static bool isThreadAlive(const Thread& osThread);
@@ -350,182 +293,6 @@ inline size_t Os::pageSize() {
 }
 
 inline int Os::processorCount() { return processorCount_; }
-
-#if defined(_WIN64)
-
-extern "C" void _Os_setCurrentStackPtr(address sp);
-
-ALWAYSINLINE void Os::setCurrentStackPtr(address sp) { _Os_setCurrentStackPtr(sp); }
-
-#else  // !_WIN64
-
-ALWAYSINLINE address Os::currentStackPtr() {
-  intptr_t value;
-
-#if defined(__GNUC__)
-  __asm__ __volatile__(
-#if defined(ATI_ARCH_X86)
-      LP64_SWITCH("movl %%esp", "movq %%rsp") ",%0"
-      : "=r"(value)
-#elif defined(ATI_ARCH_ARM)
-      "mov %0,sp"
-      : "=r"(value)
-#else
-      ""
-#endif
-  );
-#else   // !__GNUC__
-  __asm mov value, esp;
-#endif  // !__GNUC__
-
-  return (address)value;
-}
-
-#endif  // !_WIN64
-
-
-#if defined(__linux__)
-
-inline void Os::ThreadAffinityMask::init() { CPU_ZERO(&mask_); }
-
-inline void Os::ThreadAffinityMask::set(uint cpu) { CPU_SET(cpu, &mask_); }
-
-inline void Os::ThreadAffinityMask::clear(uint cpu) { CPU_CLR(cpu, &mask_); }
-
-inline bool Os::ThreadAffinityMask::isSet(uint cpu) const { return CPU_ISSET(cpu, &mask_); }
-
-inline bool Os::ThreadAffinityMask::isEmpty() const {
-  for (__cpu_mask bits : mask_.__bits) {
-    if (bits != 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
-inline void Os::ThreadAffinityMask::set(const cpu_set_t& mask) { mask_ = mask; }
-
-inline void Os::ThreadAffinityMask::clear(const cpu_set_t& mask) {
-  for (uint i = 0; i < sizeof(mask_.__bits) / sizeof(mask_.__bits[0]); ++i) {
-    mask_.__bits[i] &= ~mask.__bits[i];
-  }
-}
-
-inline void Os::ThreadAffinityMask::adjust(cpu_set_t& mask) const {
-  for (uint i = 0; i < sizeof(mask_.__bits) / sizeof(mask_.__bits[0]); ++i) {
-    mask.__bits[i] &= mask_.__bits[i];
-  }
-}
-
-inline uint Os::ThreadAffinityMask::countSet() const {
-  uint count = 0;
-  for (__cpu_mask bits : mask_.__bits) {
-    count += countBitsSet(bits);
-  }
-  return count;
-}
-
-inline uint Os::ThreadAffinityMask::getFirstSet() const {
-  uint i = 0;
-  for (__cpu_mask bits : mask_.__bits) {
-    if (bits != 0) {
-      return leastBitSet(bits) + (i * (8 * sizeof(__cpu_mask)));
-    }
-
-    ++i;
-  }
-  return (uint)-1;
-}
-
-inline uint Os::ThreadAffinityMask::getNextSet(uint cpu) const {
-  const uint32_t* bits = (const uint32_t*)mask_.__bits;
-  ++cpu;
-  uint j = cpu % (8 * sizeof(uint32_t));
-  for (uint i = cpu / (8 * sizeof(uint32_t)); i < sizeof(mask_.__bits) / (sizeof(uint32_t)); ++i) {
-    if (bits[i] != 0) {
-      for (; j < (8 * sizeof(uint32_t)); ++j) {
-        if (0 != (bits[i] & ((uint32_t)1 << j))) {
-          return i * (8 * sizeof(uint32_t)) + j;
-        }
-      }
-    }
-    j = 0;
-  }
-  return (uint)-1;
-}
-
-#else
-
-inline void Os::ThreadAffinityMask::init() {
-  for (uint i = 0; i < sizeof(mask_) / sizeof(KAFFINITY); ++i) {
-    mask_[i] = (KAFFINITY)0;
-  }
-}
-
-inline void Os::ThreadAffinityMask::set(uint cpu) {
-  mask_[cpu / (8 * sizeof(KAFFINITY))] |= (KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)));
-}
-
-inline void Os::ThreadAffinityMask::clear(uint cpu) {
-  mask_[cpu / (8 * sizeof(KAFFINITY))] &= ~((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY))));
-}
-
-inline bool Os::ThreadAffinityMask::isSet(uint cpu) const {
-  return (KAFFINITY)0 !=
-         (mask_[cpu / (8 * sizeof(KAFFINITY))] & ((KAFFINITY)1 << (cpu % (8 * sizeof(KAFFINITY)))));
-}
-
-inline bool Os::ThreadAffinityMask::isEmpty() const {
-  for (uint i = 0; i < sizeof(mask_) / sizeof(KAFFINITY); ++i) {
-    if (mask_[i] != (KAFFINITY)0) {
-      return false;
-    }
-  }
-  return true;
-}
-
-inline void Os::ThreadAffinityMask::set(size_t group, KAFFINITY affinity) {
-  mask_[group] |= affinity;
-}
-
-inline void Os::ThreadAffinityMask::adjust(size_t group, KAFFINITY& affinity) const {
-  affinity &= mask_[group];
-}
-
-inline uint Os::ThreadAffinityMask::countSet() const {
-  uint count = 0;
-  for (uint i = 0; i < sizeof(mask_) / sizeof(KAFFINITY); ++i) {
-    count += countBitsSet(mask_[i]);
-  }
-  return count;
-}
-
-inline uint Os::ThreadAffinityMask::getFirstSet() const {
-  for (uint i = 0; i < sizeof(mask_) / sizeof(KAFFINITY); ++i) {
-    if (mask_[i] != 0) {
-      return leastBitSet(mask_[i]) + (i * (8 * sizeof(KAFFINITY)));
-    }
-  }
-  return (uint)-1;
-}
-
-inline uint Os::ThreadAffinityMask::getNextSet(uint cpu) const {
-  ++cpu;
-  uint j = cpu % (8 * sizeof(KAFFINITY));
-  for (uint i = cpu / (8 * sizeof(KAFFINITY)); i < sizeof(mask_) / sizeof(KAFFINITY); ++i) {
-    if (mask_[i] != 0) {
-      for (; j < (8 * sizeof(KAFFINITY)); ++j) {
-        if (0 != (mask_[i] & ((KAFFINITY)1 << j))) {
-          return i * (8 * sizeof(KAFFINITY)) + j;
-        }
-      }
-    }
-    j = 0;
-  }
-  return (uint)-1;
-}
-
-#endif
 
 /* Mini numa interface instead of numa lib apis */
 namespace numa {
