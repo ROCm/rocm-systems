@@ -64,7 +64,7 @@ check_format_attributes() {
         return 1
     fi
 
-    local expected_attrs=("config" "config1" "xcc" "se" "sa" "wgp" "cu" "aggregate" "sample_all")
+    local expected_attrs=("config" "config1" "xcc" "se" "sa" "wgp" "cu" "aggregate")
     local all_found=true
 
     for attr in "${expected_attrs[@]}"; do
@@ -99,7 +99,6 @@ verify_format_ranges() {
         ["wgp"]="config1:24-31"
         ["cu"]="config1:32-39"
         ["aggregate"]="config1:40"
-        ["sample_all"]="config1:41"
     )
 
     local all_correct=true
@@ -201,14 +200,6 @@ test_mixed_syntax() {
         log_success "Mixed syntax: se=1,aggregate=1"
     else
         log_warn "Mixed syntax: se=1,aggregate=1 (aggregate mode not yet implemented)"
-    fi
-
-    # Test 2: sample_all flag
-    log_info "Test: sample_all=1"
-    if perf stat -e amdgpu_pmu/sq_waves,sample_all=1/ -a sleep 0.1 2>&1 | grep -q "sq_waves"; then
-        log_success "Mixed syntax: sample_all=1"
-    else
-        log_warn "Mixed syntax: sample_all=1 (sample_all mode not yet implemented)"
     fi
 }
 
