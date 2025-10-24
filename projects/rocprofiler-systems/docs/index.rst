@@ -11,8 +11,12 @@ of applications running on the CPU or the CPU and GPU. It supports dynamic binar
 instrumentation, call-stack sampling, and various other features for determining
 which function and line number are currently executing. To learn more, see :doc:`what-is-rocprof-sys`
 
-ROCm Systems Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems>`__.
-It is the successor to `<https://github.com/ROCm/omnitrace>`__.
+ROCm Systems Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`__.
+
+.. note::
+
+  The ROCm Systems Profiler repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-systems>`_.
+  ROCm Systems Profiler is the successor to `<https://github.com/ROCm/omnitrace>`__.
 
 .. grid:: 2
   :gutter: 3
