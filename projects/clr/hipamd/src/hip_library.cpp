@@ -70,6 +70,9 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
       kern = ki->second;
     } else {
       auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
+      if (ret != hipSuccess) {
+        return ret;
+      }
       Register(f.first, device_id, kern);
     }
     k[count++] = kern;
@@ -89,7 +92,9 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
     return hipErrorNotFound;
   }
   auto ret = f->second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
-
+  if (ret != hipSuccess) {
+    return ret;
+  }
   // Register it, basically make it available for query though the hip context.
   Register(name, device_id, *k);
   return hipSuccess;
