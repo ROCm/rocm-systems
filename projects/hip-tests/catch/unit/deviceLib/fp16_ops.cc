@@ -27,6 +27,10 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <limits>
 
+#if !defined(USE_PREBUILT_CATCH)
+  using namespace Catch;
+#endif
+
 __global__ void fp16_arith_gpu(float* a, float* b, float* c) {
   c[0] = __half2float(__hadd(__float2half_rn(a[0]), __float2half_rn(b[0])));
   c[1] = __half2float(__hsub(__float2half_rn(a[1]), __float2half_rn(b[1])));
@@ -73,7 +77,11 @@ void fp16_arith_cpu(const std::vector<float>& a, const std::vector<float>& b,
 TEST_CASE("Unit_fp16_arith") {
   constexpr size_t num_of_ops = 18;
   constexpr size_t iters = 100;
+#if defined(USE_PREBUILT_CATCH)
   Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f);
+#else
+  Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /*seed*/ 0x1234);
+#endif
   constexpr float input2 = 1.1f;
   for (size_t iter = 0; iter < iters; iter++) {
     auto input1 = input1_gen.get();
@@ -153,7 +161,11 @@ void fp162_arith_cpu(std::vector<float2>& a, std::vector<float2>& b, std::vector
 TEST_CASE("Unit_fp162_arith") {
   constexpr size_t num_of_ops = 18;
   constexpr size_t iters = 100;
+#if defined(USE_PREBUILT_CATCH)
   Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f);
+#else
+  Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /* seed */ 0x1234);
+#endif
   for (size_t iter = 0; iter < iters; iter++) {
     auto input1 = input1_gen.get();
     auto input2 = input1_gen.get();

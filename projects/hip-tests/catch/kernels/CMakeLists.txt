@@ -5,4 +5,7 @@ if(NOT RTC_TESTING)
 
     add_library(KERNELS EXCLUDE_FROM_ALL OBJECT ${TEST_SRC})
     target_compile_options(KERNELS PUBLIC -std=c++17)
+    if(NOT USE_PREBUILT_CATCH)
+        target_link_libraries(KERNELS PRIVATE Catch2::Catch2)
+    endif()
 endif()

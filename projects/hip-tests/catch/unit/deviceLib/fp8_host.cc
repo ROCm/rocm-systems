@@ -27,6 +27,11 @@ THE SOFTWARE.
 #include <vector>
 #include <bitset>
 
+#if !defined(USE_PREBUILT_CATCH)
+  using namespace Catch;
+#endif
+
+
 /*
  * Tests for fp8 conversions on host
  * Both FNUZ and OCP types are supported on host

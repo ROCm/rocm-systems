@@ -27,6 +27,11 @@ THE SOFTWARE.
 #include <vector>
 #include <bitset>
 
+#if !defined(USE_PREBUILT_CATCH)
+  using namespace Catch;
+#endif
+
+
 /*
  * This catch test is meant for FP8 OCP conversions
  * tests only supported on gfx1200 and gfx1201 archs

@@ -19,6 +19,8 @@ THE SOFTWARE.
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
+#include <random>
+
 #include <cmd_options.hh>
 #include <cpu_grid.h>
 #include <resource_guards.hh>

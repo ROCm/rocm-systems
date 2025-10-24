@@ -1,6 +1,48 @@
 cmake_minimum_required(VERSION 3.16.8)
 
-# to skip the simple compiler test
+# Read -DHIP_PATH
+# If not set read env{HIP_PATH} only on Windows
+if(WIN32)
+    if(NOT DEFINED HIP_PATH)
+        if(DEFINED ENV{HIP_PATH})
+            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
+        endif()
+    endif()
+endif()
+
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm")
+endif()
+if(NOT DEFINED HIP_PATH)
+    set(HIP_PATH ${ROCM_PATH})
+endif()
+
+if(NOT DEFINED HIPCC_EXEC)
+    if(WIN32)
+        set(HIPCC_EXEC "hipcc.exe")
+    else()
+        set(HIPCC_EXEC "hipcc")
+    endif()
+endif()
+if(NOT DEFINED HIPCONFIG_EXEC)
+    if(WIN32)
+        set(HIPCONFIG_EXEC "hipconfig.exe")
+    else()
+        set(HIPCONFIG_EXEC "hipconfig")
+    endif()
+endif()
+
+# hip-tests only work with HIPCC for now
+# We need to move to amdclang++, for now we enforce hipcc
+# using that as default for hiptests project
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
+endif()
+if(NOT DEFINED CMAKE_C_COMPILER)
+    set(CMAKE_C_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
+endif()
+
+# Skip compiler check
 set(CMAKE_C_COMPILER_WORKS 1)
 set(CMAKE_CXX_COMPILER_WORKS 1)
 
@@ -8,8 +50,25 @@ project(hiptests)
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
-
+option(BUILD_UNIT_TESTS "Build unit tests" ON)
+option(BUILD_PERF_TESTS "Build perf tests" OFF)
+option(BUILD_STRESS_TESTS "Build stress tests" OFF)
+option(THEROCK_BUILD_MODE "Option to let hip-tests know if TheRock is being used to build" OFF)
+option(USE_PREBUILT_CATCH "Use the catch version shipped with hip-tests" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
+
+if(THEROCK_BUILD_MODE AND WIN32)
+    message(FATAL_ERROR "TheRock Builds are not supported on Windows... yet")
+endif()
+
+if(WIN32)
+    set(USE_PREBUILT_CATCH ON CACHE BOOL "Using catch2v2 shipped with hiptests" FORCE)
+endif()
+
+if(USE_PREBUILT_CATCH)
+    add_compile_definitions(USE_PREBUILT_CATCH)
+endif()
+
 if (TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
@@ -38,41 +97,9 @@ if(HIP_PLATFORM STREQUAL "amd")
     endif()
 endif()
 
-# Read -DHIP_PATH
-# If not set read env{HIP_PATH} only on Windows
-if(WIN32)
-    if(NOT DEFINED HIP_PATH)
-        if(DEFINED ENV{HIP_PATH})
-            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
-        endif()
-    endif()
-endif()
-
-if(NOT DEFINED HIP_PATH)
-    if(DEFINED ROCM_PATH)
-        set(HIP_PATH ${ROCM_PATH})
-    else()
-        set(HIP_PATH "/opt/rocm")
-    endif()
-endif()
-
-if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm")
-endif()
-
 message(STATUS "HIP_PATH: ${HIP_PATH}")
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
-if (WIN32)
-  set(HIPCC_EXEC "hipcc.exe")
-  set(HIPCONFIG_EXEC "hipconfig.exe")
-else()
-  set(HIPCC_EXEC "hipcc")
-  set(HIPCONFIG_EXEC "hipconfig")
-endif()
-
-set(CMAKE_C_COMPILER   "${HIP_PATH}/bin/${HIPCC_EXEC}")
-set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
 execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
                 OUTPUT_VARIABLE HIP_VERSION
                 RESULT_VARIABLE result
@@ -118,14 +145,6 @@ else()
    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
-if(NOT DEFINED CATCH2_PATH)
-    if(DEFINED ENV{CATCH2_PATH})
-        set(CATCH2_PATH $ENV{CATCH2_PATH} CACHE STRING "Catch2 Path")
-    else()
-        set(CATCH2_PATH "${CMAKE_CURRENT_LIST_DIR}/external/Catch2")
-    endif()
-endif()
-message(STATUS "Catch2 Path: ${CATCH2_PATH}")
 
 # Set JSON Parser path
 if(NOT DEFINED JSON_PARSER)
@@ -136,21 +155,46 @@ if(NOT DEFINED JSON_PARSER)
     endif()
 endif()
 
-message(STATUS "Searching Catch2 in: ${CMAKE_CURRENT_LIST_DIR}/external")
-find_package(Catch2 REQUIRED
-    PATHS
-        ${CMAKE_CURRENT_LIST_DIR}/external
-    PATH_SUFFIXES
-    Catch2/cmake/Catch2
-)
-include(Catch)
+# Use Prebuilt Catch2, this is for windows
+if(USE_PREBUILT_CATCH)
+    find_package(Catch2 CONFIG REQUIRED
+        PATHS
+            ${CMAKE_CURRENT_LIST_DIR}/external
+        PATH_SUFFIXES
+        Catch2/cmake/Catch2
+    )
+    include(Catch)
+    include_directories(${CMAKE_CURRENT_LIST_DIR}/external/Catch2)
+    # path used for generating the *_include.cmake file
+    set(CATCH2_INCLUDE ${CATCH2_PATH}/cmake/Catch2/catch_include.cmake.in)
+    set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
+    file(COPY ./external/Catch2/cmake/Catch2/CatchAddTests.cmake
+         DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+    file(COPY ./external/Catch2/cmake/Catch2/catch_include.cmake
+         DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+    set(ADD_SCRIPT_PATH ${CATCH_SCRIPT_BINARY_DIR}/CatchAddTests.cmake)
+    set(CATCH_INCLUDE_PATH ${CATCH_SCRIPT_BINARY_DIR}/catch_include.cmake)
+else()
+    if(NOT THEROCK_BUILD_MODE)
+        # Setup catch2 manually
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
+            DOWNLOAD_EXTRACT_TIMESTAMP OFF
+            URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
+        )
+        FetchContent_MakeAvailable(Catch2)
+    else()
+        # TheRock has already setup Catch2 for us
+        find_package(Catch2 REQUIRED)
+    endif()
+    include(cmake/hip-tests.cmake)
+endif() # USE_PREBUILT_CATCH
+
 include(CTest)
 
-# path used for generating the *_include.cmake file
-set(CATCH2_INCLUDE ${CATCH2_PATH}/cmake/Catch2/catch_include.cmake.in)
-
 include_directories(
-    ${CATCH2_PATH}
     "./include"
     "./kernels"
     ${HIP_PATH}/include
@@ -171,13 +215,6 @@ foreach(json IN LISTS JSON_FILES)
     file(COPY ${json}
          DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
 endforeach()
-set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-file(COPY ./external/Catch2/cmake/Catch2/CatchAddTests.cmake
-     DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
-file(COPY ./external/Catch2/cmake/Catch2/catch_include.cmake
-     DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
-set(ADD_SCRIPT_PATH ${CATCH_SCRIPT_BINARY_DIR}/CatchAddTests.cmake)
-set(CATCH_INCLUDE_PATH ${CATCH_SCRIPT_BINARY_DIR}/catch_include.cmake)
 
 if (WIN32)
   configure_file(catchProp_in_rc.in ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc @ONLY)
@@ -198,11 +235,6 @@ endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
     add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored)
-endif()
-
-cmake_policy(PUSH)
-if(POLICY CMP0037)
-    cmake_policy(SET CMP0037 OLD)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -318,7 +350,6 @@ file(COPY ./unit/compileAndCaptureOutput.py
 
 file(COPY ./include/hip_test_common.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
 file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
-file(COPY ./external/Catch2/catch.hpp DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
 
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
@@ -331,15 +362,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_custom_target(build_tests)
 
 # Tests folder
-add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
-add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
-add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
-add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
-add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
-add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
-add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
+if(BUILD_UNIT_TESTS)
+    add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
+    add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
+    add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
+    add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+    add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
+    add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
+endif()
+if(BUILD_PERF_TESTS)
+    add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
+    add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
+endif()
+if(BUILD_STRESS_TESTS)
+    add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
+endif()
 
 add_custom_target(gen_coverage
                   COMMAND ${CMAKE_COMMAND} -B build/
@@ -347,8 +384,6 @@ add_custom_target(gen_coverage
                   COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
                   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
                   COMMENT "Generating Test Coverage Report")
-
-cmake_policy(POP)
 
 # packaging the tests
 # make package_test to generate packages for test

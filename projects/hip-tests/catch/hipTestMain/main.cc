@@ -36,7 +36,11 @@ int main(int argc, char** argv) {
 
   Catch::Session session;
 
+#if defined(USE_PREBUILT_CATCH)
   using namespace Catch::clara;
+#else
+  using namespace Catch::Clara;
+#endif
   // clang-format off
   auto cli = session.cli()
     | Opt(cmd_options.iterations, "iterations")

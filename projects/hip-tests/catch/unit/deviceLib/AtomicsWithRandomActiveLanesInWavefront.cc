@@ -37,6 +37,9 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 using namespace std;
+#if !defined(USE_PREBUILT_CATCH)
+  using namespace Catch;
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // Auto-Verification Code
