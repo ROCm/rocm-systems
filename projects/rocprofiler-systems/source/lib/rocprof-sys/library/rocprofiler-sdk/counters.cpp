@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/rocprofiler-sdk/counters.hpp"
+#include "core/agent_manager.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
@@ -117,10 +118,13 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
         const size_t      agent_handle    = record.record_counter.agent_id.handle;
         const size_t      value           = record.record_counter.counter_value;
 
+        auto agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
+
         trace_cache::get_buffer_storage().store(
             trace_cache::entry_type::pmc_event_with_sample, track_name.c_str(),
             _timing.start, event_metadata.c_str(), stack_id, parent_stack_id,
-            correlation_id, call_stack.c_str(), line_info.c_str(), agent_handle,
+            correlation_id, call_stack.c_str(), line_info.c_str(),
+            static_cast<uint32_t>(agent.device_id), static_cast<uint8_t>(agent.type),
             track_name.c_str(), value);
     }
 }
