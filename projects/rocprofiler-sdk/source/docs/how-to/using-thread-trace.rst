@@ -80,9 +80,9 @@ The following table lists the parameters relevant to thread tracing:
 |                          |         |         | Navi: 0x0 | Bitmask on GFX9 and SIMD_ID[0,3] on Navi.                    |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | kernel-iteration-range   | List    |         |           | Defines dispatch iteration of the kernel to be profiled.     |
-|                          |         |         |           | Hyphen (-) specifies a range: 1-10 means iterations 1-10.   |
-|                          |         |         |           | Comma (,) specifies individual items: 1,10 means only 1,10. |
-|                          |         |         |           | Can combine: [1,2,[5-8]] means iterations 1,2,5,6,7,8.      |
+|                          |         |         |           | Hyphen (-) specifies a range: 1-10 means iterations 1-10.    |
+|                          |         |         |           | Comma (,) specifies individual items: 1,10 means only 1,10.  |
+|                          |         |         |           | Can combine: [1,2,[5-8]] means iterations 1,2,5,6,7,8.       |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | kernel-include-regex     | String  | Any     |           | Profiles kernel names matching the regex                     |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
@@ -157,7 +157,7 @@ If you're familiar with rocprofv1/v2 ATT (Advanced Thread Trace) parameters, thi
 | SIMD_SELECT                | --att-simd-select           | Same value range (0-0xF)                      |
 +----------------------------+-----------------------------+-----------------------------------------------+
 | BUFFER_SIZE                | --att-buffer-size           | **v1/v2: MB, v3: bytes**                      |
-|                            |                             | v1/v2: 192 = v3: 201326592 (or 0xC000000)    |
+|                            |                             | v1/v2: 192 = v3: 201326592 (or 0xC000000)     |
 +----------------------------+-----------------------------+-----------------------------------------------+
 | DISPATCH_RANGE             | --kernel-iteration-range    | Syntax changed: see iteration range section   |
 |                            |                             | v1/v2: 4000,4500 = v3: 4000-4500              |
