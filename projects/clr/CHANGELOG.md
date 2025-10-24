@@ -8,6 +8,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `hipStreamCopyAttributes` Copies attributes from source stream to destination stream
+    - `hipLibraryEnumerateKernels` Return Kernel handles within a library
+    - `hipKernelGetLibrary` Return Library handle for a hipKernel_t handle
+    - `hipKernelGetName` Return function name for a hipKernel_t handle
 
 ## HIP 7.1 for ROCm 7.1
 
