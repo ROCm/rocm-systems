@@ -10,41 +10,33 @@ if(WIN32)
     endif()
 endif()
 
+if(NOT DEFINED HIP_PATH)
+    if(DEFINED ROCM_PATH)
+        set(HIP_PATH ${ROCM_PATH})
+    else()
+        set(HIP_PATH "/opt/rocm")
+    endif()
+endif()
+
 if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "/opt/rocm")
 endif()
-if(NOT DEFINED HIP_PATH)
-    set(HIP_PATH ${ROCM_PATH})
-endif()
 
-if(NOT DEFINED HIPCC_EXEC)
-    if(WIN32)
-        set(HIPCC_EXEC "hipcc.exe")
-    else()
-        set(HIPCC_EXEC "hipcc")
-    endif()
-endif()
-if(NOT DEFINED HIPCONFIG_EXEC)
-    if(WIN32)
-        set(HIPCONFIG_EXEC "hipconfig.exe")
-    else()
-        set(HIPCONFIG_EXEC "hipconfig")
-    endif()
-endif()
-
-# hip-tests only work with HIPCC for now
-# We need to move to amdclang++, for now we enforce hipcc
-# using that as default for hiptests project
-if(NOT DEFINED CMAKE_CXX_COMPILER)
-    set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
-endif()
-if(NOT DEFINED CMAKE_C_COMPILER)
-    set(CMAKE_C_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
+if (WIN32)
+  set(HIPCC_EXEC "hipcc.exe")
+  set(HIPCONFIG_EXEC "hipconfig.exe")
+else()
+  set(HIPCC_EXEC "hipcc")
+  set(HIPCONFIG_EXEC "hipconfig")
 endif()
 
 # Skip compiler check
 set(CMAKE_C_COMPILER_WORKS 1)
 set(CMAKE_CXX_COMPILER_WORKS 1)
+
+# This needs to be set before project because we might need to compile catch2
+set(CMAKE_C_COMPILER   "${HIP_PATH}/bin/${HIPCC_EXEC}")
+set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
 
 project(hiptests)
 
