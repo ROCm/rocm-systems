@@ -79,7 +79,10 @@ The following table lists the parameters relevant to thread tracing:
 | att-simd-select          | Integer | 0 - 0xF | gfx9: 0xF | Defines one or more SIMDs to be traced, out of four.         |
 |                          |         |         | Navi: 0x0 | Bitmask on GFX9 and SIMD_ID[0,3] on Navi.                    |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| kernel-iteration-range   | List    |         |           | Defines dispatch iteration of the kernel to be profiled      |
+| kernel-iteration-range   | List    |         |           | Defines dispatch iteration of the kernel to be profiled.     |
+|                          |         |         |           | Hyphen (-) specifies a range: 1-10 means iterations 1-10.   |
+|                          |         |         |           | Comma (,) specifies individual items: 1,10 means only 1,10. |
+|                          |         |         |           | Can combine: [1,2,[5-8]] means iterations 1,2,5,6,7,8.      |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | kernel-include-regex     | String  | Any     |           | Profiles kernel names matching the regex                     |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
@@ -126,6 +129,177 @@ For AMD Radeon, the ``simd-select`` parameter is a SIMD ID defaulting to 3. For 
 
   rocprofv3 --att --att-simd-select 0x0 -- <application_path>
 
+Migrating from rocprofv1/v2 thread trace
+===========
+
+If you're familiar with rocprofv1/v2 ATT (Advanced Thread Trace) parameters, this section maps the old configuration format to the new rocprofv3 command-line options.
+
+**Old rocprofv1/v2 input file format:**
+
+.. code-block:: text
+
+  att: TARGET_CU=0
+  SE_MASK=0xffffffff
+  SIMD_SELECT=0
+  DISPATCH_RANGE=4000,4500
+  BUFFER_SIZE=192
+  PERFCOUNTERS_CTRL=8
+
+**Parameter mapping table:**
+
++----------------------------+-----------------------------+-----------------------------------------------+
+| rocprofv1/v2 Parameter     | rocprofv3 Parameter         | Notes                                         |
++============================+=============================+===============================================+
+| TARGET_CU                  | --att-target-cu             | Same value range (0-15)                       |
++----------------------------+-----------------------------+-----------------------------------------------+
+| SE_MASK                    | --att-shader-engine-mask    | Same hex bitmask format                       |
++----------------------------+-----------------------------+-----------------------------------------------+
+| SIMD_SELECT                | --att-simd-select           | Same value range (0-0xF)                      |
++----------------------------+-----------------------------+-----------------------------------------------+
+| BUFFER_SIZE                | --att-buffer-size           | **v1/v2: MB, v3: bytes**                      |
+|                            |                             | v1/v2: 192 = v3: 201326592 (or 0xC000000)    |
++----------------------------+-----------------------------+-----------------------------------------------+
+| DISPATCH_RANGE             | --kernel-iteration-range    | Syntax changed: see iteration range section   |
+|                            |                             | v1/v2: 4000,4500 = v3: 4000-4500              |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTERS_CTRL          | --att-perfcounter-ctrl      | Same value range (1-32), gfx9 only            |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTER                | --att-perfcounters          | Counter name, gfx9 only                       |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTER_ID             | --att-perfcounters          | Counter ID, gfx9 only                         |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTER_MASK           | N/A                         | Use --att-target-cu to select CU              |
++----------------------------+-----------------------------+-----------------------------------------------+
+| ISA_CAPTURE_MODE           | N/A                         | Code object capture is automatic in v3        |
++----------------------------+-----------------------------+-----------------------------------------------+
+| OCCUPANCY                  | N/A                         | For similar effect, see --att-no-detail       |
++----------------------------+-----------------------------+-----------------------------------------------+
+
+**Equivalent rocprofv3 command:**
+
+.. code-block:: bash
+
+  # rocprofv1/v2 config converted to rocprofv3
+  rocprofv3 --att \
+    --att-target-cu 0 \
+    --att-shader-engine-mask 0xffffffff \
+    --att-simd-select 0 \
+    --kernel-iteration-range 4000-4500 \
+    --att-buffer-size 201326592 \
+    --att-perfcounter-ctrl 8 \
+    -- <application_path>
+
+  # Or using JSON input file:
+
+.. code-block:: text
+
+  {
+      "jobs": [
+          {
+              "advanced_thread_trace": true,
+              "att_target_cu": 0,
+              "att_shader_engine_mask": "0xffffffff",
+              "att_simd_select": "0x0",
+              "att_buffer_size": "0xC000000",
+              "kernel_iteration_range": "4000-4500",
+              "att_perfcounter_ctrl": 8
+          }
+      ]
+  }
+
+**Key differences:**
+
+- **Buffer size units:** rocprofv1/v2 used megabytes, rocprofv3 uses bytes. Multiply your old value by 1,048,576 (or left-shift by 20 bits).
+- **Dispatch range syntax:** rocprofv1/v2 used comma notation for ranges (4000,4500), rocprofv3 uses hyphen for ranges (4000-4500) and comma for individual items.
+- **No input.txt file:** rocprofv3 uses command-line options or JSON/YAML input files instead of the old input.txt format.
+- **Kernel filtering:** Use --kernel-include-regex and --kernel-exclude-regex for kernel name filtering in rocprofv3.
+
+Parameter usage examples
+===========
+
+This section provides examples of using various thread trace parameters.
+
+**Targeting specific CU and shader engine:**
+
+.. code-block:: bash
+
+  # Trace CU 2 on shader engine 0 (mask 0x1)
+  rocprofv3 --att --att-target-cu 2 --att-shader-engine-mask 0x1 -- <application_path>
+
+  # Trace multiple shader engines (mask 0xF traces 4 SEs)
+  rocprofv3 --att --att-shader-engine-mask 0xF -- <application_path>
+
+**Adjusting buffer size:**
+
+.. code-block:: bash
+
+  # Increase buffer to 256MB to avoid data loss
+  rocprofv3 --att --att-buffer-size 268435456 -- <application_path>
+
+  # Use 1GB buffer for long-running kernels
+  rocprofv3 --att --att-buffer-size 0x40000000 -- <application_path>
+
+**Kernel filtering and iteration ranges:**
+
+.. code-block:: bash
+
+  # Trace only kernels matching "matmul"
+  rocprofv3 --att --kernel-include-regex "matmul" -- <application_path>
+
+  # Trace iterations 5 through 10 of matching kernels
+  rocprofv3 --att --kernel-include-regex "matmul" --kernel-iteration-range 5-10 -- <application_path>
+
+  # Trace specific iterations 1, 3, and 7 through 9
+  rocprofv3 --att --kernel-include-regex "matmul" --kernel-iteration-range "1,3,[7-9]" -- <application_path>
+
+  # Exclude specific kernels from profiling
+  rocprofv3 --att --kernel-include-regex ".*" --kernel-exclude-regex "copy.*" -- <application_path>
+
+**GPU selection:**
+
+.. code-block:: bash
+
+  # Trace only on GPU 0
+  rocprofv3 --att --att-gpu-index 0 -- <application_path>
+
+  # Trace on GPUs 0 and 2
+  rocprofv3 --att --att-gpu-index 0,2 -- <application_path>
+
+**Consecutive kernel profiling:**
+
+.. code-block:: bash
+
+  # Profile 5 consecutive kernels starting from the first "matmul" kernel
+  rocprofv3 --att --kernel-include-regex "matmul" --att-consecutive-kernels 5 -- <application_path>
+
+  # Combined with GPU selection
+  rocprofv3 --att --kernel-include-regex "conv" --att-consecutive-kernels 3 --att-gpu-index 0 -- <application_path>
+
+**Performance counter streaming (gfx9 only):**
+
+.. code-block:: bash
+
+  # Enable activity counters with period 8
+  rocprofv3 --att --att-activity 8 -- <application_path>
+
+  # Custom perfcounter control period
+  rocprofv3 --att --att-perfcounter-ctrl 4 -- <application_path>
+
+**Combined parameters:**
+
+.. code-block:: bash
+
+  # Comprehensive example: trace specific kernels on specific hardware
+  rocprofv3 --att \
+    --att-target-cu 1 \
+    --att-shader-engine-mask 0x1 \
+    --att-simd-select 0xF \
+    --att-buffer-size 0x10000000 \
+    --kernel-include-regex "mykernel.*" \
+    --kernel-iteration-range "2-5" \
+    --att-gpu-index 0 \
+    -d output_dir \
+    -- <application_path>
 
 Using input file
 ===========
@@ -141,10 +315,14 @@ As explained in the preceding section, you can specify parameters on the command
               "att_target_cu": 1,
               "att_shader_engine_mask": "0x1",
               "att_simd_select": "0xF",
-              "att_buffer_size": "0x6000000"
+              "att_buffer_size": "0x6000000",
+              "kernel_include_regex": "matmul.*",
+              "kernel_iteration_range": "[1,2,[5-8]]"
           }
       ]
   }
+
+This example traces iterations 1, 2, 5, 6, 7, and 8 of kernels matching "matmul.*"
 
 Thread tracing for multiple kernel instances
 =============================
