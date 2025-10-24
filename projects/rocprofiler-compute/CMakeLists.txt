@@ -53,6 +53,11 @@ set(EXECUTABLE_NAME "rocprof-compute")
 
 include(ExternalProject)
 include(GNUInstallDirs)
+include( utils.cmake )
+
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+set( COMP_TYPE "main" )
 
 # version control info
 execute_process(
@@ -696,6 +701,8 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 # Packaging
 # ----------
 
+set(PKG_MAINTAINER_NM  "rocprofiler compute support")
+set(PKG_MAINTAINER_EMAIL  "dl.omnitools@amd.com")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
@@ -799,5 +806,7 @@ set(CPACK_SOURCE_IGNORE_FILES
     /tests
     /build
 )
+
+configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
 include(CPack)
