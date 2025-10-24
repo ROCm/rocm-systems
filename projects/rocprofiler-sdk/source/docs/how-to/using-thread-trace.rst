@@ -129,91 +129,6 @@ For AMD Radeon, the ``simd-select`` parameter is a SIMD ID defaulting to 3. For 
 
   rocprofv3 --att --att-simd-select 0x0 -- <application_path>
 
-Migrating from rocprofv1/v2 thread trace
-===========================================
-
-If you're familiar with rocprofv1/v2 ATT (Advanced Thread Trace) parameters, this section maps the old configuration format to the new rocprofv3 command-line options.
-
-**Old rocprofv1/v2 input file format:**
-
-.. code-block:: text
-
-  att: TARGET_CU=0
-  SE_MASK=0xffffffff
-  SIMD_SELECT=0
-  DISPATCH_RANGE=4000,4500
-  BUFFER_SIZE=192
-  PERFCOUNTERS_CTRL=8
-
-**Parameter mapping table:**
-
-+----------------------------+-----------------------------+-----------------------------------------------+
-| rocprofv1/v2 Parameter     | rocprofv3 Parameter         | Notes                                         |
-+============================+=============================+===============================================+
-| TARGET_CU                  | --att-target-cu             | Same value range (0-15)                       |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| SE_MASK                    | --att-shader-engine-mask    | Same hex bitmask format                       |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| SIMD_SELECT                | --att-simd-select           | Same value range (0-0xF)                      |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| BUFFER_SIZE                | --att-buffer-size           | **v1/v2: MB, v3: bytes**                      |
-|                            |                             | v1/v2: 192 = v3: 201326592 (or 0xC000000)     |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| DISPATCH_RANGE             | --kernel-iteration-range    | Syntax changed: see iteration range section   |
-|                            |                             | v1/v2: 4000,4500 = v3: 4000-4500              |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| PERFCOUNTERS_CTRL          | --att-perfcounter-ctrl      | Same value range (1-32), gfx9 only            |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| PERFCOUNTER                | --att-perfcounters          | Counter name, gfx9 only                       |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| PERFCOUNTER_ID             | --att-perfcounters          | Counter ID, gfx9 only                         |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| PERFCOUNTER_MASK           | N/A                         | Use --att-target-cu to select CU              |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| ISA_CAPTURE_MODE           | N/A                         | Code object capture is automatic in v3        |
-+----------------------------+-----------------------------+-----------------------------------------------+
-| OCCUPANCY                  | N/A                         | For similar effect, see --att-no-detail       |
-+----------------------------+-----------------------------+-----------------------------------------------+
-
-**Equivalent rocprofv3 command:**
-
-.. code-block:: bash
-
-  # rocprofv1/v2 config converted to rocprofv3
-  rocprofv3 --att \
-    --att-target-cu 0 \
-    --att-shader-engine-mask 0xffffffff \
-    --att-simd-select 0 \
-    --kernel-iteration-range 4000-4500 \
-    --att-buffer-size 201326592 \
-    --att-perfcounter-ctrl 8 \
-    -- <application_path>
-
-  # Or using JSON input file:
-
-.. code-block:: text
-
-  {
-      "jobs": [
-          {
-              "advanced_thread_trace": true,
-              "att_target_cu": 0,
-              "att_shader_engine_mask": "0xffffffff",
-              "att_simd_select": "0x0",
-              "att_buffer_size": "0xC000000",
-              "kernel_iteration_range": "4000-4500",
-              "att_perfcounter_ctrl": 8
-          }
-      ]
-  }
-
-**Key differences:**
-
-- **Buffer size units:** rocprofv1/v2 used megabytes, rocprofv3 uses bytes. Multiply your old value by 1,048,576 (or left-shift by 20 bits).
-- **Dispatch range syntax:** rocprofv1/v2 used comma notation for ranges (4000,4500), rocprofv3 uses hyphen for ranges (4000-4500) and comma for individual items.
-- **No input.txt file:** rocprofv3 uses command-line options or JSON/YAML input files instead of the old input.txt format.
-- **Kernel filtering:** Use --kernel-include-regex and --kernel-exclude-regex for kernel name filtering in rocprofv3.
-
 Parameter usage examples
 ========================
 
@@ -433,3 +348,88 @@ Here are some options to handle this:
     
   * This can potentially cause low performance in high-demanding kernels.
     
+Migrating from rocprofv2 thread trace
+======================================
+
+If you're familiar with rocprofv2 ATT (Advanced Thread Trace) parameters, this section maps the old configuration format to the new rocprofv3 command-line options.
+
+**Old rocprofv2 input file format:**
+
+.. code-block:: text
+
+  att: TARGET_CU=0
+  SE_MASK=0xffffffff
+  SIMD_SELECT=0
+  DISPATCH_RANGE=4000,4500
+  BUFFER_SIZE=192
+  PERFCOUNTERS_CTRL=8
+
+**Parameter mapping table:**
+
++----------------------------+-----------------------------+-----------------------------------------------+
+| rocprofv2 Parameter        | rocprofv3 Parameter         | Notes                                         |
++============================+=============================+===============================================+
+| TARGET_CU                  | --att-target-cu             | Same value range (0-15)                       |
++----------------------------+-----------------------------+-----------------------------------------------+
+| SE_MASK                    | --att-shader-engine-mask    | Same hex bitmask format                       |
++----------------------------+-----------------------------+-----------------------------------------------+
+| SIMD_SELECT                | --att-simd-select           | Same value range (0-0xF)                      |
++----------------------------+-----------------------------+-----------------------------------------------+
+| BUFFER_SIZE                | --att-buffer-size           | **v2: MB, v3: bytes**                         |
+|                            |                             | v2: 192 = v3: 201326592 (or 0xC000000)        |
++----------------------------+-----------------------------+-----------------------------------------------+
+| DISPATCH_RANGE             | --kernel-iteration-range    | Syntax changed: see iteration range section   |
+|                            |                             | v2: 4000,4500 = v3: 4000-4500                 |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTERS_CTRL          | --att-perfcounter-ctrl      | Same value range (1-32), gfx9 only            |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTER                | --att-perfcounters          | Counter name, gfx9 only                       |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTER_ID             | --att-perfcounters          | Counter ID, gfx9 only                         |
++----------------------------+-----------------------------+-----------------------------------------------+
+| PERFCOUNTER_MASK           | N/A                         | Use --att-target-cu to select CU              |
++----------------------------+-----------------------------+-----------------------------------------------+
+| ISA_CAPTURE_MODE           | N/A                         | Code object capture is automatic in v3        |
++----------------------------+-----------------------------+-----------------------------------------------+
+| OCCUPANCY                  | N/A                         | For similar effect, see --att-no-detail       |
++----------------------------+-----------------------------+-----------------------------------------------+
+
+**Equivalent rocprofv3 command:**
+
+.. code-block:: bash
+
+  # rocprofv2 config converted to rocprofv3
+  rocprofv3 --att \
+    --att-target-cu 0 \
+    --att-shader-engine-mask 0xffffffff \
+    --att-simd-select 0 \
+    --kernel-iteration-range 4000-4500 \
+    --att-buffer-size 201326592 \
+    --att-perfcounter-ctrl 8 \
+    -- <application_path>
+
+  # Or using JSON input file:
+
+.. code-block:: text
+
+  {
+      "jobs": [
+          {
+              "advanced_thread_trace": true,
+              "att_target_cu": 0,
+              "att_shader_engine_mask": "0xffffffff",
+              "att_simd_select": "0x0",
+              "att_buffer_size": "0xC000000",
+              "kernel_iteration_range": "4000-4500",
+              "att_perfcounter_ctrl": 8
+          }
+      ]
+  }
+
+**Key differences:**
+
+- **Buffer size units:** rocprofv2 used megabytes, rocprofv3 uses bytes. Multiply your old value by 1,048,576 (or left-shift by 20 bits).
+- **Dispatch range syntax:** rocprofv2 used comma notation for ranges (4000,4500), rocprofv3 uses hyphen for ranges (4000-4500) and comma for individual items.
+- **No input.txt file:** rocprofv3 uses command-line options or JSON/YAML input files instead of the old input.txt format.
+- **Kernel filtering:** Use --kernel-include-regex and --kernel-exclude-regex for kernel name filtering in rocprofv3.
+
