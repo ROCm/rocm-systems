@@ -162,6 +162,11 @@ endforeach()
 # ----------------------------------------------------------------------------------------#
 
 if(ROCPROFSYS_USE_ROCM)
+    string(ASCII 27 Esc)
+    set(Reset "${Esc}[0m")
+    set(Red "${Esc}[31m")
+    set(Green "${Esc}[32m")
+
     find_package(ROCmVersion)
 
     if(NOT ROCmVersion_FOUND)
@@ -172,11 +177,8 @@ if(ROCPROFSYS_USE_ROCM)
             HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
         )
-        if(SPACK_BUILD)
-            find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-        else()
-            find_package(ROCmVersion REQUIRED HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-        endif()
+        message(STATUS "${Green}[DFG] After find HIP - ROCM_PATH = ${ROCM_PATH}, hip_VERSION = ${hip_VERSION}${Reset}")
+        find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
     endif()
 
     if(NOT ROCmVersion_FOUND)
@@ -196,11 +198,18 @@ if(ROCPROFSYS_USE_ROCM)
         list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
     endif()
 
-    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
     set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
+
+    message(STATUS "${Green}Triple Version: ${ROCmVersion_TRIPLE_VERSION}${Reset}")
+    message(STATUS "${Green}Full Version: ${ROCmVersion_FULL_VERSION}${Reset}")
+    message(STATUS "${Green}ROCm version: ${ROCPROFSYS_ROCM_VERSION}${Reset}")
+    message(STATUS "${Green}ROCm major version: ${ROCPROFSYS_ROCM_VERSION_MAJOR}${Reset}")
+    message(STATUS "${Green}ROCm minor version: ${ROCPROFSYS_ROCM_VERSION_MINOR}${Reset}")
+    message(STATUS "${Green}ROCm patch version: ${ROCPROFSYS_ROCM_VERSION_PATCH}${Reset}")
 
     rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
                                     "ROCm version used by rocprofiler-systems"
@@ -228,8 +237,8 @@ if(ROCPROFSYS_USE_ROCM)
         INTERFACE rocprofiler-sdk::rocprofiler-sdk
     )
 
-    find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
+    find_package(amd_smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 endif()
 
 # ----------------------------------------------------------------------------------------#
