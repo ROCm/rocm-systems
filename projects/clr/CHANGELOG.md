@@ -39,6 +39,16 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
+    - `hipLibraryLoadData`      Create library object from code
+    - `hipLibraryLoadFromFile`  Create library object from file
+    - `hipLibraryUnload`        Unload library
+    - `hipLibraryGetKernel`     Get a kernel from library
+    - `hipLibraryGetKernelCount` Get kernel count in library
+* Changed HIP APIs
+    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
+    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
+      hipMemAllocationType and allocates uncached memory if so
+    - `hipHostRegister` now supports hipHostRegisterIoMemory flag
 * Support for the flag `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
 * Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
 

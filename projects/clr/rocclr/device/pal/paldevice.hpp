@@ -38,7 +38,6 @@
 #include "device/pal/palappprofile.hpp"
 #include "device/pal/palcapturemgr.hpp"
 #include "device/pal/palsignal.hpp"
-#include "acl.h"
 #include "memory"
 
 #include <atomic>
@@ -58,16 +57,6 @@ namespace amd::pal {
 
 //! A nil device object
 class NullDevice : public amd::Device {
- protected:
-#if defined(WITH_COMPILER_LIB)
-  static Compiler* compiler_;
-#endif
-
- public:
-#if defined(WITH_COMPILER_LIB)
-  Compiler* compiler() const { return compiler_; }
-#endif
-
  public:
   static bool init(void);
 

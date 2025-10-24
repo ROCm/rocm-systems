@@ -45,7 +45,7 @@ class UberTraceCaptureMgr final : public ICaptureMgr {
 
   bool Update(Pal::IPlatform* platform) override;
 
-  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+  void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,
                    size_t z) override;
 
   void PostDispatch(VirtualGPU* gpu) override;
