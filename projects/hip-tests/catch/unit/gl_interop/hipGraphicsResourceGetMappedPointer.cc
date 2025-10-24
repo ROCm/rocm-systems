@@ -176,3 +176,51 @@ TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters") {
 
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipGraphicsResourceGetMappedPointer while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/gl_interop/hipGraphicsResourceGetMappedPointer.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Capture") {
+  GLContextScopeGuard gl_context;
+
+  const int device_count = HipTest::getDeviceCount();
+  unsigned int gl_device_count = 0;
+  std::vector<int> gl_devices(device_count, -1);
+
+  // Initialize GL interop
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  REQUIRE(gl_device_count == 1);
+  REQUIRE(gl_devices.at(0) == 0);
+
+  GLBufferObject vbo;
+
+  hipGraphicsResource* vbo_resource;
+
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone));
+
+  HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0));
+
+  float* buffer_devptr = nullptr;
+  size_t size = 0;
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipGraphicsResourceGetMappedPointer(reinterpret_cast<void**>(&buffer_devptr), &size,
+                                                      vbo_resource), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  REQUIRE(buffer_devptr != nullptr);
+  REQUIRE(size == vbo.kSize);
+
+  HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0));
+
+  HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
+}

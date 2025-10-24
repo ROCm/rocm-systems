@@ -73,3 +73,46 @@ TEST_CASE("Unit_hipGraphicsUnmapResources_Negative_Parameters") {
 
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipGraphicsUnmapResources while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/gl_interop/hipGraphicsUnmapResources.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipGraphicsUnmapResources_Capture") {
+  GLContextScopeGuard gl_context;
+
+  const int device_count = HipTest::getDeviceCount();
+  unsigned int gl_device_count = 0;
+  std::vector<int> gl_devices(device_count, -1);
+
+  // Initialize GL interop
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  REQUIRE(gl_device_count == 1);
+  REQUIRE(gl_devices.at(0) == 0);
+
+  GLBufferObject vbo;
+  GLImageObject tex;
+
+  std::array<hipGraphicsResource_t, 2> resources;
+
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resources.at(0), vbo, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterImage(&resources.at(1), tex, GL_TEXTURE_2D,
+                                       hipGraphicsRegisterFlagsNone));
+
+  HIP_CHECK(hipGraphicsMapResources(resources.size(), resources.data(), 0));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipGraphicsUnmapResources(resources.size(), resources.data(), 0), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipGraphicsUnregisterResource(resources.at(0)));
+  HIP_CHECK(hipGraphicsUnregisterResource(resources.at(1)));
+}
