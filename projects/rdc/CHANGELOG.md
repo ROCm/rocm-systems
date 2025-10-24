@@ -14,7 +14,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Improved profiler metrics path detection for counter definitions
 
-### Fixed
+### Resolved issues
 
 - Group management issues with listing created/non-created groups.
 - ECC_UNCORRECT field behavior.
