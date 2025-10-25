@@ -21,6 +21,7 @@
 #pragma once
 
 #include <mutex>
+#if defined(USE_COMGR_LIBRARY)
 #include "top.hpp"
 #include "amd_comgr/amd_comgr.h"
 
@@ -445,3 +446,4 @@ class Comgr : public amd::AllStatic {
 };
 
 }  // namespace amd
+#endif

@@ -52,16 +52,17 @@ namespace amd::pal {
 class VirtualGPU;
 class Device;
 class NullDevice;
-class Program;
+class HSAILProgram;
+class LightningProgram;
 
 /*! \addtogroup pal PAL Device Implementation
  *  @{
  */
-class Kernel : public device::Kernel {
+class HSAILKernel : public device::Kernel {
  public:
-  Kernel(std::string name, pal::Program* prog, bool internalKernel);
+  HSAILKernel(std::string name, HSAILProgram* prog, bool internalKernel);
 
-  virtual ~Kernel();
+  virtual ~HSAILKernel();
 
   //! Initializes the metadata required for this kernel,
   bool init();
@@ -79,7 +80,7 @@ class Kernel : public device::Kernel {
   }
 
   //! Returns HSA program associated with this kernel
-  const pal::Program& prog() const;
+  const HSAILProgram& prog() const;
 
   //! Returns LDS size used in this kernel
   uint32_t ldsSize() const { return WorkgroupGroupSegmentByteSize(); }
@@ -118,15 +119,12 @@ class Kernel : public device::Kernel {
   //! Returns the kernel index in the program
   uint index() const { return index_; }
 
-  //! Get the kernel descriptor and copy the code object from the program CPU segment
-  bool setKernelDescriptor(amd::hsa::loader::Symbol* sym, llvm::amdhsa::kernel_descriptor_t* akd);
-
  private:
   //! Disable copy constructor
-  Kernel(const pal::Kernel&);
+  HSAILKernel(const HSAILKernel&);
 
   //! Disable operator=
-  Kernel& operator=(const pal::Kernel&);
+  HSAILKernel& operator=(const HSAILKernel&);
 
  protected:
   //! Get the kernel code and copy the code object from the program CPU segment
@@ -144,6 +142,25 @@ class Kernel : public device::Kernel {
 
   uint64_t code_;    //!< GPU memory pointer to the kernel
   size_t codeSize_;  //!< Size of ISA code
+};
+
+class LightningKernel : public HSAILKernel {
+ public:
+  LightningKernel(const std::string& name, HSAILProgram* prog, bool internalKernel)
+      : HSAILKernel(name, prog, internalKernel) {}
+
+  //! Returns Lightning program associated with this kernel
+  const LightningProgram& prog() const;
+
+#if defined(USE_COMGR_LIBRARY)
+  //! Get the kernel descriptor and copy the code object from the program CPU segment
+  bool setKernelDescriptor(amd::hsa::loader::Symbol* sym, llvm::amdhsa::kernel_descriptor_t* akd);
+  //! Initializes the metadata required for this kernel
+  bool init();
+
+  //! Setup after code object loading
+  bool postLoad();
+#endif
 };
 
 /*@}*/  // namespace amd::pal

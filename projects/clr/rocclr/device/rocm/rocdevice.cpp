@@ -121,7 +121,8 @@ bool NullDevice::create(const amd::Isa& isa) {
   info_.oclcVersion_ = "OpenCL C " OPENCL_C_VERSION_STR " ";
   info_.spirVersions_ = "";
   std::stringstream ss;
-  ss << AMD_BUILD_STRING " (HSA,LC) [Offline]";
+  ss << AMD_BUILD_STRING " (HSA," << (settings().useLightning_ ? "LC" : "HSAIL");
+  ss << ") [Offline]";
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
   info_.version_ = "OpenCL " OPENCL_VERSION_STR " ";
   return true;
@@ -699,7 +700,12 @@ bool Device::create() {
 
 // ================================================================================================
 device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program = new roc::Program(*this, owner);
+  device::Program* program;
+  if (settings().useLightning_) {
+    program = new LightningProgram(*this, owner);
+  } else {
+    program = new HSAILProgram(*this, owner);
+  }
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -712,15 +718,19 @@ bool Device::createBlitProgram() {
   bool result = true;
   std::string extraKernel;
 
-  if (amd::IS_HIP) {
-    if (settings().gwsInitSupported_) {
-      extraKernel = device::HipExtraSourceCode;
+#if defined(USE_COMGR_LIBRARY)
+  if (settings().useLightning_) {
+    if (amd::IS_HIP) {
+      if (settings().gwsInitSupported_) {
+        extraKernel = device::HipExtraSourceCode;
+      } else {
+        extraKernel = device::HipExtraSourceCodeNoGWS;
+      }
     } else {
-      extraKernel = device::HipExtraSourceCodeNoGWS;
+      extraKernel = SchedulerSourceCode;
     }
-  } else {
-    extraKernel = SchedulerSourceCode;
   }
+#endif  // USE_COMGR_LIBRARY
 
   blitProgram_ = new BlitProgram(context_);
   // Create blit programs
@@ -735,7 +745,12 @@ bool Device::createBlitProgram() {
 }
 
 device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program = new roc::Program(*this, owner);
+  device::Program* program;
+  if (settings().useLightning_) {
+    program = new LightningProgram(*this, owner);
+  } else {
+    program = new HSAILProgram(*this, owner);
+  }
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -1286,7 +1301,9 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
   std::stringstream ss;
-  ss << AMD_BUILD_STRING " (HSA" << major << "." << minor << ",LC)";
+  ss << AMD_BUILD_STRING " (HSA" << major << "." << minor << ","
+     << (settings().useLightning_ ? "LC" : "HSAIL");
+  ss << ")";
 
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
 
@@ -1457,6 +1474,10 @@ bool Device::populateOCLDeviceConstants() {
     }
     if (amd::IS_HIP) {
       if (info_.iommuv2_ || isa().versionMajor() >= 8) {
+        info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
+      }
+    } else if (!settings().useLightning_) {
+      if (info_.iommuv2_ || (isa().versionMajor() == 8)) {
         info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
       }
     }

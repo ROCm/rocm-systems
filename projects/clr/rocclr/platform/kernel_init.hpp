@@ -20,6 +20,8 @@
 
 #pragma once
 
+#if defined(USE_COMGR_LIBRARY)
+
 // Static values initialization from class Kernel.
 const amd::Kernel::ArgFieldMapType amd::Kernel::kArgFieldMap[] = {
     {"Name", ArgField::Name},
@@ -187,3 +189,5 @@ cl_int amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) 
   }
   return 0;
 }
+
+#endif  // defined(USE_COMGR_LIBRARY)
