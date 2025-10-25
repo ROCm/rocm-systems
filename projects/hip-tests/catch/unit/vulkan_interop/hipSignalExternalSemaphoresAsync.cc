@@ -73,3 +73,27 @@ TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Negative_Parameters") {
     HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipSignalExternalSemaphoresAsync while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/vulkan_interop/hipSignalExternalSemaphoresAsync.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Capture") {
+  VulkanTest vkt(enable_validation);
+  hipExternalSemaphoreSignalParams signal_params = {};
+  signal_params.params.fence.value = 1;
+  const auto hip_ext_semaphore = ImportBinarySemaphore(vkt);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipSignalExternalSemaphoresAsync(&hip_ext_semaphore, &signal_params, 1,
+    nullptr), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+}
