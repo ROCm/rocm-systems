@@ -587,7 +587,7 @@ write_perfetto(
             }
         }
 
-        struct CounterTrackData
+        struct counter_track_data
         {
             std::string                               agent_type  = {};
             std::string                               unit_name   = {};
@@ -596,7 +596,7 @@ write_perfetto(
         };
 
         auto sample_endpoints =
-            std::map<std::string, std::map<std::pair<uint32_t, uint32_t>, CounterTrackData>>{};
+            std::map<std::string, std::map<std::pair<uint32_t, uint32_t>, counter_track_data>>{};
 
         for(auto ditr : sample_gen)
         {
@@ -633,12 +633,6 @@ write_perfetto(
 
                 track_name << " (S)";
 
-                uint32_t divider = 1;
-                if(data.unit_name == "MB")
-                    divider = 1000 * 1000;
-                else if(data.unit_name == "sec")
-                    divider = 1000 * 1000 * 1000;
-
                 auto name          = track_name.str();
                 auto counter_track = ::perfetto::CounterTrack{name.c_str(), this_pid_track}
                                          .set_unit_name(data.unit_name.c_str())
@@ -650,7 +644,7 @@ write_perfetto(
                     TRACE_COUNTER(sdk::perfetto_category<sdk::category::generic_sample>::name,
                                   counter_track,
                                   itr.first,
-                                  itr.second / divider);
+                                  itr.second);
                 }
 
                 tracing_session->FlushBlocking();
