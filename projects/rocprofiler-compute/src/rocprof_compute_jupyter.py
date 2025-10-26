@@ -111,6 +111,7 @@ class JupyterAnalysis(OmniAnalyze_Base):
             gpu_kernel=kwargs.get("kernel_filter"),
             gpu_id=kwargs.get("gpu_filter"),
             gpu_dispatch_id=kwargs.get("dispatch_filter"),
+            pc_sampling_sorting_type=kwargs.get("pc_sampling_sorting_type", "samples"),
         )
 
         super().__init__(args, supported_archs)
@@ -377,14 +378,22 @@ def open(perf_data_dir: str, **kwargs: Any) -> None:
 
     # Initialize SOCs
     from rocprof_compute_soc import soc_gfx908, soc_gfx90a, soc_gfx940, soc_gfx941, soc_gfx942, soc_gfx950
+    from utils.specs import generate_machine_specs
+
+    # Load system info from the workload directory
+    sys_info = file_io.load_sys_info(f"{perf_data_path}/sysinfo.csv")
+    sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
+
+    # Generate machine specs from the loaded sysinfo
+    mspec = generate_machine_specs(_current_analysis.get_args(), sys_info_dict)
 
     omni_socs: dict[str, OmniSoC_Base] = {
-        "gfx908": soc_gfx908.gfx908(),
-        "gfx90a": soc_gfx90a.gfx90a(),
-        "gfx940": soc_gfx940.gfx940(),
-        "gfx941": soc_gfx941.gfx941(),
-        "gfx942": soc_gfx942.gfx942(),
-        "gfx950": soc_gfx950.gfx950(),
+        "gfx908": soc_gfx908.gfx908_soc(_current_analysis.get_args(), mspec),
+        "gfx90a": soc_gfx90a.gfx90a_soc(_current_analysis.get_args(), mspec),
+        "gfx940": soc_gfx940.gfx940_soc(_current_analysis.get_args(), mspec),
+        "gfx941": soc_gfx941.gfx941_soc(_current_analysis.get_args(), mspec),
+        "gfx942": soc_gfx942.gfx942_soc(_current_analysis.get_args(), mspec),
+        "gfx950": soc_gfx950.gfx950_soc(_current_analysis.get_args(), mspec),
     }
     _current_analysis.set_soc(omni_socs)
 
