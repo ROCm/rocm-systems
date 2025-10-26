@@ -912,7 +912,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: Union[pd.DataFrame, dict], config: dict
+    raw_pmc_df: Union[pd.DataFrame, dict], config: dict, sys_vars: dict[str, Union[int, float]]
 ) -> dict[str, Optional[Union[str, float, int]]]:
     """Calculate built-in variables"""
     # TODO: fix all $normUnit in Unit column or title
@@ -930,7 +930,8 @@ def calc_builtin_vars(
         )
         try:
             # Create temporary evaluator for this calculation
-            temporary_evaluator = MetricEvaluator(raw_pmc_df, {}, {})
+            # Pass sys_vars so that $num_xcd and other system variables are available
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
@@ -945,8 +946,10 @@ def calc_builtin_vars(
             variable_value, schema.PMC_PERF_FILE_PREFIX, config
         )
         try:
+            # Merge sys_vars with builtin_vars_collection for second pass
+            combined_vars = {**sys_vars, **builtin_vars_collection}
             temporary_evaluator = MetricEvaluator(
-                raw_pmc_df, builtin_vars_collection, {}
+                raw_pmc_df, combined_vars, {}
             )
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
@@ -982,7 +985,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, config)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
     sys_vars.update(builtin_vars)
 
     # Create metric evaluator
@@ -1316,26 +1319,25 @@ def search_pc_sampling_record(
         return None
 
     # Convert to sorted list of tuples:
-    # (code_object_id, inst_index, code_object_offset, count)
+    # (code_object_id, inst_index, code_object_offset, count, count_issued, count_stalled, stall_reason)
     sorted_counts = sorted(
         [
             (
                 code_object_id,
-                info["inst_index"],
+                info[3],  # inst_index
                 offset,
-                info["count"],
-                info["count_issued"],
-                info["count_stalled"],
-                # For info["stall_reason"], remove the zero entries,
+                info[0],  # count
+                info[1],  # count_issued
+                info[2],  # count_stalled
+                # For info[4] (stall_reason dict), remove the zero entries,
                 # sorting the remaining items by their values in descending order
                 sorted(
-                    ((k, v) for k, v in info["stall_reason"].items() if v > 0),
+                    ((k, v) for k, v in info[4].items() if v > 0),
                     key=lambda item: item[1],
                     reverse=True,
                 ),
             )
-            for code_object_id, offsets in grouped_data.items()
-            for offset, info in offsets.items()
+            for (code_object_id, offset), info in grouped_data.items()
         ],
         key=lambda x: (
             x[0],
