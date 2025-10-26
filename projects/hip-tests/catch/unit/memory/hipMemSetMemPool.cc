@@ -79,6 +79,22 @@ TEST_CASE("Unit_hipMemSetMemPool_Negative") {
     }
   }
 
+  SECTION("Using destroyed pool") {
+    // Create a temporary pool
+    hipMemPool_t temp_pool;
+    prop.allocType = hipMemAllocationTypePinned;
+    prop.location.id = dev;
+    prop.location.type = hipMemLocationTypeDevice;
+    HIP_CHECK(hipMemPoolCreate(&temp_pool, &prop));
+
+    // Destroy it
+    HIP_CHECK(hipMemPoolDestroy(temp_pool));
+
+    // Try to set the destroyed pool - should fail
+    HIP_CHECK_ERROR(hipMemSetMemPool(&location, hipMemAllocationTypePinned, temp_pool),
+                    hipErrorInvalidValue);
+  }
+
   SECTION("Invalid allocation type") {
     HIP_CHECK_ERROR(hipMemSetMemPool(&location, hipMemAllocationTypeInvalid, mem_pool),
                     hipErrorInvalidValue);

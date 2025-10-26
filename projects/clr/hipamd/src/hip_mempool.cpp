@@ -521,6 +521,10 @@ hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
 
   auto mem_pool = reinterpret_cast<hip::MemoryPool*>(pool);
 
+  if (!IsMemPoolValid(mem_pool)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   // Location and type must match pool's location and allocation type
   if ((location->id != mem_pool->Device()->deviceId()) ||
       (type != mem_pool->Properties().allocType)) {
