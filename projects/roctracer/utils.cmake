@@ -29,7 +29,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
         @ONLY
       )
       if( BUILD_ENABLE_LINTIAN_OVERRIDES )
-	if(BUILD_SHARED_LIBS STREQUAL "ON")
+        if(BUILD_SHARED_LIBS STREQUAL "OFF")
 	  string(FIND ${DEB_OVERRIDES_INSTALL_FILENM} "static" OUT_VAR1)
 	  if(OUT_VAR1 EQUAL -1)
 	    set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-static" )
@@ -70,19 +70,20 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
                   DESTINATION ${CMAKE_INSTALL_DOCDIR}
                   COMPONENT ${COMPONENT_NAME_T})
       endif()
-    else()
-        # License file
-        install ( FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T})
-    endif()
 
        # Install lintian overrides
     if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
       set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
       install ( FILES ${OVERRIDE_FILE}
-	  DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
+          DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
           COMPONENT ${COMPONENT_NAME_T})
+    endif()
+
+    else()
+        # License file
+        install ( FILES ${LICENSE_FILE}
+            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
+            COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 

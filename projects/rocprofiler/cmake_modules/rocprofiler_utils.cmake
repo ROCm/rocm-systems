@@ -328,19 +328,20 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
                   DESTINATION ${CMAKE_INSTALL_DOCDIR}
                   COMPONENT ${COMPONENT_NAME_T})
       endif()
-    else()
-        # License file
-        install ( FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T})
-    endif()
 
     # Install lintian overrides
     if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
       set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
       install ( FILES ${OVERRIDE_FILE}
-	  DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
+          DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
           COMPONENT ${COMPONENT_NAME_T})
+    endif()
+
+    else()
+        # License file
+        install ( FILES ${LICENSE_FILE}
+            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
+            COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 
