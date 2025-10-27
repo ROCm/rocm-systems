@@ -389,7 +389,7 @@ jobs:
             ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
 
       - name: Install Curl for RHEL 8.8
-        if: ${{ matrix.system.os == 'rhel-8.8' }}
+        if: ${{ matrix.os == 'rhel-8.8' }}
         run: |
           dnf install -y curl
           ln -s /usr/local/bin/curl /usr/bin/curl
@@ -397,7 +397,7 @@ jobs:
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
         with:
-          key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          key: ccache-${{ matrix.os }}-${{ matrix.runner }}-gfx94X
           max-size: 2G
           save: true
           variant: sccache
@@ -440,7 +440,7 @@ jobs:
           echo "✅ AQLProfile Installation complete!"
 
       - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
@@ -465,23 +465,23 @@ jobs:
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:$PATH \
           python3 ./source/scripts/run-ci.py -B build \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core \
             --mode ${CI_MODE} \
             --build-jobs 16 \
             --site "linux-mi325-1gpu-ossci-rocm" \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
-            ${{ matrix.system.ci-flags }} \
+            ${{ matrix.ci-flags }} \
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
-            -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             -DPython3_EXECUTABLE=$(which python3) \
             ${{ env.GLOBAL_CMAKE_OPTIONS }} \
             -- \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" \
+            -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" \
 
   sanitizers:
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
