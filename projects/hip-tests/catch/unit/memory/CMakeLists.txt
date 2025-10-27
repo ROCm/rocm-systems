@@ -148,11 +148,11 @@ if(HIP_PLATFORM MATCHES "amd")
   add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
   add_dependencies(build_tests hipHostRegisterPerf)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
-if(UNIX)
-  add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
-  add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
-endif()
+  if(UNIX)
+    add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
+    add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
+  endif()
 endif()
 
 set(TEST_SRC
@@ -256,12 +256,12 @@ hip_add_exe_to_target(NAME MemoryTest2
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(HIP_PLATFORM MATCHES "amd")
-set(TEST_SRC
+  set(TEST_SRC
   inlineVar.cc
   memoryCommon.cc
 )
 
-hip_add_exe_to_target(NAME InlineVarTest
+  hip_add_exe_to_target(NAME InlineVarTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 

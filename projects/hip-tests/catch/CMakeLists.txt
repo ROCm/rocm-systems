@@ -11,53 +11,53 @@ option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 if (TEST_CLOCK_CYCLE)
-    add_definitions(-DTEST_CLOCK_CYCLE)
+  add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
 # flag to generate standalone exe per src file.
 message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
 
 if(NOT WIN32)
-    set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
+  set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
 endif()
 
 # Check if platform is set
 if(NOT HIP_PLATFORM STREQUAL "amd" AND NOT HIP_PLATFORM STREQUAL "nvidia")
-    message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
+  message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    if(UNIX AND DEFINED ROCM_PATH)
-        # Read -DROCM_PATH and set CXX_FLAGS for amd platform only
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --rocm-path=${ROCM_PATH}")
-    endif()
+  if(UNIX AND DEFINED ROCM_PATH)
+    # Read -DROCM_PATH and set CXX_FLAGS for amd platform only
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --rocm-path=${ROCM_PATH}")
+  endif()
 
-    if(DEFINED HIP_PATH)
-        # Read -DHIP_PATH and set CXX_FLAGS for amd platform only
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${HIP_PATH}")
-    endif()
+  if(DEFINED HIP_PATH)
+    # Read -DHIP_PATH and set CXX_FLAGS for amd platform only
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${HIP_PATH}")
+  endif()
 endif()
 
 # Read -DHIP_PATH
 # If not set read env{HIP_PATH} only on Windows
 if(WIN32)
-    if(NOT DEFINED HIP_PATH)
-        if(DEFINED ENV{HIP_PATH})
-            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
-        endif()
+  if(NOT DEFINED HIP_PATH)
+    if(DEFINED ENV{HIP_PATH})
+      set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
     endif()
+  endif()
 endif()
 
 if(NOT DEFINED HIP_PATH)
-    if(DEFINED ROCM_PATH)
-        set(HIP_PATH ${ROCM_PATH})
-    else()
-        set(HIP_PATH "/opt/rocm")
-    endif()
+  if(DEFINED ROCM_PATH)
+    set(HIP_PATH ${ROCM_PATH})
+  else()
+    set(HIP_PATH "/opt/rocm")
+  endif()
 endif()
 
 if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm")
+  set(ROCM_PATH "/opt/rocm")
 endif()
 
 message(STATUS "HIP_PATH: ${HIP_PATH}")
@@ -98,10 +98,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17")
 
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
-    message(STATUS "Building catch tests with Address Sanitizer options")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
+  message(STATUS "Building catch tests with Address Sanitizer options")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -113,27 +113,27 @@ list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
 list(GET VERSION_LIST 1 HIP_VERSION_GITHASH)
 
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
 else()
-   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
 if(NOT DEFINED CATCH2_PATH)
-    if(DEFINED ENV{CATCH2_PATH})
-        set(CATCH2_PATH $ENV{CATCH2_PATH} CACHE STRING "Catch2 Path")
-    else()
-        set(CATCH2_PATH "${CMAKE_CURRENT_LIST_DIR}/external/Catch2")
-    endif()
+  if(DEFINED ENV{CATCH2_PATH})
+    set(CATCH2_PATH $ENV{CATCH2_PATH} CACHE STRING "Catch2 Path")
+  else()
+    set(CATCH2_PATH "${CMAKE_CURRENT_LIST_DIR}/external/Catch2")
+  endif()
 endif()
 message(STATUS "Catch2 Path: ${CATCH2_PATH}")
 
 # Set JSON Parser path
 if(NOT DEFINED JSON_PARSER)
-    if(DEFINED ENV{JSON_PARSER})
-        set(JSON_PARSER $ENV{JSON_PARSER} CACHE STRING "JSON Parser Path")
-    else()
-        set(JSON_PARSER "${CMAKE_CURRENT_LIST_DIR}/external/picojson")
-    endif()
+  if(DEFINED ENV{JSON_PARSER})
+    set(JSON_PARSER $ENV{JSON_PARSER} CACHE STRING "JSON Parser Path")
+  else()
+    set(JSON_PARSER "${CMAKE_CURRENT_LIST_DIR}/external/picojson")
+  endif()
 endif()
 
 message(STATUS "Searching Catch2 in: ${CMAKE_CURRENT_LIST_DIR}/external")
@@ -159,7 +159,7 @@ include_directories(
 
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 if (RTC_TESTING)
-    add_definitions(-DRTC_TESTING=ON)
+  add_definitions(-DRTC_TESTING=ON)
 endif()
 add_definitions(-DKERNELS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/kernels/")
 
@@ -168,7 +168,7 @@ set(HIP_TEST_CONFIG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/co
 file(MAKE_DIRECTORY ${HIP_TEST_CONFIG_BINARY_DIR})
 file(GLOB JSON_FILES "./hipTestMain/config/*.json")
 foreach(json IN LISTS JSON_FILES)
-    file(COPY ${json}
+  file(COPY ${json}
          DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
 endforeach()
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
@@ -197,17 +197,17 @@ if (WIN32)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored)
+  add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored)
 endif()
 
 cmake_policy(PUSH)
 if(POLICY CMP0037)
-    cmake_policy(SET CMP0037 OLD)
+  cmake_policy(SET CMP0037 OLD)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21.0)
-    set(CMAKE_HIP_ARCHITECTURES OFF)
+  set(CMAKE_HIP_ARCHITECTURES OFF)
 endif()
 message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 
@@ -223,29 +223,29 @@ message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 if(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_PATH}/bin/rocm_agent_enumerator"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
-    execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
+  execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
          OUTPUT_VARIABLE HIP_GPU_ARCH
          RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
          OUTPUT_STRIP_TRAILING_WHITESPACE)
-    # Trim out gfx000
-    string(REPLACE "gfx000\n" "" HIP_GPU_ARCH ${HIP_GPU_ARCH})
-    if (NOT HIP_GPU_ARCH STREQUAL "")
-        string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
-        list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
-        list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
-        set(OFFLOAD_ARCH_STR "")
-        foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
-            set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
-        endforeach()
-    else()
-        message(STATUS "ROCm Agent Enumerator found no valid architectures")
-    endif()
+  # Trim out gfx000
+  string(REPLACE "gfx000\n" "" HIP_GPU_ARCH ${HIP_GPU_ARCH})
+  if (NOT HIP_GPU_ARCH STREQUAL "")
+    string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
+    list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
+    list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
+    set(OFFLOAD_ARCH_STR "")
+    foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
+      set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+    endforeach()
+  else()
+    message(STATUS "ROCm Agent Enumerator found no valid architectures")
+  endif()
 elseif(DEFINED OFFLOAD_ARCH_STR)
-    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
+  string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 endif()
 
 if(DEFINED OFFLOAD_ARCH_STR)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OFFLOAD_ARCH_STR} ")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OFFLOAD_ARCH_STR} ")
 endif()
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 
@@ -265,35 +265,35 @@ separate_arguments(OFFLOAD_ARCH_LIST)
 list(REMOVE_DUPLICATES  OFFLOAD_ARCH_LIST)
 set(hip_gpu_arch_list "")
 foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
-    string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
-    string(REPLACE ":" ";" target_id_list ${targetid})
-    list(GET target_id_list 0 arch)
-    string(APPEND hip_gpu_arch_list "${arch};")
-    list(REMOVE_DUPLICATES  hip_gpu_arch_list)
+  string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
+  string(REPLACE ":" ";" target_id_list ${targetid})
+  list(GET target_id_list 0 arch)
+  string(APPEND hip_gpu_arch_list "${arch};")
+  list(REMOVE_DUPLICATES  hip_gpu_arch_list)
 endforeach()
 
 if(WIN32)
-    set(configToUse "config_amd_windows")
-    set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
-    set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
-    set(CLANG_CPP "${HIP_PATH}/../lc/bin/clang-cpp.exe")
+  set(configToUse "config_amd_windows")
+  set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
+  set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
+  set(CLANG_CPP "${HIP_PATH}/../lc/bin/clang-cpp.exe")
 
-    set(cmd "${CLANG_CPP} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
-    message(${cmd})
-    execute_process(COMMAND cmd.exe /C ${cmd}
+  set(cmd "${CLANG_CPP} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+  message(${cmd})
+  execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
-    message(STATUS "${configToUse}.json file generation result: ${json_result}")
+  message(STATUS "${configToUse}.json file generation result: ${json_result}")
 else()
-    set(configToUse "config_amd_linux")
-    foreach(arch ${hip_gpu_arch_list})
-        set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
-        set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
-        message(${cmd})
-        execute_process(COMMAND bash -c ${cmd}
+  set(configToUse "config_amd_linux")
+  foreach(arch ${hip_gpu_arch_list})
+    set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
+    set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
+    set(cmd "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+    message(${cmd})
+    execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)
-        message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
-    endforeach()
+    message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
+  endforeach()
 endif()
 # prints the catch info to a file
 string(TIMESTAMP _timestamp UTC)
@@ -322,7 +322,7 @@ file(COPY ./external/Catch2/catch.hpp DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${
 
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
 endif()
 
 # Disable CXX extensions (gnu++11 etc)
@@ -377,7 +377,7 @@ function (set_source_file_properties_per_arch ARCH_LIST TEST_FILE NEW_PROPERTIES
   foreach(ARCH_STR IN LISTS ARCH_LIST)
     check_arch(ARCH_STR)
     if (${IS_CORRECT_ARCH} GREATER_EQUAL 0)
-      set_source_files_properties(TEST_FILE PROPERTIES COMPILE_FLAGS NEW_PROPERTIES)
+      set_source_files_properties(${TEST_FILE} PROPERTIES COMPILE_FLAGS ${NEW_PROPERTIES})
       return()
     endif()
   endforeach()
@@ -388,7 +388,7 @@ function(set_property_per_arch ARCH_LIST SOURCE_FILES NEW_PROPERTIES)
   foreach(ARCH_STR IN LISTS ARCH_LIST)
     check_arch(ARCH_STR)
     if (${IS_CORRECT_ARCH} GREATER_EQUAL 0)
-      set_property(SOURCE ${SOURCE_FILES} PROPERTIES COMPILE_FLAGS NEW_PROPERTIES)
+      set_property(SOURCE ${SOURCE_FILES} PROPERTIES COMPILE_FLAGS ${NEW_PROPERTIES})
       return()
     endif()
   endforeach()
@@ -419,13 +419,13 @@ cmake_policy(POP)
 set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/)
 add_subdirectory(packaging)
 if(UNIX)
-add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
+  add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
     COMMAND rm -rf *.deb *.rpm *.tar.gz
     COMMAND make package
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 else()
-file(TO_NATIVE_PATH ${PROJECT_BINARY_DIR} CATCH_BINARY_DIR)
-add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
+  file(TO_NATIVE_PATH ${PROJECT_BINARY_DIR} CATCH_BINARY_DIR)
+  add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
     COMMAND cpack
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
@@ -434,14 +434,14 @@ endif()
 # check if doxygen is installed
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
-    # Configure Doxyfile with proper paths
-    set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/DoxyfileTests)
-    set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/DoxyfileTests.out)
-    configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+  # Configure Doxyfile with proper paths
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/DoxyfileTests)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/DoxyfileTests.out)
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
 
-    add_custom_target(build_docs
+  add_custom_target(build_docs
         COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
         COMMENT "Generating test plan documentation with Doxygen")
 else()
-    message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
+  message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
 endif()
