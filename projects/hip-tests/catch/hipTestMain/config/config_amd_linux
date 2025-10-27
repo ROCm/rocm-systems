@@ -9,8 +9,6 @@
     ],
     "DisabledTests": [
     #if defined COMMON
-        "Unit_hipDeviceReset_Positive_Basic",
-        "Unit_hipDeviceReset_Positive_Threaded",
         "NOTE: The following test is disabled due to defect - EXSWHTEC-242",
         "Unit_hipFuncGetAttributes_Positive_Basic",
         "NOTE: The following test is disabled due to defect - EXSWHTEC-244",

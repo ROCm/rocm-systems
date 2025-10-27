@@ -214,7 +214,5 @@
         "Unit_hipDeviceSetLimit_Negative_MallocHeapSize",
         "=== Disabling tests which no longer behave the same on nvidia platform ===",
         "Unit_hipGraphInstantiateWithParams_Negative",
-        "Unit_hipDeviceReset_Positive_Basic",
-        "Unit_hipDeviceReset_Positive_Threaded",
     ]
 }
