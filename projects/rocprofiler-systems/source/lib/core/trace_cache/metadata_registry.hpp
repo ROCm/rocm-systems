@@ -171,7 +171,7 @@ struct kernel_symbol_less
         const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& rhs)
         const
     {
-        return lhs.kernel_object < rhs.kernel_object;
+        return lhs.kernel_id < rhs.kernel_id;
     }
 };
 #endif
