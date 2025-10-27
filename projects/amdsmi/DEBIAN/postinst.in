@@ -176,15 +176,20 @@ do_install_amdsmi_python_lib() {
   export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
 
   # only try to activate argcomplete if such command exists
+  # python3-argcomplete is recommended but optional, we handle its absence gracefully
   if command -v activate-global-python-argcomplete &>/dev/null; then
-    activate-global-python-argcomplete
+    activate-global-python-argcomplete 2>/dev/null || {
+      echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete"
+    }
   else
     # try older argcomplete3 version
     if command -v activate-global-python-argcomplete3 &>/dev/null; then
-      activate-global-python-argcomplete3
+      activate-global-python-argcomplete3 2>/dev/null || {
+        echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete3"
+      }
     else
-      echo "[WARNING] Could not find argcomplete or argcomplete3. "\
-        "Argument completion will not work..."
+      echo "[WARNING] Could not find argcomplete activation command. "\
+        "Argument completion will not work. Install python3-argcomplete package to enable it."
     fi
   fi
 }
