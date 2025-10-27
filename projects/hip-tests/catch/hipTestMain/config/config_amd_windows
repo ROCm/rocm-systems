@@ -193,8 +193,6 @@
         "Unit_hipStreamAddCallback_StrmSyncTiming",
         "SWDEV-402082 - PAL Backend fails to reserve address on GPU except first one",
         "Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check",
-        "SWDEV-398981 fails in stress test",
-        "Unit_hipStreamCreateWithPriority_MulthreadDefaultflag",
         "Disabling below tests temporarily due to change in API behavior",
         "Unit_hipMemPrefetchAsync_NonPageSz",
         "Unit_hipStreamCreateWithFlags_DefaultStreamInteraction",

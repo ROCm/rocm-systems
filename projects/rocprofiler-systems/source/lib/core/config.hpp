@@ -362,7 +362,7 @@ std::string
 get_tmpdir();
 
 std::string
-get_database_absolute_path(std::string_view database_name);
+get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
