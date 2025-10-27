@@ -134,7 +134,16 @@ def add_args(parser):
         default=False,
     )
 
-    return ["output_file", "output_path", "kernel_rename"]
+    post_processing_options = parser.add_argument_group("Post-processing tracing options")
+
+    post_processing_options.add_argument(
+        "--stats",
+        help="Generate statistics files for API calls, kernel dispatches, and memory operations",
+        action="store_true",
+        default=False,
+    )
+
+    return ["output_file", "output_path", "kernel_rename", "stats"]
 
 
 def process_args(args, valid_args):

@@ -401,6 +401,126 @@ def write_region_csv(importData, config) -> None:
     """
     write_sql_query_to_csv(importData, config, query, "regions")
 
+def write_stats_csv(importData, config) -> None:
+    """Write statistics CSV files for system trace components only."""
+    
+    if not getattr(config, 'stats', False):
+        return
+    
+    # Domain stats - aggregated statistics across all domains
+    domain_stats_query = """
+        SELECT 
+            category AS Name,
+            COUNT(*) AS Calls,
+            SUM(end - start) AS TotalDurationNs,
+            AVG(end - start) AS AverageNs,
+            (SUM(end - start) * 100.0 / (SELECT SUM(end - start) FROM regions WHERE end > start)) AS Percentage,
+            MIN(end - start) AS MinNs,
+            MAX(end - start) AS MaxNs,
+            SQRT(AVG((end - start) * (end - start)) - AVG(end - start) * AVG(end - start)) AS StdDev
+        FROM regions 
+        WHERE end > start AND category IN ('HIP_API', 'HSA_API', 'MARKER_API')
+        GROUP BY category
+        ORDER BY TotalDurationNs DESC
+    """
+    
+    write_sql_query_to_csv(importData, config, domain_stats_query, "domain", "stats")
+    
+    # HIP API stats
+    hip_api_stats_query = """
+        SELECT 
+            name AS Name,
+            COUNT(*) AS Calls,
+            SUM(end - start) AS TotalDurationNs,
+            AVG(end - start) AS AverageNs,
+            (SUM(end - start) * 100.0 / (SELECT SUM(end - start) FROM regions WHERE category = 'HIP_API' AND end > start)) AS Percentage,
+            MIN(end - start) AS MinNs,
+            MAX(end - start) AS MaxNs,
+            SQRT(AVG((end - start) * (end - start)) - AVG(end - start) * AVG(end - start)) AS StdDev
+        FROM regions 
+        WHERE category = 'HIP_API' AND end > start
+        GROUP BY name
+        ORDER BY TotalDurationNs DESC
+    """
+    
+    write_sql_query_to_csv(importData, config, hip_api_stats_query, "hip_api", "stats")
+    
+    # HSA API stats  
+    hsa_api_stats_query = """
+        SELECT 
+            name AS Name,
+            COUNT(*) AS Calls,
+            SUM(end - start) AS TotalDurationNs,
+            AVG(end - start) AS AverageNs,
+            (SUM(end - start) * 100.0 / (SELECT SUM(end - start) FROM regions WHERE category = 'HSA_API' AND end > start)) AS Percentage,
+            MIN(end - start) AS MinNs,
+            MAX(end - start) AS MaxNs,
+            SQRT(AVG((end - start) * (end - start)) - AVG(end - start) * AVG(end - start)) AS StdDev
+        FROM regions 
+        WHERE category = 'HSA_API' AND end > start
+        GROUP BY name
+        ORDER BY TotalDurationNs DESC
+    """
+    
+    write_sql_query_to_csv(importData, config, hsa_api_stats_query, "hsa_api", "stats")
+    
+    # Marker API stats
+    marker_api_stats_query = """
+        SELECT 
+            name AS Name,
+            COUNT(*) AS Calls,
+            SUM(end - start) AS TotalDurationNs,
+            AVG(end - start) AS AverageNs,
+            (SUM(end - start) * 100.0 / (SELECT SUM(end - start) FROM regions WHERE category = 'MARKER_API' AND end > start)) AS Percentage,
+            MIN(end - start) AS MinNs,
+            MAX(end - start) AS MaxNs,
+            SQRT(AVG((end - start) * (end - start)) - AVG(end - start) * AVG(end - start)) AS StdDev
+        FROM regions 
+        WHERE category = 'MARKER_API' AND end > start
+        GROUP BY name
+        ORDER BY TotalDurationNs DESC
+    """
+    
+    write_sql_query_to_csv(importData, config, marker_api_stats_query, "marker_api", "stats")
+    
+    # Kernel stats
+    kernel_stats_query = """
+        SELECT 
+            name AS Name,
+            COUNT(*) AS Calls,
+            SUM(end - start) AS TotalDurationNs,
+            AVG(end - start) AS AverageNs,
+            (SUM(end - start) * 100.0 / (SELECT SUM(end - start) FROM kernels WHERE end > start)) AS Percentage,
+            MIN(end - start) AS MinNs,
+            MAX(end - start) AS MaxNs,
+            SQRT(AVG((end - start) * (end - start)) - AVG(end - start) * AVG(end - start)) AS StdDev
+        FROM kernels 
+        WHERE end > start
+        GROUP BY name
+        ORDER BY TotalDurationNs DESC
+    """
+    
+    write_sql_query_to_csv(importData, config, kernel_stats_query, "kernel", "stats")
+    
+    # Memory copy stats
+    memory_copy_stats_query = """
+        SELECT 
+            name AS Name,
+            COUNT(*) AS Calls,
+            SUM(end - start) AS TotalDurationNs,
+            AVG(end - start) AS AverageNs,
+            (SUM(end - start) * 100.0 / (SELECT SUM(end - start) FROM memory_copies WHERE end > start)) AS Percentage,
+            MIN(end - start) AS MinNs,
+            MAX(end - start) AS MaxNs,
+            SQRT(AVG((end - start) * (end - start)) - AVG(end - start) * AVG(end - start)) AS StdDev
+        FROM memory_copies 
+        WHERE end > start
+        GROUP BY name
+        ORDER by TotalDurationNs DESC
+    """
+    
+    write_sql_query_to_csv(importData, config, memory_copy_stats_query, "memory_copy", "stats")
+
 
 def write_csv(importData, config):
 
@@ -411,6 +531,7 @@ def write_csv(importData, config):
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+    write_stats_csv(importData, config)
 
 
 def execute(input, config=None, window_args=None, **kwargs):
